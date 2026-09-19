@@ -8,6 +8,16 @@ export const KV = {
   summaries: "mem:summaries",
   config: "mem:config",
   metrics: "mem:metrics",
+  // Recovery queue for observations whose LLM compression failed (provider
+  // 5xx, unparseable output). There is only ONE KV slot per observation id,
+  // and the searchable store must hold a CompressedObservation for the record
+  // to be findable at all - so the degraded synthetic necessarily overwrites
+  // the raw, truncating toolOutput to the synthetic narrative budget. The
+  // full raw is parked here so a later sweep can compress it properly rather
+  // than from the truncated remains. Cleared once compression succeeds.
+  // NOT "mem:obs:pending": that would sit inside the KV.observations
+  // namespace and be picked up by anything scanning mem:obs:*.
+  compressPending: "mem:compress-pending",
   health: "mem:health",
   embeddings: (obsId: string) => `mem:emb:${obsId}`,
   bm25Index: "mem:index:bm25",
@@ -38,6 +48,23 @@ export const KV = {
   graphNameIndex: "mem:graph:name-index",
   graphEdgeKey: "mem:graph:edge-key",
   graphNodeDegree: "mem:graph:node-degree",
+  // Read-path side-indexes so graph retrieval never enumerates the full
+  // nodes/edges scopes. Maintained as hints on every write site;
+  // readers verify each hit against the live record (stale flag +
+  // snapshot resetAt) so deletes/wipes need no index cleanup.
+  // - graphNameShards: key `hash(nodeId) % 64` -> Array<{id, name}>.
+  //   The full name catalog is readable as 64 bounded gets, preserving
+  //   substring-match semantics without a kv.list.
+  // - graphAdjacency: key nodeId -> incident edgeId[]. Bounds traversal
+  //   cost by degree x depth instead of total edge count.
+  // - graphObsNodes: key obsId -> nodeId[] linking observations to the
+  //   graph nodes extracted from them.
+  // - graphIndexMeta: readiness marker. Absent = indexes not built;
+  //   readers fall back to full enumeration.
+  graphNameShards: "mem:graph:name-shards",
+  graphAdjacency: "mem:graph:adjacency",
+  graphObsNodes: "mem:graph:obs-nodes",
+  graphIndexMeta: "mem:graph:index-meta",
   semantic: "mem:semantic",
   procedural: "mem:procedural",
   teamShared: (teamId: string) => `mem:team:${teamId}:shared`,

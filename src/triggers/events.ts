@@ -7,7 +7,9 @@ import {
   getAgentId,
   getConsolidationCooldownMs,
   isConsolidationEnabled,
+  isGraphExtractionEnabled,
 } from "../config.js";
+import { graphLegDisabled } from "../state/graph-indexes.js";
 import { logger } from "../logger.js";
 
 // Global marker recording when corpus consolidation last ran, used to debounce
@@ -107,20 +109,25 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     if (isReflectEnabled()) {
       fireVoid("mem::slot-reflect", { sessionId: data.sessionId });
     }
-    // Unconditional: mem::graph-extract gates its LLM pass internally.
-    try {
-      const observations = await kv.list<CompressedObservation>(
-        KV.observations(data.sessionId),
-      );
-      const compressed = observations.filter((o) => o.title);
-      if (compressed.length > 0) {
-        fireVoid("mem::graph-extract", { observations: compressed });
+    // Fork posture (graph-off). Stock 0.9.29 fires this unconditionally and
+    // lets mem::graph-extract gate only its LLM pass, so a keyless install
+    // grows the graph from every session stop. Here the whole fan-out needs
+    // the extraction flag AND the graph leg not killed (AGENTMEMORY_GRAPH_LEG).
+    if (isGraphExtractionEnabled() && !graphLegDisabled()) {
+      try {
+        const observations = await kv.list<CompressedObservation>(
+          KV.observations(data.sessionId),
+        );
+        const compressed = observations.filter((o) => o.title);
+        if (compressed.length > 0) {
+          fireVoid("mem::graph-extract", { observations: compressed });
+        }
+      } catch (err) {
+        logger.warn("graph-extract trigger failed", {
+          sessionId: data.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-    } catch (err) {
-      logger.warn("graph-extract trigger failed", {
-        sessionId: data.sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
     }
     // Crystals + lessons consolidation. The stop lifecycle is the single
     // source of truth: event::session::stopped fires for ALL agents (the

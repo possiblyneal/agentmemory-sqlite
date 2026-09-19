@@ -160,8 +160,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   if (!allowAgentSdk) {
     process.stderr.write(
       pc.dim(
-        "[agentmemory] No LLM provider key set — running zero-LLM with BM25 search. " +
-          "Set EMBEDDING_PROVIDER=local for on-device semantic embeddings. " +
+        "[agentmemory] No LLM provider key set — running zero-LLM (BM25 + on-device embeddings). " +
           "Set ANTHROPIC_API_KEY (or GEMINI/OPENAI/OPENROUTER/MINIMAX) in ~/.agentmemory/.env for LLM compression and summaries. " +
           "Agent-SDK fallback stays off by default to avoid a Stop-hook recursion loop; opt in with AGENTMEMORY_AUTO_COMPRESS=true + AGENTMEMORY_ALLOW_AGENT_SDK=true.\n",
       ),
@@ -199,8 +198,6 @@ export function loadConfig(): AgentMemoryConfig {
   const streamsPort =
     parseInt(env["III_STREAM_PORT"] || env["III_STREAMS_PORT"] || "", 10) ||
     restPort + 1;
-  const viewerPort =
-    parseInt(env["III_VIEWER_PORT"] || "", 10) || restPort + 2;
   const engineUrl =
     env["III_ENGINE_URL"] ||
     `ws://localhost:${
@@ -211,7 +208,6 @@ export function loadConfig(): AgentMemoryConfig {
     engineUrl,
     restPort,
     streamsPort,
-    viewerPort,
     provider,
     tokenBudget: safeParseInt(env["TOKEN_BUDGET"], 2000),
     maxObservationsPerSession: safeParseInt(env["MAX_OBS_PER_SESSION"], 500),
@@ -229,6 +225,21 @@ function getMergedEnv(
 
 export function getEnvVar(key: string): string | undefined {
   return getMergedEnv()[key];
+}
+
+// `AGENTMEMORY_ENGINE=inproc` replaces the iii engine with the in-process
+// runtime in src/engine/inproc: state lives in a node:sqlite file, the REST
+// and stream ports are bound by this process, and no engine binary,
+// iii-config.yaml or worker bus is involved. Anything else keeps the stock
+// iii path, which stays compiling for one release.
+export function isInprocEngine(): boolean {
+  return (getEnvVar("AGENTMEMORY_ENGINE") ?? "").toLowerCase() === "inproc";
+}
+
+export function getSqlitePath(): string {
+  return (
+    getEnvVar("AGENTMEMORY_SQLITE_PATH") || join(DATA_DIR, "agentmemory.sqlite")
+  );
 }
 
 export function isDropStaleIndexEnabled(): boolean {
@@ -379,6 +390,19 @@ export function loadSnapshotConfig(): {
 
 export function isGraphExtractionEnabled(): boolean {
   return getMergedEnv()["GRAPH_EXTRACTION_ENABLED"] === "true";
+}
+
+// A1 (4A): suppress explicitly non-latest memories at the read paths.
+//
+// Ships DISABLED. The enable is gated on the step 5 supersession census,
+// because A1 hides superseded rows from callers and the census is what
+// decides whether those supersessions were correct. Enabling first would
+// ship a user-visible visibility change on unaudited lineage.
+//
+// Off is byte-identical to pre-A1 behaviour, including the number of KV
+// reads per search (asserted in test/nonlatest-filter.test.ts).
+export function isNonLatestFilterEnabled(): boolean {
+  return getMergedEnv()["AGENTMEMORY_NONLATEST_FILTER"] === "true";
 }
 
 export function getGraphBatchSize(): number {

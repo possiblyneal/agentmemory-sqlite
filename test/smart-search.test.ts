@@ -292,3 +292,91 @@ describe("Smart Search Function", () => {
     });
   });
 });
+
+// Regression: expandIds returned nothing against the real daemon while every
+// existing test passed. Two independent causes, both invisible to the suite
+// above because mockKV coerces a miss to `null` (the engine returns
+// `undefined`) and its fixture has a single session, so the target always sat
+// at batch index 0 of findObservation's 5-wide scan.
+describe("Smart Search expandIds — findObservation regressions", () => {
+  // Miss returns `undefined`, matching the engine rather than the kinder mock.
+  function engineLikeKV() {
+    const store = new Map<string, Map<string, unknown>>();
+    return {
+      get: async <T>(scope: string, key: string): Promise<T | null> =>
+        store.get(scope)?.get(key) as T,
+      set: async <T>(scope: string, key: string, data: T): Promise<T> => {
+        if (!store.has(scope)) store.set(scope, new Map());
+        store.get(scope)!.set(key, data);
+        return data;
+      },
+      delete: async (scope: string, key: string): Promise<void> => {
+        store.get(scope)?.delete(key);
+      },
+      list: async <T>(scope: string): Promise<T[]> =>
+        Array.from(store.get(scope)?.values() ?? []) as T[],
+    };
+  }
+
+  it("finds an observation whose session is not first in its 5-session batch", async () => {
+    const sdk = mockSdk();
+    const kv = engineLikeKV();
+
+    // 5 sessions; the target lives in the 4th, so a strict `!== null` test
+    // matches the leading `undefined` and drops the hit.
+    for (let i = 1; i <= 5; i++) {
+      await kv.set("mem:sessions", `ses_${i}`, {
+        id: `ses_${i}`,
+        project: "p",
+        cwd: "/tmp",
+        startedAt: "2026-02-01T00:00:00Z",
+        status: "completed",
+        observationCount: 0,
+      } as Session);
+    }
+    await kv.set(
+      "mem:obs:ses_4",
+      "obs_buried",
+      makeObs({ id: "obs_buried", sessionId: "ses_4", title: "Buried" }),
+    );
+
+    registerSmartSearchFunction(sdk as never, kv as never, async () => []);
+
+    const result = (await sdk.trigger("mem::smart-search", {
+      expandIds: ["obs_buried"],
+    })) as { mode: string; results: Array<{ observation: CompressedObservation }> };
+
+    expect(result.mode).toBe("expanded");
+    expect(result.results.length).toBe(1);
+    expect(result.results[0].observation.title).toBe("Buried");
+  });
+
+  it("expands a saved memory id, which lives in KV.memories not KV.observations", async () => {
+    const sdk = mockSdk();
+    const kv = engineLikeKV();
+
+    await kv.set("mem:memories", "mem_abc123", {
+      id: "mem_abc123",
+      createdAt: "2026-02-01T00:00:00Z",
+      updatedAt: "2026-02-01T00:00:00Z",
+      type: "bug",
+      title: "Saved memory",
+      content: "body text",
+      concepts: ["c"],
+      files: [],
+      sessionIds: [],
+      strength: 7,
+      version: 1,
+      isLatest: true,
+    });
+
+    registerSmartSearchFunction(sdk as never, kv as never, async () => []);
+
+    const result = (await sdk.trigger("mem::smart-search", {
+      expandIds: ["mem_abc123"],
+    })) as { mode: string; results: Array<{ observation: CompressedObservation }> };
+
+    expect(result.results.length).toBe(1);
+    expect(result.results[0].observation.narrative).toBe("body text");
+  });
+});

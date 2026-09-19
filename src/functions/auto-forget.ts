@@ -3,8 +3,8 @@ import type { Memory, CompressedObservation, Session } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
-import { deleteAccessLog } from "./access-tracker.js";
-import { getSearchIndex, vectorIndexRemove, flushIndexSave } from "./search.js";
+import { deleteIndexed, flushIndexSave } from "./search.js";
+import { refersToDifferentDates } from "../state/memory-utils.js";
 import { logger } from "../logger.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -47,15 +47,12 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
               if (mem.imageRef) {
                 await decrementImageRef(kv, sdk, mem.imageRef);
               }
-              await kv.delete(KV.memories, mem.id);
+              await deleteIndexed(kv, KV.memories, mem.id);
               await recordAudit(kv, "delete", "mem::auto-forget", [mem.id], {
                 resource: "memory",
                 reason: "auto-forget TTL",
                 timestamp: mem.forgetAfter,
               });
-              await deleteAccessLog(kv, mem.id);
-              getSearchIndex().remove(mem.id);
-              vectorIndexRemove(mem.id);
             }
           }
         }
@@ -118,6 +115,15 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             if (sim > CONTRADICTION_THRESHOLD) {
               const memA = memById.get(memIds[i])!;
               const memB = memById.get(memIds[j])!;
+              // Two daily reports of two different days are not a
+              // contradiction. Without this, auto-forget silently re-demotes
+              // exactly the rows a lineage repair just restored - measured
+              // 2026-08-10, one hour after the step 5 repair - and unlike
+              // remember it records NO supersedes edge, so a lineage census
+              // cannot even see what it did.
+              if (refersToDifferentDates(memA.content, memB.content)) {
+                continue;
+              }
               result.contradictions.push({
                 memoryA: memA.id,
                 memoryB: memB.id,
@@ -166,7 +172,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             if (!dryRun) {
               let deletedOk = false;
               try {
-                await kv.delete(KV.observations(sessions[i].id), obs.id);
+                await deleteIndexed(kv, KV.observations(sessions[i].id), obs.id);
                 deletedOk = true;
               } catch {
                 deletedOk = false;
@@ -182,8 +188,6 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                   sessionId: sessions[i].id,
                   timestamp: obs.timestamp,
                 });
-                getSearchIndex().remove(obs.id);
-                vectorIndexRemove(obs.id);
               }
             }
           }

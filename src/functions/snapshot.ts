@@ -12,6 +12,7 @@ import type {
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
+import { indexGraphNode, graphLegDisabled } from "../state/graph-indexes.js";
 import { recordAudit } from "./audit.js";
 import { VERSION } from "../version.js";
 import { logger } from "../logger.js";
@@ -60,7 +61,11 @@ export function registerSnapshotFunction(
 
         const sessions = await kv.list<Session>(KV.sessions);
         const memories = await kv.list<Memory>(KV.memories);
-        const graphNodes = await kv.list<GraphNode>(KV.graphNodes);
+        // B-mode: graph frozen — don't enumerate the graph scope for the
+        // snapshot; emit an empty node set instead.
+        const graphNodes = graphLegDisabled()
+          ? []
+          : await kv.list<GraphNode>(KV.graphNodes);
         const accessLogs = await kv
           .list<AccessLogExport>(KV.accessLog)
           .catch(() => [] as AccessLogExport[]);
@@ -206,6 +211,7 @@ export function registerSnapshotFunction(
         if (state.graphNodes) {
           for (const node of state.graphNodes) {
             await kv.set(KV.graphNodes, node.id, node);
+            await indexGraphNode(kv, node as unknown as GraphNode);
           }
         }
         if (state.observations) {

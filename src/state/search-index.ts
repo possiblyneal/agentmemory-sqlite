@@ -20,6 +20,13 @@ export class SearchIndex {
   private readonly b = 0.75;
 
   add(obs: CompressedObservation): void {
+    // Re-adding an existing id must not double-count its length.
+    // `entries.set` below overwrites the entry, but `totalDocLength +=`
+    // is unconditional — so a re-add inflates avgDocLen for EVERY
+    // document, silently skewing the b=0.75 length normalisation
+    // corpus-wide. Remove first; remove() is a no-op for unknown ids.
+    if (this.entries.has(obs.id)) this.remove(obs.id);
+
     const terms = this.extractTerms(obs);
     const termFreq = new Map<string, number>();
     let termCount = 0;
@@ -49,6 +56,11 @@ export class SearchIndex {
 
   has(id: string): boolean {
     return this.entries.has(id);
+  }
+
+  // Indexed document ids, for the importer's corpus delta.
+  ids(): IterableIterator<string> {
+    return this.entries.keys();
   }
 
   remove(id: string): void {
@@ -124,6 +136,20 @@ export class SearchIndex {
         }
       }
 
+      // Prefix expansion approximates ONE query term ("index" -> "indexes",
+      // "indexing"), so the expansions must together contribute like one
+      // term: take the best-matching sibling, never the sum. Summing is
+      // unbounded — a document enumerating v1.0.0 ... v1.40.0 accumulates a
+      // full BM25 contribution for each distinct sibling of the single query
+      // token "v1". Measured on a 200-doc corpus: 1 sibling scores 3.63 and
+      // 80 siblings score 110.01, against a ~22 ceiling for any single term
+      // (idf_max * (k1+1)). That let version and tag lists outrank exact
+      // matches, including curated memories. Max-combining is bounded by
+      // construction and is the usual treatment for wildcard expansions
+      // (dis_max / constant-score rewrite). AGENTMEMORY_PREFIX_MATCH=sum
+      // restores the old additive behaviour.
+      const prefixSum = process.env.AGENTMEMORY_PREFIX_MATCH === "sum";
+      const prefixBest = new Map<string, number>();
       const startIdx = this.lowerBound(sorted, term);
       for (let si = startIdx; si < sorted.length; si++) {
         const indexTerm = sorted[si];
@@ -142,11 +168,19 @@ export class SearchIndex {
           const numerator = tf * (this.k1 + 1);
           const denominator =
             tf + this.k1 * (1 - this.b + this.b * (docLen / avgDocLen));
-          scores.set(
-            obsId,
-            (scores.get(obsId) || 0) + prefixIdf * (numerator / denominator) * weight,
-          );
+          const contribution = prefixIdf * (numerator / denominator) * weight;
+          if (prefixSum) {
+            scores.set(obsId, (scores.get(obsId) || 0) + contribution);
+          } else {
+            const best = prefixBest.get(obsId);
+            if (best === undefined || contribution > best) {
+              prefixBest.set(obsId, contribution);
+            }
+          }
         }
+      }
+      for (const [obsId, contribution] of prefixBest) {
+        scores.set(obsId, (scores.get(obsId) || 0) + contribution);
       }
     }
 
@@ -241,6 +275,9 @@ export class SearchIndex {
       ...obs.concepts,
       ...obs.files,
       obs.type,
+      // Full prompt text (prompt_submit records only): makes every word of
+      // the user's prompt lexically searchable, not just the summary of it.
+      obs.userPrompt || "",
     ];
     return this.tokenize(parts.join(" ").toLowerCase());
   }

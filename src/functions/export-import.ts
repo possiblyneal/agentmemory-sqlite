@@ -28,10 +28,16 @@ import { importOrigin } from "../types.js";
 import { normalizeAccessLog } from "./access-tracker.js";
 import { KV } from "../state/schema.js";
 import { checkPayloadFrameSize } from "../state/frame-guard.js";
+import {
+  indexGraphEdge,
+  indexGraphNode,
+  graphLegDisabled,
+} from "../state/graph-indexes.js";
+import { graphWritesDisabled } from "./graph.js";
 import { StateKV } from "../state/kv.js";
 import { VERSION } from "../version.js";
 import { recordAudit } from "./audit.js";
-import { indexRecords } from "./search.js";
+import { deleteIndexed, indexRecords } from "./search.js";
 import { resetLessonIndex } from "./lessons.js";
 import { logger } from "../logger.js";
 
@@ -117,8 +123,10 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         checkpoints,
         accessLogs,
       ] = await Promise.all([
-        kv.list<GraphNode>(KV.graphNodes).catch(() => []),
-        kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
+        // B-mode: graph frozen — export omits the graph scope rather than
+        // enumerate it. Non-graph scopes export normally.
+        graphLegDisabled() ? [] : kv.list<GraphNode>(KV.graphNodes).catch(() => []),
+        graphLegDisabled() ? [] : kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
         kv.list<SemanticMemory>(KV.semantic).catch(() => []),
         kv.list<ProceduralMemory>(KV.procedural).catch(() => []),
         kv.list<Action>(KV.actions).catch(() => []),
@@ -319,10 +327,10 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           }
         });
         await runChunked(obsDeletes, (d) =>
-          kv.delete(KV.observations(d.sessionId), d.obsId),
+          deleteIndexed(kv, KV.observations(d.sessionId), d.obsId),
         );
         await runChunked(await kv.list<Memory>(KV.memories), (m) =>
-          kv.delete(KV.memories, m.id),
+          deleteIndexed(kv, KV.memories, m.id),
         );
         await runChunked(
           await kv.list<SessionSummary>(KV.summaries),
@@ -372,14 +380,19 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           await kv.list<Insight>(KV.insights).catch(() => []),
           (i) => kv.delete(KV.insights, i.id),
         );
-        await runChunked(
-          await kv.list<{ id: string }>(KV.graphNodes).catch(() => []),
-          (n) => kv.delete(KV.graphNodes, n.id),
-        );
-        await runChunked(
-          await kv.list<{ id: string }>(KV.graphEdges).catch(() => []),
-          (e) => kv.delete(KV.graphEdges, e.id),
-        );
+        // Fork posture: a replace-import wipes the graph scope only when it
+        // may also restore it (same gate as the import below), so the graph
+        // is either replaced whole or left untouched - never emptied.
+        if (!graphWritesDisabled()) {
+          await runChunked(
+            await kv.list<{ id: string }>(KV.graphNodes).catch(() => []),
+            (n) => kv.delete(KV.graphNodes, n.id),
+          );
+          await runChunked(
+            await kv.list<{ id: string }>(KV.graphEdges).catch(() => []),
+            (e) => kv.delete(KV.graphEdges, e.id),
+          );
+        }
         await runChunked(
           await kv.list<{ id: string }>(KV.semantic).catch(() => []),
           (s) => kv.delete(KV.semantic, s.id),
@@ -472,22 +485,28 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         stats.summaries++;
       });
 
-      if (importData.graphNodes) {
+      // Fork posture (graph-off): graph rows in an import file are written
+      // only when graph writes are allowed (see graphWritesDisabled), and
+      // every written row also lands in the #893 side-indexes the read
+      // path depends on.
+      if (importData.graphNodes && !graphWritesDisabled()) {
         await runChunked(importData.graphNodes, async (node) => {
           if (strategy === "skip") {
             const existing = await kv.get(KV.graphNodes, node.id).catch(() => null);
             if (existing) { stats.skipped++; return; }
           }
           await kv.set(KV.graphNodes, node.id, node);
+          await indexGraphNode(kv, node);
         });
       }
-      if (importData.graphEdges) {
+      if (importData.graphEdges && !graphWritesDisabled()) {
         await runChunked(importData.graphEdges, async (edge) => {
           if (strategy === "skip") {
             const existing = await kv.get(KV.graphEdges, edge.id).catch(() => null);
             if (existing) { stats.skipped++; return; }
           }
           await kv.set(KV.graphEdges, edge.id, edge);
+          await indexGraphEdge(kv, edge);
         });
       }
       if (importData.semanticMemories) {

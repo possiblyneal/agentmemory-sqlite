@@ -66,11 +66,64 @@ function parseExpansionXml(xml: string): QueryExpansion | null {
   };
 }
 
+function emptyExpansion(query: string): QueryExpansion {
+  return {
+    original: query,
+    reformulations: [],
+    temporalConcretizations: [],
+    entityExtractions: [],
+  };
+}
+
+/**
+ * One LLM round-trip that turns a query into reformulations plus entities.
+ *
+ * Extracted from the `mem::expand-query` registration below so the retrieval
+ * path can call it directly instead of round-tripping through the SDK trigger.
+ * Never throws: a provider failure degrades to an EMPTY expansion, which makes
+ * `searchWithExpansion` behave exactly like a plain search. The failure is
+ * logged at error level rather than swallowed, because a provider that is
+ * always failing here should be visible in the journal.
+ */
+export async function expandQuery(
+  provider: MemoryProvider,
+  query: string,
+  maxReformulations = 5,
+): Promise<QueryExpansion> {
+  try {
+    const response = await provider.compress(
+      QUERY_EXPANSION_SYSTEM,
+      `Expand this query for memory retrieval:\n\n"${query}"`,
+    );
+
+    const parsed = parseExpansionXml(response);
+    if (!parsed) {
+      logger.warn("Failed to parse query expansion");
+      return emptyExpansion(query);
+    }
+
+    parsed.original = query;
+    parsed.reformulations = parsed.reformulations.slice(0, maxReformulations);
+
+    logger.info("Query expanded", {
+      original: query,
+      reformulations: parsed.reformulations.length,
+      entities: parsed.entityExtractions.length,
+    });
+
+    return parsed;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Query expansion failed", { error: msg });
+    return emptyExpansion(query);
+  }
+}
+
 export function registerQueryExpansionFunction(
   sdk: ISdk,
   provider: MemoryProvider,
 ): void {
-  sdk.registerFunction("mem::expand-query", 
+  sdk.registerFunction("mem::expand-query",
     async (data: { query: string; maxReformulations?: number } | undefined) => {
       if (!data || typeof data.query !== "string" || !data.query.trim()) {
         logger.warn("Invalid expand-query payload");
@@ -80,51 +133,11 @@ export function registerQueryExpansionFunction(
       const maxR = Number.isFinite(rawMaxR)
         ? Math.max(1, Math.min(10, Math.floor(rawMaxR)))
         : 5;
-      const query = data.query.trim();
 
-      try {
-        const response = await provider.compress(
-          QUERY_EXPANSION_SYSTEM,
-          `Expand this query for memory retrieval:\n\n"${query}"`,
-        );
-
-        const parsed = parseExpansionXml(response);
-        if (!parsed) {
-          logger.warn("Failed to parse query expansion");
-          return {
-            success: true,
-            expansion: {
-              original: query,
-              reformulations: [],
-              temporalConcretizations: [],
-              entityExtractions: [],
-            },
-          };
-        }
-
-        parsed.original = query;
-        parsed.reformulations = parsed.reformulations.slice(0, maxR);
-
-        logger.info("Query expanded", {
-          original: query,
-          reformulations: parsed.reformulations.length,
-          entities: parsed.entityExtractions.length,
-        });
-
-        return { success: true, expansion: parsed };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error("Query expansion failed", { error: msg });
-        return {
-          success: true,
-          expansion: {
-            original: query,
-            reformulations: [],
-            temporalConcretizations: [],
-            entityExtractions: [],
-          },
-        };
-      }
+      return {
+        success: true,
+        expansion: await expandQuery(provider, data.query.trim(), maxR),
+      };
     },
   );
 }

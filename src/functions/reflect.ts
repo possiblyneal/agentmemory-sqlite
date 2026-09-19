@@ -12,6 +12,7 @@ import type {
 } from "../types.js";
 import { recordAudit } from "./audit.js";
 import { REFLECT_SYSTEM, buildReflectPrompt } from "../prompts/reflect.js";
+import { graphLegDisabled } from "../state/graph-indexes.js";
 
 interface ConceptCluster {
   concepts: string[];
@@ -173,8 +174,10 @@ export function registerReflectFunctions(
 
       const [graphNodes, graphEdges, semanticMemories, lessons, crystals] =
         await Promise.all([
-          kv.list<GraphNode>(KV.graphNodes).catch(() => []),
-          kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
+          // B-mode: graph frozen — skip graph-scope reads, cluster over
+          // semantic/lessons/crystals only.
+          graphLegDisabled() ? [] : kv.list<GraphNode>(KV.graphNodes).catch(() => []),
+          graphLegDisabled() ? [] : kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
           kv.list<SemanticMemory>(KV.semantic).catch(() => []),
           kv.list<Lesson>(KV.lessons).catch(() => []),
           kv.list<Crystal>(KV.crystals).catch(() => []),
@@ -462,7 +465,9 @@ export function registerReflectFunctions(
         }
       }
 
-      await Promise.all(dirty.map((i) => kv.set(KV.insights, i.id, i)));
+      // Awaited batches, not a fan-out: N un-awaited sets run back to back on
+      // the event loop under inproc (see StateKV.setMany).
+      await kv.setMany(KV.insights, dirty.map((i) => ({ key: i.id, value: i })));
       await recordAudit(kv, "reflect", "mem::insight-decay-sweep", dirty.map((i) => i.id), {
         event: "insight.decay",
         decayed,

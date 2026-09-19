@@ -345,7 +345,9 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         }
       }
 
-      await Promise.all(dirty.map((l) => kv.set(KV.lessons, l.id, l)));
+      // Awaited batches, not a fan-out: N un-awaited sets run back to back on
+      // the event loop under inproc (see StateKV.setMany).
+      await kv.setMany(KV.lessons, dirty.map((l) => ({ key: l.id, value: l })));
       for (const l of dirty) {
         if (l.deleted) {
           lessonRecords.delete(l.id);
@@ -355,23 +357,21 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         }
       }
       if (dirty.length > 0) noteLessonMutation();
-      await Promise.all(
-        auditEvents.map((event) =>
-          recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", [event.id], {
-            action: event.action,
-            actor: "system",
-            reason: "decay-sweep",
-            before: {
-              confidence: event.beforeConfidence,
-              deleted: event.beforeDeleted,
-            },
-            after: {
-              confidence: event.afterConfidence,
-              deleted: event.afterDeleted,
-            },
-          }),
-        ),
-      );
+      for (const event of auditEvents) {
+        await recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", [event.id], {
+          action: event.action,
+          actor: "system",
+          reason: "decay-sweep",
+          before: {
+            confidence: event.beforeConfidence,
+            deleted: event.beforeDeleted,
+          },
+          after: {
+            confidence: event.afterConfidence,
+            deleted: event.afterDeleted,
+          },
+        });
+      }
 
       return { success: true, decayed, softDeleted, total: lessons.length };
     },

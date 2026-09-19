@@ -404,6 +404,15 @@ export async function handleToolCall(
     try {
       return await handleProxy(validated, handle);
     } catch (err) {
+      // 503 means the server exists but is not ready (booting, or nginx's
+      // maintenance freeze during a cutover). Writing to the local store
+      // instead would fork the data and report a save the server never saw;
+      // surface it so the client retries.
+      if ((err as { status?: number }).status === 503) {
+        throw new Error(
+          `agentmemory server is not ready (503) for ${toolName}; retry shortly. Not falling back to the local store.`,
+        );
+      }
       process.stderr.write(
         `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}; invalidating handle and falling back to local KV\n`,
       );
@@ -449,6 +458,13 @@ export async function handleToolsList(): Promise<{ tools: unknown[] }> {
         `[@agentmemory/mcp] tools/list: server returned unexpected shape (no .tools array); falling back to local IMPLEMENTED_TOOLS list. Set AGENTMEMORY_DEBUG=1 to inspect response.\n`,
       );
     } catch (err) {
+      // Not ready is not unreachable: advertising the seven local tools
+      // would hide the server's tool set until the next discovery.
+      if ((err as { status?: number }).status === 503) {
+        throw new Error(
+          "agentmemory server is not ready (503) for tools/list; retry shortly. Not advertising the local fallback tool set.",
+        );
+      }
       process.stderr.write(
         `[@agentmemory/mcp] tools/list proxy failed: ${err instanceof Error ? err.message : String(err)}; falling back to local list\n`,
       );

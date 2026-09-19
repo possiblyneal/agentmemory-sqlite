@@ -48,6 +48,15 @@ function mockSdk() {
   };
 }
 
+// Counts distinct PARENTS, not raw vectors. "one vector per memory" was
+// the old contract; under chunking a memory owns as many vectors as it
+// has chunks, and what callers actually depend on is that it resolves to
+// exactly one retrievable row.
+function distinctParents(idx: VectorIndex): Set<string> {
+  const ids = idx.search(new Float32Array([0.1, 0.2, 0.3]), 1000);
+  return new Set(ids.map((r) => r.obsId));
+}
+
 describe("vector index population on remember", () => {
   const mockEmbedder: EmbeddingProvider = {
     name: "test",
@@ -58,14 +67,19 @@ describe("vector index population on remember", () => {
   };
 
   let vectorIndex: VectorIndex;
+  const savedChunking = process.env.AGENTMEMORY_MEMORY_CHUNKING;
 
   beforeEach(() => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
     vectorIndex = new VectorIndex();
     setVectorIndex(vectorIndex);
     setEmbeddingProvider(mockEmbedder);
   });
 
   afterEach(() => {
+    if (savedChunking === undefined)
+      delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    else process.env.AGENTMEMORY_MEMORY_CHUNKING = savedChunking;
     setVectorIndex(null);
     setEmbeddingProvider(null);
   });
@@ -81,7 +95,47 @@ describe("vector index population on remember", () => {
     });
 
     expect((result as { success: boolean }).success).toBe(true);
+    expect(distinctParents(vectorIndex).size).toBe(1);
+  });
+
+  it("writes exactly one vector per memory when chunking is OFF", async () => {
+    // Flag-OFF regression guard: the default path must stay
+    // byte-identical to the pre-chunking behaviour, bare ids and all.
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerRememberFunction(sdk as never, kv as never);
+
+    await sdk.trigger({
+      function_id: "mem::remember",
+      payload: { content: "x ".repeat(5000).trim(), type: "fact" },
+    });
+
     expect(vectorIndex.size).toBe(1);
+    const [only] = [...distinctParents(vectorIndex)];
+    expect(only).not.toContain("#");
+  });
+
+  it("writes one vector per chunk, resolving to one row, when chunking is ON", async () => {
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "true";
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerRememberFunction(sdk as never, kv as never);
+
+    // ~7.8k chars over many paragraphs — the shape that embeds to mush
+    // as a single vector.
+    const content = Array.from(
+      { length: 20 },
+      (_, i) => `SECTION ${i}\n` + `topic ${i} detail sentence. `.repeat(15),
+    ).join("\n\n");
+    const result = (await sdk.trigger({
+      function_id: "mem::remember",
+      payload: { content, type: "architecture", concepts: ["alpha", "beta"] },
+    })) as { success: boolean; memory: { id: string } };
+
+    expect(result.success).toBe(true);
+    expect(vectorIndex.size).toBeGreaterThan(1);
+    // …and every one of them collapses back to the single parent id.
+    expect([...distinctParents(vectorIndex)]).toEqual([result.memory.id]);
   });
 
   it("calls vectorIndex.add() with short content (0% similarity dedup)", async () => {
@@ -98,7 +152,7 @@ describe("vector index population on remember", () => {
       payload: { content: "Second completely different memory", type: "fact" },
     });
 
-    expect(vectorIndex.size).toBe(2);
+    expect(distinctParents(vectorIndex).size).toBe(2);
   });
 
   it("handles missing embedder gracefully (vectorIndex stays null)", async () => {

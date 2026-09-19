@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { handleToolCall } from "../src/mcp/standalone.js";
+import { handleToolCall, handleToolsList } from "../src/mcp/standalone.js";
 import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
 import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
 
@@ -208,6 +208,33 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(out.mode).toBe("compact");
     expect(out.results).toHaveLength(1);
     expect(out.results[0].content).toBe("local only");
+  });
+
+  it("a 503 from the server is an error, never a local save", async () => {
+    let calls = 0;
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      calls++;
+      return new Response(JSON.stringify({ error: "starting" }), { status: 503, statusText: "Service Unavailable" });
+    });
+    const localKv = new InMemoryKV(undefined);
+    await expect(handleToolCall("memory_save", { content: "must not land locally" }, localKv)).rejects.toThrow(/not ready \(503\)/);
+    expect(calls).toBe(1);
+    // Nothing reached the local store.
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    resetHandleForTests();
+    const recall = await handleToolCall("memory_recall", { query: "locally" }, localKv);
+    expect(JSON.parse(recall.content[0].text).results).toHaveLength(0);
+  });
+
+  it("tools/list under a 503 is an error, not the reduced local list", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      return new Response(JSON.stringify({ error: "starting" }), { status: 503, statusText: "Service Unavailable" });
+    });
+    await expect(handleToolsList()).rejects.toThrow(/not ready \(503\)/);
   });
 
   it("invalidates the handle on proxy failure, so the next call re-probes", async () => {

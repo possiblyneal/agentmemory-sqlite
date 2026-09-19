@@ -9,6 +9,7 @@ import type { Insight, GraphNode, GraphEdge, SemanticMemory, Lesson, Crystal } f
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
+  const setManyCalls: Array<{ scope: string; keys: string[] }> = [];
   return {
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
@@ -18,6 +19,15 @@ function mockKV() {
       store.get(scope)!.set(key, data);
       return data;
     },
+    setMany: async <T>(scope: string, entries: Array<{ key: string; value: T }>): Promise<number> => {
+      setManyCalls.push({ scope, keys: entries.map((e) => e.key) });
+      for (const e of entries) {
+        if (!store.has(scope)) store.set(scope, new Map());
+        store.get(scope)!.set(e.key, e.value);
+      }
+      return entries.length;
+    },
+    setManyCalls,
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },

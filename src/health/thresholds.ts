@@ -59,10 +59,14 @@ export function evaluateHealth(
     degraded = true;
   }
 
+  // Measure heapUsed against V8's --max-old-space-size ceiling, NOT against
+  // heapTotal. heapTotal is only what V8 has reserved so far and it grows
+  // lazily, so heapUsed/heapTotal sits near 100% by design in any steady-state
+  // process - it alerted "degraded/critical" forever on a daemon with gigabytes
+  // of headroom. heap_size_limit is the boundary the process actually OOMs at.
+  const heapLimit = snapshot.memory.heapLimit ?? 0;
   const memPercent =
-    snapshot.memory.heapTotal > 0
-      ? (snapshot.memory.heapUsed / snapshot.memory.heapTotal) * 100
-      : 0;
+    heapLimit > 0 ? (snapshot.memory.heapUsed / heapLimit) * 100 : 0;
   const rss = snapshot.memory.rss ?? 0;
   const rssAboveFloor = rss >= cfg.memoryRssFloorBytes;
   const memMb = Math.round(rss / (1024 * 1024));

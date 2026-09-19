@@ -10,7 +10,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
-import { deleteAccessLog } from "./access-tracker.js";
+import { deleteIndexed } from "./search.js";
 import { logger } from "../logger.js";
 
 interface EvictionConfig {
@@ -214,7 +214,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               stats.lowImportanceObs++;
             } else {
               try {
-                await kv.delete(KV.observations(session.id), o.id);
+                await deleteIndexed(kv, KV.observations(session.id), o.id);
                 stats.lowImportanceObs++;
               } catch (err) {
                 logger.warn("Eviction delete failed", {
@@ -257,7 +257,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           } else {
             for (const o of toEvict) {
               try {
-                await kv.delete(KV.observations(o.sessionId), o.id);
+                await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
                 stats.capEvictions++;
               } catch (err) {
                 logger.warn("Eviction delete failed", {
@@ -292,7 +292,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               evictedMemIds.add(mem.id);
             } else {
               try {
-                await kv.delete(KV.memories, mem.id);
+                await deleteIndexed(kv, KV.memories, mem.id);
                 stats.expiredMemories++;
                 evictedMemIds.add(mem.id);
               } catch (err) {
@@ -312,7 +312,6 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 reason: "expired_memory",
                 dryRun,
               });
-              await deleteAccessLog(kv, mem.id);
             }
           }
         }
@@ -328,7 +327,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               stats.nonLatestMemories++;
             } else {
               try {
-                await kv.delete(KV.memories, mem.id);
+                await deleteIndexed(kv, KV.memories, mem.id);
                 stats.nonLatestMemories++;
               } catch (err) {
                 logger.warn("Eviction delete failed", {
@@ -347,7 +346,6 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 reason: "old_non_latest_memory",
                 dryRun,
               });
-              await deleteAccessLog(kv, mem.id);
             }
           }
         }

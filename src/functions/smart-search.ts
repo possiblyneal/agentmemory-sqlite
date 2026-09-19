@@ -5,8 +5,10 @@ import type {
   CompressedObservation,
   HybridSearchResult,
   Lesson,
+  Memory,
 } from "../types.js";
 import { KV } from "../state/schema.js";
+import { memoryToObservation } from "../state/memory-utils.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAccessBatch } from "./access-tracker.js";
@@ -17,6 +19,7 @@ import {
 } from "../config.js";
 import { logger } from "../logger.js";
 import { getCounters } from "../telemetry/setup.js";
+import { graphReadable } from "../state/graph-indexes.js";
 
 // #771: smart-search followup-rate diagnostic. Stored per session as
 // the most recent search payload, used to detect whether the next
@@ -276,11 +279,18 @@ export function registerSmartSearchFunction(
         results: compact.length,
         lessons: lessons.length,
       });
+      // graph-read-fix local delta: surface whether the graph leg
+      // contributed. Omitted when the leg is off (B-mode) or the
+      // side-indexes are unarmed — the results above are BM25+vector only.
+      // Phase-D alerts treat graphOmitted as a signal ONLY in A-mode.
+      const graphOmitted = !(await graphReadable(kv));
+      if (graphOmitted) getCounters().graphLegOmitted.add(1);
       const response: {
         mode: "compact";
         results: CompactSearchResult[];
         lessons?: CompactLessonResult[];
-      } = { mode: "compact", results: compact };
+        graphOmitted?: boolean;
+      } = { mode: "compact", results: compact, graphOmitted };
       if (includeLessons) response.lessons = lessons;
       return response;
     },
@@ -371,6 +381,12 @@ async function findObservation(
     if (obs) return obs;
   }
 
+  // Saved memories (mem::remember) live in KV.memories under a synthetic
+  // session, not KV.observations(*); resolve them before the scan so a bare
+  // obsId for a saved memory resolves and skips the O(sessions) scan.
+  const mem = (await kv.get<Memory>(KV.memories, obsId).catch(() => null)) ?? null;
+  if (mem) return memoryToObservation(mem);
+
   const sessions = await kv.list<{ id: string }>(KV.sessions);
   for (let i = 0; i < sessions.length; i += 5) {
     const batch = sessions.slice(i, i + 5);
@@ -379,7 +395,10 @@ async function findObservation(
         kv.get<CompressedObservation>(KV.observations(s.id), obsId).catch(() => null),
       ),
     );
-    const found = results.find((r) => r !== null);
+    // `!= null` not `!== null`: the engine returns `undefined` on a miss, so a
+    // strict null test matches element 0 of every batch and a real hit is only
+    // returned when it lands at batch index 0 (~1 in 5, deterministic).
+    const found = results.find((r) => r != null);
     if (found) return found;
   }
   return null;

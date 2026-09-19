@@ -3,6 +3,7 @@ import type {
   CompressedObservation,
   ObservationType,
 } from "../types.js";
+import { truncate as truncateMiddleOut } from "../prompts/compression.js";
 
 // Zero-LLM compression path. Converts a RawObservation into a
 // CompressedObservation using only heuristics — no Claude call, no token
@@ -93,12 +94,16 @@ export function buildSyntheticCompression(
     title: truncate(toolName || "observation", 80),
     subtitle: inputStr ? truncate(inputStr, 120) : undefined,
     facts: [],
-    narrative: truncate(narrativeParts.join(" | "), 400),
+    // Middle-out at 2000 (was head-only at 400): the tail of a log or prompt
+    // is usually the part that matters, and 400 chars of head lost it.
+    narrative: truncateMiddleOut(narrativeParts.join(" | "), 2000),
     concepts: [],
     files: extractFiles(raw.toolInput),
     importance: 5,
     confidence: 0.3,
   };
+  if (raw.toolName) result.toolName = raw.toolName;
+  if (raw.userPrompt) result.userPrompt = raw.userPrompt;
   if (raw.modality) result.modality = raw.modality;
   if (raw.imageData) result.imageData = raw.imageData;
   if (raw.agentId) result.agentId = raw.agentId;

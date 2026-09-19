@@ -116,6 +116,18 @@ describe("Graph Functions", () => {
     expect(edges[0].type).toBe("uses");
   });
 
+  it("graph-extract stamps nodes with the source observation's sessionId (#656)", async () => {
+    await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+
+    const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+    expect(nodes.length).toBeGreaterThan(0);
+    // Every node built from testObs must carry its session so retrieval
+    // can resolve KV.observations(sessionId) instead of the empty namespace.
+    for (const n of nodes) {
+      expect(n.sessionId).toBe("ses_1");
+    }
+  });
+
   it("graph-extract accepts self-closing entity tags", async () => {
     mockProvider.compress.mockResolvedValueOnce(`<entities>
 <entity type="file" name="src/index.ts"/>
@@ -185,6 +197,10 @@ describe("Graph Functions", () => {
 
   it("graph-query with startNodeId does BFS traversal", async () => {
     await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+    // Arm the read side-indexes so the startNodeId walk traverses via the
+    // bounded adjacency index. Unarmed the reader is fail-closed (graph-read
+    // -fix local delta 1) and serves the snapshot, not a BFS.
+    await sdk.trigger("mem::graph-snapshot-rebuild", { force: true });
 
     const nodes = await kv.list<GraphNode>("mem:graph:nodes");
     const fileNode = nodes.find((n) => n.name === "src/index.ts")!;
@@ -593,10 +609,11 @@ describe("Graph Functions", () => {
     });
   });
 
-  // CodeRabbit feedback: cover the timeout-budget fallback path and
-  // the oversized-corpus rebuild refusal. The hot path never enumerates
-  // any more, but the rebuild endpoint AND the BFS / query branches
-  // still call kv.list — both need explicit failure-mode tests.
+  // CodeRabbit feedback: cover the rebuild refusal + degradation paths.
+  // Post graph-read-fix (local delta 1) the BFS / query branches no longer
+  // enumerate at all — they fail closed to a snapshot/unavailable envelope
+  // — so only the rebuild endpoint still calls kv.list. Both keep explicit
+  // failure-mode tests.
   describe("budget + tooLarge guards (#814 v2)", () => {
     function slowKV(delayMs: number) {
       const base = mockKV();
@@ -609,8 +626,12 @@ describe("Graph Functions", () => {
       };
     }
 
-    it("graph-query startNodeId returns warning envelope when enumeration exceeds budget", async () => {
-      const slow = slowKV(7000); // > LIVE_ENUMERATION_BUDGET_MS (6000ms)
+    it("graph-query startNodeId returns a degradation warning when unarmed (fail-closed)", async () => {
+      // graph-read-fix local delta 1: the unarmed query/startNodeId path no
+      // longer enumerates (that kv.list was the pre-#814 500). It fails
+      // closed to a snapshot-backed / unavailable envelope. slowKV's delay
+      // is never reached because no graph-scope list is issued.
+      const slow = slowKV(7000);
       const localSdk = mockSdk();
       registerGraphFunction(localSdk as never, slow as never, mockProvider as never);
 
@@ -619,7 +640,8 @@ describe("Graph Functions", () => {
       })) as GraphQueryResult;
 
       expect(result.warning).toBeTruthy();
-      expect(result.warning).toMatch(/budget|enumeration/i);
+      expect(result.warning).toMatch(/unavailable|unarmed|snapshot|leg|walk/i);
+      expect(result.nodes).toEqual([]);
     }, 10000);
 
     // CodeRabbit raised that slowKV(setTimeout) doesn't simulate a

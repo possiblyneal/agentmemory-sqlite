@@ -227,7 +227,8 @@ describe("buildSyntheticCompression", () => {
       toolOutput: longInput,
       raw: {},
     });
-    expect(synth.narrative.length).toBeLessThanOrEqual(400);
+    // 2000-char budget (middle-out) + the "[...N chars omitted...]" marker.
+    expect(synth.narrative.length).toBeLessThanOrEqual(2100);
   });
 
   it("maps post_tool_failure to the error type even with no tool name", async () => {

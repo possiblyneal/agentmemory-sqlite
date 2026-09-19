@@ -129,8 +129,11 @@ describe("mem::graph::import-graphify", () => {
   let tmp: string;
   let kv: ReturnType<typeof mockKV>;
   let sdk: ReturnType<typeof mockSdk>;
+  // Fork: persistGraphDelta refuses graph writes unless extraction is armed.
+  const ORIG_GRAPH_FLAG = process.env["GRAPH_EXTRACTION_ENABLED"];
 
   beforeEach(() => {
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
     tmp = mkdtempSync(join(tmpdir(), "am-graphify-"));
     mkdirSync(join(tmp, "graphify-out"), { recursive: true });
     writeFileSync(join(tmp, "graphify-out", "graph.json"), JSON.stringify(FIXTURE));
@@ -140,6 +143,8 @@ describe("mem::graph::import-graphify", () => {
   });
 
   afterEach(() => {
+    if (ORIG_GRAPH_FLAG === undefined) delete process.env["GRAPH_EXTRACTION_ENABLED"];
+    else process.env["GRAPH_EXTRACTION_ENABLED"] = ORIG_GRAPH_FLAG;
     rmSync(tmp, { recursive: true, force: true });
   });
 

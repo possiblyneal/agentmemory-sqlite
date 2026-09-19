@@ -30,6 +30,7 @@ const ALL_CATEGORIES = [
   "sketches",
   "signals",
   "sessions",
+  "observations",
   "memories",
   "lessons",
   "summaries",
@@ -313,6 +314,58 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             category: "sessions",
             status: "pass",
             message: `All ${sessions.length} sessions are healthy`,
+            fixable: false,
+          });
+        }
+      }
+
+      // Observations were the ONLY record type with no integrity check, and
+      // they are the highest-volume one. A CompressedObservation always has a
+      // narrative; a RawObservation never does. A record still in raw shape
+      // means mem::compress failed and returned before storing, leaving it
+      // present on disk but absent from BOTH search indexes - unretrievable,
+      // and silent, because a recall miss cannot be observed from outside.
+      // That is how the v0.1.0 orphaning defect ran undetected until
+      // 2026-08-18 and accumulated 411 unreachable observations.
+      if (categories.includes("observations")) {
+        const sessions = await kv.list<Session>(KV.sessions);
+        const orphaned: string[] = [];
+        let total = 0;
+
+        for (const session of sessions) {
+          const observations = await kv.list<Record<string, unknown>>(
+            KV.observations(session.id),
+          );
+          total += observations.length;
+          for (const o of observations) {
+            if (typeof o["narrative"] === "string") continue;
+            if (typeof o["hookType"] !== "string") continue;
+            // An observation created moments ago is legitimately still raw
+            // while its compression is in flight. Only records past the
+            // grace window are genuinely orphaned.
+            const ts = new Date(String(o["timestamp"])).getTime();
+            if (Number.isFinite(ts) && now - ts < ONE_HOUR_MS) continue;
+            orphaned.push(String(o["id"] ?? "unknown"));
+          }
+        }
+
+        if (orphaned.length > 0) {
+          checks.push({
+            name: `observations-uncompressed:${orphaned.length}`,
+            category: "observations",
+            status: "warn",
+            message:
+              `${orphaned.length} of ${total} observations are still in raw shape, so they are in neither ` +
+              `the BM25 nor the vector index and no search can return them (e.g. ` +
+              `${orphaned.slice(0, 5).join(", ")}). Re-run compression for these.`,
+            fixable: false,
+          });
+        } else {
+          checks.push({
+            name: "observations-ok",
+            category: "observations",
+            status: "pass",
+            message: `All ${total} observations are compressed and indexable`,
             fixable: false,
           });
         }

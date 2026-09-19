@@ -3,8 +3,7 @@ import type { Memory, GovernanceFilter, AuditEntry } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { recordAudit, safeAudit, queryAudit } from "./audit.js";
-import { deleteAccessLog } from "./access-tracker.js";
-import { getSearchIndex, vectorIndexRemove, flushIndexSave } from "./search.js";
+import { deleteIndexed, flushIndexSave } from "./search.js";
 import { logger } from "../logger.js";
 
 export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
@@ -22,10 +21,7 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
       for (const id of data.memoryIds) {
         const mem = await kv.get<Memory>(KV.memories, id);
         if (mem) {
-          await kv.delete(KV.memories, id);
-          await deleteAccessLog(kv, id);
-          getSearchIndex().remove(id);
-          vectorIndexRemove(id);
+          await deleteIndexed(kv, KV.memories, id);
           deleted++;
         }
       }
@@ -110,10 +106,7 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
         const batch = candidates.slice(i, i + BATCH_SIZE);
         const results = await Promise.allSettled(
           batch.map(async (mem) => {
-            await kv.delete(KV.memories, mem.id);
-            await deleteAccessLog(kv, mem.id);
-            getSearchIndex().remove(mem.id);
-            vectorIndexRemove(mem.id);
+            await deleteIndexed(kv, KV.memories, mem.id);
           }),
         );
         results.forEach((result, j) => {

@@ -34,22 +34,143 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
+// Chunked documents store one vector per chunk under `${parentId}#${i}`.
+// `#` cannot appear in a generateId output (`prefix_base36_hex`), so the
+// split is unambiguous.
+export function parentIdOf(vectorId: string): string {
+  const hash = vectorId.indexOf("#");
+  return hash === -1 ? vectorId : vectorId.slice(0, hash);
+}
+
+// How far past `limit` to scan before collapsing chunks back to parents.
+// A 10-chunk memory occupying 10 raw slots would otherwise underfill the
+// page. Only applied when the index actually contains chunks.
+const CHUNK_FANOUT = 4;
+
+export type VectorRow = {
+  id: string;
+  sessionId: string;
+  embedding: Float32Array;
+  // SHA-256 of the clipped text this vector was computed for; "" when the
+  // caller has none (non-inproc paths, which never reach a store anyway).
+  inputHash: string;
+};
+
+// Durable rows behind the in-memory map (src/engine/inproc/vectors.ts). Each
+// mutation of the map first goes to the store, and the map is changed only
+// after the store's enclosing transaction commits, so the map never holds a
+// vector the disk does not.
+export interface VectorStore {
+  // Upsert one row. A parent id (no `#`) also drops every `${id}#*` row.
+  put(row: VectorRow): void;
+  // Delete `id` and every `${id}#*` chunk row; with `exact`, only `id`.
+  remove(id: string, exact?: boolean): void;
+  clear(): void;
+  // Run `fn` once the enclosing transaction has committed; immediately when
+  // no transaction is open. Never runs after a rollback.
+  afterCommit(fn: () => void): void;
+}
+
 export class VectorIndex {
   private vectors: Map<string, { embedding: Float32Array; sessionId: string }> =
     new Map();
+  // parentId -> its chunk ids. Lets remove(parent) drop every `parent#*`
+  // without an O(N) scan of the whole index on every delete.
+  private chunkIds: Map<string, Set<string>> = new Map();
+  private store: VectorStore | null = null;
 
-  add(obsId: string, sessionId: string, embedding: Float32Array): void {
-    this.vectors.set(obsId, { embedding, sessionId });
+  attachStore(store: VectorStore | null): void {
+    this.store = store;
   }
 
-  remove(obsId: string): void {
+  add(obsId: string, sessionId: string, embedding: Float32Array, inputHash = ""): void {
+    this.mutate(
+      (s) => s.put({ id: obsId, sessionId, embedding, inputHash }),
+      () => this.applyAdd(obsId, sessionId, embedding),
+    );
+  }
+
+  // Content deletion removes a parent and all its chunks. The fill pass prunes
+  // one row at a time (`exact`): a stale bare-parent row must not take the
+  // memory's current chunk rows with it.
+  remove(obsId: string, exact = false): void {
+    this.mutate(
+      (s) => s.remove(obsId, exact),
+      () => this.applyRemove(obsId, exact),
+    );
+  }
+
+  // Fill the map from persisted rows without any store write. `rows` is in
+  // `seq` order, so insertion order matches what was persisted.
+  hydrate(rows: Iterable<Pick<VectorRow, "id" | "sessionId" | "embedding">>): void {
+    for (const row of rows) this.applyAdd(row.id, row.sessionId, row.embedding);
+  }
+
+  private mutate(persist: (s: VectorStore) => void, apply: () => void): void {
+    if (!this.store) {
+      apply();
+      return;
+    }
+    persist(this.store);
+    this.store.afterCommit(apply);
+  }
+
+  private applyAdd(obsId: string, sessionId: string, embedding: Float32Array): void {
+    this.vectors.set(obsId, { embedding, sessionId });
+    const parent = parentIdOf(obsId);
+    if (parent === obsId) {
+      // Re-adding a document as a SINGLE vector must drop any chunk
+      // vectors it previously had, or the stale chunks keep matching and
+      // can outrank the current content. Same re-add hazard SearchIndex
+      // has; keeping add() idempotent closes it here too.
+      const stale = this.chunkIds.get(obsId);
+      if (stale) {
+        for (const id of stale) this.vectors.delete(id);
+        this.chunkIds.delete(obsId);
+      }
+    } else {
+      let set = this.chunkIds.get(parent);
+      if (!set) {
+        set = new Set();
+        this.chunkIds.set(parent, set);
+      }
+      set.add(obsId);
+    }
+  }
+
+  private applyRemove(obsId: string, exact = false): void {
     this.vectors.delete(obsId);
+    const parent = parentIdOf(obsId);
+    if (parent !== obsId) {
+      const set = this.chunkIds.get(parent);
+      set?.delete(obsId);
+      if (set?.size === 0) this.chunkIds.delete(parent);
+      return;
+    }
+    if (exact) return;
+    // Callers only ever know the parent id (a memory id, an observation
+    // id). Without this, re-saving or forgetting a chunked memory leaves
+    // its chunk vectors behind as orphans that still match queries.
+    const chunks = this.chunkIds.get(obsId);
+    if (chunks) {
+      for (const id of chunks) this.vectors.delete(id);
+      this.chunkIds.delete(obsId);
+    }
   }
 
   search(
     query: Float32Array,
     limit = 20,
   ): Array<{ obsId: string; sessionId: string; score: number }> {
+    // UNGATED collapse, on purpose. This is the rollback contract: the
+    // WRITING of chunks is flag-gated, the READING of them never is. If
+    // this were gated too, turning the chunking flag off against an
+    // already-chunked index would return raw `id#3` rows that no KV
+    // lookup can resolve — a config-only rollback would silently gut the
+    // vector leg.
+    const chunked = this.chunkIds.size > 0;
+    const scanLimit = chunked ? limit * CHUNK_FANOUT : limit;
+
     const results: Array<{
       obsId: string;
       sessionId: string;
@@ -59,9 +180,9 @@ export class VectorIndex {
 
     for (const [obsId, entry] of this.vectors) {
       const score = cosineSimilarity(query, entry.embedding);
-      if (results.length < limit) {
+      if (results.length < scanLimit) {
         results.push({ obsId, sessionId: entry.sessionId, score });
-        if (results.length === limit) {
+        if (results.length === scanLimit) {
           results.sort((a, b) => a.score - b.score);
           minScore = results[0].score;
         }
@@ -73,11 +194,35 @@ export class VectorIndex {
     }
 
     results.sort((a, b) => b.score - a.score);
-    return results;
+    if (!chunked) return results.slice(0, limit);
+
+    // One row per parent, carrying its best-scoring chunk's score.
+    const best = new Map<string, { obsId: string; sessionId: string; score: number }>();
+    for (const r of results) {
+      const parent = parentIdOf(r.obsId);
+      const existing = best.get(parent);
+      if (!existing || r.score > existing.score) {
+        best.set(parent, {
+          obsId: parent,
+          sessionId: r.sessionId,
+          score: r.score,
+        });
+      }
+    }
+    return Array.from(best.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   get size(): number {
     return this.vectors.size;
+  }
+
+  // Dimension of the stored vectors (null while empty). A query vector of
+  // another length scores 0 against every row and looks like a valid leg.
+  get dims(): number | null {
+    const first = this.vectors.values().next().value;
+    return first ? first.embedding.length : null;
   }
 
   // Walks every stored vector and returns the obsIds whose dimension
@@ -104,20 +249,26 @@ export class VectorIndex {
   }
 
   clear(): void {
-    this.vectors.clear();
+    this.mutate(
+      (s) => s.clear(),
+      () => {
+        this.vectors.clear();
+        this.chunkIds.clear();
+      },
+    );
   }
 
+  // Snapshot restore for the iii-persisted index. Not used with a store: the
+  // inproc boot path hydrates from rows instead.
   restoreFrom(other: VectorIndex): void {
     const src = (other as any).vectors as Map<
       string,
       { embedding: Float32Array; sessionId: string }
     >;
     this.vectors = new Map();
+    this.chunkIds = new Map();
     for (const [obsId, entry] of src) {
-      this.vectors.set(obsId, {
-        embedding: new Float32Array(entry.embedding),
-        sessionId: entry.sessionId,
-      });
+      this.applyAdd(obsId, entry.sessionId, new Float32Array(entry.embedding));
     }
   }
 
@@ -154,10 +305,10 @@ export class VectorIndex {
           typeof entry?.sessionId !== "string"
         )
           continue;
-        idx.vectors.set(obsId, {
-          embedding: base64ToFloat32(entry.embedding),
-          sessionId: entry.sessionId,
-        });
+        // Via add(), not vectors.set(), so the chunk-id side map is
+        // rebuilt from a persisted chunked index. Ids are opaque strings
+        // on disk, so the serialised format needs no version bump.
+        idx.add(obsId, entry.sessionId, base64ToFloat32(entry.embedding));
       } catch {
         continue;
       }

@@ -15,7 +15,8 @@ import {
 } from "../prompts/compression.js";
 import { VISION_DESCRIPTION_PROMPT } from "../prompts/vision.js";
 import { getXmlTag, getXmlChildren } from "../prompts/xml.js";
-import { getSearchIndex, vectorIndexAddGuarded } from "./search.js";
+import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, markIndexDirty } from "./search.js";
+import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { CompressOutputSchema } from "../eval/schemas.js";
 import { validateOutput } from "../eval/validator.js";
 import { scoreCompression } from "../eval/quality.js";
@@ -78,6 +79,72 @@ export function registerCompressFunction(
     }) => {
       const startMs = Date.now();
 
+      // Compression is the ONLY writer of KV.observations for this id -
+      // observe.ts hands us the raw record and stores nothing itself, and
+      // nothing re-compresses a failure later. So every early return that
+      // skips the kv.set below leaves the observation present on disk as raw
+      // bytes but absent from BOTH search legs: unfindable forever, from one
+      // transient provider 5xx. Degrade to the same zero-LLM synthetic record
+      // observe.ts writes when auto-compress is off. confidence stays 0.3,
+      // which is what marks these for a later re-compression sweep.
+      // This is a degradation, not a silent fallback: the caller still gets
+      // success:false and the error log still fires, so the alert still pages.
+      const storeDegraded = async (reason: string): Promise<void> => {
+        try {
+          // Park the full raw BEFORE overwriting it, so the sweep that
+          // re-compresses this later works from the original and not from
+          // the synthetic's truncated narrative. attempts counts how many
+          // times this record has failed compression - the sweep uses it to
+          // quarantine records that fail deterministically (e.g. content the
+          // model refuses to summarize) instead of cycling on them forever.
+          const prior = await kv.get<{ attempts?: number }>(
+            KV.compressPending,
+            data.observationId,
+          );
+          await kv.set(KV.compressPending, data.observationId, {
+            observationId: data.observationId,
+            sessionId: data.sessionId,
+            raw: data.raw,
+            reason,
+            failedAt: new Date().toISOString(),
+            attempts: (prior?.attempts ?? 0) + 1,
+          });
+
+          const synthetic = buildSyntheticCompression(data.raw);
+          synthetic.id = data.observationId;
+          synthetic.sessionId = data.sessionId;
+          await kv.set(
+            KV.observations(data.sessionId),
+            data.observationId,
+            synthetic,
+          );
+          if (!isIndexExcluded(synthetic)) {
+            getSearchIndex().add(synthetic);
+            await vectorIndexAddGuarded(
+              synthetic.id,
+              synthetic.sessionId,
+              synthetic.title + " " + (synthetic.narrative || ""),
+              { kind: "synthetic", logId: synthetic.id },
+            );
+            markIndexDirty();
+          }
+          logger.warn("Stored degraded synthetic observation after compression failure", {
+            obsId: data.observationId,
+            sessionId: data.sessionId,
+            reason,
+          });
+        } catch (err) {
+          // Nothing left to fall back to. Log loudly: this is the case where
+          // an observation really is lost to retrieval.
+          logger.error("Degraded store FAILED - observation is unretrievable", {
+            obsId: data.observationId,
+            sessionId: data.sessionId,
+            reason,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+
       let imageDescription: string | undefined;
       const hasImage = data.raw.modality === "image" || data.raw.modality === "mixed";
 
@@ -108,7 +175,7 @@ export function registerCompressFunction(
         }
       }
 
-      const prompt = buildCompressionPrompt({
+      const promptArgs = {
         hookType: data.raw.hookType,
         toolName: data.raw.toolName,
         toolInput: data.raw.toolInput,
@@ -117,7 +184,8 @@ export function registerCompressFunction(
           : data.raw.toolOutput,
         userPrompt: data.raw.userPrompt,
         timestamp: data.raw.timestamp,
-      });
+      };
+      const prompt = buildCompressionPrompt(promptArgs);
 
       try {
         const validator = (response: string) => {
@@ -139,6 +207,7 @@ export function registerCompressFunction(
           prompt,
           validator,
           1,
+          buildCompressionPrompt(promptArgs, { neutralize: true }),
         );
 
         const parsed = parseCompressionXml(response);
@@ -151,6 +220,7 @@ export function registerCompressFunction(
             obsId: data.observationId,
             retried,
           });
+          await storeDegraded("parse_failed");
           return { success: false, error: "parse_failed" };
         }
 
@@ -167,6 +237,13 @@ export function registerCompressFunction(
           ...(data.raw.imageData ? { imageRef: data.raw.imageData } : {}),
           ...(data.raw.agentId ? { agentId: data.raw.agentId } : {}),
           ...(data.raw.origin ? { origin: data.raw.origin } : {}),
+          // Persisted so the index-write sites can recognise the
+          // daemon's own retrieval calls. Compression overwrites the raw
+          // KV record, so without this the tool name is gone from disk.
+          ...(data.raw.toolName ? { toolName: data.raw.toolName } : {}),
+          // Full prompt text survives compression verbatim - the summary
+          // above is derived from it, it does not replace it.
+          ...(data.raw.userPrompt ? { userPrompt: data.raw.userPrompt } : {}),
         };
 
         await kv.set(
@@ -175,23 +252,32 @@ export function registerCompressFunction(
           compressed,
         );
 
-        try {
-          getSearchIndex().add(compressed);
-        } catch (err) {
-          logger.warn("Failed to index compressed observation into BM25", {
-            obsId: compressed.id,
-            sessionId: compressed.sessionId,
-            title: compressed.title,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        // Re-compressing a previously-failed observation clears its recovery
+        // entry. A no-op for the overwhelming majority that never failed.
+        await kv.delete(KV.compressPending, data.observationId);
 
-        await vectorIndexAddGuarded(
-          compressed.id,
-          compressed.sessionId,
-          compressed.title + " " + (compressed.narrative || ""),
-          { kind: "observation", logId: compressed.id },
-        );
+        // Stored above unconditionally; only the INDEX writes are
+        // skipped for excluded tools (retrieval echoes).
+        if (!isIndexExcluded(compressed)) {
+          try {
+            getSearchIndex().add(compressed);
+          } catch (err) {
+            logger.warn("Failed to index compressed observation into BM25", {
+              obsId: compressed.id,
+              sessionId: compressed.sessionId,
+              title: compressed.title,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+
+          await vectorIndexAddGuarded(
+            compressed.id,
+            compressed.sessionId,
+            compressed.title + " " + (compressed.narrative || ""),
+            { kind: "observation", logId: compressed.id },
+          );
+          markIndexDirty();
+        }
 
         const streamResults = await Promise.allSettled([
           sdk.trigger({
@@ -261,6 +347,7 @@ export function registerCompressFunction(
           obsId: data.observationId,
           error: msg,
         });
+        await storeDegraded("compression_failed");
         return { success: false, error: "compression_failed" };
       }
     },

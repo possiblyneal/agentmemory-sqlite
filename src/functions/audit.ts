@@ -30,6 +30,45 @@ import { logger } from "../logger.js";
 //
 // When adding a new deletion path, add an explicit recordAudit call
 // BEFORE kv.delete(...) and match one of the two shapes above.
+//
+// Storage: with AGENTMEMORY_AUDIT_STORE=off the entry is emitted as one
+// structured log line (journald -> Loki keeps the evidence: operation,
+// functionId, targetIds, details) and nothing is written to KV; the audit
+// query then answers an empty list. Any other value keeps the KV store.
+//
+// Which entries become lines when the store is off: AGENTMEMORY_AUDIT_LOG=
+// all (default) | deletions | off. `deletions` keeps every path that removes
+// data - the six removal operations plus the removals that hide under a
+// broader name: heal with action "delete", mesh peer removal, an import
+// that replaces the store, and the soft deletions (a lesson or insight
+// decayed to deleted, a sketch discarded by heal) - and drops the
+// per-operation chatter (observe, compress, heal repairs ...): a few lines
+// a month instead of ~100 KB a day. The details checks mirror the payloads
+// at those call sites; a new deletion path needs either a listed operation
+// or one of these markers.
+
+function auditStoreOff(): boolean {
+  return (process.env.AGENTMEMORY_AUDIT_STORE ?? "").toLowerCase() === "off";
+}
+
+const DELETION_OPS: ReadonlySet<AuditEntry["operation"]> = new Set([
+  "forget", "delete", "lesson_delete", "slot_delete", "core_remove", "sketch_discard",
+]);
+
+function isDeletion(operation: AuditEntry["operation"], details: Record<string, unknown>): boolean {
+  if (DELETION_OPS.has(operation)) return true;
+  if (details.action === "delete" || details.action === "soft-delete" || details.action === "mesh.remove") return true;
+  if (details.newStatus === "discarded") return true;
+  if (typeof details.softDeleted === "number" && details.softDeleted > 0) return true;
+  return operation === "import" && details.strategy === "replace";
+}
+
+function auditLineWanted(operation: AuditEntry["operation"], details: Record<string, unknown>): boolean {
+  const mode = (process.env.AGENTMEMORY_AUDIT_LOG ?? "all").toLowerCase();
+  if (mode === "off") return false;
+  if (mode === "deletions") return isDeletion(operation, details);
+  return true;
+}
 
 export async function recordAudit(
   kv: StateKV,
@@ -50,6 +89,19 @@ export async function recordAudit(
     details,
     qualityScore,
   };
+  if (auditStoreOff()) {
+    if (!auditLineWanted(operation, details)) return entry;
+    logger.audit(operation, {
+      auditId: entry.id,
+      functionId,
+      targetIds,
+      targetCount: targetIds.length,
+      details,
+      ...(qualityScore !== undefined ? { qualityScore } : {}),
+      ...(userId !== undefined ? { userId } : {}),
+    });
+    return entry;
+  }
   await kv.set(KV.audit, entry.id, entry);
   return entry;
 }
@@ -86,6 +138,7 @@ export async function queryAudit(
     limit?: number;
   },
 ): Promise<AuditEntry[]> {
+  if (auditStoreOff()) return [];
   const all = await kv.list<AuditEntry>(KV.audit);
   let entries = [...all].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),

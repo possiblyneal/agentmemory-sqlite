@@ -32,7 +32,31 @@ function endsCVC(s: string): boolean {
   return !/[aeiou]/.test(c1) && /[aeiou]/.test(v) && !/[aeiouwxy]/.test(c2);
 }
 
+// Memoized: the same word is stemmed again and again (8.8M tokens over ~215k
+// distinct words in a 44k-document store, measured 2026-09-09), and stem()
+// was 16 of the 21 s the boot rebuild took. Bounds: words longer than
+// MEMO_MAX_WORD (hashes, base64, ids) are stemmed but not cached; a cached
+// key is copied out of the string it was split from, because a V8 substring
+// keeps its whole source text alive (a 128 KiB query would otherwise stay
+// pinned by each of its tokens); the map is cleared at MEMO_CAP entries.
+// Worst case ~500k x 64 chars, about 100 MB; today's corpus fills ~215k.
+// ponytail: whole-map clear at the cap, an LRU if the vocabulary ever churns
+const memo = new Map<string, string>();
+const MEMO_CAP = 500_000;
+const MEMO_MAX_WORD = 64;
+
 export function stem(word: string): string {
+  if (word.length > MEMO_MAX_WORD) return stemWord(word);
+  const hit = memo.get(word);
+  if (hit !== undefined) return hit;
+  const key = Buffer.from(word, "utf16le").toString("utf16le"); // flat copy, code units preserved
+  const out = stemWord(key);
+  if (memo.size >= MEMO_CAP) memo.clear();
+  memo.set(key, out);
+  return out;
+}
+
+function stemWord(word: string): string {
   if (word.length <= 2) return word;
 
   let w = word;
