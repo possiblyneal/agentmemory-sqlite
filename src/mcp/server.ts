@@ -10,7 +10,9 @@ import type {
 } from "../types.js";
 import { getVisibleTools } from "./tools-registry.js";
 import { timingSafeCompare } from "../auth.js";
+import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
 
 type McpResponse = {
   status_code: number;
@@ -44,6 +46,17 @@ export function registerMcpEndpoints(
   sdk: ISdk,
   kv: StateKV,
   secret?: string,
+  // Step 6: per-tool call counts, so the eventual move off AGENTMEMORY_TOOLS=all
+  // rests on measurement rather than on a transcript census. Stored `toolName`
+  // is optional and absent from older records, its coverage depends on which
+  // host hooks are active, and rare administrative workflows appear in no
+  // finite sample - so absence from transcripts cannot be read as evidence a
+  // tool is unnecessary. Server-side counting has none of those gaps.
+  //
+  // Reuses MetricsStore rather than adding a second tally: it already does
+  // persisted per-id counts with an in-memory cache and is already surfaced on
+  // the status endpoint. Only the tool NAME is recorded - never arguments.
+  metricsStore?: MetricsStore,
 ): void {
   function checkAuth(
     req: ApiRequest,
@@ -83,6 +96,14 @@ export function registerMcpEndpoints(
       }
 
       const { name, arguments: args = {} } = req.body;
+
+      // Counted before dispatch so an unknown or failing tool still registers
+      // as "something called this". Latency is not meaningful here - the
+      // handler below returns at dozens of different points - so it is
+      // recorded as 0 and only the call count is read.
+      void metricsStore
+        ?.record(`mcp_tool:${name}`, 0, true)
+        .catch(() => undefined);
 
       try {
         switch (name) {
@@ -1478,6 +1499,22 @@ export function registerMcpEndpoints(
         }
 
         if (uri === "agentmemory://graph/stats") {
+          // Fail-closed: off or unarmed -> typed unavailable, never
+          // enumerate the graph scope from this MCP resource.
+          if (!(await graphReadable(kv))) {
+            return {
+              status_code: 200,
+              body: {
+                contents: [
+                  {
+                    uri,
+                    mimeType: "application/json",
+                    text: JSON.stringify({ code: GRAPH_INDEX_NOT_READY }),
+                  },
+                ],
+              },
+            };
+          }
           try {
             const nodes = await kv.list<GraphNode>(KV.graphNodes);
             const edges = await kv.list<GraphEdge>(KV.graphEdges);

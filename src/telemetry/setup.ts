@@ -52,6 +52,25 @@ interface Counters {
   // despite retrieval being correct). Never incremented by core in
   // live use; reserved here so dashboards keep a stable name.
   readerFailureWithEvidence: Counter;
+  // graph-read-fix local delta: the graph leg was omitted from a
+  // smart_search (leg off in B-mode, or side-indexes unarmed). In A-mode a
+  // nonzero rate is an alert (something should be armed and isn't); in
+  // B-mode it is 100% by design and must NOT page.
+  graphLegOmitted: Counter;
+  // A1 (4A): a memory explicitly marked isLatest:false was rejected at a
+  // read path before reaching the caller. Only moves while
+  // AGENTMEMORY_NONLATEST_FILTER=true. Nonzero means suppression is doing
+  // work; flat zero after the enable means either a clean corpus or a
+  // filter that is not on the path.
+  nonlatestFiltered: Counter;
+  // A1's companion, and the one that measures the BUG rather than the fix.
+  // Incremented on the filter-DISABLED path when a non-latest row is
+  // resolved and handed back, i.e. the live incidence of stale rows
+  // reaching callers - never measured before A1. It becomes structurally
+  // zero the moment the filter is enabled, which is the assertion: the
+  // same call site either filters (nonlatestFiltered) or leaks
+  // (nonlatestLeaked), never both.
+  nonlatestLeaked: Counter;
 }
 
 interface Histograms {
@@ -96,6 +115,9 @@ const COUNTER_NAMES: Array<[keyof Counters, string]> = [
   ["governanceDelete", "governance.delete"],
   ["smartSearchFollowupWithinWindow", "smart_search.followup_within_window_total"],
   ["readerFailureWithEvidence", "reader_failure_with_evidence_total"],
+  ["graphLegOmitted", "graph_leg_omitted_total"],
+  ["nonlatestFiltered", "nonlatest_filtered_total"],
+  ["nonlatestLeaked", "nonlatest_leaked_total"],
 ];
 
 const HISTOGRAM_NAMES: Array<[keyof Histograms, string]> = [

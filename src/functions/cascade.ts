@@ -3,6 +3,7 @@ import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import type { Memory, GraphNode, GraphEdge } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { graphLegDisabled } from "../state/graph-indexes.js";
 
 export function registerCascadeFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::cascade-update", 
@@ -22,7 +23,10 @@ export function registerCascadeFunction(sdk: ISdk, kv: StateKV): void {
 
       const obsIds = new Set(superseded.sourceObservationIds || []);
 
-      if (obsIds.size > 0) {
+      // B-mode: graph frozen — skip the graph-scope enumeration + stale
+      // flagging entirely (no reads, no writes). Sibling-memory flagging
+      // below still runs on the non-graph memories scope.
+      if (obsIds.size > 0 && !graphLegDisabled()) {
         const now = new Date().toISOString();
         const nodes = await kv.list<GraphNode>(KV.graphNodes);
         for (const node of nodes) {

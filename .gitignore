@@ -21,6 +21,11 @@ agentmemory-debug/
 
 # Lock files — never commit (see feedback_no_lockfiles memory)
 package-lock.json
+# ...except ours. The build is reproduced from this repo alone; without the
+# lockfile `git archive` drops it and `npm ci` on the build host fails or
+# silently resolves a different dependency tree than the one that produced
+# the shipped dist.
+!package-lock.json
 pnpm-lock.yaml
 yarn.lock
 integrations/hermes/__pycache__/
@@ -29,3 +34,8 @@ integrations/hermes/__pycache__/
 eval/reports/
 # LongMemEval download is 278MB; fetched on demand
 eval/data/longmemeval/
+
+
+# Local-only privacy scanner for this fork. Never shipped: its marker list and
+# allowlist describe the private infrastructure it exists to detect.
+/scripts/check-private.sh

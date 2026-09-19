@@ -26,6 +26,17 @@
 
 type Fields = Record<string, unknown> | undefined;
 
+// AGENTMEMORY_LOG_LEVEL=info|warn|error|off: the lowest level still written
+// (default info, which is everything, as before the switch existed). Read
+// per call so a test can flip it. `logger.audit` bypasses it: at `warn` the
+// deletion evidence would otherwise vanish together with the info chatter.
+const LEVEL_RANK = new Map([["info", 0], ["warn", 1], ["error", 2], ["off", 3]]);
+
+function enabled(level: "info" | "warn" | "error"): boolean {
+  const lowest = LEVEL_RANK.get((process.env.AGENTMEMORY_LOG_LEVEL ?? "info").toLowerCase()) ?? 0;
+  return (LEVEL_RANK.get(level) ?? 0) >= lowest;
+}
+
 function fmt(level: string, msg: string, fields: Fields): string {
   if (!fields || Object.keys(fields).length === 0) {
     return `[agentmemory] ${level} ${msg}`;
@@ -50,13 +61,17 @@ function emit(level: string, msg: string, fields: Fields): void {
 
 export const logger = {
   info(msg: string, fields?: Fields): void {
-    emit("info", msg, fields);
+    if (enabled("info")) emit("info", msg, fields);
   },
   warn(msg: string, fields?: Fields): void {
-    emit("warn", msg, fields);
+    if (enabled("warn")) emit("warn", msg, fields);
   },
   error(msg: string, fields?: Fields): void {
-    emit("error", msg, fields);
+    if (enabled("error")) emit("error", msg, fields);
+  },
+  // `[agentmemory] audit <operation> <json>`; never filtered by the level.
+  audit(operation: string, fields?: Fields): void {
+    emit("audit", operation, fields);
   },
 };
 

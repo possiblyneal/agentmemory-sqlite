@@ -15,6 +15,9 @@ const VECTOR_KEY = "vectors";
 const VECTOR_MANIFEST_KEY = "vectors:manifest";
 const VECTOR_SHARD_SCOPE_PREFIX = `${KV.bm25Index}:vectors:`;
 const INDEX_SHARD_KEY = "data";
+// The A2 rollback artifact: the manifest pair that was live before the
+// reconcile published. Their shards are deliberately never cleaned up.
+const CHECKPOINT_ROLLBACK_KEY = "checkpoint:rollback";
 const DEFAULT_INDEX_SHARD_CHARS = 2_000_000;
 
 type IndexShardManifest = {
@@ -22,6 +25,14 @@ type IndexShardManifest = {
   generation?: string;
   shards: Array<{ scope: string; key: string; chars: number }>;
   chars: number;
+};
+
+export type IndexCheckpoint = {
+  generation: string;
+  previous: {
+    bm25: IndexShardManifest | null;
+    vector: IndexShardManifest | null;
+  };
 };
 
 type IndexPersistenceOptions = {
@@ -65,8 +76,16 @@ function isValidShardDescriptor(
   );
 }
 
+// How often a dirty index is flushed to KV. Serializing the whole index is
+// expensive (hundreds of MB on a large corpus), so this is deliberately NOT
+// the 5s add-debounce — it is a periodic checkpoint. The exposure window is
+// one interval's worth of live-indexed entries on an unclean exit.
+const PERIODIC_SAVE_MS = 300_000;
+
 export class IndexPersistence {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private periodic: ReturnType<typeof setInterval> | null = null;
+  private dirty = false;
   private lastFailureLogAt = 0;
 
   constructor(
@@ -75,6 +94,32 @@ export class IndexPersistence {
     private vector: VectorIndex | null,
     private options: IndexPersistenceOptions = {},
   ) {}
+
+  // Every observation and memory indexed while the daemon runs is added to
+  // the IN-MEMORY index only. Nothing was flushing that to disk: scheduleSave
+  // is called at boot (after a rebuild or backfill) and save() on deletes, so
+  // the on-disk snapshot froze at the last rebuild and every entry indexed
+  // since was lost on restart. Measured on production: a 24,027-document
+  // corpus restored 17,625 documents, silently missing everything indexed
+  // since the previous rebuild.
+  //
+  // markDirty() is the cheap call the live add sites make; the flush itself
+  // is amortised onto a timer.
+  markDirty(): void {
+    this.dirty = true;
+    if (this.periodic) return;
+    const ms = Number(process.env.AGENTMEMORY_INDEX_SAVE_INTERVAL_MS) || PERIODIC_SAVE_MS;
+    this.periodic = setInterval(() => {
+      if (!this.dirty) return;
+      this.dirty = false;
+      this.save().catch((err) => {
+        this.dirty = true; // retry on the next tick
+        this.logFailure(err);
+      });
+    }, ms);
+    // Never hold the event loop open for this alone.
+    this.periodic.unref?.();
+  }
 
   scheduleSave(): void {
     if (this.timer) clearTimeout(this.timer);
@@ -123,6 +168,10 @@ export class IndexPersistence {
   }
 
   stop(): void {
+    if (this.periodic) {
+      clearInterval(this.periodic);
+      this.periodic = null;
+    }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -196,15 +245,14 @@ export class IndexPersistence {
       shards.map(async (shard, index) => {
         const chunk = chunks[index] ?? "";
         await this.kv.set(shard.scope, shard.key, chunk);
-        await this.auditIndexPersistence("shard_write", [
-          statePath(shard.scope, shard.key),
-        ], {
-          scope: shard.scope,
-          key: shard.key,
-          manifestKey,
-          generation,
-          chars: chunk.length,
-        });
+        // Successful per-shard writes are deliberately NOT audited. A large
+        // index is hundreds of shards and the periodic flush republishes it
+        // every five minutes, so these rows dominated the audit log (42 MB)
+        // while carrying nothing the retained manifest_publish row does not
+        // already state - same generation, same shard count, same total
+        // chars. Suppression rather than aggregation for that reason.
+        // Failures are untouched: a rejected write still rolls back through
+        // deleteShards, which audits every delete.
       }),
     );
     const failedWrite = writeResults.find(
@@ -264,6 +312,164 @@ export class IndexPersistence {
         await this.deleteShards([shard], "previous_generation_cleanup");
       }
     }
+  }
+
+  // --- A2 reconcile checkpoint -------------------------------------------
+  //
+  // save() publishes BM25 and vector as two INDEPENDENT operations, each
+  // minting its own generation and each deleting its predecessor's shards
+  // on success. That is fine for incremental checkpoints and wrong for a
+  // baseline reconcile, which needs the opposite of both properties: one
+  // generation covering both indexes, and a predecessor that SURVIVES so
+  // there is something to roll back to.
+  //
+  // Atomicity here is publish-both-then-compensate, not a true two-key
+  // commit — the store has no multi-key transaction and the load path
+  // reads two manifests. If the second publish fails the first is rolled
+  // back to its previous value, and the reconcile runs with the daemon
+  // quiesced, so no reader observes the window. Making the combined
+  // checkpoint the canonical publisher belongs to 4B.
+  async saveCheckpoint(
+    bm25Serialized: string,
+    vectorSerialized: string | null,
+  ): Promise<IndexCheckpoint> {
+    const generation =
+      this.options.createGeneration?.() ?? createIndexGeneration();
+    const previousBm25 = await this.readManifest(BM25_MANIFEST_KEY);
+    const previousVector = await this.readManifest(VECTOR_MANIFEST_KEY);
+
+    // Recorded BEFORE anything is written. Rollback restores these two
+    // manifest objects; their shards are never deleted by this method, and
+    // ordinary saves afterwards only ever delete the generation they
+    // themselves superseded — so the artifact stays intact.
+    const rollback: IndexCheckpoint = {
+      generation,
+      previous: {
+        bm25: previousBm25 ?? null,
+        vector: previousVector ?? null,
+      },
+    };
+    await this.kv.set(KV.bm25Index, CHECKPOINT_ROLLBACK_KEY, rollback);
+
+    const bm25Shards = await this.writeGeneration(
+      bm25Serialized,
+      BM25_SHARD_SCOPE_PREFIX,
+      generation,
+    );
+    let vectorShards: IndexShardManifest["shards"] | null = null;
+    if (vectorSerialized !== null) {
+      try {
+        vectorShards = await this.writeGeneration(
+          vectorSerialized,
+          VECTOR_SHARD_SCOPE_PREFIX,
+          generation,
+        );
+      } catch (err) {
+        await this.deleteShards(bm25Shards, "checkpoint_rollback");
+        throw err;
+      }
+    }
+
+    const bm25Manifest: IndexShardManifest = {
+      v: 1,
+      generation,
+      shards: bm25Shards,
+      chars: bm25Serialized.length,
+    };
+    await this.kv.set(KV.bm25Index, BM25_MANIFEST_KEY, bm25Manifest);
+
+    if (vectorShards && vectorSerialized !== null) {
+      const vectorManifest: IndexShardManifest = {
+        v: 1,
+        generation,
+        shards: vectorShards,
+        chars: vectorSerialized.length,
+      };
+      try {
+        await this.kv.set(KV.bm25Index, VECTOR_MANIFEST_KEY, vectorManifest);
+      } catch (err) {
+        // Compensate: put BM25 back where it was, so the pair stays
+        // consistent. A half-published checkpoint is the one outcome
+        // worse than not publishing at all.
+        if (previousBm25) {
+          await this.kv
+            .set(KV.bm25Index, BM25_MANIFEST_KEY, previousBm25)
+            .catch(() => undefined);
+        }
+        await this.deleteShards(bm25Shards, "checkpoint_rollback");
+        await this.deleteShards(vectorShards, "checkpoint_rollback");
+        throw err;
+      }
+    }
+
+    await this.auditIndexPersistence(
+      "checkpoint_publish",
+      [
+        statePath(KV.bm25Index, BM25_MANIFEST_KEY),
+        statePath(KV.bm25Index, VECTOR_MANIFEST_KEY),
+      ],
+      {
+        generation,
+        bm25Chars: bm25Serialized.length,
+        vectorChars: vectorSerialized?.length ?? 0,
+        previousBm25Generation: previousBm25?.generation ?? null,
+        previousVectorGeneration: previousVector?.generation ?? null,
+        cleanup: "skipped_predecessor_retained",
+      },
+    );
+    return rollback;
+  }
+
+  async readCheckpointRollback(): Promise<IndexCheckpoint | null> {
+    return (
+      (await this.kv
+        .get<IndexCheckpoint>(KV.bm25Index, CHECKPOINT_ROLLBACK_KEY)
+        .catch(() => null)) ?? null
+    );
+  }
+
+  private async readManifest(
+    manifestKey: string,
+  ): Promise<IndexShardManifest | null> {
+    const manifest = await this.kv
+      .get<IndexShardManifest>(KV.bm25Index, manifestKey)
+      .catch(() => null);
+    return manifest?.v === 1 && Array.isArray(manifest.shards)
+      ? manifest
+      : null;
+  }
+
+  private async writeGeneration(
+    serialized: string,
+    scopePrefix: string,
+    generation: string,
+  ): Promise<IndexShardManifest["shards"]> {
+    const chunkChars = shardChars(this.options);
+    const shards: IndexShardManifest["shards"] = [];
+    const chunks: string[] = [];
+    for (let offset = 0; offset < serialized.length; offset += chunkChars) {
+      const scope = `${scopePrefix}${generation}:${String(
+        shards.length,
+      ).padStart(5, "0")}`;
+      const chunk = serialized.slice(offset, offset + chunkChars);
+      shards.push({ scope, key: INDEX_SHARD_KEY, chars: chunk.length });
+      chunks.push(chunk);
+    }
+    const writes = await Promise.allSettled(
+      shards.map(async (shard, index) => {
+        // Same suppression as the ordinary save path: the checkpoint's own
+        // audit row records generation, both manifests and their sizes.
+        await this.kv.set(shard.scope, shard.key, chunks[index] ?? "");
+      }),
+    );
+    const failed = writes.find(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    if (failed) {
+      await this.deleteShards(shards, "checkpoint_shard_write_rollback");
+      throw failed.reason;
+    }
+    return shards;
   }
 
   private async auditIndexPersistence(

@@ -80,6 +80,19 @@ export interface CompressedObservation {
   modality?: "text" | "image" | "mixed";
   agentId?: string;
   origin?: Origin;
+  // Carried over from RawObservation. Compression used to drop it, so the
+  // stored record had no way to say which tool produced it — which made
+  // "never index the daemon's own search calls" impossible to express at
+  // the index-write sites. Optional: records written before this exists
+  // simply have no toolName.
+  toolName?: string;
+  // Full prompt text, carried verbatim from RawObservation for prompt_submit
+  // observations. Compression overwrites the raw record in place, so before
+  // this existed the only survivor of a 30K prompt was an LLM summary of it -
+  // the text itself was permanently discarded. Indexed by BM25 (extractTerms)
+  // so every word of the prompt is lexically searchable; the vector leg still
+  // embeds title + narrative only.
+  userPrompt?: string;
 }
 
 export type ObservationType =
@@ -180,7 +193,6 @@ export interface AgentMemoryConfig {
   engineUrl: string;
   restPort: number;
   streamsPort: number;
-  viewerPort: number;
   provider: ProviderConfig;
   tokenBudget: number;
   maxObservationsPerSession: number;
@@ -225,6 +237,8 @@ export interface HealthSnapshot {
   memory: {
     heapUsed: number;
     heapTotal: number;
+    // absent on snapshots stored by builds that predate the field
+    heapLimit?: number;
     rss: number;
     external: number;
   };
@@ -405,6 +419,12 @@ export interface GraphNode {
   name: string;
   properties: Record<string, unknown>;
   sourceObservationIds: string[];
+  // sessionId of the most recent source observation. Carried so graph
+  // retrieval can resolve a node's observations back to their KV
+  // namespace (KV.observations is keyed by sessionId). Optional for
+  // backward compatibility with nodes written before #656; retrieval
+  // falls back to a cross-session obsId scan when absent.
+  sessionId?: string;
   createdAt: string;
   updatedAt?: string;
   aliases?: string[];

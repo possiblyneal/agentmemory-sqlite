@@ -1,9 +1,17 @@
 import type {
   GraphNode,
   GraphEdge,
+  Session,
+  CompressedObservation,
 } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
+import {
+  GraphIndexReader,
+  graphReadable,
+  loadNameCatalog,
+  loadNodeIdsForObservations,
+} from "../state/graph-indexes.js";
 
 export interface GraphRetrievalResult {
   obsId: string;
@@ -12,6 +20,10 @@ export interface GraphRetrievalResult {
   graphContext: string;
   pathLength: number;
 }
+
+type NeighborProvider = (
+  nodeId: string,
+) => Promise<Array<{ node: GraphNode; edge: GraphEdge }>>;
 
 function buildGraphContext(
   path: Array<{ node: GraphNode; edge?: GraphEdge }>,
@@ -41,33 +53,135 @@ function buildGraphContext(
 export class GraphRetrieval {
   constructor(private kv: StateKV) {}
 
+  /**
+   * Resolve each result to the session whose KV namespace actually holds
+   * its observation, so HybridSearch.enrichResults can load it via
+   * KV.observations(sessionId) (#656).
+   *
+   * The node-provided `sessionId` is only a hint: a node accumulates
+   * sourceObservationIds across many extracts/sessions but stores a single
+   * (most-recent) session, and legacy pre-#656 nodes store none. So for
+   * every result we VERIFY the obsId actually lives in the hinted session;
+   * on a miss (wrong hint, empty hint, multi-session node) we fall back to
+   * scanning known sessions. This makes the resolution authoritative
+   * rather than trusting a hint that can be stale or shared.
+   *
+   * Cost: the common single-session node confirms in one lookup. Results
+   * sharing an obsId are cached, so repeats are free. Only genuine misses
+   * pay the per-session scan.
+   */
+  private async resolveSessionIds(
+    results: GraphRetrievalResult[],
+  ): Promise<void> {
+    if (results.length === 0) return;
+
+    // obsId -> owning sessionId, or null when no known session holds it
+    // (so an unresolved obsId is scanned at most once, not per result).
+    const resolved = new Map<string, string | null>();
+    let sessions: Session[] | null = null; // lazily listed on first miss
+
+    const probe = async (sessionId: string, obsId: string): Promise<boolean> => {
+      const obs = await this.kv
+        .get<CompressedObservation>(KV.observations(sessionId), obsId)
+        .catch(() => null);
+      return obs !== null;
+    };
+
+    for (const r of results) {
+      if (resolved.has(r.obsId)) {
+        r.sessionId = resolved.get(r.obsId) ?? "";
+        continue;
+      }
+
+      // 1) Trust-but-verify the node's hint first (cheapest path).
+      if (r.sessionId && (await probe(r.sessionId, r.obsId))) {
+        resolved.set(r.obsId, r.sessionId);
+        continue;
+      }
+
+      // 2) Hint was empty or wrong — scan known sessions for the obs.
+      // Guard the list like probe() guards its get(): a KV failure here
+      // should degrade to an unresolved sessionId ("") for this obs, not
+      // abort the whole retrieval. Empty array also caches the miss below.
+      //
+      // NOTE: the graph-read-fix plan's delta 2 replaces this scan with a
+      // fail-closed miss once delta 3 (forward (sessionId, obsId) pair
+      // maintenance + legacy backfill) guarantees every node carries a
+      // correct hint. That is A-mode-only work, deferred with the backfill;
+      // until it lands the scan stays so A-mode never drops legacy nodes.
+      if (sessions === null) {
+        sessions = await this.kv
+          .list<Session>(KV.sessions)
+          .catch(() => [] as Session[]);
+      }
+      let found: string | null = null;
+      for (const session of sessions) {
+        if (session.id === r.sessionId) continue; // already probed above
+        if (await probe(session.id, r.obsId)) {
+          found = session.id;
+          break;
+        }
+      }
+      resolved.set(r.obsId, found);
+      r.sessionId = found ?? "";
+    }
+  }
+
   async searchByEntities(
     entityNames: string[],
     maxDepth = 2,
     maxResults = 20,
   ): Promise<GraphRetrievalResult[]> {
-    const allNodes = (await this.kv.list<GraphNode>(KV.graphNodes)).filter((n) => !n.stale);
-    const allEdges = (await this.kv.list<GraphEdge>(KV.graphEdges)).filter((e) => !e.stale);
-
-    const matchingNodes = allNodes.filter((n) => {
-      const nameLower = n.name.toLowerCase();
-      return entityNames.some(
-        (e) =>
-          nameLower.includes(e.toLowerCase()) ||
-          e.toLowerCase().includes(nameLower),
+    if (await graphReadable(this.kv)) {
+      const reader = await GraphIndexReader.open(this.kv);
+      const catalog = await loadNameCatalog(this.kv);
+      const lowered = entityNames.map((e) => e.toLowerCase());
+      const matchingNodes: GraphNode[] = [];
+      for (const entry of catalog) {
+        const nameLower = entry.name.toLowerCase();
+        const matched = lowered.some(
+          (e) => nameLower.includes(e) || e.includes(nameLower),
+        );
+        if (!matched) continue;
+        const node = await reader.getNode(entry.id);
+        if (node) matchingNodes.push(node);
+      }
+      return this.scoreEntityMatches(
+        matchingNodes,
+        (id) => reader.getNeighbors(id),
+        maxDepth,
+        maxResults,
       );
-    });
+    }
 
+    // Fail-closed: leg off or side-indexes unarmed. NEVER enumerate the
+    // graph scope here (that path is the uncatchable engine kill). Degrade
+    // to no graph contribution; smart_search still returns BM25+vector.
+    return [];
+  }
+
+  private async scoreEntityMatches(
+    matchingNodes: GraphNode[],
+    getNeighbors: NeighborProvider,
+    maxDepth: number,
+    maxResults: number,
+  ): Promise<GraphRetrievalResult[]> {
     if (matchingNodes.length === 0) return [];
+
+    // Which start node first claims an observation decides its score,
+    // so iterate in a deterministic order regardless of whether the
+    // matches came from enumeration or the sharded name catalog.
+    const orderedMatches = [...matchingNodes].sort((a, b) =>
+      a.id.localeCompare(b.id),
+    );
 
     const results: GraphRetrievalResult[] = [];
     const visitedObs = new Set<string>();
 
-    for (const startNode of matchingNodes) {
-      const paths = this.dijkstraTraversal(
+    for (const startNode of orderedMatches) {
+      const paths = await this.dijkstraTraversal(
         startNode,
-        allNodes,
-        allEdges,
+        getNeighbors,
         maxDepth,
       );
 
@@ -89,7 +203,7 @@ export class GraphRetrieval {
 
           results.push({
             obsId,
-            sessionId: "",
+            sessionId: lastNode.sessionId ?? "",
             score,
             graphContext: buildGraphContext(path),
             pathLength,
@@ -102,7 +216,7 @@ export class GraphRetrieval {
         visitedObs.add(obsId);
         results.push({
           obsId,
-          sessionId: "",
+          sessionId: startNode.sessionId ?? "",
           score: 1.0,
           graphContext: `[${startNode.type}] ${startNode.name}`,
           pathLength: 0,
@@ -111,7 +225,11 @@ export class GraphRetrieval {
     }
 
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, maxResults);
+    const top = results.slice(0, maxResults);
+    // Resolve sessions only for the surviving top-K so verification/scan
+    // work never runs for results that get trimmed away.
+    await this.resolveSessionIds(top);
+    return top;
   }
 
   async expandFromChunks(
@@ -119,18 +237,48 @@ export class GraphRetrieval {
     maxDepth = 1,
     maxResults = 10,
   ): Promise<GraphRetrievalResult[]> {
-    const allNodes = (await this.kv.list<GraphNode>(KV.graphNodes)).filter((n) => !n.stale);
-    const allEdges = (await this.kv.list<GraphEdge>(KV.graphEdges)).filter((e) => !e.stale);
+    if (await graphReadable(this.kv)) {
+      const reader = await GraphIndexReader.open(this.kv);
+      const candidateIds = await loadNodeIdsForObservations(this.kv, obsIds);
+      const linkedNodes: GraphNode[] = [];
+      for (const nodeId of candidateIds) {
+        const node = await reader.getNode(nodeId);
+        if (
+          node &&
+          (node.sourceObservationIds ?? []).some((id) => obsIds.includes(id))
+        ) {
+          linkedNodes.push(node);
+        }
+      }
+      return this.scoreExpansion(
+        linkedNodes,
+        (id) => reader.getNeighbors(id),
+        obsIds,
+        maxDepth,
+        maxResults,
+      );
+    }
 
-    const linkedNodes = allNodes.filter((n) =>
-      n.sourceObservationIds.some((id) => obsIds.includes(id)),
+    // Fail-closed: leg off or side-indexes unarmed. Never enumerate.
+    return [];
+  }
+
+  private async scoreExpansion(
+    linkedNodes: GraphNode[],
+    getNeighbors: NeighborProvider,
+    obsIds: string[],
+    maxDepth: number,
+    maxResults: number,
+  ): Promise<GraphRetrievalResult[]> {
+    const orderedLinked = [...linkedNodes].sort((a, b) =>
+      a.id.localeCompare(b.id),
     );
 
     const results: GraphRetrievalResult[] = [];
     const visitedObs = new Set<string>(obsIds);
 
-    for (const node of linkedNodes) {
-      const paths = this.dijkstraTraversal(node, allNodes, allEdges, maxDepth);
+    for (const node of orderedLinked) {
+      const paths = await this.dijkstraTraversal(node, getNeighbors, maxDepth);
       for (const path of paths) {
         const lastNode = path[path.length - 1].node;
         for (const obsId of lastNode.sourceObservationIds) {
@@ -142,7 +290,7 @@ export class GraphRetrieval {
 
           results.push({
             obsId,
-            sessionId: "",
+            sessionId: lastNode.sessionId ?? "",
             score,
             graphContext: buildGraphContext(path),
             pathLength,
@@ -152,7 +300,9 @@ export class GraphRetrieval {
     }
 
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, maxResults);
+    const top = results.slice(0, maxResults);
+    await this.resolveSessionIds(top);
+    return top;
   }
 
   async temporalQuery(
@@ -163,18 +313,38 @@ export class GraphRetrieval {
     currentState: GraphEdge[];
     history: GraphEdge[];
   }> {
-    const allNodes = (await this.kv.list<GraphNode>(KV.graphNodes)).filter((n) => !n.stale);
-    const allEdges = (await this.kv.list<GraphEdge>(KV.graphEdges)).filter((e) => !e.stale);
+    if (await graphReadable(this.kv)) {
+      const reader = await GraphIndexReader.open(this.kv);
+      const catalog = await loadNameCatalog(this.kv);
+      const lower = entityName.toLowerCase();
+      let entity: GraphNode | null = null;
+      for (const entry of catalog) {
+        if (entry.name.toLowerCase() !== lower) continue;
+        const node = await reader.getNode(entry.id);
+        if (node) {
+          entity = node;
+          break;
+        }
+      }
+      if (!entity) return { entity: null, currentState: [], history: [] };
 
-    const entity = allNodes.find(
-      (n) => n.name.toLowerCase() === entityName.toLowerCase(),
-    );
-    if (!entity) return { entity: null, currentState: [], history: [] };
+      const relatedEdges = await reader.getIncidentEdges(entity.id);
+      return this.partitionTemporalEdges(entity, relatedEdges, asOf);
+    }
 
-    const relatedEdges = allEdges.filter(
-      (e) => e.sourceNodeId === entity.id || e.targetNodeId === entity.id,
-    );
+    // Fail-closed: leg off or side-indexes unarmed. Never enumerate.
+    return { entity: null, currentState: [], history: [] };
+  }
 
+  private partitionTemporalEdges(
+    entity: GraphNode,
+    relatedEdges: GraphEdge[],
+    asOf?: string,
+  ): {
+    entity: GraphNode | null;
+    currentState: GraphEdge[];
+    history: GraphEdge[];
+  } {
     if (!asOf) {
       const latestEdges = this.getLatestEdges(relatedEdges);
       const historicalEdges = relatedEdges.filter(
@@ -231,32 +401,16 @@ export class GraphRetrieval {
   // which fell back to edge-count order and ignored the 0.1-1.0 weight
   // attached to every graph edge. Dijkstra over `cost = 1/weight`
   // (cheaper edges = stronger relationships) returns the
-  // highest-weighted path to each reachable node within maxDepth. Also
-  // tightens the perf profile:
-  //   - Adjacency built once in O(V+E) (previous BFS re-filtered
-  //     allEdges per visited node, O(V·E) overall).
-  //   - Min-heap dequeue is O(log V) per pop (previous queue.shift()
-  //     was O(n) — the dominant cost on graphs above ~200 nodes per
-  //     the contributor's benchmark in #328).
-  private dijkstraTraversal(
+  // highest-weighted path to each reachable node within maxDepth.
+  // Neighbor expansion is delegated to the provider so the same
+  // traversal serves both the enumeration fallback (prebuilt adjacency
+  // over kv.list arrays) and the side-index path (targeted adjacency
+  // gets bounded by degree x maxDepth).
+  private async dijkstraTraversal(
     startNode: GraphNode,
-    allNodes: GraphNode[],
-    allEdges: GraphEdge[],
+    getNeighbors: NeighborProvider,
     maxDepth: number,
-  ): Array<Array<{ node: GraphNode; edge?: GraphEdge }>> {
-    const nodeIndex = new Map<string, GraphNode>();
-    for (const n of allNodes) nodeIndex.set(n.id, n);
-
-    const adjacency = new Map<string, Array<{ neighborId: string; edge: GraphEdge }>>();
-    for (const edge of allEdges) {
-      const a = edge.sourceNodeId;
-      const b = edge.targetNodeId;
-      if (!adjacency.has(a)) adjacency.set(a, []);
-      if (!adjacency.has(b)) adjacency.set(b, []);
-      adjacency.get(a)!.push({ neighborId: b, edge });
-      adjacency.get(b)!.push({ neighborId: a, edge });
-    }
-
+  ): Promise<Array<Array<{ node: GraphNode; edge?: GraphEdge }>>> {
     const dist = new Map<string, number>();
     const pathTo = new Map<string, Array<{ node: GraphNode; edge?: GraphEdge }>>();
     dist.set(startNode.id, 0);
@@ -273,10 +427,9 @@ export class GraphRetrieval {
       if (cost > (dist.get(nodeId) ?? Infinity)) continue;
       if (depth >= maxDepth) continue;
 
-      const neighbors = adjacency.get(nodeId) ?? [];
-      for (const { neighborId, edge } of neighbors) {
-        const nextNode = nodeIndex.get(neighborId);
-        if (!nextNode) continue;
+      const neighbors = await getNeighbors(nodeId);
+      for (const { node: nextNode, edge } of neighbors) {
+        const neighborId = nextNode.id;
         // Clamp weight to avoid division-by-zero on malformed edges;
         // 0.01 is below the documented 0.1 floor.
         const edgeCost = 1 / Math.max(edge.weight, 0.01);

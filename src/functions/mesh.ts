@@ -2,6 +2,11 @@ import type { ISdk } from "iii-sdk";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
+import {
+  indexGraphEdge,
+  indexGraphNode,
+  graphLegDisabled,
+} from "../state/graph-indexes.js";
 import { recordAudit } from "./audit.js";
 import type {
   MeshPeer,
@@ -80,6 +85,7 @@ async function lwwMergeList<T extends { id: string }>(
   items: T[] | undefined,
   lockPrefix: string,
   tsField: "updatedAt" | "createdAt",
+  onWrite?: (item: T) => Promise<void>,
 ): Promise<number> {
   if (!items || !Array.isArray(items)) return 0;
   let count = 0;
@@ -100,7 +106,10 @@ async function lwwMergeList<T extends { id: string }>(
       }
       return false;
     });
-    if (wrote) count++;
+    if (wrote) {
+      count++;
+      if (onWrite) await onWrite(item);
+    }
   }
   return count;
 }
@@ -131,7 +140,10 @@ async function lwwMergeGraphNodes(
       }
       return false;
     });
-    if (wrote) count++;
+    if (wrote) {
+      count++;
+      await indexGraphNode(kv, item);
+    }
   }
   return count;
 }
@@ -361,7 +373,14 @@ export function registerMeshFunction(
         }
       }
       accepted += await lwwMergeGraphNodes(kv, data.graphNodes);
-      accepted += await lwwMergeList(kv, KV.graphEdges, data.graphEdges, "mem:gedge", "createdAt");
+      accepted += await lwwMergeList(
+        kv,
+        KV.graphEdges,
+        data.graphEdges,
+        "mem:gedge",
+        "createdAt",
+        (edge) => indexGraphEdge(kv, edge),
+      );
       await recordAudit(kv, "mesh_sync", "mem::mesh-receive", [], {
         action: "mesh.receive",
         accepted,
@@ -435,14 +454,16 @@ async function collectSyncData(
     result.relations = deltaFilter(all, sinceTime, "createdAt");
   }
 
-  if (scopes.includes("graph:nodes") && !projectScoped) {
+  // B-mode: graph frozen — never enumerate the graph scope for a mesh
+  // delta export.
+  if (scopes.includes("graph:nodes") && !projectScoped && !graphLegDisabled()) {
     const all = await kv.list<GraphNode>(KV.graphNodes);
     result.graphNodes = all.filter(
       (n) => new Date(graphNodeTs(n)).getTime() > sinceTime,
     );
   }
 
-  if (scopes.includes("graph:edges") && !projectScoped) {
+  if (scopes.includes("graph:edges") && !projectScoped && !graphLegDisabled()) {
     const all = await kv.list<GraphEdge>(KV.graphEdges);
     result.graphEdges = deltaFilter(all, sinceTime, "createdAt");
   }
@@ -484,11 +505,19 @@ async function applySyncData(
       if (wrote) applied++;
     }
   }
-  if (scopes.includes("graph:nodes")) {
+  // B-mode: graph frozen — skip inbound graph mutation from a mesh peer.
+  if (scopes.includes("graph:nodes") && !graphLegDisabled()) {
     applied += await lwwMergeGraphNodes(kv, data.graphNodes);
   }
-  if (scopes.includes("graph:edges")) {
-    applied += await lwwMergeList(kv, KV.graphEdges, data.graphEdges, "mem:gedge", "createdAt");
+  if (scopes.includes("graph:edges") && !graphLegDisabled()) {
+    applied += await lwwMergeList(
+      kv,
+      KV.graphEdges,
+      data.graphEdges,
+      "mem:gedge",
+      "createdAt",
+      (edge) => indexGraphEdge(kv, edge),
+    );
   }
 
   return applied;

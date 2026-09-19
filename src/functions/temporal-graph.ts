@@ -9,6 +9,14 @@ import type {
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
+import {
+  indexGraphEdge,
+  indexGraphNode,
+  linkObservationsToNode,
+  graphLegDisabled,
+  graphReadable,
+  GRAPH_INDEX_NOT_READY,
+} from "../state/graph-indexes.js";
 import { logger } from "../logger.js";
 
 const TEMPORAL_EXTRACTION_SYSTEM = `You are a temporal knowledge extraction engine. Given observations, extract entities AND their temporal relationships with full context metadata.
@@ -48,6 +56,10 @@ Rules:
 function parseTemporalGraphXml(
   xml: string,
   observationIds: string[],
+  // obsId -> sessionId, so temporal nodes record the session namespace of
+  // their source observations (#656). Optional; absent obsIds leave the
+  // node's sessionId undefined and retrieval falls back to a scan.
+  sessionByObsId?: Map<string, string>,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
@@ -74,12 +86,23 @@ function parseTemporalGraphXml(
       aliases.push(propMatch[1]);
     }
 
+    let sessionId: string | undefined;
+    if (sessionByObsId) {
+      for (const obsId of observationIds) {
+        const sid = sessionByObsId.get(obsId);
+        if (sid) {
+          sessionId = sid;
+          break;
+        }
+      }
+    }
     nodes.push({
       id: generateId("gn"),
       type,
       name,
       properties,
       sourceObservationIds: observationIds,
+      ...(sessionId !== undefined && { sessionId }),
       createdAt: now,
       aliases: aliases.length > 0 ? aliases : undefined,
     });
@@ -158,6 +181,7 @@ export function registerTemporalGraphFunctions(
     async (data: {
       observations: Array<{
         id: string;
+        sessionId?: string;
         title: string;
         narrative: string;
         concepts: string[];
@@ -168,6 +192,20 @@ export function registerTemporalGraphFunctions(
     }) => {
       if (!data.observations || data.observations.length === 0) {
         return { success: false, error: "No observations provided" };
+      }
+
+      // B-mode write-skip (graph-read-fix local delta): the graph is
+      // frozen. Skip extraction entirely — no kv.list read, no node/edge
+      // writes. The memory itself is already persisted by the caller; only
+      // graph mutation is skipped, so the graph can't drift toward the 25K
+      // cliff while frozen and issues zero graph-scope reads.
+      if (graphLegDisabled()) {
+        return {
+          success: true,
+          nodesAdded: 0,
+          edgesAdded: 0,
+          skipped: "graph-leg-off",
+        };
       }
 
       const items = data.observations
@@ -184,7 +222,17 @@ export function registerTemporalGraphFunctions(
         );
 
         const obsIds = data.observations.map((o) => o.id);
-        const { nodes, edges } = parseTemporalGraphXml(response, obsIds);
+        // Map source observations to their sessions so temporal nodes
+        // resolve back to KV.observations(sessionId) at retrieval (#656).
+        const sessionByObsId = new Map<string, string>();
+        for (const o of data.observations) {
+          if (o.sessionId) sessionByObsId.set(o.id, o.sessionId);
+        }
+        const { nodes, edges } = parseTemporalGraphXml(
+          response,
+          obsIds,
+          sessionByObsId,
+        );
 
         const existingNodes = await kv.list<GraphNode>(KV.graphNodes);
         const existingEdges = await kv.list<GraphEdge>(KV.graphEdges);
@@ -206,6 +254,9 @@ export function registerTemporalGraphFunctions(
                 ]),
               ],
               properties: { ...existing.properties, ...node.properties },
+              // Refresh to the newest source's session (#656); keep the
+              // existing value when this extract couldn't resolve one.
+              sessionId: node.sessionId ?? existing.sessionId,
               updatedAt: new Date().toISOString(),
               aliases: [
                 ...new Set([
@@ -216,10 +267,12 @@ export function registerTemporalGraphFunctions(
             };
             if (merged.aliases.length === 0) delete (merged as any).aliases;
             await kv.set(KV.graphNodes, existing.id, merged);
+            await linkObservationsToNode(kv, existing.id, obsIds);
             node.id = existing.id;
             idRemap.set(oldId, existing.id);
           } else {
             await kv.set(KV.graphNodes, node.id, node);
+            await indexGraphNode(kv, node);
             existingNodes.push(node);
           }
         }
@@ -254,6 +307,7 @@ export function registerTemporalGraphFunctions(
           }
 
           await kv.set(KV.graphEdges, edge.id, edge);
+          await indexGraphEdge(kv, edge);
           existingEdges.push(edge);
         }
 
@@ -280,6 +334,11 @@ export function registerTemporalGraphFunctions(
       asOf?: string;
       includeHistory?: boolean;
     }): Promise<TemporalState | { error: string }> => {
+      // Fail-closed graph reader: off or unarmed -> typed unavailable,
+      // never enumerate the graph scope.
+      if (!(await graphReadable(kv))) {
+        return { error: GRAPH_INDEX_NOT_READY } as { error: string };
+      }
       const allNodes = await kv.list<GraphNode>(KV.graphNodes);
       const allEdges = await kv.list<GraphEdge>(KV.graphEdges);
 
@@ -358,6 +417,10 @@ export function registerTemporalGraphFunctions(
       from?: string;
       to?: string;
     }) => {
+      // Fail-closed graph reader: off or unarmed -> typed unavailable.
+      if (!(await graphReadable(kv))) {
+        return { error: GRAPH_INDEX_NOT_READY };
+      }
       const allNodes = await kv.list<GraphNode>(KV.graphNodes);
       const allEdges = await kv.list<GraphEdge>(KV.graphEdges);
       const historicalEdges = await kv

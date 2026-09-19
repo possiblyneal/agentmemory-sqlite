@@ -13,7 +13,13 @@ import {
   isConsolidationEnabled,
   isContextInjectionEnabled,
   isDropStaleIndexEnabled,
+  isInprocEngine,
+  getSqlitePath,
 } from "./config.js";
+import { createInprocSdk, type InprocSdk } from "./engine/inproc/sdk.js";
+import { SqliteVectorStore } from "./engine/inproc/vectors.js";
+import { createIndexFill, registerIndexFillFunction } from "./functions/index-fill.js";
+import { registerMaintenanceFunctions } from "./functions/maintenance.js";
 import {
   createProvider,
   createFallbackProvider,
@@ -22,6 +28,12 @@ import {
 } from "./providers/index.js";
 import { StateKV } from "./state/kv.js";
 import { KV } from "./state/schema.js";
+import {
+  GRAPH_INDEX_NODE_CEILING,
+  backfillGraphIndexes,
+  graphIndexesReady,
+  graphLegDisabled,
+} from "./state/graph-indexes.js";
 import { VectorIndex } from "./state/vector-index.js";
 import { HybridSearch } from "./state/hybrid-search.js";
 import { IndexPersistence } from "./state/index-persistence.js";
@@ -39,8 +51,18 @@ import {
   setVectorIndex,
   setEmbeddingProvider,
   setIndexPersistence,
-  setHybridRanker,
+  setInprocStores,
+  rebuildBm25FromContent,
+  pendingRebuildToken,
+  markRebuildTokenDone,
 } from "./functions/search.js";
+import {
+  reconcileIndexes,
+  pendingReconcileToken,
+  markReconcileTokenDone,
+  isReconcilePublishEnabled,
+} from "./functions/reconcile.js";
+import { memoryToIndexDoc } from "./state/memory-utils.js";
 import { registerContextFunction } from "./functions/context.js";
 import { registerSummarizeFunction } from "./functions/summarize.js";
 import { registerMigrateFunction } from "./functions/migrate.js";
@@ -86,7 +108,10 @@ import { registerReflectFunctions } from "./functions/reflect.js";
 import { registerWorkingMemoryFunctions } from "./functions/working-memory.js";
 import { registerSkillExtractFunctions } from "./functions/skill-extract.js";
 import { registerSlidingWindowFunction } from "./functions/sliding-window.js";
-import { registerQueryExpansionFunction } from "./functions/query-expansion.js";
+import {
+  expandQuery,
+  registerQueryExpansionFunction,
+} from "./functions/query-expansion.js";
 import { registerTemporalGraphFunctions } from "./functions/temporal-graph.js";
 import { registerRetentionFunctions } from "./functions/retention.js";
 import { registerCompressFileFunction } from "./functions/compress-file.js";
@@ -102,12 +127,18 @@ import { registerHealthMonitor } from "./health/monitor.js";
 import { initMetrics, OTEL_CONFIG } from "./telemetry/setup.js";
 import { VERSION } from "./version.js";
 import { bootLog } from "./logger.js";
-import { runtimeMetadataPath } from "./runtime-paths.js";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 
+// #640 + #474: the worker process (this file) is spawned by iii-exec
+// inside the engine. When `agentmemory stop` kills only the engine pid,
+// this worker can survive (detached spawn, signal not propagated, or a
+// wrapper script keeps it running) and reconnects to the next engine as
+// a duplicate worker. Write the worker pid alongside iii.pid so
+// `agentmemory stop` can reap us too.
 function workerPidfilePath(): string {
-  return runtimeMetadataPath("worker.pid");
+  return join(homedir(), ".agentmemory", "worker.pid");
 }
 function writeWorkerPidfile(): void {
   try {
@@ -171,8 +202,11 @@ async function main() {
   const embeddingProvider = createEmbeddingProvider();
   const imageEmbeddingProvider = createImageEmbeddingProvider();
 
+  const inproc = isInprocEngine();
+  const sqlitePath = getSqlitePath();
+
   bootLog(`Starting worker v${VERSION}...`);
-  bootLog(`Engine: ${config.engineUrl}`);
+  bootLog(inproc ? `Engine: in-process (${sqlitePath})` : `Engine: ${config.engineUrl}`);
   bootLog(
     `Provider: ${config.provider.provider} (${config.provider.model})`,
   );
@@ -193,7 +227,20 @@ async function main() {
   );
   bootLog(`Streams: ws://localhost:${config.streamsPort}`);
 
-  const sdk = registerWorker(config.engineUrl, {
+  // In-process runtime: no engine, no worker bus. The shim binds the REST and
+  // stream ports itself, so a bind failure has to be fatal here rather than
+  // leaving a daemon up with no listeners.
+  const inprocSdk: InprocSdk | null = inproc
+    ? createInprocSdk({
+        restPort: config.restPort,
+        streamsPort: config.streamsPort,
+        sqlitePath,
+        maxBodyBytes: parseInt(getEnvVar("AGENTMEMORY_MAX_BODY_BYTES") || "", 10) || undefined,
+      })
+    : null;
+  if (inprocSdk) await inprocSdk.listening();
+
+  const sdk = inprocSdk ?? registerWorker(config.engineUrl, {
     workerName: "agentmemory",
     invocationTimeoutMs: 180000,
     otel: {
@@ -223,6 +270,15 @@ async function main() {
   const dedupMap = new DedupMap();
 
   const vectorIndex = embeddingProvider ? new VectorIndex() : null;
+
+  // Inproc: vectors are rows in the same SQLite file as the state. Every map
+  // mutation writes its rows first and every embedding completion commits
+  // through the store's content-revalidating transaction (src/engine/inproc/vectors.ts).
+  // The store exists even without an embedding provider so content deletes
+  // still take their persisted vector rows with them.
+  const vectorStore = inprocSdk ? new SqliteVectorStore(inprocSdk.store) : null;
+  vectorIndex?.attachStore(vectorStore);
+  setInprocStores(inprocSdk?.store ?? null, vectorStore);
 
   setVectorIndex(vectorIndex);
   setEmbeddingProvider(embeddingProvider);
@@ -381,36 +437,68 @@ async function main() {
     graphWeight,
   );
 
-  const hybridRanker = (query: string, limit: number) =>
-    hybridSearch.search(query, limit);
-  registerSmartSearchFunction(sdk, kv, hybridRanker);
-  setHybridRanker(hybridRanker);
+  // `searchWithExpansion` existed as dead code since the fork point. Probe 0
+  // measured why it is worth waking up: the two frozen-fixture targets that
+  // never reached the candidate pool sit at combined rank 422 and 261 when the
+  // pool is opened to depth 4000, so BOTH retrieval legs rank them past 100 and
+  // neither a deeper pool nor a weight change would seat them in a 20-slot
+  // head. The gap is vocabulary — the query and the memory share almost no
+  // surface — which is the one thing reformulation addresses.
+  //
+  // OFF by default: it costs one LLM round-trip plus N extra searches per
+  // query. Affordable here (single-user, a handful of searches a day) but not a
+  // cost to impose on every deployment silently.
+  const queryExpansionEnabled =
+    getEnvVar("AGENTMEMORY_QUERY_EXPANSION") === "true";
+  registerSmartSearchFunction(sdk, kv, async (query, limit) =>
+    queryExpansionEnabled
+      ? hybridSearch.searchWithExpansion(
+          query,
+          limit,
+          await expandQuery(provider, query),
+        )
+      : hybridSearch.search(query, limit),
+  );
   registerRecentSearchesSweepFunction(sdk, kv);
 
   registerApiTriggers(sdk, kv, secret, metricsStore, provider);
   registerEventTriggers(sdk, kv);
-  registerMcpEndpoints(sdk, kv, secret);
+  registerMcpEndpoints(sdk, kv, secret, metricsStore);
 
   const healthMonitor = registerHealthMonitor(sdk, kv);
 
-  const indexPersistence = new IndexPersistence(kv, bm25Index, vectorIndex);
+  // Inproc mode has no giant-string index persistence at all: vectors hydrate
+  // from their rows below and BM25 is rebuilt from content. The
+  // scheduleSave/markDirty/flushIndexSave hooks stay no-ops there.
+  const indexPersistence = inproc
+    ? null
+    : new IndexPersistence(kv, bm25Index, vectorIndex);
   // Wire the persistence hook so delete paths can flush BM25/vector
   // index mutations to disk. Without this, an in-memory remove can be
   // lost across a hard process exit and the persisted snapshot
   // restores the deleted entry at next boot.
   setIndexPersistence(indexPersistence);
 
-  const loaded = await indexPersistence.load().catch((err) => {
-    console.warn(`[agentmemory] Failed to load persisted index:`, err);
-    return null;
-  });
+  const loaded = indexPersistence
+    ? await indexPersistence.load().catch((err) => {
+        console.warn(`[agentmemory] Failed to load persisted index:`, err);
+        return null;
+      })
+    : null;
   if (loaded?.bm25 && loaded.bm25.size > 0) {
     bm25Index.restoreFrom(loaded.bm25);
     bootLog(
       `Loaded persisted BM25 index (${bm25Index.size} docs)`,
     );
   }
-  if (loaded?.vector && vectorIndex && loaded.vector.size > 0) {
+  if (vectorStore && vectorIndex) {
+    const hydrated = vectorStore.hydrate(vectorIndex);
+    if (hydrated > 0) bootLog(`Hydrated ${hydrated} vectors from SQLite`);
+  }
+  // The dimension guard below runs over whichever source supplied vectors:
+  // the rows just hydrated (inproc) or the deserialised snapshot (iii).
+  const vectorSource = vectorStore ? vectorIndex : loaded?.vector ?? null;
+  if (vectorSource && vectorIndex && vectorSource.size > 0) {
     // Persisted vectors carry whatever dimension the provider had when
     // they were written. If the active provider declares a different
     // dimension — or if the on-disk index contains a mix of dimensions
@@ -423,7 +511,7 @@ async function main() {
     const activeDim = embeddingProvider?.dimensions ?? 0;
     const { mismatches, seenDimensions } =
       activeDim > 0
-        ? loaded.vector.validateDimensions(activeDim)
+        ? vectorSource.validateDimensions(activeDim)
         : { mismatches: [], seenDimensions: new Set<number>() };
 
     if (mismatches.length > 0) {
@@ -436,16 +524,18 @@ async function main() {
       if (dropStale) {
         console.warn(
           `[agentmemory] Persisted vector index has ${mismatches.length} of ` +
-            `${loaded.vector.size} vectors with the wrong dimension. Active ` +
+            `${vectorSource.size} vectors with the wrong dimension. Active ` +
             `provider (${embeddingProvider?.name}) declares ${activeDim}; ` +
             `dimensions seen on disk: ${distinct}. ` +
             `AGENTMEMORY_DROP_STALE_INDEX=true is set — discarding the persisted ` +
             `vectors. Live observations will rebuild the index over time.`,
         );
+        // Inproc: the rows ARE the index, so discarding means deleting them.
+        if (vectorStore) vectorIndex.clear();
       } else {
         throw new Error(
           `[agentmemory] Refusing to start: persisted vector index has ` +
-            `${mismatches.length} of ${loaded.vector.size} vectors with the ` +
+            `${mismatches.length} of ${vectorSource.size} vectors with the ` +
             `wrong dimension. Active provider (${embeddingProvider?.name}) ` +
             `declares ${activeDim}; dimensions seen on disk: ${distinct}. ` +
             `First mismatched obsIds: ${sample}. Loading would silently corrupt ` +
@@ -456,17 +546,115 @@ async function main() {
             `  - Switch the embedding provider back to the one that wrote the index.`,
         );
       }
-    } else {
-      vectorIndex.restoreFrom(loaded.vector);
+    } else if (!vectorStore) {
+      vectorIndex.restoreFrom(vectorSource);
       bootLog(
         `Loaded persisted vector index (${vectorIndex.size} vectors)`,
       );
     }
   }
 
-  const needsRebuild = bm25Index.size === 0;
+  // Inproc: BM25 is not persisted, so it is rebuilt from the content rows on
+  // every boot - one ordered walk, vectors untouched (they hydrated above).
+  // rebuildIndex / reconcileIndexes and their env tokens are unreachable in
+  // this mode: both would clear or re-serialise the vector index.
+  if (inprocSdk) {
+    const t0 = performance.now();
+    const r = await rebuildBm25FromContent(inprocSdk.store.db);
+    bootLog(
+      `BM25 rebuilt from content: ${r.docs} docs of ${r.rows} rows in ` +
+        `${Math.round(performance.now() - t0)} ms (read ${Math.round(r.readMs)} ms, ` +
+        `index ${Math.round(r.indexMs)} ms${r.skipped ? `, ${r.skipped} rows skipped` : ""})`,
+    );
+  }
 
-  if (needsRebuild) {
+  // Inproc maintenance routes (plan steps 9.7, 10): mem::backup, and
+  // mem::index-debug-legs when AGENTMEMORY_INDEX_DEBUG=1. Registered before
+  // the gate opens so they exist the moment readyz answers 200.
+  if (inprocSdk) registerMaintenanceFunctions(sdk, inprocSdk.store);
+
+  // Inproc readiness (plan step 6): DB opened, a write probe round-tripped,
+  // vectors hydrated, BM25 rebuilt -> readyz 200 and the 503 gate opens. The
+  // probe uses the same key the health monitor writes. A failure here is
+  // fatal on purpose: systemd restarts a daemon that cannot write its store.
+  if (inprocSdk) {
+    const stamp = Date.now();
+    inprocSdk.store.set(KV.health, "_probe", { ts: stamp });
+    const back = inprocSdk.store.get(KV.health, "_probe") as { ts?: number } | null;
+    if (back?.ts !== stamp) throw new Error("readiness write probe did not round-trip");
+    inprocSdk.setReady();
+    bootLog("Ready: /agentmemory/readyz -> 200, routes open");
+  }
+
+  // Inproc: the vector fill/repair pass (plan step 5) closes the gap between
+  // the content rows and the vectors table - missing or stale rows are
+  // embedded, orphans pruned. Runs once at boot after readiness (not awaited:
+  // a large backlog after an import must not hold up the listener) and hourly.
+  if (inprocSdk && vectorStore && vectorIndex) {
+    const fill = createIndexFill(inprocSdk.store, vectorStore, vectorIndex);
+    registerIndexFillFunction(sdk, fill);
+    void fill.run();
+    setInterval(() => void fill.run(), 3_600_000).unref();
+    bootLog("Vector fill pass: at boot and hourly (mem::index-fill-missing)");
+  }
+
+  // An explicit rebuild token in the environment that the store has not
+  // recorded yet. Idempotent: markRebuildTokenDone below records it, so
+  // the flag can live in a systemd drop-in permanently.
+  const rebuildToken = inproc ? null : await pendingRebuildToken(kv).catch(() => null);
+
+  // bm25Index.size === 0 alone misses the asymmetric case: a boot that
+  // restored BM25 from disk but lost (or never had) the vector index
+  // degrades to BM25-only PERMANENTLY, because nothing ever re-triggers
+  // the rebuild. If a provider exists, an empty vector index is a
+  // rebuild trigger in its own right.
+  const vectorEmpty =
+    vectorIndex !== null &&
+    embeddingProvider !== null &&
+    vectorIndex.size === 0;
+  const needsRebuild =
+    !inproc && (bm25Index.size === 0 || vectorEmpty || rebuildToken !== null);
+
+  // A2 baseline reconcile takes precedence over the ordinary rebuild path:
+  // it does the same repopulation, but offline, fail-closed, and published
+  // as one retained-predecessor checkpoint. Running rebuildIndex as well
+  // would clear the live singletons the reconcile is about to replace.
+  // Inproc ignores the reconcile token: reconcileIndexes serialises and
+  // checkpoints through IndexPersistence, which does not exist here (plan
+  // step 4).
+  const reconcileToken = indexPersistence
+    ? await pendingReconcileToken(kv).catch(() => null)
+    : null;
+  if (reconcileToken && indexPersistence) {
+    const publish = isReconcilePublishEnabled();
+    bootLog(
+      `Index reconcile requested by token "${reconcileToken}" (${publish ? "PUBLISH" : "dry run"})`,
+    );
+    void reconcileIndexes(kv, indexPersistence, { publish })
+      .then(async (report) => {
+        bootLog(
+          `Index reconcile ${publish ? "published" : "dry run"}: ` +
+            `bm25 ${report.bm25.before} -> ${report.bm25.after} ` +
+            `(+${report.bm25.added} / -${report.bm25.dropped}), ` +
+            `vectors ${report.vectors.before} -> ${report.vectors.after}, ` +
+            `${Math.round(report.durationMs / 1000)}s`,
+        );
+        if (report.published) await markReconcileTokenDone(kv, reconcileToken);
+      })
+      .catch((err) => {
+        console.warn(
+          `[agentmemory] Index reconcile FAILED - nothing published:`,
+          err,
+        );
+      });
+  } else if (needsRebuild && !inproc) {
+    if (rebuildToken) {
+      bootLog(`Index rebuild requested by token "${rebuildToken}"`);
+    } else if (vectorEmpty && bm25Index.size > 0) {
+      bootLog(
+        `Vector index empty with an active embedding provider (${embeddingProvider?.name}) — rebuilding`,
+      );
+    }
     // Fire-and-forget. rebuildIndex iterates every observation across
     // every session and AWAITS an embedding-provider call per record.
     // On a large corpus + rate-limited embedding endpoint that can
@@ -476,16 +664,19 @@ async function main() {
     // and search degrades gracefully — partial coverage > no viewer
     // for hours. Errors still surface via the inner .catch.
     void rebuildIndex(kv)
-      .then((indexCount) => {
+      .then(async (indexCount) => {
         if (indexCount > 0) {
           bootLog(`Search index rebuilt: ${indexCount} entries`);
-          indexPersistence.scheduleSave();
+          indexPersistence?.scheduleSave();
         }
+        // Only after the rebuild actually resolves — a crashed or
+        // aborted rebuild must run again on the next boot.
+        if (rebuildToken) await markRebuildTokenDone(kv, rebuildToken);
       })
       .catch((err) => {
         console.warn(`[agentmemory] Failed to rebuild search index:`, err);
       });
-  } else {
+  } else if (!inproc) {
     // Backfill memories into BM25 for users upgrading from <0.9.5: prior
     // versions of mem::remember never indexed memories, so the persisted
     // BM25 covers observations only and `memory_smart_search` returns
@@ -500,31 +691,56 @@ async function main() {
         if (memory.isLatest === false) continue;
         if (!memory.title || !memory.content) continue;
         if (bm25Index.has(memory.id)) continue;
-        bm25Index.add({
-          id: memory.id,
-          sessionId: memory.sessionIds?.[0] ?? "memory",
-          timestamp: memory.createdAt,
-          type: "decision",
-          title: memory.title,
-          facts: [memory.content],
-          narrative: memory.content,
-          concepts: memory.concepts,
-          files: memory.files,
-          importance: memory.strength,
-        });
+        bm25Index.add(memoryToIndexDoc(memory));
         backfilled++;
       }
       if (backfilled > 0) {
         bootLog(
           `Backfilled ${backfilled} memories into BM25 (legacy index gap)`,
         );
-        indexPersistence.scheduleSave();
+        indexPersistence?.scheduleSave();
       }
     } catch (err) {
       console.warn(
         `[agentmemory] Failed to backfill memories into BM25:`,
         err,
       );
+    }
+  }
+
+  // Backfill the graph read side-indexes for corpora that predate them.
+  // Mirrors the BM25 memories backfill above: one-time, gated on the
+  // snapshot's recorded node count so we never enumerate a corpus large
+  // enough to starve the worker heartbeat.
+  //
+  // graph-read-fix local delta (B-mode boot-skip): when the leg is off
+  // this block is skipped ENTIRELY — it makes the only graph-scope reads
+  // at boot (the kv.list arming enumeration), and B-mode must issue zero.
+  // Skipping is safe: with the marker absent the readers fail-closed
+  // (graphReadable === false) rather than enumerating.
+  if (!graphLegDisabled()) {
+    try {
+      if (!(await graphIndexesReady(kv))) {
+        const graphSnap = await kv.get<import("./types.js").GraphSnapshot>(
+          KV.graphSnapshot,
+          "current",
+        );
+        const totalNodes = graphSnap?.stats?.totalNodes ?? 0;
+        if (graphSnap && totalNodes > 0 && totalNodes <= GRAPH_INDEX_NODE_CEILING) {
+          const [graphNodes, graphEdges] = await Promise.all([
+            kv.list<import("./types.js").GraphNode>(KV.graphNodes),
+            kv.list<import("./types.js").GraphEdge>(KV.graphEdges),
+          ]);
+          await backfillGraphIndexes(
+            kv,
+            graphNodes.filter((n) => !n.stale),
+            graphEdges.filter((e) => !e.stale),
+          );
+          bootLog(`Backfilled graph read indexes (${totalNodes} nodes)`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[agentmemory] Failed to backfill graph indexes:`, err);
     }
   }
 
@@ -536,14 +752,15 @@ async function main() {
     `Ready. ${embeddingProvider ? "Triple-stream (BM25+Vector+Graph)" : "BM25+Graph"} search active.`,
   );
   bootLog(
-    `REST API: 130 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
+    `REST API: 131 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
   );
   bootLog(
     `MCP surface (opt-in via \`npx @agentmemory/mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,
   );
 
+  const viewerPort = config.restPort + 2;
   const viewerServer = startViewerServer(
-    config.viewerPort,
+    viewerPort,
     kv,
     sdk,
     secret,
@@ -610,9 +827,9 @@ async function main() {
     console.log(`\n[agentmemory] Shutting down...`);
     healthMonitor.stop();
     dedupMap.stop();
-    indexPersistence.stop();
+    indexPersistence?.stop();
     await new Promise<void>((resolve) => viewerServer.close(() => resolve()));
-    await indexPersistence.save().catch((err) => {
+    await indexPersistence?.save().catch((err) => {
       console.warn(`[agentmemory] Failed to save index on shutdown:`, err);
     });
     await sdk.shutdown();

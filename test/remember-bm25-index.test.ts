@@ -1,24 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { SearchIndex } from "../src/state/search-index.js";
-import type { CompressedObservation, Memory } from "../src/types.js";
+import { memoryToIndexDoc, MEMORY_SESSION } from "../src/state/memory-utils.js";
+import type { Memory } from "../src/types.js";
 
-// Mirrors the helper used by remember.ts and rebuildIndex(). Kept inline
-// here rather than exporting from src/ so the test asserts the contract,
-// not the implementation.
-function memoryAsIndexable(memory: Memory): CompressedObservation {
-  return {
-    id: memory.id,
-    sessionId: memory.sessionIds[0] ?? "memory",
-    timestamp: memory.createdAt,
-    type: "decision",
-    title: memory.title,
-    facts: [memory.content],
-    narrative: memory.content,
-    concepts: memory.concepts,
-    files: memory.files,
-    importance: memory.strength,
-  };
-}
+// The real projection used by remember.ts, rebuildIndex() and the boot
+// backfill. Was duplicated inline here; three copies of the same shape
+// is exactly how they drift apart.
+const memoryAsIndexable = memoryToIndexDoc;
+
+const SLIM = "AGENTMEMORY_MEMORY_DOC_SLIM";
+const savedSlim = process.env[SLIM];
+afterEach(() => {
+  if (savedSlim === undefined) delete process.env[SLIM];
+  else process.env[SLIM] = savedSlim;
+});
 
 function makeMemory(overrides: Partial<Memory> = {}): Memory {
   return {
@@ -79,6 +74,77 @@ describe("memory indexing into SearchIndex (closes #257)", () => {
     const hits = idx.search("BM25 test", 5);
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].obsId).toBe("mem_moy3u6ua_8c6962b668e7");
+  });
+
+  it("keeps the full payload shape by default and drops only facts when slim", () => {
+    const memory = makeMemory();
+    delete process.env[SLIM];
+    const fat = memoryAsIndexable(memory);
+    expect(fat.facts).toEqual([memory.content]);
+    expect(fat.narrative).toBe(memory.content);
+    expect(fat.sessionId).toBe(MEMORY_SESSION);
+
+    process.env[SLIM] = "true";
+    const slim = memoryAsIndexable(memory);
+    expect(slim.facts).toEqual([]);
+    // Everything still searchable — content survives in narrative, and
+    // the title is only a prefix of it, so nothing is lost lexically.
+    expect(slim.narrative).toBe(memory.content);
+    expect(slim.title).toBe(memory.title);
+    expect(slim.concepts).toEqual(memory.concepts);
+  });
+
+  // MEASURED, not assumed. The design note behind this flag claimed the
+  // triplicated content inflates docLen ~2.2x and that b=0.75 length
+  // normalisation "roughly halves the score", so dropping facts[0] would
+  // raise it. That is wrong: duplicating content scales tf AND docLen by
+  // the same factor, and BM25 saturates in tf — so the fat doc scores
+  // HIGHER, and the gap widens on a corpus where every memory is fat
+  // (avgDocLen falls when they all shrink, re-inflating every length
+  // ratio). Probed on a synthetic 22.6k-doc corpus: memory-vs-echo score
+  // ratio 0.258 fat, 0.205 slim.
+  //
+  // The flag stays because it is a legitimate knob and defaults to off.
+  // This test exists so nobody enables it in production expecting a win.
+  it("slim scores no better than fat — the flag is not a ranking win", () => {
+    const memory = makeMemory({
+      id: "mem_slim_001",
+      title: "Teleport app routing",
+      content:
+        "The mainpc-rdp TCP application is reached through Teleport Connect VNet and needs a residentKey passkey",
+      concepts: ["teleport", "vnet"],
+    });
+    // A short, unrelated document is what sets avgDocLen; the memory's
+    // length penalty is measured against it.
+    const noise = {
+      id: "obs_noise",
+      sessionId: "ses_1",
+      timestamp: new Date().toISOString(),
+      type: "other" as const,
+      title: "unrelated",
+      facts: [],
+      narrative: "nothing to see",
+      concepts: [],
+      files: [],
+      importance: 5,
+    };
+
+    delete process.env[SLIM];
+    const fatIdx = new SearchIndex();
+    fatIdx.add(memoryAsIndexable(memory));
+    fatIdx.add(noise);
+    const fatScore = fatIdx.search("mainpc-rdp Teleport Connect VNet residentKey", 5)[0];
+
+    process.env[SLIM] = "true";
+    const slimIdx = new SearchIndex();
+    slimIdx.add(memoryAsIndexable(memory));
+    slimIdx.add(noise);
+    const slimScore = slimIdx.search("mainpc-rdp Teleport Connect VNet residentKey", 5)[0];
+
+    // Still findable either way — the flag is safe, just not a win.
+    expect(fatScore.obsId).toBe("mem_slim_001");
+    expect(slimScore.obsId).toBe("mem_slim_001");
+    expect(slimScore.score).toBeLessThanOrEqual(fatScore.score);
   });
 
   it("matches concepts as well as title and content", () => {

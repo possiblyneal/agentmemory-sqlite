@@ -67,6 +67,24 @@ export default defineConfig([
     clean: false,
     sourcemap: false,
   },
+  // Migration importer (plan step 8): reuses the daemon's store, hydration,
+  // BM25 rebuild and fill-pass code, so it ships as its own dist entry.
+  {
+    entry: ["src/ops/import-state-store.ts"],
+    outDir: "dist",
+    ...shared,
+    clean: false,
+    sourcemap: false,
+  },
+  // Acceptance harness "new side" (plan step 9.7a): the daemon's own BM25
+  // rebuild and vector hydration over a snapshot, plus the index classes.
+  {
+    entry: ["src/ops/acceptance-legs.ts"],
+    outDir: "dist",
+    ...shared,
+    clean: false,
+    sourcemap: false,
+  },
   // One entry per config block prevents tsdown from hoisting shared
   // helpers into hashed chunks across hooks.
   ...hookEntries.map((entry) => ({

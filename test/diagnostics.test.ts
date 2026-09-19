@@ -195,15 +195,83 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 15 = 8 original (actions, leases, sentinels, sketches, signals,
+      // 16 = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
-      // 1 added in #memory-project-scope (memory-project-coverage).
-      expect(result.summary.pass).toBe(15);
+      // 1 added in #memory-project-scope (memory-project-coverage) +
+      // 1 for observations, the last record type that had no check.
+      expect(result.summary.pass).toBe(16);
       expect(result.summary.warn).toBe(0);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
       expect(result.checks.every((c) => c.status === "pass")).toBe(true);
+    });
+
+    // Guards the detection gap that let the v0.1.0 compression-orphan defect
+    // run silently: observations were the only record type with no check.
+    it("raw-shaped observation past the grace window produces warn", async () => {
+      const session = makeSession();
+      await kv.set(KV.sessions, session.id, session);
+      await kv.set(KV.observations(session.id), "obs_orphan", {
+        id: "obs_orphan",
+        sessionId: session.id,
+        timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        hookType: "post_tool_use",
+        toolName: "Read",
+        raw: {},
+      });
+
+      const result = (await sdk.trigger("mem::diagnose", {
+        categories: ["observations"],
+      })) as { checks: DiagnosticCheck[] };
+
+      const check = result.checks.find((c) =>
+        c.name.startsWith("observations-uncompressed:"),
+      );
+      expect(check).toBeDefined();
+      expect(check!.status).toBe("warn");
+      expect(check!.message).toContain("obs_orphan");
+    });
+
+    it("raw observation still inside the grace window is not flagged", async () => {
+      const session = makeSession();
+      await kv.set(KV.sessions, session.id, session);
+      await kv.set(KV.observations(session.id), "obs_inflight", {
+        id: "obs_inflight",
+        sessionId: session.id,
+        timestamp: new Date().toISOString(),
+        hookType: "post_tool_use",
+        raw: {},
+      });
+
+      const result = (await sdk.trigger("mem::diagnose", {
+        categories: ["observations"],
+      })) as { checks: DiagnosticCheck[] };
+
+      expect(result.checks.find((c) => c.name === "observations-ok")).toBeDefined();
+    });
+
+    it("compressed observation is not flagged", async () => {
+      const session = makeSession();
+      await kv.set(KV.sessions, session.id, session);
+      await kv.set(KV.observations(session.id), "obs_ok", {
+        id: "obs_ok",
+        sessionId: session.id,
+        timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        type: "file_read",
+        title: "Read foo.ts",
+        narrative: "Read the file before editing it.",
+        facts: ["a"],
+        concepts: [],
+        files: [],
+        importance: 3,
+      });
+
+      const result = (await sdk.trigger("mem::diagnose", {
+        categories: ["observations"],
+      })) as { checks: DiagnosticCheck[] };
+
+      expect(result.checks.find((c) => c.name === "observations-ok")).toBeDefined();
     });
 
     it("active action with no lease produces warn", async () => {

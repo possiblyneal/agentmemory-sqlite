@@ -22,7 +22,10 @@ const configState = {
   isolated: false,
 };
 
-vi.mock("../src/config.js", () => ({
+// Partial mock: search.ts imports more from config than the two knobs this
+// suite steers, and a full mock breaks the moment it imports one more.
+vi.mock("../src/config.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/config.js")>()),
   getAgentId: () => configState.agentId,
   isAgentScopeIsolated: () => configState.isolated,
 }));

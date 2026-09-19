@@ -16,6 +16,8 @@ vi.mock("../src/functions/search.js", () => ({
     add: vi.fn(),
   }),
   vectorIndexAddGuarded: vi.fn().mockResolvedValue(false),
+  isIndexExcluded: () => false,
+  markIndexDirty: () => {},
 }));
 
 const mockTrigger = vi.fn().mockResolvedValue(undefined);

@@ -3,10 +3,14 @@ import type { Memory } from "../types.js";
 import { KV, generateId, jaccardSimilarity } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
-import { memoryToObservation } from "../state/memory-utils.js";
-import { deleteAccessLog } from "./access-tracker.js";
+import {
+  memoryToIndexDoc,
+  memoryChunkJobs,
+  refersToDifferentDates,
+  MEMORY_SESSION,
+} from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
-import { getSearchIndex, isMemoryIndexReady, vectorIndexAddGuarded, vectorIndexRemove, flushIndexSave } from "./search.js";
+import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorIndexRemove, flushIndexSave, markIndexDirty, deleteIndexed } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 
@@ -126,6 +130,21 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             lowerContent,
             existing.content.toLowerCase(),
           );
+          if (
+            similarity > 0.7 &&
+            refersToDifferentDates(data.content, existing.content)
+          ) {
+            // Recurring daily reports collide above the threshold on template
+            // wording alone. Measured: 2 of our 67 supersession edges were one
+            // day's report erasing the previous day's, and the digest job that
+            // produced them still runs. Skip rather than break - a genuinely
+            // superseding memory may sit further down the list.
+            logger.info("remember: refusing to supersede across dates", {
+              candidateId: existing.id,
+              similarity,
+            });
+            continue;
+          }
           if (similarity > 0.7) {
             supersededId = existing.id;
             supersededVersion = existing.version ?? 1;
@@ -179,14 +198,20 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         if (supersededMemory) {
           supersededMemory.isLatest = false;
           await kv.set(KV.memories, supersededMemory.id, supersededMemory);
-          // The superseded version stays in KV (the viewer's version
-          // chain reads it there) but leaves both search indexes:
-          // recall returning an outdated fact as if current is worse
-          // than returning nothing.
+          // De-index the superseded version. rebuildIndex() already skips
+          // isLatest === false, but the live indexes keep serving the old
+          // row until the next full rebuild — so the stale text competes
+          // with its own replacement (and a memory-layer boost would
+          // amplify exactly that). Soft-fail: the save already committed.
           try {
             getSearchIndex().remove(supersededMemory.id);
-          } catch {}
-          vectorIndexRemove(supersededMemory.id);
+            vectorIndexRemove(supersededMemory.id);
+          } catch (err) {
+            logger.warn("Failed to de-index superseded memory", {
+              memId: supersededMemory.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         await kv.set(KV.memories, memory.id, memory);
 
@@ -196,19 +221,25 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         // an indexing failure doesn't block the save itself — the
         // restart-time rebuild will pick the memory up either way.
         try {
-          getSearchIndex().add(memoryToObservation(memory));
+          getSearchIndex().add(memoryToIndexDoc(memory));
         } catch (err) {
           logger.warn("Failed to index saved memory into BM25", {
             memId: memory.id,
             error: err instanceof Error ? err.message : String(err),
           });
         }
-        await vectorIndexAddGuarded(
-          memory.id,
-          memory.sessionIds?.[0] ?? "memory",
-          memory.title + " " + memory.content,
-          { kind: "memory", logId: memory.id },
+        // Batched so a chunked save costs ONE embed round-trip rather
+        // than one per chunk. Yields a single job when chunking is off.
+        const sessionId = memory.sessionIds?.[0] ?? MEMORY_SESSION;
+        await vectorIndexAddBatchGuarded(
+          memoryChunkJobs(memory).map((job) => ({
+            id: job.id,
+            sessionId,
+            text: job.text,
+            context: { kind: "memory" as const, logId: job.id },
+          })),
         );
+        markIndexDirty();
 
         if (supersededId) {
           await sdk.trigger({
@@ -258,13 +289,10 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       if (data.memoryId) {
         const mem = await kv.get<Memory>(KV.memories, data.memoryId);
         if (mem) {
-          await kv.delete(KV.memories, data.memoryId);
+          await deleteIndexed(kv, KV.memories, data.memoryId);
           if (mem.imageRef) {
             await decrementImageRef(kv, sdk, mem.imageRef);
           }
-          await deleteAccessLog(kv, data.memoryId);
-          getSearchIndex().remove(data.memoryId);
-          vectorIndexRemove(data.memoryId);
           deletedMemoryIds.push(data.memoryId);
           deleted++;
         }
@@ -280,13 +308,11 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             KV.observations(data.sessionId),
             obsId,
           );
-          await kv.delete(KV.observations(data.sessionId), obsId);
+          await deleteIndexed(kv, KV.observations(data.sessionId), obsId);
           if (obs?.imageData) await decrementImageRef(kv, sdk, obs.imageData);
           if (obs?.imageRef && obs.imageRef !== obs.imageData) {
             await decrementImageRef(kv, sdk, obs.imageRef);
           }
-          getSearchIndex().remove(obsId);
-          vectorIndexRemove(obsId);
           deletedObservationIds.push(obsId);
           deleted++;
         }
@@ -301,13 +327,11 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           KV.observations(data.sessionId),
         );
         for (const obs of observations) {
-          await kv.delete(KV.observations(data.sessionId), obs.id);
+          await deleteIndexed(kv, KV.observations(data.sessionId), obs.id);
           if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
           if (obs.imageRef && obs.imageRef !== obs.imageData) {
             await decrementImageRef(kv, sdk, obs.imageRef);
           }
-          getSearchIndex().remove(obs.id);
-          vectorIndexRemove(obs.id);
           deletedObservationIds.push(obs.id);
           deleted++;
         }

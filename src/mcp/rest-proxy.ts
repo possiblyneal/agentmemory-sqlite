@@ -147,8 +147,11 @@ export async function resolveHandle(): Promise<Handle> {
             signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
           });
           if (!res.ok) {
-            throw new Error(
-              `${init?.method || "GET"} ${path} -> ${res.status} ${res.statusText}`,
+            // Carry the status: the caller treats "the server answered 503"
+            // differently from "the server could not be reached".
+            throw Object.assign(
+              new Error(`${init?.method || "GET"} ${path} -> ${res.status} ${res.statusText}`),
+              { status: res.status },
             );
           }
           const text = await res.text();

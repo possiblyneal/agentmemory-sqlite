@@ -10,6 +10,11 @@ export async function compressWithRetry(
   userPrompt: string,
   validator: (response: string) => { valid: boolean; errors?: string[] },
   maxRetries = 1,
+  // Hardened variant of userPrompt for retries (e.g. payload re-encoded as a
+  // JSON string literal). A first attempt that failed validation usually
+  // failed because the payload derailed the model, so retrying the identical
+  // prompt with a sterner system suffix rarely changes the outcome.
+  retryUserPrompt?: string,
 ): Promise<{ response: string; retried: boolean }> {
   const first = await provider.compress(systemPrompt, userPrompt);
   const result = validator(first);
@@ -18,7 +23,7 @@ export async function compressWithRetry(
   for (let i = 0; i < maxRetries; i++) {
     const retry = await provider.compress(
       systemPrompt + STRICTER_SUFFIX,
-      userPrompt,
+      retryUserPrompt ?? userPrompt,
     );
     const retryResult = validator(retry);
     if (retryResult.valid) return { response: retry, retried: true };

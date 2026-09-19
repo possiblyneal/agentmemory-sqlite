@@ -15,6 +15,7 @@ import type { SessionSummary, Memory, SemanticMemory, ProceduralMemory } from ".
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
+  const setManyCalls: Array<{ scope: string; keys: string[] }> = [];
   return {
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
@@ -24,6 +25,15 @@ function mockKV() {
       store.get(scope)!.set(key, data);
       return data;
     },
+    setMany: async <T>(scope: string, entries: Array<{ key: string; value: T }>): Promise<number> => {
+      setManyCalls.push({ scope, keys: entries.map((e) => e.key) });
+      for (const e of entries) {
+        if (!store.has(scope)) store.set(scope, new Map());
+        store.get(scope)!.set(e.key, e.value);
+      }
+      return entries.length;
+    },
+    setManyCalls,
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
@@ -248,5 +258,82 @@ describe("Consolidation Pipeline", () => {
     expect(result.success).toBe(true);
     expect(result.results).toBeDefined();
     vi.mocked(isConsolidationEnabled).mockReturnValue(true);
+  });
+});
+
+describe("Consolidation Pipeline: decay writes and single flight", () => {
+  const provider = { name: "test", compress: vi.fn(), summarize: vi.fn() };
+  const day = 86400000;
+
+  function semantic(id: string, ageDays: number, strength: number): SemanticMemory {
+    const at = new Date(Date.now() - ageDays * day).toISOString();
+    return {
+      id,
+      fact: "fact " + id,
+      confidence: 0.9,
+      sourceSessionIds: [],
+      sourceMemoryIds: [],
+      accessCount: 0,
+      lastAccessedAt: at,
+      strength,
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  it("decay tier writes only the rows whose strength actually changed, in one batch", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    await kv.set("mem:semantic", "fresh", semantic("fresh", 1, 0.8));
+    await kv.set("mem:semantic", "old", semantic("old", 60, 0.8));
+    await kv.set("mem:semantic", "floor", semantic("floor", 400, 0.1));
+
+    const result = (await sdk.trigger("mem::consolidate-pipeline", { tier: "decay" })) as {
+      success: boolean;
+      results: { decay: Record<string, number> };
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.results.decay).toEqual({ semantic: 3, procedural: 0, semanticWritten: 1, proceduralWritten: 0 });
+    expect(kv.setManyCalls).toEqual([
+      { scope: "mem:semantic", keys: ["old"] },
+      { scope: "mem:procedural", keys: [] },
+    ]);
+    const old = (await kv.get("mem:semantic", "old")) as SemanticMemory;
+    expect(old.strength).toBeCloseTo(0.8 * 0.9 * 0.9, 6);
+    expect(((await kv.get("mem:semantic", "fresh")) as SemanticMemory).strength).toBe(0.8);
+  });
+
+  it("a second run while one is in flight is skipped, not queued", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const slow = {
+      name: "test",
+      compress: vi.fn(),
+      summarize: vi.fn(async () => {
+        await gate;
+        return "<semantic_memories></semantic_memories>";
+      }),
+    };
+    registerConsolidationPipelineFunction(sdk as never, kv as never, slow as never);
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", "ses_" + i, makeSummary(i));
+
+    const first = sdk.trigger("mem::consolidate-pipeline", { tier: "semantic" }) as Promise<{ success: boolean }>;
+    const second = (await sdk.trigger("mem::consolidate-pipeline", { tier: "semantic" })) as {
+      success: boolean;
+      skipped: boolean;
+      reason: string;
+    };
+    expect(second).toEqual({ success: false, skipped: true, reason: expect.stringContaining("already running") });
+
+    release();
+    expect((await first).success).toBe(true);
+    const third = (await sdk.trigger("mem::consolidate-pipeline", { tier: "decay" })) as { success: boolean };
+    expect(third.success).toBe(true);
   });
 });

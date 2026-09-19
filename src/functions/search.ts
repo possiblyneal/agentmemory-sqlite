@@ -5,30 +5,29 @@ import { StateKV } from '../state/kv.js'
 import { SearchIndex } from '../state/search-index.js'
 import { VectorIndex } from '../state/vector-index.js'
 import type { EmbeddingProvider } from '../types.js'
-import { memoryToObservation } from '../state/memory-utils.js'
+import {
+  memoryToObservation,
+  memoryToIndexDoc,
+  memoryChunkJobs,
+  isLatestEligible,
+  MEMORY_SESSION,
+} from '../state/memory-utils.js'
 import { recordAccessBatch } from './access-tracker.js'
+import { withKeyedLock } from '../state/keyed-mutex.js'
+import { clipEmbedInput, isIndexExcluded, enumerateIndexCorpus, type EmbedKind } from '../state/index-corpus.js'
+import type { SqliteState } from '../engine/inproc/state.js'
+import type { SqliteVectorStore } from '../engine/inproc/vectors.js'
 import { logger } from "../logger.js";
-import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import {
+  getAgentId,
+  isAgentScopeIsolated,
+  isNonLatestFilterEnabled,
+} from "../config.js";
+import { getCounters } from "../telemetry/setup.js";
 
 let index: SearchIndex | null = null
 let vectorIndex: VectorIndex | null = null
 let currentEmbeddingProvider: EmbeddingProvider | null = null
-
-// Hybrid ranking hook for mem::search. Wired by index.ts once the
-// hybrid searcher exists (it is constructed after this module's
-// registration runs). When set and the vector index has entries,
-// mem::search ranks candidates through the full BM25+vector+graph
-// fusion instead of BM25 alone — previously only mem::smart-search got
-// hybrid ranking while the primary recall surface stayed keyword-only.
-type HybridRanker = (
-  query: string,
-  limit: number,
-) => Promise<Array<{ observation: CompressedObservation; sessionId: string; combinedScore: number }>>
-let hybridRanker: HybridRanker | null = null
-
-export function setHybridRanker(fn: HybridRanker | null): void {
-  hybridRanker = fn
-}
 
 // Dedupes the lazy cold-start rebuild kicked off from the mem::search
 // request path. A full rebuildIndex walks every observation across every
@@ -69,6 +68,144 @@ export function vectorIndexRemove(id: string): void {
   vectorIndex?.remove(id);
 }
 
+// Eligibility and embed-input rules live in src/state/index-corpus.ts so the
+// live write paths, the inproc vector commit and the boot rebuild share one
+// definition. Re-exported here for the existing call sites.
+export { clipEmbedInput, isIndexExcluded }
+
+// Set in inproc mode (src/index.ts). With the state store present, every
+// content delete removes its vector rows in the same transaction and the
+// cold-search rebuild fallback is off (BM25 is rebuilt from content at boot);
+// with the vector store present, every embedding completion commits through
+// its content-revalidating transaction.
+let inprocState: SqliteState | null = null
+let inprocVectorStore: SqliteVectorStore | null = null
+export function setInprocStores(
+  state: SqliteState | null,
+  vectors: SqliteVectorStore | null,
+): void {
+  inprocState = state
+  inprocVectorStore = vectors
+}
+
+// Boot-time BM25 rebuild for inproc mode: one ordered walk of the content
+// rows through enumerateIndexCorpus(), BM25 only - the vector index is never
+// touched (its rows hydrate separately). Yields to the event loop every 2000
+// rows so livez keeps answering. Returns where the time went so the importer
+// can report it against the 30 s budget.
+export async function rebuildBm25FromContent(
+  db: import('node:sqlite').DatabaseSync,
+): Promise<{ docs: number; rows: number; skipped: number; readMs: number; indexMs: number }> {
+  const idx = getSearchIndex()
+  idx.clear()
+  memoryIndexReady = false
+  let docs = 0
+  let rows = 0
+  let skipped = 0
+  let readMs = 0
+  let indexMs = 0
+  let t = performance.now()
+  for (const item of enumerateIndexCorpus(db)) {
+    const read = performance.now()
+    readMs += read - t
+    if (item.error) {
+      skipped++
+      if (skipped <= 20) {
+        logger.warn('BM25 rebuild: row not indexable, skipped', { scope: item.scope, key: item.key, error: item.error })
+      }
+    }
+    if (item.doc) {
+      // One malformed row must not take the boot down with it: skip it,
+      // say which, and keep going. The first few are logged individually.
+      try {
+        idx.add(item.doc)
+        docs++
+      } catch (err) {
+        skipped++
+        if (skipped <= 20) {
+          logger.warn('BM25 rebuild: row not indexable, skipped', {
+            scope: item.scope,
+            key: item.key,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+    }
+    t = performance.now()
+    indexMs += t - read
+    if (++rows % 2000 === 0) {
+      await new Promise((r) => setImmediate(r))
+      t = performance.now()
+    }
+  }
+  memoryIndexReady = true
+  if (skipped > 20) logger.warn('BM25 rebuild: rows skipped in total', { skipped })
+  return { docs, rows, skipped, readMs, indexMs }
+}
+
+// Content delete + access-log delete + BM25/vector de-index, shared by every
+// delete path (forget, governance, retention, auto-forget, evict, import
+// replace). Memories and observations both get access-log rows (search
+// records observation hits), so the log always goes with the content. In
+// inproc mode the content row, the access-log row and the vector rows go in
+// ONE transaction, so a crash cannot leave a vector for content that is gone;
+// with iii the steps are sequential.
+export async function deleteIndexed(kv: StateKV, scope: string, id: string): Promise<void> {
+  const state = inprocState
+  // recordAccess is a read-modify-write under this lock; take it so a
+  // concurrent access bump cannot resurrect the row we just deleted.
+  await withKeyedLock(`mem:access:${id}`, async () => {
+    if (state) {
+      state.transaction(() => {
+        state.delete(scope, id)
+        state.delete(KV.accessLog, id)
+        // The VectorIndex's store hook joins this transaction. Without a map
+        // (no embedding provider configured) the rows still have to go.
+        if (vectorIndex) vectorIndex.remove(id)
+        else inprocVectorStore?.remove(id)
+      })
+    } else {
+      await kv.delete(scope, id)
+      await kv.delete(KV.accessLog, id).catch(() => {})
+      vectorIndexRemove(id)
+    }
+  })
+  getSearchIndex().remove(id)
+}
+
+// Rebuild-once token. AGENTMEMORY_INDEX_REBUILD is a TOKEN, not a
+// boolean: once the rebuild it names completes, the token is written to
+// KV and subsequent boots compare against the stored value. That makes it
+// idempotent and safe to leave in a systemd drop-in permanently — which
+// matters, because drop-ins stay in place.
+const REBUILD_TOKEN_KEY = "index-rebuild-token"
+
+export async function pendingRebuildToken(
+  kv: StateKV,
+): Promise<string | null> {
+  const want = process.env.AGENTMEMORY_INDEX_REBUILD?.trim()
+  if (!want) return null
+  const stored = await kv
+    .get<{ token: string }>(KV.state, REBUILD_TOKEN_KEY)
+    .catch(() => null)
+  return stored?.token === want ? null : want
+}
+
+export async function markRebuildTokenDone(
+  kv: StateKV,
+  token: string,
+): Promise<void> {
+  await kv
+    .set(KV.state, REBUILD_TOKEN_KEY, {
+      token,
+      at: new Date().toISOString(),
+    })
+    .catch(() => {
+      // Best-effort: a failed marker write costs one redundant rebuild on
+      // the next boot, which is far better than failing the boot itself.
+    })
+}
+
 // Persistence sync hook. Without this, index removals only live in
 // memory; a crash/SIGKILL before graceful shutdown reloads a stale
 // snapshot at boot and the deleted entry resurrects in the index.
@@ -78,16 +215,29 @@ export function vectorIndexRemove(id: string): void {
 let indexPersistence: {
   scheduleSave: () => void;
   save: () => Promise<void>;
+  markDirty?: () => void;
 } | null = null;
 
 export function setIndexPersistence(
-  p: { scheduleSave: () => void; save: () => Promise<void> } | null,
+  p: {
+    scheduleSave: () => void;
+    save: () => Promise<void>;
+    markDirty?: () => void;
+  } | null,
 ): void {
   indexPersistence = p;
 }
 
 export function scheduleIndexSave(): void {
   indexPersistence?.scheduleSave();
+}
+
+// Called by the LIVE index-add sites. Cheap (sets a flag); the actual flush
+// is amortised onto IndexPersistence's periodic timer. Without this the
+// in-memory index diverges from the on-disk snapshot and every entry added
+// since the last rebuild is lost on restart.
+export function markIndexDirty(): void {
+  indexPersistence?.markDirty?.();
 }
 
 // Synchronous flush variant for delete paths. The debounced
@@ -103,15 +253,38 @@ export async function flushIndexSave(): Promise<void> {
   await indexPersistence?.save();
 }
 
-// Hard cap on embedding input length. Most providers cap input around
-// 8k tokens (~32k chars at ~4 chars/token). Truncate defensively so a
-// huge memory.content can't 400 the embed call or blow context budget
-// on a single doc. 16k chars ≈ 4k tokens, safely under every provider.
-const EMBED_MAX_CHARS = 16_000
-
-export function clipEmbedInput(text: string): string {
-  if (text.length <= EMBED_MAX_CHARS) return text
-  return text.slice(0, EMBED_MAX_CHARS)
+// Writes one completed embedding. With the inproc store this is the
+// revalidating commit (false = dropped as stale); without it, the plain
+// in-memory add.
+function commitVector(
+  vi: VectorIndex,
+  job: { id: string; sessionId: string; text: string; kind: EmbedKind },
+  embedding: Float32Array,
+): boolean {
+  if (!inprocVectorStore) {
+    vi.add(job.id, job.sessionId, embedding)
+    return true
+  }
+  let ok = false
+  try {
+    ok = inprocVectorStore.commitEmbedding(vi, job, embedding)
+  } catch (err) {
+    // The content row is unreadable as a document (malformed field); the
+    // completion is dropped exactly as a stale one would be.
+    logger.warn('vector-index add: content row not evaluable - dropped completion', {
+      kind: job.kind,
+      id: job.id,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return false
+  }
+  if (!ok) {
+    logger.info("vector-index add: content changed since embed — dropped stale completion", {
+      kind: job.kind,
+      id: job.id,
+    })
+  }
+  return ok
 }
 
 // Single guarded vector-index write. Returns true on success. Logs and
@@ -142,8 +315,7 @@ export async function vectorIndexAddGuarded(
       })
       return false
     }
-    vi.add(id, sessionId, embedding)
-    return true
+    return commitVector(vi, { id, sessionId, text, kind: context.kind }, embedding)
   } catch (err) {
     logger.warn("vector-index add: embed failed — skipping", {
       kind: context.kind,
@@ -172,10 +344,14 @@ export async function vectorIndexAddBatchGuarded(
     text: string
     context: { kind: "memory" | "observation" | "synthetic"; logId: string }
   }>,
-): Promise<{ ok: number; fail: number }> {
+): Promise<{ ok: number; fail: number; rejected: number }> {
+  // `fail` is provider-side (embed threw, wrong count, wrong dims);
+  // `rejected` is content-side (the completion was dropped as stale or the
+  // row could not be evaluated). Callers that abort on a failing provider
+  // must look at `fail` only.
   const vi = vectorIndex
   const ep = currentEmbeddingProvider
-  if (!vi || !ep || items.length === 0) return { ok: 0, fail: 0 }
+  if (!vi || !ep || items.length === 0) return { ok: 0, fail: 0, rejected: 0 }
 
   let embeddings: Float32Array[]
   try {
@@ -186,7 +362,7 @@ export async function vectorIndexAddBatchGuarded(
       provider: ep.name,
       error: err instanceof Error ? err.message : String(err),
     })
-    return { ok: 0, fail: items.length }
+    return { ok: 0, fail: items.length, rejected: 0 }
   }
 
   if (embeddings.length !== items.length) {
@@ -198,11 +374,12 @@ export async function vectorIndexAddBatchGuarded(
         provider: ep.name,
       },
     )
-    return { ok: 0, fail: items.length }
+    return { ok: 0, fail: items.length, rejected: 0 }
   }
 
   let ok = 0
   let fail = 0
+  let rejected = 0
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
     const embedding = embeddings[i]
@@ -218,18 +395,18 @@ export async function vectorIndexAddBatchGuarded(
       continue
     }
     try {
-      vi.add(item.id, item.sessionId, embedding)
-      ok++
+      if (commitVector(vi, { ...item, kind: item.context.kind }, embedding)) ok++
+      else rejected++
     } catch (err) {
       logger.warn("vector-index add batch: index write failed — skipping item", {
         kind: item.context.kind,
         id: item.context.logId,
         error: err instanceof Error ? err.message : String(err),
       })
-      fail++
+      rejected++
     }
   }
-  return { ok, fail }
+  return { ok, fail, rejected }
 }
 
 // Embed-batch size for rebuild. Each item is one /v1/embeddings call's
@@ -284,17 +461,22 @@ export async function indexRecords(
   for (const memory of memories) {
     if (memory.isLatest === false) continue
     if (!memory.title || !memory.content) continue
-    idx.add(memoryToObservation(memory))
-    await enqueue({
-      id: memory.id,
-      sessionId: memory.sessionIds?.[0] ?? 'memory',
-      text: memory.title + ' ' + memory.content,
-      context: { kind: "memory", logId: memory.id },
-    })
+    idx.add(memoryToIndexDoc(memory))
+    // One job per chunk when chunking is on, one job total otherwise.
+    for (const job of memoryChunkJobs(memory)) {
+      await enqueue({
+        id: job.id,
+        sessionId: memory.sessionIds?.[0] ?? MEMORY_SESSION,
+        text: job.text,
+        context: { kind: "memory", logId: job.id },
+      })
+    }
     count++
   }
   for (const obs of observations) {
     if (!obs.title || !obs.narrative) continue
+    // Never index the daemon's own retrieval calls (retrieval echoes).
+    if (isIndexExcluded(obs)) continue
     idx.add(obs)
     await enqueue({
       id: obs.id,
@@ -442,7 +624,10 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         tokenBudget = data.token_budget
       }
 
-      if (idx.size === 0) {
+      // Inproc rebuilds BM25 from content at boot and never runs rebuildIndex
+      // (it would clear the persisted vectors); an empty index there simply
+      // has nothing to return yet.
+      if (idx.size === 0 && !inprocState) {
         // Share one rebuild across concurrent cold-start queries so they
         // don't each walk the whole corpus and saturate the pool.
         if (!rebuildPromise) {
@@ -471,35 +656,16 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       // doesn't carry it), so without the over-fetch isolated-mode
       // queries return underfilled pages when same-agent matches
       // rank lower than cross-agent ones in the hybrid score.
+      // Even unfiltered, fetching exactly `effectiveLimit` underfills the
+      // page: the second pass below drops rows whose observation/memory
+      // record no longer resolves in KV (evicted sessions, deleted
+      // memories), and there is nothing behind them to backfill with.
+      // Over-fetch a little in every case.
       const filtering = !!(projectFilter || cwdFilter || filterAgentId)
-      const fetchLimit = filtering ? Math.max(effectiveLimit * 10, 100) : effectiveLimit
-      // Hybrid results carry the observation the ranker already loaded,
-      // so the load pass below doesn't refetch every record it just
-      // enriched.
-      let results: Array<{
-        obsId: string
-        sessionId: string
-        score: number
-        observation?: CompressedObservation
-      }>
-      if (hybridRanker && vectorIndex && vectorIndex.size > 0) {
-        try {
-          const hybrid = await hybridRanker(query, fetchLimit)
-          results = hybrid.map((r) => ({
-            obsId: r.observation.id,
-            sessionId: r.sessionId,
-            score: r.combinedScore,
-            observation: r.observation,
-          }))
-        } catch (err) {
-          logger.warn("hybrid ranking failed, falling back to keyword search", {
-            error: err instanceof Error ? err.message : String(err),
-          })
-          results = idx.search(query, fetchLimit)
-        }
-      } else {
-        results = idx.search(query, fetchLimit)
-      }
+      const fetchLimit = filtering
+        ? Math.max(effectiveLimit * 10, 100)
+        : Math.max(effectiveLimit * 3, 30)
+      const results = idx.search(query, fetchLimit)
 
       // Resolve session -> project/cwd once per sessionId we touch.
       const sessionCache = new Map<string, Session | null>()
@@ -533,7 +699,11 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       // rows, and capping early would underfill the result page. Use
       // fetchLimit as the upper bound in that case; the final
       // truncation lives at the end of the second pass.
-      const earlyCap = filterAgentId ? fetchLimit : effectiveLimit
+      // Must track fetchLimit, not effectiveLimit — otherwise the
+      // over-fetch above is immediately thrown away here and widening
+      // fetchLimit changes nothing at all. The final truncation to
+      // effectiveLimit lives at the end of the second pass.
+      const earlyCap = fetchLimit
       const candidates: typeof results = []
       for (const r of results) {
         if (candidates.length >= earlyCap) break
@@ -571,9 +741,14 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       // KV.memories when the observation lookup misses — entries indexed
       // via mem::remember live in the memories scope under a synthetic
       // sessionId, so the observation key never exists (#265).
+      // A1: this is the mem::search path, which memory_recall reaches via
+      // server.ts. Fixing only hybrid-search would leave recall surfacing
+      // stale rows, so the same predicate is applied here. Refill is free:
+      // the loop below walks every candidate and stops at effectiveLimit,
+      // so a rejected row is replaced by the next eligible one.
+      const filterNonLatest = isNonLatestFilterEnabled()
       const obsResults = await Promise.all(
         candidates.map(async (r) => {
-          if (r.observation) return r.observation
           const obs = await kv
             .get<CompressedObservation>(KV.observations(r.sessionId), r.obsId)
             .catch(() => null)
@@ -581,7 +756,18 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           const mem = await kv
             .get<Memory>(KV.memories, r.obsId)
             .catch(() => null)
-          return mem ? memoryToObservation(mem) : null
+          if (!mem) return null
+          // Checked on the Memory record, before coercion:
+          // memoryToObservation drops isLatest, so a check after it has
+          // nothing left to test.
+          if (!isLatestEligible(mem)) {
+            if (filterNonLatest) {
+              getCounters().nonlatestFiltered.add(1)
+              return null
+            }
+            getCounters().nonlatestLeaked.add(1)
+          }
+          return memoryToObservation(mem)
         })
       )
       const enriched: SearchResult[] = []

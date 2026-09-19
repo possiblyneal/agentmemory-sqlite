@@ -10,6 +10,19 @@ import type {
 import { KV, generateId } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import {
+  GRAPH_INDEX_NODE_CEILING,
+  GraphIndexReader,
+  backfillGraphIndexes,
+  clearNameShards,
+  graphLegDisabled,
+  graphReadable,
+  indexGraphEdge,
+  indexGraphNode,
+  linkObservationsToNode,
+  loadNameCatalog,
+  markGraphIndexesReady,
+} from "../state/graph-indexes.js";
+import {
   GRAPH_EXTRACTION_SYSTEM,
   buildGraphExtractionPrompt,
 } from "../prompts/graph-extraction.js";
@@ -180,7 +193,122 @@ function paginateFromSnapshot(
 // extract-driven snapshot is the right approach for those corpora.
 // Operators above the threshold should use mem::graph-reset and let
 // future extracts rebuild incrementally.
-const REBUILD_SAFE_NODE_CEILING = 25000;
+const REBUILD_SAFE_NODE_CEILING = GRAPH_INDEX_NODE_CEILING;
+
+// Bounds the index-served BFS in mem::graph-query so a dense corpus
+// can't expand into an unbounded number of targeted gets. Hitting the
+// cap returns a truncated page with an explanatory warning.
+const TRAVERSAL_VISIT_CAP = 5000;
+
+async function queryViaIndexes(
+  kv: StateKV,
+  query: string,
+  limit: number,
+  offset: number,
+): Promise<GraphQueryResult> {
+  const reader = await GraphIndexReader.open(kv);
+  const lower = query.toLowerCase();
+  const catalog = await loadNameCatalog(kv);
+  const matched = new Map<string, GraphNode>();
+  for (const entry of catalog) {
+    if (!entry.name.toLowerCase().includes(lower)) continue;
+    const node = await reader.getNode(entry.id);
+    if (node) matched.set(node.id, node);
+  }
+
+  const snap = await readSnapshot(kv);
+  let partialPropertyCoverage = false;
+  for (const node of snap?.topNodes ?? []) {
+    if (node.stale || matched.has(node.id)) continue;
+    const propMatch = Object.values(node.properties).some(
+      (v) => typeof v === "string" && v.toLowerCase().includes(lower),
+    );
+    if (propMatch) matched.set(node.id, node);
+  }
+  if (!snap || snap.stats.totalNodes > snap.topNodes.length) {
+    partialPropertyCoverage = true;
+  }
+
+  const nodes = [...matched.values()];
+  const edgeIds = new Set<string>();
+  const edges: GraphEdge[] = [];
+  for (const node of nodes) {
+    for (const edge of await reader.getIncidentEdges(node.id)) {
+      if (edgeIds.has(edge.id)) continue;
+      edgeIds.add(edge.id);
+      edges.push(edge);
+    }
+  }
+
+  const result = paginate(nodes, edges, 0, limit, offset);
+  if (partialPropertyCoverage) {
+    return {
+      ...result,
+      warning:
+        "Property-value matches are served from the top-degree snapshot; " +
+        "nodes outside it are matched by name only.",
+    };
+  }
+  return result;
+}
+
+async function traverseViaIndexes(
+  kv: StateKV,
+  startNodeId: string,
+  nodeType: string | undefined,
+  maxDepth: number,
+  limit: number,
+  offset: number,
+): Promise<GraphQueryResult> {
+  const reader = await GraphIndexReader.open(kv);
+  const visited = new Set<string>();
+  const visitedEdges = new Set<string>();
+  const resultNodes: GraphNode[] = [];
+  const resultEdges: GraphEdge[] = [];
+  const queue: Array<{ nodeId: string; depth: number }> = [
+    { nodeId: startNodeId, depth: 0 },
+  ];
+  let capped = false;
+
+  while (queue.length > 0) {
+    const { nodeId, depth } = queue.shift()!;
+    if (visited.has(nodeId) || depth > maxDepth) continue;
+    if (visited.size >= TRAVERSAL_VISIT_CAP) {
+      capped = true;
+      break;
+    }
+    visited.add(nodeId);
+
+    const node = await reader.getNode(nodeId);
+    if (node && (!nodeType || node.type === nodeType)) {
+      resultNodes.push(node);
+    }
+
+    for (const edge of await reader.getIncidentEdges(nodeId)) {
+      if (!visitedEdges.has(edge.id)) {
+        visitedEdges.add(edge.id);
+        resultEdges.push(edge);
+      }
+      const nextId =
+        edge.sourceNodeId === nodeId ? edge.targetNodeId : edge.sourceNodeId;
+      if (!visited.has(nextId)) {
+        queue.push({ nodeId: nextId, depth: depth + 1 });
+      }
+    }
+  }
+
+  const result = paginate(resultNodes, resultEdges, maxDepth, limit, offset);
+  if (capped) {
+    return {
+      ...result,
+      truncated: true,
+      warning:
+        `Traversal stopped after visiting ${TRAVERSAL_VISIT_CAP} nodes. ` +
+        `Lower maxDepth or start from a lower-degree node for a complete walk.`,
+    };
+  }
+  return result;
+}
 
 function nameIndexKey(type: string, name: string): string {
   return `${type}|${name}`;
@@ -288,6 +416,12 @@ function mergeNode(
       ]),
     ],
     properties: { ...existing.properties, ...incoming.properties },
+    // Refresh to the newest source's session (#656). The incoming node
+    // is the more recent extract; prefer its sessionId when present so a
+    // node re-observed in a different session points at the live one.
+    // Falls back to the existing value (which may itself be undefined for
+    // pre-#656 nodes — retrieval handles that case).
+    sessionId: incoming.sessionId ?? existing.sessionId,
     updatedAt: capturedAt,
   };
 }
@@ -379,6 +513,11 @@ function parseAttrs(raw: string): Record<string, string> {
 function parseGraphXml(
   xml: string,
   observationIds: string[],
+  // obsId -> sessionId, so each extracted node can record the session
+  // namespace of its source observations (#656). Optional: when omitted
+  // (or an obsId is missing), the node's sessionId is left undefined and
+  // retrieval falls back to a cross-session scan.
+  sessionByObsId?: Map<string, string>,
 ): {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -406,12 +545,27 @@ function parseGraphXml(
     while ((propMatch = propRegex.exec(propsBlock)) !== null) {
       properties[propMatch[1]] = propMatch[2];
     }
+    // Resolve the node's sessionId from its source observations. All
+    // observationIds in one extract call share the batch, so the first
+    // resolvable session is representative; merges later refresh it to
+    // the newest source (see mergeNode).
+    let sessionId: string | undefined;
+    if (sessionByObsId) {
+      for (const obsId of observationIds) {
+        const sid = sessionByObsId.get(obsId);
+        if (sid) {
+          sessionId = sid;
+          break;
+        }
+      }
+    }
     nodes.push({
       id: generateId("gn"),
       type,
       name,
       properties,
       sourceObservationIds: observationIds,
+      ...(sessionId !== undefined && { sessionId }),
       createdAt: now,
     });
   };
@@ -548,12 +702,25 @@ export function extractGraphHeuristics(
 // `kv.list<GraphNode>(KV.graphNodes)`. At 75K nodes the list payload
 // exceeds the iii heartbeat budget and the worker dies before merge can
 // complete. Each name-index entry is a single small kv.get/set pair.
+// Fork posture (graph-off): a graph WRITE is allowed only when extraction is
+// armed (GRAPH_EXTRACTION_ENABLED) AND the graph leg is not killed
+// (AGENTMEMORY_GRAPH_LEG=off). Stock 0.9.29 writes heuristic nodes with no
+// flag at all; both 0.9.29 writers (graph-extract, graphify import) funnel
+// through persistGraphDelta, and the one path that bypasses it (mem::import in
+// export-import.ts) applies this same predicate itself. Lives here rather
+// than in graph-indexes.ts so config.ts stays out of that module's import
+// graph (several tests partially mock it).
+export function graphWritesDisabled(): boolean {
+  return graphLegDisabled() || !isGraphExtractionEnabled();
+}
+
 export async function persistGraphDelta(
   kv: StateKV,
   nodes: GraphNode[],
   edges: GraphEdge[],
   obsIds: string[],
 ): Promise<{ newNodeCount: number; newEdgeCount: number }> {
+  if (graphWritesDisabled()) return { newNodeCount: 0, newEdgeCount: 0 };
   const snap = (await readSnapshot(kv)) ?? emptySnapshot();
   const capturedAt = new Date().toISOString();
   let newNodeCount = 0;
@@ -594,6 +761,7 @@ export async function persistGraphDelta(
       idRemap.set(node.id, existing.id);
       const merged = mergeNode(existing, node, obsIds, capturedAt);
       await kv.set(KV.graphNodes, existing.id, merged);
+      await linkObservationsToNode(kv, existing.id, obsIds);
       // Update topNodes entry if present so a stale clone isn't
       // returned from the snapshot fast path.
       const topIdx = snap.topNodes.findIndex((n) => n.id === existing!.id);
@@ -605,6 +773,7 @@ export async function persistGraphDelta(
       await kv.set(KV.graphNodes, node.id, node);
       await kv.set(KV.graphNameIndex, indexKey, node.id);
       await kv.set(KV.graphNodeDegree, node.id, 0);
+      await indexGraphNode(kv, node);
       snap.stats.totalNodes += 1;
       snap.stats.nodesByType[node.type] =
         (snap.stats.nodesByType[node.type] ?? 0) + 1;
@@ -653,6 +822,7 @@ export async function persistGraphDelta(
     } else {
       await kv.set(KV.graphEdges, edge.id, edge);
       await kv.set(KV.graphEdgeKey, eKey, edge.id);
+      await indexGraphEdge(kv, edge);
       snap.stats.totalEdges += 1;
       snap.stats.edgesByType[edge.type] =
         (snap.stats.edgesByType[edge.type] ?? 0) + 1;
@@ -690,6 +860,14 @@ export function registerGraphFunction(
         return { success: false, error: "No observations provided" };
       }
 
+      // Fork posture (graph-off): no graph write unless extraction is armed
+      // AND the graph leg is not killed. persistGraphDelta() enforces the same
+      // rule for every writer; returning here first just skips the heuristic
+      // and LLM work whose output would be dropped anyway.
+      if (graphWritesDisabled()) {
+        return { success: true, nodesAdded: 0, edgesAdded: 0, skipped: "graph-writes-off" };
+      }
+
       const obsIds = data.observations.map((o) => o.id);
 
       let nodes: GraphNode[] = [];
@@ -722,7 +900,14 @@ export function registerGraphFunction(
             GRAPH_EXTRACTION_SYSTEM,
             prompt,
           );
-          const parsed = parseGraphXml(response, obsIds);
+          // Map each source observation to its session so extracted nodes
+          // can be resolved back to KV.observations(sessionId) at retrieval
+          // time (#656). Skip blanks defensively.
+          const sessionByObsId = new Map<string, string>();
+          for (const o of data.observations) {
+            if (o.sessionId) sessionByObsId.set(o.id, o.sessionId);
+          }
+          const parsed = parseGraphXml(response, obsIds, sessionByObsId);
           nodes = nodes.concat(parsed.nodes);
           edges = edges.concat(parsed.edges);
         } catch (err) {
@@ -819,109 +1004,55 @@ export function registerGraphFunction(
         };
       }
 
-      // Query / startNodeId paths still need broader access. Race the
-      // live enumeration against a wall-clock budget so a long
-      // kv.list doesn't block the worker indefinitely. On timeout the
-      // caller gets a snapshot-backed approximation instead of a 500.
-      let allNodes: GraphNode[];
-      let allEdges: GraphEdge[];
-      try {
-        const [rawNodes, rawEdges] = await withTimeout(
-          Promise.all([
-            kv.list<GraphNode>(KV.graphNodes),
-            kv.list<GraphEdge>(KV.graphEdges),
-          ]),
-          LIVE_ENUMERATION_BUDGET_MS,
-          "graph-query enumeration",
-        );
-        allNodes = rawNodes.filter((n) => !n.stale);
-        allEdges = rawEdges.filter((e) => !e.stale);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn("Graph query enumeration timed out, using snapshot", {
-          error: msg,
-        });
-        const snap = await readSnapshot(kv);
-        if (snap) {
-          return {
-            ...paginateFromSnapshot(snap, data.nodeType, limit, offset),
-            warning:
-              "Live graph enumeration exceeded budget. Query / " +
-              "startNodeId paths degrade on >25K-node corpora until a " +
-              "per-node edge index lands. Result reflects top-degree " +
-              "snapshot, not the requested walk.",
-          };
+      // Query / startNodeId paths serve from the read side-indexes
+      // when they have been built (boot backfill, snapshot-rebuild, or
+      // graph-reset). Name matches come from the sharded name catalog
+      // (64 bounded gets) and traversal expands via per-node adjacency
+      // lists, so cost scales with matches x degree instead of corpus
+      // size.
+      if (await graphReadable(kv)) {
+        if (data.query) {
+          return queryViaIndexes(kv, data.query, limit, offset);
         }
-        return {
-          nodes: [],
-          edges: [],
-          depth: 0,
-          totalNodes: 0,
-          totalEdges: 0,
-          truncated: false,
+        return traverseViaIndexes(
+          kv,
+          data.startNodeId!,
+          data.nodeType,
+          maxDepth,
           limit,
           offset,
+        );
+      }
+
+      // Fail-closed (graph-read-fix local delta): the leg is off or the
+      // side-indexes are unarmed. NEVER enumerate the graph scope for a
+      // query / startNodeId walk — that unbounded kv.list is the pre-#814
+      // "Invocation stopped" 500 and, under the leg guard, the exact read
+      // B-mode must not issue. Serve the top-degree snapshot instead; when
+      // armed, control returned above via the bounded side-indexes.
+      const snap = await readSnapshot(kv);
+      if (snap && snap.stats.totalNodes > 0) {
+        return {
+          ...paginateFromSnapshot(snap, data.nodeType, limit, offset),
           warning:
-            "Graph enumeration exceeded budget and no snapshot is available.",
+            "Graph leg off or side-indexes unarmed; query/startNodeId walk " +
+            "unavailable. Result reflects the top-degree snapshot, not the " +
+            "requested walk.",
         };
       }
-
-      if (data.query) {
-        const lower = data.query.toLowerCase();
-        const matchingNodes = allNodes.filter(
-          (n) =>
-            n.name.toLowerCase().includes(lower) ||
-            Object.values(n.properties).some(
-              (v) => typeof v === "string" && v.toLowerCase().includes(lower),
-            ),
-        );
-        return paginate(matchingNodes, allEdges, 0, limit, offset);
-      }
-
-      if (data.startNodeId) {
-        const visited = new Set<string>();
-        const visitedEdges = new Set<string>();
-        const resultNodes: GraphNode[] = [];
-        const resultEdges: GraphEdge[] = [];
-        const queue: Array<{ nodeId: string; depth: number }> = [
-          { nodeId: data.startNodeId, depth: 0 },
-        ];
-
-        while (queue.length > 0) {
-          const { nodeId, depth } = queue.shift()!;
-          if (visited.has(nodeId) || depth > maxDepth) continue;
-          visited.add(nodeId);
-
-          const node = allNodes.find((n) => n.id === nodeId);
-          if (node) {
-            if (!data.nodeType || node.type === data.nodeType) {
-              resultNodes.push(node);
-            }
-          }
-
-          const neighborEdges = allEdges.filter(
-            (e) => e.sourceNodeId === nodeId || e.targetNodeId === nodeId,
-          );
-          for (const edge of neighborEdges) {
-            if (!visitedEdges.has(edge.id)) {
-              visitedEdges.add(edge.id);
-              resultEdges.push(edge);
-            }
-            const nextId =
-              edge.sourceNodeId === nodeId
-                ? edge.targetNodeId
-                : edge.sourceNodeId;
-            if (!visited.has(nextId)) {
-              queue.push({ nodeId: nextId, depth: depth + 1 });
-            }
-          }
-        }
-
-        return paginate(resultNodes, resultEdges, maxDepth, limit, offset);
-      }
-
-      // Unreachable — noWalk branch handles the rest.
-      return paginate([], [], 0, limit, offset);
+      return {
+        nodes: [],
+        edges: [],
+        depth: 0,
+        totalNodes: 0,
+        totalEdges: 0,
+        truncated: false,
+        limit,
+        offset,
+        warning:
+          "Graph leg unavailable and no snapshot present. Enable the leg " +
+          "and arm the side-indexes, or run snapshot-rebuild.",
+      };
     },
   );
 
@@ -972,6 +1103,16 @@ export function registerGraphFunction(
     "mem::graph-snapshot-rebuild",
     async (data?: { force?: boolean }) => {
       const started = Date.now();
+      // B-mode (graph-read-fix local delta): graph frozen — refuse the
+      // rebuild. It enumerates the graph scope to rebuild the snapshot +
+      // side-indexes, and B-mode must issue zero graph-scope reads.
+      if (graphLegDisabled()) {
+        return {
+          success: false,
+          skipped: "graph-leg-off",
+          error: "Graph leg is off (B-mode); snapshot rebuild is disabled.",
+        };
+      }
       // #825: pre-flight refusal for legacy corpora. The old guard
       // checked node count AFTER kv.list, but the heartbeat dies at
       // ~0.35s on a 75K-node response — long before the wall-clock
@@ -1076,6 +1217,8 @@ export function registerGraphFunction(
         );
       }
 
+      await backfillGraphIndexes(kv, liveNodes, liveEdges);
+
       const snap = buildSnapshotFromArrays(nodes, edges);
       await kv.set(KV.graphSnapshot, SNAPSHOT_KEY, snap);
       const tookMs = Date.now() - started;
@@ -1135,6 +1278,15 @@ export function registerGraphFunction(
       resetAt: new Date().toISOString(),
     };
     await kv.set(KV.graphSnapshot, SNAPSHOT_KEY, resetSnapshot);
+    // The name shards are the only side-index with a bounded, known
+    // key set, so they can be wiped outright. Adjacency / obs-node
+    // hints for pre-reset rows stay on disk; index readers verify
+    // every hit against `resetAt`, so those orphans are never served.
+    // Marking the indexes ready flips retrieval onto the index path,
+    // which (unlike the enumeration fallback) applies the resetAt
+    // filter and therefore stops surfacing pre-reset rows.
+    await clearNameShards(kv);
+    await markGraphIndexesReady(kv);
     const counts: Record<string, number> = {
       [KV.graphSnapshot]: 1,
     };

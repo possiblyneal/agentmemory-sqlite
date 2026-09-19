@@ -20,6 +20,12 @@ function mockKV(
 
   store.set("mem:graph:edge-history", new Map());
 
+  // Arm the graph read side-indexes marker so the fail-closed temporal
+  // readers (graph-read-fix local delta 1) pass their graphReadable() gate.
+  // mem::temporal-query / differential-state serve real data only when the
+  // leg is on AND armed; unarmed they return GRAPH_INDEX_NOT_READY.
+  store.set("mem:graph:index-meta", new Map([["current", { version: 1 }]]));
+
   return {
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
