@@ -4,6 +4,7 @@ import type { HealthSnapshot } from "../types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { evaluateHealth } from "./thresholds.js";
+import type { HealthHysteresis } from "./thresholds.js";
 
 export function registerHealthMonitor(
   sdk: ISdk,
@@ -12,6 +13,9 @@ export function registerHealthMonitor(
   let connectionState = "connected";
   let prevCpuUsage = process.cpuUsage();
   let prevCpuTime = Date.now();
+  // Deliberately in the closure and never in the store: a restart resets the
+  // judgement (#1170).
+  let hysteresis: HealthHysteresis | undefined;
 
   if (typeof sdk.on === "function") {
     sdk.on("connection_state", (state?: unknown) => {
@@ -86,7 +90,8 @@ export function registerHealthMonitor(
       alerts: [],
     };
 
-    const evaluated = evaluateHealth(snapshot);
+    const evaluated = evaluateHealth(snapshot, {}, hysteresis);
+    hysteresis = evaluated.hysteresis;
     snapshot.status = evaluated.status;
     snapshot.alerts = evaluated.alerts;
     snapshot.notes = evaluated.notes;

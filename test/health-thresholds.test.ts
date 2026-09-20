@@ -129,3 +129,94 @@ describe("evaluateHealth memory severity", () => {
     expect(alerts.some((a) => a.startsWith("memory_"))).toBe(false);
   });
 });
+
+// #1170: the published Health Verdict is a restart signal to an external
+// supervisor. One slow GC inside a 30s sampling window used to be enough to
+// publish `critical`, so a Verdict now changes only after three consecutive
+// samples agree on the new one, in both directions.
+describe("evaluateHealth verdict hysteresis", () => {
+  const critical = snap({ connectionState: "failed" });
+  const degraded = snap({ connectionState: "reconnecting" });
+  const healthy = snap();
+
+  // Feed a sequence through, threading hysteresis state the way the monitor
+  // does, and return the Verdict published after each sample.
+  function publish(samples: HealthSnapshot[]): string[] {
+    let state = undefined as ReturnType<typeof evaluateHealth>["hysteresis"] | undefined;
+    return samples.map((s) => {
+      const r = evaluateHealth(s, {}, state);
+      state = r.hysteresis;
+      return r.status;
+    });
+  }
+
+  it("publishes a verdict on the first sample rather than staying unjudged", () => {
+    expect(publish([critical])).toEqual(["critical"]);
+  });
+
+  it("ignores a single disagreeing sample", () => {
+    expect(publish([healthy, critical])).toEqual(["healthy", "healthy"]);
+  });
+
+  it("ignores two consecutive disagreeing samples", () => {
+    expect(publish([healthy, critical, critical])).toEqual([
+      "healthy",
+      "healthy",
+      "healthy",
+    ]);
+  });
+
+  it("changes the verdict on the third consecutive disagreeing sample", () => {
+    expect(publish([healthy, critical, critical, critical])).toEqual([
+      "healthy",
+      "healthy",
+      "healthy",
+      "critical",
+    ]);
+  });
+
+  it("starts the run over when one agreeing sample breaks it", () => {
+    expect(
+      publish([healthy, critical, critical, healthy, critical, critical]),
+    ).toEqual(["healthy", "healthy", "healthy", "healthy", "healthy", "healthy"]);
+  });
+
+  it("never changes the verdict under an alternating sequence", () => {
+    const alternating = [healthy, critical, healthy, critical, healthy, critical];
+    expect(new Set(publish(alternating))).toEqual(new Set(["healthy"]));
+  });
+
+  it("requires three consecutive samples to agree, not merely to disagree with the published verdict", () => {
+    expect(publish([healthy, critical, degraded, critical])).toEqual([
+      "healthy",
+      "healthy",
+      "healthy",
+      "healthy",
+    ]);
+  });
+
+  it("clears a critical verdict only after three consecutive healthy samples", () => {
+    expect(
+      publish([critical, healthy, healthy, healthy, healthy]),
+    ).toEqual(["critical", "critical", "critical", "healthy", "healthy"]);
+  });
+
+  it("subjects a jump from healthy straight to critical to the same count as a step through degraded", () => {
+    const direct = publish([healthy, critical, critical, critical]);
+    const stepped = publish([healthy, degraded, degraded, degraded]);
+    expect(direct.indexOf("critical")).toBe(stepped.indexOf("degraded"));
+  });
+
+  it("reports the alerts of the sample just taken, not of the published verdict", () => {
+    const first = evaluateHealth(healthy);
+    const second = evaluateHealth(critical, {}, first.hysteresis);
+    expect(second.status).toBe("healthy");
+    expect(second.alerts).toContain("connection_failed");
+  });
+
+  it("classifies a lone sample exactly as before when no prior state is given", () => {
+    expect(evaluateHealth(critical).status).toBe("critical");
+    expect(evaluateHealth(degraded).status).toBe("degraded");
+    expect(evaluateHealth(healthy).status).toBe("healthy");
+  });
+});

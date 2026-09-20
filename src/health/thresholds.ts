@@ -20,10 +20,33 @@ const DEFAULTS: ThresholdConfig = {
   memoryRssFloorBytes: 512 * 1024 * 1024,
 };
 
+export type HealthStatus = "healthy" | "degraded" | "critical";
+
+// The published verdict is a restart signal to an external supervisor, so it
+// must not follow a single reading: one slow GC inside a sampling window is
+// not a sick daemon. `pending` is the verdict the recent samples are arguing
+// for and `run` is how many in a row have argued for it; the published
+// verdict only moves once that run reaches CONSECUTIVE_SAMPLES. The monitor
+// holds this in its own closure and never persists it — a restart legitimately
+// resets the judgement (#1170).
+export type HealthHysteresis = {
+  published: HealthStatus;
+  pending: HealthStatus;
+  run: number;
+};
+
+const CONSECUTIVE_SAMPLES = 3;
+
 export function evaluateHealth(
   snapshot: HealthSnapshot,
   config: Partial<ThresholdConfig> = {},
-): { status: "healthy" | "degraded" | "critical"; alerts: string[]; notes: string[] } {
+  prior?: HealthHysteresis,
+): {
+  status: HealthStatus;
+  alerts: string[];
+  notes: string[];
+  hysteresis: HealthHysteresis;
+} {
   const cfg = { ...DEFAULTS, ...config };
   const alerts: string[] = [];
   const notes: string[] = [];
@@ -80,6 +103,39 @@ export function evaluateHealth(
     notes.push(`memory_heap_tight_${Math.round(memPercent)}%_rss${memMb}mb`);
   }
 
-  const status = critical ? "critical" : degraded ? "degraded" : "healthy";
-  return { status, alerts, notes };
+  const sampled: HealthStatus = critical
+    ? "critical"
+    : degraded
+      ? "degraded"
+      : "healthy";
+
+  // No prior state is the first sample after startup: publish it directly so
+  // the daemon is judged promptly rather than staying unjudged while a run
+  // accumulates.
+  if (!prior) {
+    return {
+      status: sampled,
+      alerts,
+      notes,
+      hysteresis: { published: sampled, pending: sampled, run: 0 },
+    };
+  }
+
+  if (sampled === prior.published) {
+    return {
+      status: prior.published,
+      alerts,
+      notes,
+      hysteresis: { published: prior.published, pending: sampled, run: 0 },
+    };
+  }
+
+  const run = sampled === prior.pending ? prior.run + 1 : 1;
+  const published = run >= CONSECUTIVE_SAMPLES ? sampled : prior.published;
+  return {
+    status: published,
+    alerts,
+    notes,
+    hysteresis: { published, pending: sampled, run: published === sampled ? 0 : run },
+  };
 }
