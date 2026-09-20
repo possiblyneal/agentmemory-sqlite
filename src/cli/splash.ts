@@ -6,7 +6,7 @@
 //   80–119 cols: compact monospace title + tagline.
 //   <  80 cols: single-line `agentmemory v<VERSION>`.
 //
-// The brand accent is the orange `#FF6B35` we already use in the README
+// The brand accent is the orange `#FF6B35`
 // and viewer; we render it through ANSI 38;5;208 (the closest xterm-256
 // match) when stdout is a TTY, and fall back to plain text otherwise.
 // No colour bytes are hard-coded into the strings themselves so that

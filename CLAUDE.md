@@ -23,14 +23,12 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 3. `src/triggers/api.ts` — REST endpoint registration
 4. `src/index.ts` — function registration + endpoint count in the log line
 5. `test/mcp-standalone.test.ts` — tool count assertion
-6. `README.md` — tool counts (search for "MCP tools")
-7. `plugin/.claude-plugin/plugin.json` — tool count in description
-8. `plugin/plugin.json` and `plugin/.mcp.copilot.json` (when present) — tool count or MCP exposure
+6. `plugin/.claude-plugin/plugin.json` — tool count in description
+7. `plugin/plugin.json` and `plugin/.mcp.copilot.json` (when present) — tool count or MCP exposure
 
 **When adding REST endpoints, you MUST update:**
 1. `src/triggers/api.ts` — endpoint registration
 2. `src/index.ts` — endpoint count in the log line
-3. `README.md` — endpoint count (search for "REST endpoints" and "endpoints on port")
 
 **When bumping version, you MUST update ALL of the following:**
 1. `package.json` — version field
@@ -131,9 +129,8 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 ## Supported hosts
 
 19 `connect` adapters, enumerated by `ADAPTERS` in `src/cli/connect/index.ts` — that array is
-the source of truth for the count in `README.md`, `CONTRIBUTING.md` and the generated
-`plugin/skills/agentmemory-agents/REFERENCE.md`. Cursor and Codex are not supported: their
-adapters, manifests and tests were removed rather than maintained.
+the source of truth for the count in the generated
+`plugin/skills/agentmemory-agents/REFERENCE.md`. Cursor and Codex are not supported.
 
 Two survivors are named for Codex but are not Codex-specific — do not delete them with a host:
 `plugin/hooks/hooks.codex.json` is the manifest `connect dsh` merges (`src/cli/connect/dsh.ts`),
@@ -155,13 +152,12 @@ upstream deliberately: this fork does not own those package names.
 
 Nothing is published from here — there is no release workflow and `dist/` is gitignored, so
 the only install path is clone → `npm ci` → `npm run build` →
-`npm link`. User-facing docs (`README.md`, `INSTALL_FOR_AGENTS.md`, `SECURITY.md`) must
-describe that path, never `npx`/`npm install -g @agentmemory/*`, which resolve to upstream's
-code. The one exception is the `@agentmemory/mcp` shim wherever it is invoked as a proxy —
-`plugin/.mcp.json`, `plugin/.mcp.copilot.json` and the README's MCP-standalone blocks — because
-in proxy mode the tool surface comes from this fork's running server, not from the shim.
-The translated `READMEs/` were deleted rather than kept stale — do not re-add translations
-without a way to keep them current.
+`npm link`. Any doc that tells a user how to install must describe that path, never
+`npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. The one exception is
+the `@agentmemory/mcp` shim wherever it is invoked as a proxy — `plugin/.mcp.json` and
+`plugin/.mcp.copilot.json` — because in proxy mode the tool surface comes from this fork's
+running server, not from the shim. The translated `READMEs/` were deleted rather than kept
+stale — do not re-add translations without a way to keep them current.
 
 ## Current Stats (v0.9.29)
 
