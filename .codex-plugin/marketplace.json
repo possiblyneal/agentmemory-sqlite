@@ -8,7 +8,7 @@
       "name": "agentmemory",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/rohitg00/agentmemory.git",
+        "url": "https://github.com/possiblyneal/agentmemory-sqlite.git",
         "path": "./plugin",
         "ref": "main"
       },
