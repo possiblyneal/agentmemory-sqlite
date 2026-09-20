@@ -25,7 +25,7 @@ This fork is not published to npm, so there is nothing to install from a registr
 ```bash
 git clone https://github.com/possiblyneal/agentmemory-sqlite.git
 cd agentmemory-sqlite
-npm install --legacy-peer-deps
+npm ci
 npm run build
 npm link
 ```
@@ -149,7 +149,7 @@ The MCP server exposes 54 tools by default (`--tools all`). Use `--tools core` (
 
 - `command not found: agentmemory`: the linked bin is not on `PATH`. Run `node dist/cli.mjs` from the clone instead.
 - `EACCES` during `npm link`: set a writable npm prefix (`npm config set prefix ~/.npm-global`), or use the `node dist/cli.mjs` form.
-- Stale build after a `git pull`: re-run `npm install --legacy-peer-deps && npm run build`.
+- Stale build after a `git pull`: re-run `npm ci && npm run build`.
 - Port already in use: another process holds 3111, 3112, or 3113. Stop that process, or start with `--port <N>` to move all three at once.
 - Server starts but `livez` never returns 200: re-run with `agentmemory --verbose` to see the boot log.
 - Only 7 tools visible in the agent: the MCP shim is in local fallback because it could not reach a server. Start `agentmemory` and ensure `AGENTMEMORY_URL` points at it (default `http://localhost:3111`), then reload MCP.

@@ -64,7 +64,7 @@ This fork is not published to npm — clone it, build it, and link the `agentmem
 ```bash
 git clone https://github.com/possiblyneal/agentmemory-sqlite.git
 cd agentmemory-sqlite
-npm install --legacy-peer-deps
+npm ci
 npm run build
 npm link          # puts `agentmemory` on your PATH
 agentmemory
@@ -114,7 +114,7 @@ or skip the link entirely and run the CLI from the clone with `node dist/cli.mjs
 Pull and rebuild in the clone; the linked `agentmemory` command follows it automatically:
 
 ```bash
-git pull && npm install --legacy-peer-deps && npm run build
+git pull && npm ci && npm run build
 ```
 
 </details>
