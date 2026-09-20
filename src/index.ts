@@ -1,4 +1,7 @@
-import { registerWorker, TriggerAction } from "iii-sdk";
+// The worker registration is the last thing still reaching for the external
+// engine; removing it is the contract step of ADR 0001.
+import { registerWorker } from "iii-sdk";
+import { TriggerAction } from "./engine/types.js";
 import {
   hydrateProcessEnvFromFile,
   loadConfig,
