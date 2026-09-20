@@ -476,8 +476,10 @@ export interface EdgeContext {
 }
 
 export interface GraphQueryResult {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+  // Snapshot-served pages carry no provenance (#1171); record-served ones do,
+  // and are assignable here. A consumer needing provenance reads the record.
+  nodes: SnapshotNode[];
+  edges: SnapshotEdge[];
   depth: number;
   // #753: pagination + truncation signals for large graphs. `total*`
   // counts reflect the full unbounded result for the given filter so
@@ -506,10 +508,17 @@ export interface GraphQueryResult {
 // KV.graphSnapshot with a single key "current". `dirty` is set true by
 // mem::graph-extract after writes and flipped false when the snapshot
 // rebuild completes.
+// #1171: the snapshot is a bounded view for cheap reads, so it sheds
+// provenance — carrying it made the snapshot grow with how often things are
+// mentioned. Provenance stays on the node and edge records themselves, which
+// is where anything asking about origin reads it.
+export type SnapshotNode = Omit<GraphNode, "sourceObservationIds">;
+export type SnapshotEdge = Omit<GraphEdge, "sourceObservationIds">;
+
 export interface GraphSnapshot {
   version: 1;
-  topNodes: GraphNode[];
-  topEdges: GraphEdge[];
+  topNodes: SnapshotNode[];
+  topEdges: SnapshotEdge[];
   // Synchronous degree lookup keyed by nodeId. Maintained alongside
   // topNodes so re-ranking after an edge write doesn't require an
   // async kv.get for every top-N entry inside the sort comparator.

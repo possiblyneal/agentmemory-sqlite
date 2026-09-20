@@ -4,6 +4,8 @@ import type {
   GraphEdge,
   GraphQueryResult,
   GraphSnapshot,
+  SnapshotNode,
+  SnapshotEdge,
   CompressedObservation,
   MemoryProvider,
 } from "../types.js";
@@ -72,6 +74,22 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
       },
     );
   });
+}
+
+// #1171: the snapshot is derived and disposable, so it holds a projection of
+// each node and edge with provenance stripped. Origin is read from the record.
+function projectNode(
+  node: SnapshotNode & { sourceObservationIds?: string[] },
+): SnapshotNode {
+  const { sourceObservationIds: _drop, ...rest } = node;
+  return rest;
+}
+
+function projectEdge(
+  edge: SnapshotEdge & { sourceObservationIds?: string[] },
+): SnapshotEdge {
+  const { sourceObservationIds: _drop, ...rest } = edge;
+  return rest;
 }
 
 function emptySnapshot(): GraphSnapshot {
@@ -148,8 +166,8 @@ function buildSnapshotFromArrays(
   }
   return {
     version: 1,
-    topNodes: ranked,
-    topEdges,
+    topNodes: ranked.map(projectNode),
+    topEdges: topEdges.map(projectEdge),
     topDegrees,
     stats: {
       totalNodes: liveNodes.length,
@@ -217,7 +235,9 @@ async function queryViaIndexes(
   const reader = await GraphIndexReader.open(kv);
   const lower = query.toLowerCase();
   const catalog = await loadNameCatalog(kv);
-  const matched = new Map<string, GraphNode>();
+  // Mixed on purpose: name matches come from the records and carry
+  // provenance, property matches come from the snapshot and do not (#1171).
+  const matched = new Map<string, SnapshotNode>();
   for (const entry of catalog) {
     if (!entry.name.toLowerCase().includes(lower)) continue;
     const node = await reader.getNode(entry.id);
@@ -365,7 +385,7 @@ async function applyDegreeDelta(
     // Capacity available — fetch + promote.
     const node = await kv.get<GraphNode>(KV.graphNodes, nodeId);
     if (node && !node.stale) {
-      snap.topNodes.push(node);
+      snap.topNodes.push(projectNode(node));
       snap.topDegrees[node.id] = next;
       snap.topNodes.sort(
         (a, b) =>
@@ -384,7 +404,7 @@ async function applyDegreeDelta(
     if (node && !node.stale) {
       const evicted = snap.topNodes.pop();
       if (evicted) delete snap.topDegrees[evicted.id];
-      snap.topNodes.push(node);
+      snap.topNodes.push(projectNode(node));
       snap.topDegrees[node.id] = next;
       snap.topNodes.sort(
         (a, b) =>
@@ -403,7 +423,7 @@ function snapshotPushEdgeIfBothInTop(
   if (topIds.has(edge.sourceNodeId) && topIds.has(edge.targetNodeId)) {
     // Dedupe in case the same edge gets pushed twice.
     if (!snap.topEdges.find((e) => e.id === edge.id)) {
-      snap.topEdges.push(edge);
+      snap.topEdges.push(projectEdge(edge));
     }
   }
 }
@@ -460,8 +480,8 @@ function resolvePagination(
 }
 
 function paginate(
-  nodes: GraphNode[],
-  allEdges: GraphEdge[],
+  nodes: SnapshotNode[],
+  allEdges: SnapshotEdge[],
   depth: number,
   limit: number,
   offset: number,
@@ -789,7 +809,7 @@ export async function persistGraphDelta(
       // returned from the snapshot fast path.
       const topIdx = snap.topNodes.findIndex((n) => n.id === existing!.id);
       if (topIdx !== -1) {
-        snap.topNodes[topIdx] = merged;
+        snap.topNodes[topIdx] = projectNode(merged);
         snapMutated = true;
       }
     } else {
@@ -804,7 +824,7 @@ export async function persistGraphDelta(
       if (snap.topNodes.length < SNAPSHOT_TOP_NODES) {
         // Degree 0 still beats an empty slot — sit at the tail
         // until edges arrive and promote.
-        snap.topNodes.push(node);
+        snap.topNodes.push(projectNode(node));
         snap.topDegrees[node.id] = 0;
       }
     }
@@ -839,7 +859,7 @@ export async function persistGraphDelta(
       // Replace cached topEdges entry too if present.
       const topIdx = snap.topEdges.findIndex((e) => e.id === existing!.id);
       if (topIdx !== -1) {
-        snap.topEdges[topIdx] = merged;
+        snap.topEdges[topIdx] = projectEdge(merged);
         snapMutated = true;
       }
     } else {
@@ -864,6 +884,10 @@ export async function persistGraphDelta(
   }
 
   if (newNodeCount > 0 || newEdgeCount > 0 || snapMutated) {
+    // A snapshot stored before #1171 still carries provenance on entries this
+    // batch never touched; the next write replaces it with a projected one.
+    snap.topNodes = snap.topNodes.map(projectNode);
+    snap.topEdges = snap.topEdges.map(projectEdge);
     snap.updatedAt = capturedAt;
     snap.dirty = false;
     await kv.set(KV.graphSnapshot, SNAPSHOT_KEY, snap);

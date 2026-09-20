@@ -950,4 +950,95 @@ describe("Graph Functions", () => {
       expect((await kvLocal.list<GraphNode>("mem:graph:nodes")).length).toBe(2);
     });
   });
+  // #1171: the Graph Snapshot exists to make reads cheap by holding a bounded
+  // view of the busiest entities. Carrying Provenance along with them made it
+  // grow with how often things are mentioned, which is the opposite of that.
+  // Provenance stays on the records themselves.
+  describe("snapshot carries no provenance (#1171)", () => {
+    it("drops provenance from snapshot entities and relations on rebuild", async () => {
+      await kv.set("mem:graph:nodes", "n_0", {
+        id: "n_0", type: "file", name: "a", properties: {},
+        sourceObservationIds: ["obs_1", "obs_2"], stale: false,
+      });
+      await kv.set("mem:graph:nodes", "n_1", {
+        id: "n_1", type: "file", name: "b", properties: {},
+        sourceObservationIds: ["obs_1"], stale: false,
+      });
+      await kv.set("mem:graph:edges", "e_0", {
+        id: "e_0", type: "uses", sourceNodeId: "n_0", targetNodeId: "n_1",
+        weight: 1, sourceObservationIds: ["obs_1", "obs_2"], stale: false,
+      });
+
+      await sdk.trigger("mem::graph-snapshot-rebuild", { force: true });
+
+      const [snapshot] = await kv.list<Record<string, unknown>>("mem:graph:snapshot");
+      for (const entry of [
+        ...(snapshot["topNodes"] as Record<string, unknown>[]),
+        ...(snapshot["topEdges"] as Record<string, unknown>[]),
+      ]) {
+        expect(entry).not.toHaveProperty("sourceObservationIds");
+      }
+      expect((snapshot["topNodes"] as unknown[]).length).toBe(2);
+      expect((snapshot["topEdges"] as unknown[]).length).toBe(1);
+    });
+
+    it("drops provenance from entries the extract path writes into the snapshot", async () => {
+      await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+
+      const [snapshot] = await kv.list<Record<string, unknown>>("mem:graph:snapshot");
+      const entries = [
+        ...(snapshot["topNodes"] as Record<string, unknown>[]),
+        ...(snapshot["topEdges"] as Record<string, unknown>[]),
+      ];
+      expect(entries.length).toBeGreaterThan(0);
+      for (const entry of entries) {
+        expect(entry).not.toHaveProperty("sourceObservationIds");
+      }
+    });
+
+    it("leaves provenance on the entity and relation records themselves", async () => {
+      await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      const edges = await kv.list<GraphEdge>("mem:graph:edges");
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) expect(node.sourceObservationIds).toEqual(["obs_1"]);
+      for (const edge of edges) expect(edge.sourceObservationIds).toEqual(["obs_1"]);
+    });
+
+    it("keeps the same entities, relations and statistics it carried before", async () => {
+      await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+
+      const [snapshot] = await kv.list<Record<string, unknown>>("mem:graph:snapshot");
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      const topNodeIds = (snapshot["topNodes"] as { id: string }[]).map((n) => n.id);
+      expect(new Set(topNodeIds)).toEqual(new Set(nodes.map((n) => n.id)));
+      expect((snapshot["stats"] as { totalNodes: number }).totalNodes).toBe(nodes.length);
+    });
+
+    it("reads a snapshot written before this change and replaces it on the next write", async () => {
+      await kv.set("mem:graph:snapshot", "current", {
+        version: 1,
+        topNodes: [
+          { id: "n_old", type: "file", name: "old", properties: {},
+            sourceObservationIds: ["obs_old"], stale: false },
+        ],
+        topEdges: [],
+        topDegrees: { n_old: 0 },
+        stats: { totalNodes: 1, totalEdges: 0, nodesByType: { file: 1 }, edgesByType: {} },
+        updatedAt: "2026-01-01T00:00:00Z",
+        dirty: false,
+      });
+
+      const result = (await sdk.trigger("mem::graph-extract", {
+        observations: [testObs],
+      })) as { success: boolean };
+      expect(result.success).toBe(true);
+
+      const [snapshot] = await kv.list<Record<string, unknown>>("mem:graph:snapshot");
+      for (const entry of snapshot["topNodes"] as Record<string, unknown>[]) {
+        expect(entry).not.toHaveProperty("sourceObservationIds");
+      }
+    });
+  });
 });
