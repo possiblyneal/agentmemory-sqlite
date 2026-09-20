@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { evaluateHealth } from "../src/health/thresholds.js";
 import type { HealthSnapshot } from "../src/types.js";
 
@@ -218,5 +218,112 @@ describe("evaluateHealth verdict hysteresis", () => {
     expect(evaluateHealth(critical).status).toBe("critical");
     expect(evaluateHealth(degraded).status).toBe("degraded");
     expect(evaluateHealth(healthy).status).toBe("healthy");
+  });
+});
+
+// #1172: the Operator tunes the health judgement from the environment so it
+// travels across machines with different memory ceilings and load profiles.
+// Defaults reproduce the previous behaviour exactly.
+describe("evaluateHealth environment overrides", () => {
+  const PREFIXED = [
+    "AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_WARN_MS",
+    "AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_CRITICAL_MS",
+    "AGENTMEMORY_HEALTH_CPU_WARN_PERCENT",
+    "AGENTMEMORY_HEALTH_CPU_CRITICAL_PERCENT",
+    "AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT",
+    "AGENTMEMORY_HEALTH_MEMORY_CRITICAL_PERCENT",
+    "AGENTMEMORY_HEALTH_MEMORY_RSS_FLOOR_BYTES",
+    "AGENTMEMORY_HEALTH_ASSERT_SAMPLES",
+    "AGENTMEMORY_HEALTH_CLEAR_SAMPLES",
+  ];
+
+  afterEach(() => {
+    for (const key of PREFIXED) delete process.env[key];
+  });
+
+  it("classifies a sample by the overridden event loop thresholds", () => {
+    process.env["AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_WARN_MS"] = "10";
+    process.env["AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_CRITICAL_MS"] = "20";
+    expect(evaluateHealth(snap({ eventLoopLagMs: 15 })).status).toBe("degraded");
+    expect(evaluateHealth(snap({ eventLoopLagMs: 25 })).status).toBe("critical");
+  });
+
+  it("classifies a sample by the overridden cpu thresholds", () => {
+    process.env["AGENTMEMORY_HEALTH_CPU_WARN_PERCENT"] = "10";
+    process.env["AGENTMEMORY_HEALTH_CPU_CRITICAL_PERCENT"] = "20";
+    expect(
+      evaluateHealth(snap({ cpu: { userMicros: 0, systemMicros: 0, percent: 15 } }))
+        .status,
+    ).toBe("degraded");
+    expect(
+      evaluateHealth(snap({ cpu: { userMicros: 0, systemMicros: 0, percent: 25 } }))
+        .status,
+    ).toBe("critical");
+  });
+
+  it("classifies a sample by the overridden memory thresholds and rss floor", () => {
+    process.env["AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT"] = "10";
+    process.env["AGENTMEMORY_HEALTH_MEMORY_CRITICAL_PERCENT"] = "20";
+    process.env["AGENTMEMORY_HEALTH_MEMORY_RSS_FLOOR_BYTES"] = String(1 * MB);
+    const s = snap({
+      memory: { heapUsed: 1000 * MB, heapTotal: 1, heapLimit: 4096 * MB, rss: 2 * MB, external: 0 },
+    });
+    expect(evaluateHealth(s).status).toBe("critical");
+  });
+
+  it("falls back to the default on a malformed value", () => {
+    process.env["AGENTMEMORY_HEALTH_CPU_CRITICAL_PERCENT"] = "not-a-number";
+    expect(
+      evaluateHealth(snap({ cpu: { userMicros: 0, systemMicros: 0, percent: 95 } }))
+        .status,
+    ).toBe("critical");
+  });
+
+  it("honours an overridden count for asserting a verdict", () => {
+    process.env["AGENTMEMORY_HEALTH_ASSERT_SAMPLES"] = "2";
+    const failed = snap({ connectionState: "failed" });
+    let state = evaluateHealth(snap()).hysteresis;
+    const seen = [failed, failed].map((s) => {
+      const r = evaluateHealth(s, {}, state);
+      state = r.hysteresis;
+      return r.status;
+    });
+    expect(seen).toEqual(["healthy", "critical"]);
+  });
+
+  it("honours an overridden count for clearing a verdict", () => {
+    process.env["AGENTMEMORY_HEALTH_CLEAR_SAMPLES"] = "2";
+    let state = evaluateHealth(snap({ connectionState: "failed" })).hysteresis;
+    const seen = [snap(), snap()].map((s) => {
+      const r = evaluateHealth(s, {}, state);
+      state = r.hysteresis;
+      return r.status;
+    });
+    expect(seen).toEqual(["critical", "healthy"]);
+  });
+
+  it("treats a count of one as no hysteresis at all", () => {
+    process.env["AGENTMEMORY_HEALTH_ASSERT_SAMPLES"] = "1";
+    process.env["AGENTMEMORY_HEALTH_CLEAR_SAMPLES"] = "1";
+    const state = evaluateHealth(snap()).hysteresis;
+    const r = evaluateHealth(snap({ connectionState: "failed" }), {}, state);
+    expect(r.status).toBe("critical");
+    expect(evaluateHealth(snap(), {}, r.hysteresis).status).toBe("healthy");
+  });
+
+  it("reads no signal from a dimension the snapshot does not measure", () => {
+    process.env["AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT"] = "1";
+    const s = snap({
+      memory: { heapUsed: 4000 * MB, heapTotal: 1, rss: 4000 * MB, external: 0 },
+    });
+    expect(evaluateHealth(s).status).toBe("healthy");
+  });
+
+  it("explicit config still wins over the environment", () => {
+    process.env["AGENTMEMORY_HEALTH_CPU_CRITICAL_PERCENT"] = "10";
+    const s = snap({ cpu: { userMicros: 0, systemMicros: 0, percent: 50 } });
+    expect(evaluateHealth(s, { cpuCriticalPercent: 90, cpuWarnPercent: 80 }).status).toBe(
+      "healthy",
+    );
   });
 });

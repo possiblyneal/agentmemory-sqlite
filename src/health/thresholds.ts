@@ -1,41 +1,23 @@
 import type { HealthSnapshot } from "../types.js";
+import { getHealthTuning } from "../config.js";
+import type { HealthTuning } from "../config.js";
 
-interface ThresholdConfig {
-  eventLoopLagWarnMs: number;
-  eventLoopLagCriticalMs: number;
-  cpuWarnPercent: number;
-  cpuCriticalPercent: number;
-  memoryWarnPercent: number;
-  memoryCriticalPercent: number;
-  memoryRssFloorBytes: number;
-}
-
-const DEFAULTS: ThresholdConfig = {
-  eventLoopLagWarnMs: 100,
-  eventLoopLagCriticalMs: 500,
-  cpuWarnPercent: 80,
-  cpuCriticalPercent: 90,
-  memoryWarnPercent: 80,
-  memoryCriticalPercent: 95,
-  memoryRssFloorBytes: 512 * 1024 * 1024,
-};
+type ThresholdConfig = Omit<HealthTuning, "assertSamples" | "clearSamples">;
 
 export type HealthStatus = "healthy" | "degraded" | "critical";
 
 // The published verdict is a restart signal to an external supervisor, so it
 // must not follow a single reading: one slow GC inside a sampling window is
 // not a sick daemon. `pending` is the verdict the recent samples are arguing
-// for and `run` is how many in a row have argued for it; the published
-// verdict only moves once that run reaches CONSECUTIVE_SAMPLES. The monitor
-// holds this in its own closure and never persists it — a restart legitimately
+// for and `run` is how many in a row have argued for it; the published verdict
+// only moves once that run reaches the configured count. The monitor holds
+// this in its own closure and never persists it — a restart legitimately
 // resets the judgement (#1170).
 export type HealthHysteresis = {
   published: HealthStatus;
   pending: HealthStatus;
   run: number;
 };
-
-const CONSECUTIVE_SAMPLES = 3;
 
 export function evaluateHealth(
   snapshot: HealthSnapshot,
@@ -47,7 +29,10 @@ export function evaluateHealth(
   notes: string[];
   hysteresis: HealthHysteresis;
 } {
-  const cfg = { ...DEFAULTS, ...config };
+  // Environment first, explicit config last: a caller that names a threshold
+  // means it (#1172).
+  const tuning = getHealthTuning();
+  const cfg = { ...tuning, ...config };
   const alerts: string[] = [];
   const notes: string[] = [];
   let critical = false;
@@ -130,8 +115,12 @@ export function evaluateHealth(
     };
   }
 
+  // Asserting a verdict and clearing one are counted separately: an operator
+  // may want to hear about trouble sooner than they hear about recovery.
+  const needed =
+    sampled === "healthy" ? tuning.clearSamples : tuning.assertSamples;
   const run = sampled === prior.pending ? prior.run + 1 : 1;
-  const published = run >= CONSECUTIVE_SAMPLES ? sampled : prior.published;
+  const published = run >= needed ? sampled : prior.published;
   return {
     status: published,
     alerts,

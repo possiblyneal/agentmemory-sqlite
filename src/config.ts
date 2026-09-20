@@ -423,6 +423,59 @@ export function getMaxSourceObservationIds(): number {
   return parsed > 0 ? parsed : MAX_SOURCE_OBSERVATION_IDS_DEFAULT;
 }
 
+// #1172: the health judgement travels across machines with very different
+// memory ceilings and load profiles, so every threshold that classifies a
+// sample, and both counts that gate a verdict change, take an override named
+// in HEALTH_ENV_KEYS below. A malformed value falls back to the default rather
+// than producing a nonsense threshold.
+export type HealthTuning = {
+  eventLoopLagWarnMs: number;
+  eventLoopLagCriticalMs: number;
+  cpuWarnPercent: number;
+  cpuCriticalPercent: number;
+  memoryWarnPercent: number;
+  memoryCriticalPercent: number;
+  memoryRssFloorBytes: number;
+  assertSamples: number;
+  clearSamples: number;
+};
+
+export const HEALTH_TUNING_DEFAULTS: HealthTuning = {
+  eventLoopLagWarnMs: 100,
+  eventLoopLagCriticalMs: 500,
+  cpuWarnPercent: 80,
+  cpuCriticalPercent: 90,
+  memoryWarnPercent: 80,
+  memoryCriticalPercent: 95,
+  memoryRssFloorBytes: 512 * 1024 * 1024,
+  assertSamples: 3,
+  clearSamples: 3,
+};
+
+const HEALTH_ENV_KEYS: Record<keyof HealthTuning, string> = {
+  eventLoopLagWarnMs: "AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_WARN_MS",
+  eventLoopLagCriticalMs: "AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_CRITICAL_MS",
+  cpuWarnPercent: "AGENTMEMORY_HEALTH_CPU_WARN_PERCENT",
+  cpuCriticalPercent: "AGENTMEMORY_HEALTH_CPU_CRITICAL_PERCENT",
+  memoryWarnPercent: "AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT",
+  memoryCriticalPercent: "AGENTMEMORY_HEALTH_MEMORY_CRITICAL_PERCENT",
+  memoryRssFloorBytes: "AGENTMEMORY_HEALTH_MEMORY_RSS_FLOOR_BYTES",
+  assertSamples: "AGENTMEMORY_HEALTH_ASSERT_SAMPLES",
+  clearSamples: "AGENTMEMORY_HEALTH_CLEAR_SAMPLES",
+};
+
+export function getHealthTuning(): HealthTuning {
+  const env = getMergedEnv();
+  const tuned = {} as HealthTuning;
+  for (const key of Object.keys(HEALTH_TUNING_DEFAULTS) as (keyof HealthTuning)[]) {
+    const fallback = HEALTH_TUNING_DEFAULTS[key];
+    const raw = env[HEALTH_ENV_KEYS[key]];
+    const parsed = raw === undefined ? NaN : Number(raw);
+    tuned[key] = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  }
+  return tuned;
+}
+
 // window for the smart-search followup-rate diagnostic. A second
 // search arriving within this many seconds (with disjoint results)
 // counts as a "follow-up" — a directional signal that the first result
