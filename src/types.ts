@@ -190,7 +190,6 @@ export interface MemoryProvider {
 }
 
 export interface AgentMemoryConfig {
-  engineUrl: string;
   restPort: number;
   streamsPort: number;
   provider: ProviderConfig;
@@ -996,6 +995,8 @@ export interface DecayConfig {
  */
 export interface StateScope {
   "system:currentDiskSize": number;
+  /** Highest startup-maintenance version this store has completed. */
+  "system:startupMaintenanceVersion": number;
 }
 
 export type StateScopeKey = keyof StateScope;

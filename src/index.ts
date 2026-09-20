@@ -27,6 +27,7 @@ import {
 } from "./providers/index.js";
 import { StateKV } from "./state/kv.js";
 import { KV } from "./state/schema.js";
+import { runStartupMaintenance } from "./state/startup-maintenance.js";
 import {
   GRAPH_INDEX_NODE_CEILING,
   backfillGraphIndexes,
@@ -500,6 +501,21 @@ async function main() {
     sdk.setReady();
     bootLog("Ready: /agentmemory/readyz -> 200, routes open");
   }
+
+  // One-time repair of stores written before this fork: graph provenance that
+  // predates the write-time bound, and the index shards the removed engine
+  // left behind. The scan is synchronous, so it goes behind setImmediate —
+  // readyz already answers 200 and the listener gets to accept first. It
+  // records its own version, so every later boot is a single marker read.
+  setImmediate(() => {
+    try {
+      runStartupMaintenance(sdk.store);
+    } catch (err) {
+      console.warn(
+        `[agentmemory] startup maintenance skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  });
 
   // The vector fill/repair pass closes the gap between the content rows and
   // the vectors table - missing or stale rows are embedded, orphans pruned.
