@@ -3,7 +3,7 @@ import type { Memory, GovernanceFilter, AuditEntry } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { recordAudit, safeAudit, queryAudit } from "./audit.js";
-import { deleteIndexed, flushIndexSave } from "./search.js";
+import { deleteIndexed } from "./search.js";
 import { logger } from "../logger.js";
 
 export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
@@ -25,8 +25,6 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
           deleted++;
         }
       }
-
-      if (deleted > 0) await flushIndexSave();
 
       await recordAudit(
         kv,
@@ -128,8 +126,6 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
           }
         });
       }
-
-      if (successfulIds.length > 0) await flushIndexSave();
 
       await safeAudit(
         kv,

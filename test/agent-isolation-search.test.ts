@@ -33,7 +33,6 @@ vi.mock("../src/config.js", async (importOriginal) => ({
 import {
   registerSearchFunction,
   getSearchIndex,
-  setIndexPersistence,
 } from "../src/functions/search.js";
 import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, Session, SearchResult } from "../src/types.js";
@@ -140,7 +139,6 @@ describe("mem::search agent-scope isolation (#817 follow-up)", () => {
   beforeEach(() => {
     sdk = makeMockSdk();
     kv = makeMockKV();
-    setIndexPersistence(null);
     // Reset index between tests.
     const idx = getSearchIndex();
     (idx as unknown as { clear?: () => void }).clear?.();

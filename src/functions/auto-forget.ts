@@ -3,7 +3,7 @@ import type { Memory, CompressedObservation, Session } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
-import { deleteIndexed, flushIndexSave } from "./search.js";
+import { deleteIndexed } from "./search.js";
 import { refersToDifferentDates } from "../state/memory-utils.js";
 import { logger } from "../logger.js";
 
@@ -192,10 +192,6 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             }
           }
         }
-      }
-
-      if (!dryRun && (result.ttlExpired.length > 0 || result.lowValueObs.length > 0)) {
-        await flushIndexSave();
       }
 
       logger.info("Auto-forget complete", {

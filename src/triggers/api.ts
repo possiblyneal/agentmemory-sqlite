@@ -2,7 +2,6 @@ import { TriggerAction, type ISdk, type ApiRequest } from "../engine/types.js";
 import type { Session, CompressedObservation, HookPayload, CommitLink, SessionSummary } from "../types.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
-import { checkPayloadFrameSize } from "../state/frame-guard.js";
 import { StateKV } from "../state/kv.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { getLatestHealth } from "../health/monitor.js";
@@ -2959,14 +2958,6 @@ export function registerApiTriggers(
           );
           body.graphEdges = df(graphEdges, "createdAt");
         }
-      }
-      // Fail an over-frame export with 413 instead of dropping the worker.
-      const oversized = checkPayloadFrameSize(
-        body,
-        "use ?since to fetch only changes after a timestamp, or ?project to scope the export",
-      );
-      if (oversized) {
-        return { status_code: 413, body: oversized };
       }
       return { status_code: 200, body };
     },

@@ -10,7 +10,7 @@ import {
   MEMORY_SESSION,
 } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
-import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorIndexRemove, flushIndexSave, markIndexDirty, deleteIndexed } from "./search.js";
+import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorIndexRemove, deleteIndexed } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 
@@ -239,7 +239,6 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             context: { kind: "memory" as const, logId: job.id },
           })),
         );
-        markIndexDirty();
 
         if (supersededId) {
           await sdk.trigger({
@@ -342,7 +341,6 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (deleted > 0) {
-        await flushIndexSave();
         await recordAudit(
           kv,
           "forget",

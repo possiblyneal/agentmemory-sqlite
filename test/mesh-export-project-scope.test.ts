@@ -6,7 +6,6 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { KV } from "../src/state/schema.js";
-import { SAFE_PAYLOAD_BYTES } from "../src/state/frame-guard.js";
 import type { Memory } from "../src/types.js";
 
 // A project-scoped mesh export must filter memories like actions: unscoped
@@ -99,31 +98,5 @@ describe("api::mesh-export project scoping", () => {
     expect(res.status_code).toBe(200);
     const memories = res.body.memories as Memory[];
     expect(memories.map((m) => m.id).sort()).toEqual(["m-alpha", "m-beta"]);
-  });
-
-  it("avoids the 413 when only another project's memory is oversized", async () => {
-    const kv = mockKV();
-    // A single beta memory alone blows the frame; alpha's slice is tiny.
-    await kv.set(
-      KV.memories,
-      "m-beta-huge",
-      memory("m-beta-huge", "beta", "z".repeat(SAFE_PAYLOAD_BYTES + 4096)),
-    );
-    await kv.set(KV.memories, "m-alpha", memory("m-alpha", "alpha"));
-    const sdk = mockSdk();
-    registerApiTriggers(sdk as never, kv as never, SECRET);
-
-    // Scoped to alpha: the huge beta memory is filtered out before the frame
-    // guard runs, so the request succeeds instead of 413-ing.
-    const scoped = await meshExport(sdk, "alpha");
-    expect(scoped.status_code).toBe(200);
-    expect((scoped.body.memories as Memory[]).map((m) => m.id)).toEqual([
-      "m-alpha",
-    ]);
-
-    // Unscoped: the oversized memory is included, so the guard fires (413).
-    const unscoped = await meshExport(sdk);
-    expect(unscoped.status_code).toBe(413);
-    expect((unscoped.body as { oversized?: boolean }).oversized).toBe(true);
   });
 });

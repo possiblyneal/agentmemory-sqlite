@@ -1,23 +1,12 @@
 import { describe, it, expect, vi, afterAll, beforeEach } from "vitest";
 import { existsSync, rmSync } from "node:fs";
 
-vi.mock("iii-sdk", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("iii-sdk")>();
-  return {
-    ...actual,
-    getContext: () => ({
-      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-    }),
-  };
-});
-
 vi.mock("../src/functions/search.js", () => ({
   getSearchIndex: () => ({
     add: vi.fn(),
   }),
   vectorIndexAddGuarded: vi.fn().mockResolvedValue(false),
   isIndexExcluded: () => false,
-  markIndexDirty: () => {},
 }));
 
 const mockTrigger = vi.fn().mockResolvedValue(undefined);

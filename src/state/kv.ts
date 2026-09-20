@@ -1,5 +1,4 @@
 import type { ISdk } from '../engine/types.js'
-import { isInprocEngine } from '../config.js'
 
 const SET_MANY_CHUNK = 100
 
@@ -41,16 +40,11 @@ export class StateKV {
     })
   }
 
-  // Bounded batches. Under inproc each chunk is one `state::set-many` call -
-  // one transaction, one fsync - and the await between chunks lets the event
-  // loop turn; a `state::set` per row was 45k fsyncs back to back (day-0 soak
-  // finding). Under iii that function does not exist, so the rows go as
-  // ordered single sets, each an RPC that yields on its own.
+  // Bounded batches. Each chunk is one `state::set-many` call - one
+  // transaction, one fsync - and the await between chunks lets the event loop
+  // turn; a `state::set` per row was 45k fsyncs back to back (day-0 soak
+  // finding).
   async setMany<T = unknown>(scope: string, entries: Array<{ key: string; value: T }>): Promise<number> {
-    if (!isInprocEngine()) {
-      for (const e of entries) await this.set(scope, e.key, e.value)
-      return entries.length
-    }
     for (let i = 0; i < entries.length; i += SET_MANY_CHUNK) {
       await this.sdk.trigger<{ scope: string; entries: Array<{ key: string; value: T }> }, number>({
         function_id: 'state::set-many',

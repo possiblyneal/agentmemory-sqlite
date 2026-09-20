@@ -15,7 +15,7 @@ import {
 } from "../prompts/compression.js";
 import { VISION_DESCRIPTION_PROMPT } from "../prompts/vision.js";
 import { getXmlTag, getXmlChildren } from "../prompts/xml.js";
-import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, markIndexDirty } from "./search.js";
+import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded } from "./search.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { CompressOutputSchema } from "../eval/schemas.js";
 import { validateOutput } from "../eval/validator.js";
@@ -126,7 +126,6 @@ export function registerCompressFunction(
               synthetic.title + " " + (synthetic.narrative || ""),
               { kind: "synthetic", logId: synthetic.id },
             );
-            markIndexDirty();
           }
           logger.warn("Stored degraded synthetic observation after compression failure", {
             obsId: data.observationId,
@@ -276,7 +275,6 @@ export function registerCompressFunction(
             compressed.title + " " + (compressed.narrative || ""),
             { kind: "observation", logId: compressed.id },
           );
-          markIndexDirty();
         }
 
         const streamResults = await Promise.allSettled([

@@ -9,7 +9,7 @@ import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
-import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, markIndexDirty } from "./search.js";
+import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { saveImageToDisk } from "../utils/image-store.js";
@@ -330,7 +330,6 @@ export function registerObserveFunction(
               synthetic.title + " " + (synthetic.narrative || ""),
               { kind: "synthetic", logId: synthetic.id },
             );
-            markIndexDirty();
           }
           await sdk.trigger({
             function_id: "stream::set",

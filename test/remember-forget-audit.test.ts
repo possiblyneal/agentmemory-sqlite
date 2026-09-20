@@ -11,7 +11,6 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
 import { registerRememberFunction } from "../src/functions/remember.js";
 import {
   getSearchIndex,
-  setIndexPersistence,
 } from "../src/functions/search.js";
 import { memoryToObservation } from "../src/state/memory-utils.js";
 import type { Memory } from "../src/types.js";
@@ -182,11 +181,9 @@ describe("mem::forget search-index cleanup", () => {
 
   beforeEach(() => {
     getSearchIndex().clear();
-    setIndexPersistence(null);
   });
 
   afterEach(() => {
-    setIndexPersistence(null);
   });
 
   it("removes a forgotten memory from the BM25 index", async () => {
@@ -224,22 +221,5 @@ describe("mem::forget search-index cleanup", () => {
 
     expect(getSearchIndex().has("obs_a")).toBe(false);
     expect(getSearchIndex().has("obs_b")).toBe(true);
-  });
-
-  it("flushes persistence immediately when a memory is forgotten", async () => {
-    const sdk = mockSdk();
-    const kv = mockKV();
-    registerRememberFunction(sdk as never, kv as never);
-    const persistence = { scheduleSave: vi.fn(), save: vi.fn(async () => {}) };
-    setIndexPersistence(persistence);
-
-    await kv.set("mem:memories", "mem_a", makeMemory("mem_a"));
-
-    await sdk.trigger({
-      function_id: "mem::forget",
-      payload: { memoryId: "mem_a" },
-    });
-
-    expect(persistence.save).toHaveBeenCalled();
   });
 });

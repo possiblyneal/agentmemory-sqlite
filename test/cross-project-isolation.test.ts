@@ -26,7 +26,7 @@ vi.mock("../src/config.js", async (importOriginal) => ({
 }));
 
 import { registerRememberFunction } from "../src/functions/remember.js";
-import { registerSearchFunction, getSearchIndex, setIndexPersistence } from "../src/functions/search.js";
+import { registerSearchFunction, getSearchIndex } from "../src/functions/search.js";
 import { registerEnrichFunction } from "../src/functions/enrich.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
@@ -106,7 +106,6 @@ describe("cross-project isolation — end-to-end", () => {
     kv = makeMockKV();
 
     // Disable index persistence in tests so no file I/O occurs.
-    setIndexPersistence(null);
 
     // Clear the singleton BM25 index between tests.
     getSearchIndex().clear();

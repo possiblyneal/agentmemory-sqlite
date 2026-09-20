@@ -7,7 +7,6 @@ vi.mock("../src/logger.js", () => ({
 import { registerAutoForgetFunction } from "../src/functions/auto-forget.js";
 import {
   getSearchIndex,
-  setIndexPersistence,
 } from "../src/functions/search.js";
 import { memoryToObservation } from "../src/state/memory-utils.js";
 import type { Memory, CompressedObservation, Session } from "../src/types.js";
@@ -176,17 +175,9 @@ describe("Auto-Forget Function", () => {
   describe("search-index cleanup", () => {
     beforeEach(() => {
       getSearchIndex().clear();
-      setIndexPersistence(null);
     });
 
-    afterEach(() => {
-      setIndexPersistence(null);
-    });
-
-    it("removes TTL-expired memories from the BM25 index and flushes persistence", async () => {
-      const persistence = { scheduleSave: vi.fn(), save: vi.fn(async () => {}) };
-      setIndexPersistence(persistence);
-
+    it("removes TTL-expired memories from the BM25 index", async () => {
       const expired = makeMemory({
         id: "mem_expired",
         forgetAfter: "2020-01-01T00:00:00Z",
@@ -198,7 +189,6 @@ describe("Auto-Forget Function", () => {
       await sdk.trigger("mem::auto-forget", {});
 
       expect(getSearchIndex().has("mem_expired")).toBe(false);
-      expect(persistence.save).toHaveBeenCalled();
     });
 
     it("removes evicted low-value observations from the BM25 index", async () => {
@@ -233,10 +223,7 @@ describe("Auto-Forget Function", () => {
       expect(getSearchIndex().has("obs_old")).toBe(false);
     });
 
-    it("does not flush persistence on dryRun", async () => {
-      const persistence = { scheduleSave: vi.fn(), save: vi.fn(async () => {}) };
-      setIndexPersistence(persistence);
-
+    it("leaves the index untouched on dryRun", async () => {
       const expired = makeMemory({
         id: "mem_expired",
         forgetAfter: "2020-01-01T00:00:00Z",
@@ -246,9 +233,8 @@ describe("Auto-Forget Function", () => {
 
       await sdk.trigger("mem::auto-forget", { dryRun: true });
 
-      // dryRun must not mutate the index or write to disk.
+      // dryRun must not mutate the index.
       expect(getSearchIndex().has("mem_expired")).toBe(true);
-      expect(persistence.save).not.toHaveBeenCalled();
     });
   });
 

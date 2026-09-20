@@ -206,52 +206,10 @@ export async function markRebuildTokenDone(
     })
 }
 
-// Persistence sync hook. Without this, index removals only live in
-// memory; a crash/SIGKILL before graceful shutdown reloads a stale
-// snapshot at boot and the deleted entry resurrects in the index.
-// Wired by src/index.ts after IndexPersistence is constructed; no-op
-// until then so unit tests that exercise the delete paths in
-// isolation don't need to wire persistence.
-let indexPersistence: {
-  scheduleSave: () => void;
-  save: () => Promise<void>;
-  markDirty?: () => void;
-} | null = null;
-
-export function setIndexPersistence(
-  p: {
-    scheduleSave: () => void;
-    save: () => Promise<void>;
-    markDirty?: () => void;
-  } | null,
-): void {
-  indexPersistence = p;
-}
-
-export function scheduleIndexSave(): void {
-  indexPersistence?.scheduleSave();
-}
-
-// Called by the LIVE index-add sites. Cheap (sets a flag); the actual flush
-// is amortised onto IndexPersistence's periodic timer. Without this the
-// in-memory index diverges from the on-disk snapshot and every entry added
-// since the last rebuild is lost on restart.
-export function markIndexDirty(): void {
-  indexPersistence?.markDirty?.();
-}
-
-// Synchronous flush variant for delete paths. The debounced
-// scheduleSave is fine for adds (chatty), but a hard process exit
-// inside the 5s debounce window would lose deletes and resurrect
-// removed entries on next boot. Deletes are infrequent enough that
-// awaiting a single write per operation is acceptable. save() catches
-// its own errors via IndexPersistence.logFailure, so this resolves
-// even when persistence fails — callers must not treat a failed
-// flush as a fatal error on the delete itself (the KV delete already
-// committed before this is invoked).
-export async function flushIndexSave(): Promise<void> {
-  await indexPersistence?.save();
-}
+// The keyword index is not persisted: it is rebuilt from the stored content
+// rows at boot, so an index mutation has nothing to flush and a hard exit
+// cannot resurrect a deleted entry. Vectors persist as their own rows and
+// commit with the write that produced them (ADR 0001).
 
 // Writes one completed embedding. With the inproc store this is the
 // revalidating commit (false = dropped as stale); without it, the plain

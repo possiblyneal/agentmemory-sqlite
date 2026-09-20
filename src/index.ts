@@ -1,6 +1,3 @@
-// The worker registration is the last thing still reaching for the external
-// engine; removing it is the contract step of ADR 0001.
-import { registerWorker } from "iii-sdk";
 import { TriggerAction } from "./engine/types.js";
 import {
   hydrateProcessEnvFromFile,
@@ -16,10 +13,9 @@ import {
   isConsolidationEnabled,
   isContextInjectionEnabled,
   isDropStaleIndexEnabled,
-  isInprocEngine,
   getSqlitePath,
 } from "./config.js";
-import { createInprocSdk, type InprocSdk } from "./engine/inproc/sdk.js";
+import { createInprocSdk } from "./engine/inproc/sdk.js";
 import { SqliteVectorStore } from "./engine/inproc/vectors.js";
 import { createIndexFill, registerIndexFillFunction } from "./functions/index-fill.js";
 import { registerMaintenanceFunctions } from "./functions/maintenance.js";
@@ -39,7 +35,6 @@ import {
 } from "./state/graph-indexes.js";
 import { VectorIndex } from "./state/vector-index.js";
 import { HybridSearch } from "./state/hybrid-search.js";
-import { IndexPersistence } from "./state/index-persistence.js";
 import { registerPrivacyFunction } from "./functions/privacy.js";
 import { registerObserveFunction } from "./functions/observe.js";
 import { registerImageQuotaCleanup } from "./functions/image-quota-cleanup.js";
@@ -49,23 +44,12 @@ import { registerDiskSizeManager } from "./functions/disk-size-manager.js";
 import { registerCompressFunction } from "./functions/compress.js";
 import {
   registerSearchFunction,
-  rebuildIndex,
   getSearchIndex,
   setVectorIndex,
   setEmbeddingProvider,
-  setIndexPersistence,
   setInprocStores,
   rebuildBm25FromContent,
-  pendingRebuildToken,
-  markRebuildTokenDone,
 } from "./functions/search.js";
-import {
-  reconcileIndexes,
-  pendingReconcileToken,
-  markReconcileTokenDone,
-  isReconcilePublishEnabled,
-} from "./functions/reconcile.js";
-import { memoryToIndexDoc } from "./state/memory-utils.js";
 import { registerContextFunction } from "./functions/context.js";
 import { registerSummarizeFunction } from "./functions/summarize.js";
 import { registerMigrateFunction } from "./functions/migrate.js";
@@ -127,7 +111,7 @@ import { startViewerServer } from "./viewer/server.js";
 import { MetricsStore } from "./eval/metrics-store.js";
 import { DedupMap } from "./functions/dedup.js";
 import { registerHealthMonitor } from "./health/monitor.js";
-import { initMetrics, OTEL_CONFIG } from "./telemetry/setup.js";
+import { initMetrics } from "./telemetry/setup.js";
 import { VERSION } from "./version.js";
 import { bootLog } from "./logger.js";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -156,17 +140,6 @@ function clearWorkerPidfile(): void {
   try {
     unlinkSync(workerPidfilePath());
   } catch {}
-}
-
-function hasGetMeter(
-  sdk: unknown,
-): sdk is { getMeter: (name: string) => unknown } {
-  return (
-    typeof sdk === "object" &&
-    sdk !== null &&
-    "getMeter" in sdk &&
-    typeof (sdk as { getMeter?: unknown }).getMeter === "function"
-  );
 }
 
 // Top-level safety net for iii-engine invocation timeouts (issue #204).
@@ -205,11 +178,10 @@ async function main() {
   const embeddingProvider = createEmbeddingProvider();
   const imageEmbeddingProvider = createImageEmbeddingProvider();
 
-  const inproc = isInprocEngine();
   const sqlitePath = getSqlitePath();
 
   bootLog(`Starting worker v${VERSION}...`);
-  bootLog(inproc ? `Engine: in-process (${sqlitePath})` : `Engine: ${config.engineUrl}`);
+  bootLog(`Engine: in-process (${sqlitePath})`);
   bootLog(
     `Provider: ${config.provider.provider} (${config.provider.model})`,
   );
@@ -230,40 +202,16 @@ async function main() {
   );
   bootLog(`Streams: ws://localhost:${config.streamsPort}`);
 
-  // In-process runtime: no engine, no worker bus. The shim binds the REST and
-  // stream ports itself, so a bind failure has to be fatal here rather than
-  // leaving a daemon up with no listeners.
-  const inprocSdk: InprocSdk | null = inproc
-    ? createInprocSdk({
-        restPort: config.restPort,
-        streamsPort: config.streamsPort,
-        sqlitePath,
-        maxBodyBytes: parseInt(getEnvVar("AGENTMEMORY_MAX_BODY_BYTES") || "", 10) || undefined,
-      })
-    : null;
-  if (inprocSdk) await inprocSdk.listening();
-
-  const sdk = inprocSdk ?? registerWorker(config.engineUrl, {
-    workerName: "agentmemory",
-    invocationTimeoutMs: 180000,
-    otel: {
-      serviceName: OTEL_CONFIG.serviceName,
-      serviceVersion: OTEL_CONFIG.serviceVersion,
-      metricsExportIntervalMs: OTEL_CONFIG.metricsExportIntervalMs,
-    },
-    // Explicit worker telemetry metadata. iii-sdk falls back to
-    // auto-detection (cwd / package.json name / hostname) when this
-    // is omitted, which produces inconsistent values per host —
-    // `agentmemory`, `node`, `npm`, occasionally the user's home
-    // directory basename. Pinning the value here gives every install
-    // the same stable project identifier for downstream attribution
-    // and grouping in the engine's metrics + traces output.
-    telemetry: {
-      project_name: "agentmemory",
-      language: "node",
-      framework: "iii-sdk",
-    },
+  // The only runtime: no engine process, no worker bus. The shim binds the
+  // REST and stream ports itself, so a bind failure has to be fatal here
+  // rather than leaving a daemon up with no listeners.
+  const sdk = createInprocSdk({
+    restPort: config.restPort,
+    streamsPort: config.streamsPort,
+    sqlitePath,
+    maxBodyBytes: parseInt(getEnvVar("AGENTMEMORY_MAX_BODY_BYTES") || "", 10) || undefined,
   });
+  await sdk.listening();
 
   writeWorkerPidfile();
 
@@ -274,23 +222,21 @@ async function main() {
 
   const vectorIndex = embeddingProvider ? new VectorIndex() : null;
 
-  // Inproc: vectors are rows in the same SQLite file as the state. Every map
+  // Vectors are rows in the same SQLite file as the state. Every map
   // mutation writes its rows first and every embedding completion commits
   // through the store's content-revalidating transaction (src/engine/inproc/vectors.ts).
   // The store exists even without an embedding provider so content deletes
   // still take their persisted vector rows with them.
-  const vectorStore = inprocSdk ? new SqliteVectorStore(inprocSdk.store) : null;
+  const vectorStore = new SqliteVectorStore(sdk.store);
   vectorIndex?.attachStore(vectorStore);
-  setInprocStores(inprocSdk?.store ?? null, vectorStore);
+  setInprocStores(sdk.store, vectorStore);
 
   setVectorIndex(vectorIndex);
   setEmbeddingProvider(embeddingProvider);
 
-  const meterAccessor = hasGetMeter(sdk)
-    ? (sdk.getMeter.bind(sdk) as (name: string) => unknown)
-    : undefined;
-
-  initMetrics(meterAccessor as ((name: string) => import("@opentelemetry/api").Meter) | undefined);
+  // The in-process Engine exposes no meter provider of its own, so metrics
+  // fall back to whatever the OTel global supplies.
+  initMetrics(undefined);
 
   registerPrivacyFunction(sdk);
   registerObserveFunction(sdk, kv, dedupMap, config.maxObservationsPerSession);
@@ -470,37 +416,12 @@ async function main() {
 
   const healthMonitor = registerHealthMonitor(sdk, kv);
 
-  // Inproc mode has no giant-string index persistence at all: vectors hydrate
-  // from their rows below and BM25 is rebuilt from content. The
-  // scheduleSave/markDirty/flushIndexSave hooks stay no-ops there.
-  const indexPersistence = inproc
-    ? null
-    : new IndexPersistence(kv, bm25Index, vectorIndex);
-  // Wire the persistence hook so delete paths can flush BM25/vector
-  // index mutations to disk. Without this, an in-memory remove can be
-  // lost across a hard process exit and the persisted snapshot
-  // restores the deleted entry at next boot.
-  setIndexPersistence(indexPersistence);
-
-  const loaded = indexPersistence
-    ? await indexPersistence.load().catch((err) => {
-        console.warn(`[agentmemory] Failed to load persisted index:`, err);
-        return null;
-      })
-    : null;
-  if (loaded?.bm25 && loaded.bm25.size > 0) {
-    bm25Index.restoreFrom(loaded.bm25);
-    bootLog(
-      `Loaded persisted BM25 index (${bm25Index.size} docs)`,
-    );
-  }
-  if (vectorStore && vectorIndex) {
+  if (vectorIndex) {
     const hydrated = vectorStore.hydrate(vectorIndex);
     if (hydrated > 0) bootLog(`Hydrated ${hydrated} vectors from SQLite`);
   }
-  // The dimension guard below runs over whichever source supplied vectors:
-  // the rows just hydrated (inproc) or the deserialised snapshot (iii).
-  const vectorSource = vectorStore ? vectorIndex : loaded?.vector ?? null;
+  // The dimension guard runs over the rows just hydrated.
+  const vectorSource = vectorIndex;
   if (vectorSource && vectorIndex && vectorSource.size > 0) {
     // Persisted vectors carry whatever dimension the provider had when
     // they were written. If the active provider declares a different
@@ -533,8 +454,8 @@ async function main() {
             `AGENTMEMORY_DROP_STALE_INDEX=true is set — discarding the persisted ` +
             `vectors. Live observations will rebuild the index over time.`,
         );
-        // Inproc: the rows ARE the index, so discarding means deleting them.
-        if (vectorStore) vectorIndex.clear();
+        // The rows ARE the index, so discarding means deleting them.
+        vectorIndex.clear();
       } else {
         throw new Error(
           `[agentmemory] Refusing to start: persisted vector index has ` +
@@ -549,21 +470,14 @@ async function main() {
             `  - Switch the embedding provider back to the one that wrote the index.`,
         );
       }
-    } else if (!vectorStore) {
-      vectorIndex.restoreFrom(vectorSource);
-      bootLog(
-        `Loaded persisted vector index (${vectorIndex.size} vectors)`,
-      );
     }
   }
 
-  // Inproc: BM25 is not persisted, so it is rebuilt from the content rows on
-  // every boot - one ordered walk, vectors untouched (they hydrated above).
-  // rebuildIndex / reconcileIndexes and their env tokens are unreachable in
-  // this mode: both would clear or re-serialise the vector index.
-  if (inprocSdk) {
+  // BM25 is not persisted: it is rebuilt from the content rows on every boot
+  // - one ordered walk, vectors untouched (they hydrated above).
+  {
     const t0 = performance.now();
-    const r = await rebuildBm25FromContent(inprocSdk.store.db);
+    const r = await rebuildBm25FromContent(sdk.store.db);
     bootLog(
       `BM25 rebuilt from content: ${r.docs} docs of ${r.rows} rows in ` +
         `${Math.round(performance.now() - t0)} ms (read ${Math.round(r.readMs)} ms, ` +
@@ -571,144 +485,34 @@ async function main() {
     );
   }
 
-  // Inproc maintenance routes (plan steps 9.7, 10): mem::backup, and
-  // mem::index-debug-legs when AGENTMEMORY_INDEX_DEBUG=1. Registered before
-  // the gate opens so they exist the moment readyz answers 200.
-  if (inprocSdk) registerMaintenanceFunctions(sdk, inprocSdk.store);
+  // Maintenance routes: mem::backup, and mem::index-debug-legs when
+  // AGENTMEMORY_INDEX_DEBUG=1. Registered before the gate opens so they
+  // exist the moment readyz answers 200.
+  registerMaintenanceFunctions(sdk, sdk.store);
 
-  // Inproc readiness (plan step 6): DB opened, a write probe round-tripped,
-  // vectors hydrated, BM25 rebuilt -> readyz 200 and the 503 gate opens. The
-  // probe uses the same key the health monitor writes. A failure here is
-  // fatal on purpose: systemd restarts a daemon that cannot write its store.
-  if (inprocSdk) {
+  // Readiness: DB opened, a write probe round-tripped, vectors hydrated,
+  // BM25 rebuilt -> readyz 200 and the 503 gate opens. The probe uses the
+  // same key the health monitor writes. A failure here is fatal on purpose:
+  // systemd restarts a daemon that cannot write its store.
+  {
     const stamp = Date.now();
-    inprocSdk.store.set(KV.health, "_probe", { ts: stamp });
-    const back = inprocSdk.store.get(KV.health, "_probe") as { ts?: number } | null;
+    sdk.store.set(KV.health, "_probe", { ts: stamp });
+    const back = sdk.store.get(KV.health, "_probe") as { ts?: number } | null;
     if (back?.ts !== stamp) throw new Error("readiness write probe did not round-trip");
-    inprocSdk.setReady();
+    sdk.setReady();
     bootLog("Ready: /agentmemory/readyz -> 200, routes open");
   }
 
-  // Inproc: the vector fill/repair pass (plan step 5) closes the gap between
-  // the content rows and the vectors table - missing or stale rows are
-  // embedded, orphans pruned. Runs once at boot after readiness (not awaited:
-  // a large backlog after an import must not hold up the listener) and hourly.
-  if (inprocSdk && vectorStore && vectorIndex) {
-    const fill = createIndexFill(inprocSdk.store, vectorStore, vectorIndex);
+  // The vector fill/repair pass closes the gap between the content rows and
+  // the vectors table - missing or stale rows are embedded, orphans pruned.
+  // Runs once at boot after readiness (not awaited: a large backlog after an
+  // import must not hold up the listener) and hourly.
+  if (vectorIndex) {
+    const fill = createIndexFill(sdk.store, vectorStore, vectorIndex);
     registerIndexFillFunction(sdk, fill);
     void fill.run();
     setInterval(() => void fill.run(), 3_600_000).unref();
     bootLog("Vector fill pass: at boot and hourly (mem::index-fill-missing)");
-  }
-
-  // An explicit rebuild token in the environment that the store has not
-  // recorded yet. Idempotent: markRebuildTokenDone below records it, so
-  // the flag can live in a systemd drop-in permanently.
-  const rebuildToken = inproc ? null : await pendingRebuildToken(kv).catch(() => null);
-
-  // bm25Index.size === 0 alone misses the asymmetric case: a boot that
-  // restored BM25 from disk but lost (or never had) the vector index
-  // degrades to BM25-only PERMANENTLY, because nothing ever re-triggers
-  // the rebuild. If a provider exists, an empty vector index is a
-  // rebuild trigger in its own right.
-  const vectorEmpty =
-    vectorIndex !== null &&
-    embeddingProvider !== null &&
-    vectorIndex.size === 0;
-  const needsRebuild =
-    !inproc && (bm25Index.size === 0 || vectorEmpty || rebuildToken !== null);
-
-  // A2 baseline reconcile takes precedence over the ordinary rebuild path:
-  // it does the same repopulation, but offline, fail-closed, and published
-  // as one retained-predecessor checkpoint. Running rebuildIndex as well
-  // would clear the live singletons the reconcile is about to replace.
-  // Inproc ignores the reconcile token: reconcileIndexes serialises and
-  // checkpoints through IndexPersistence, which does not exist here (plan
-  // step 4).
-  const reconcileToken = indexPersistence
-    ? await pendingReconcileToken(kv).catch(() => null)
-    : null;
-  if (reconcileToken && indexPersistence) {
-    const publish = isReconcilePublishEnabled();
-    bootLog(
-      `Index reconcile requested by token "${reconcileToken}" (${publish ? "PUBLISH" : "dry run"})`,
-    );
-    void reconcileIndexes(kv, indexPersistence, { publish })
-      .then(async (report) => {
-        bootLog(
-          `Index reconcile ${publish ? "published" : "dry run"}: ` +
-            `bm25 ${report.bm25.before} -> ${report.bm25.after} ` +
-            `(+${report.bm25.added} / -${report.bm25.dropped}), ` +
-            `vectors ${report.vectors.before} -> ${report.vectors.after}, ` +
-            `${Math.round(report.durationMs / 1000)}s`,
-        );
-        if (report.published) await markReconcileTokenDone(kv, reconcileToken);
-      })
-      .catch((err) => {
-        console.warn(
-          `[agentmemory] Index reconcile FAILED - nothing published:`,
-          err,
-        );
-      });
-  } else if (needsRebuild && !inproc) {
-    if (rebuildToken) {
-      bootLog(`Index rebuild requested by token "${rebuildToken}"`);
-    } else if (vectorEmpty && bm25Index.size > 0) {
-      bootLog(
-        `Vector index empty with an active embedding provider (${embeddingProvider?.name}) — rebuilding`,
-      );
-    }
-    // Fire-and-forget. rebuildIndex iterates every observation across
-    // every session and AWAITS an embedding-provider call per record.
-    // On a large corpus + rate-limited embedding endpoint that can
-    // take HOURS; awaiting it here blocks every subsequent boot step
-    // (including startViewerServer below, leaving the viewer port
-    // unbound for the duration). The index lazily fills in over time
-    // and search degrades gracefully — partial coverage > no viewer
-    // for hours. Errors still surface via the inner .catch.
-    void rebuildIndex(kv)
-      .then(async (indexCount) => {
-        if (indexCount > 0) {
-          bootLog(`Search index rebuilt: ${indexCount} entries`);
-          indexPersistence?.scheduleSave();
-        }
-        // Only after the rebuild actually resolves — a crashed or
-        // aborted rebuild must run again on the next boot.
-        if (rebuildToken) await markRebuildTokenDone(kv, rebuildToken);
-      })
-      .catch((err) => {
-        console.warn(`[agentmemory] Failed to rebuild search index:`, err);
-      });
-  } else if (!inproc) {
-    // Backfill memories into BM25 for users upgrading from <0.9.5: prior
-    // versions of mem::remember never indexed memories, so the persisted
-    // BM25 covers observations only and `memory_smart_search` returns
-    // empty for everything saved via memory_save (#257). Walk KV.memories
-    // and add the ones missing from the restored index. Idempotent on
-    // re-runs because SearchIndex.has() short-circuits already-indexed
-    // ids.
-    try {
-      const memories = await kv.list<import("./types.js").Memory>(KV.memories);
-      let backfilled = 0;
-      for (const memory of memories) {
-        if (memory.isLatest === false) continue;
-        if (!memory.title || !memory.content) continue;
-        if (bm25Index.has(memory.id)) continue;
-        bm25Index.add(memoryToIndexDoc(memory));
-        backfilled++;
-      }
-      if (backfilled > 0) {
-        bootLog(
-          `Backfilled ${backfilled} memories into BM25 (legacy index gap)`,
-        );
-        indexPersistence?.scheduleSave();
-      }
-    } catch (err) {
-      console.warn(
-        `[agentmemory] Failed to backfill memories into BM25:`,
-        err,
-      );
-    }
   }
 
   // Backfill the graph read side-indexes for corpora that predate them.
@@ -830,11 +634,7 @@ async function main() {
     console.log(`\n[agentmemory] Shutting down...`);
     healthMonitor.stop();
     dedupMap.stop();
-    indexPersistence?.stop();
     await new Promise<void>((resolve) => viewerServer.close(() => resolve()));
-    await indexPersistence?.save().catch((err) => {
-      console.warn(`[agentmemory] Failed to save index on shutdown:`, err);
-    });
     await sdk.shutdown();
     clearWorkerPidfile();
     process.exit(0);

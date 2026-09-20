@@ -27,7 +27,6 @@ import type {
 import { importOrigin } from "../types.js";
 import { normalizeAccessLog } from "./access-tracker.js";
 import { KV } from "../state/schema.js";
-import { checkPayloadFrameSize } from "../state/frame-guard.js";
 import {
   indexGraphEdge,
   indexGraphNode,
@@ -191,19 +190,6 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         memories: memories.length,
         summaries: summaries.length,
       });
-
-      // Only session collections page on ?maxSessions/?offset, so a large
-      // store can exceed the transport cap even at ?maxSessions=1.
-      const oversized = checkPayloadFrameSize(
-        exportData,
-        "narrow the range with ?maxSessions / ?offset, or export fewer collections; the non-session collections (memories, graph, semantic, actions, lessons, ...) are not yet paginated",
-      );
-      if (oversized) {
-        logger.warn("Export exceeds transport frame limit", {
-          bytes: oversized.bytes,
-        });
-        return oversized;
-      }
 
       return exportData;
     },

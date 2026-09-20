@@ -227,14 +227,10 @@ export function getEnvVar(key: string): string | undefined {
   return getMergedEnv()[key];
 }
 
-// `AGENTMEMORY_ENGINE=inproc` replaces the iii engine with the in-process
-// runtime in src/engine/inproc: state lives in a node:sqlite file, the REST
-// and stream ports are bound by this process, and no engine binary,
-// iii-config.yaml or worker bus is involved. Anything else keeps the stock
-// iii path, which stays compiling for one release.
-export function isInprocEngine(): boolean {
-  return (getEnvVar("AGENTMEMORY_ENGINE") ?? "").toLowerCase() === "inproc";
-}
+// `AGENTMEMORY_ENGINE` is accepted and ignored. There is one Engine — the
+// in-process runtime in src/engine/inproc — so nothing selects between
+// runtimes any more (ADR 0001). The variable stays unread rather than
+// rejected so an existing environment file keeps loading untouched.
 
 export function getSqlitePath(): string {
   return (
