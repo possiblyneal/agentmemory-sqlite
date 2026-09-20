@@ -246,6 +246,12 @@ export interface HealthSnapshot {
   uptimeSeconds: number;
   kvConnectivity?: { status: string; latencyMs?: number; error?: string };
   status: "healthy" | "degraded" | "critical";
+  // What the latest sample alone said, before hysteresis. `alerts` describes
+  // this reading while `status` is the verdict published to a supervisor, so
+  // the two legitimately disagree while a run accumulates - a reader shown
+  // alerts beside `healthy` needs this to tell a lagging verdict from a bug.
+  // Absent on snapshots stored by builds that predate the field.
+  sampledStatus?: "healthy" | "degraded" | "critical";
   alerts: string[];
   notes?: string[];
 }

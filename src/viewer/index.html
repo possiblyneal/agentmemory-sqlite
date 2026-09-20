@@ -1613,6 +1613,12 @@
 
       if (snap.alerts && snap.alerts.length > 0) {
         html += '<div class="card" style="margin-bottom:16px;border-color:var(--accent);border-width:2px;"><div class="card-title" style="color:var(--accent);border-bottom-color:var(--accent);">Alerts (' + snap.alerts.length + ')</div>';
+        // Alerts describe the latest sample; the status dot shows the verdict
+        // published to a supervisor, which only moves after a run of samples
+        // agrees. Say so, or alerts beside a healthy dot read as a bug.
+        if (snap.sampledStatus && snap.sampledStatus !== healthStatus) {
+          html += '<div style="font-size:11px;color:var(--ink-muted);padding:4px 0;font-family:var(--font-ui);">Latest sample reads <strong>' + esc(snap.sampledStatus) + '</strong>; the published verdict stays <strong>' + esc(healthStatus) + '</strong> until enough samples agree.</div>';
+        }
         snap.alerts.forEach(function(alRaw) {
           var al = humanizeHealthFlag(alRaw);
           html += '<div style="font-size:12px;color:var(--accent);padding:4px 0;border-bottom:1px solid var(--border-light);font-family:var(--font-ui);">' + esc(al) + '</div>';

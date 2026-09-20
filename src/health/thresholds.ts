@@ -2,8 +2,6 @@ import type { HealthSnapshot } from "../types.js";
 import { getHealthTuning } from "../config.js";
 import type { HealthTuning } from "../config.js";
 
-type ThresholdConfig = Omit<HealthTuning, "assertSamples" | "clearSamples">;
-
 export type HealthStatus = "healthy" | "degraded" | "critical";
 
 // The published verdict is a restart signal to an external supervisor, so it
@@ -30,18 +28,21 @@ const SEVERITY: Record<HealthStatus, number> = {
 
 export function evaluateHealth(
   snapshot: HealthSnapshot,
-  config: Partial<ThresholdConfig> = {},
+  config: Partial<HealthTuning> = {},
   prior?: HealthHysteresis,
 ): {
   status: HealthStatus;
+  // What this sample alone says, before hysteresis. `alerts` describes it,
+  // `status` is the verdict published to a supervisor, and while a run
+  // accumulates the two disagree on purpose.
+  sampled: HealthStatus;
   alerts: string[];
   notes: string[];
   hysteresis: HealthHysteresis;
 } {
   // Environment first, explicit config last: a caller that names a threshold
   // means it (#1172).
-  const tuning = getHealthTuning();
-  const cfg = { ...tuning, ...config };
+  const cfg = { ...getHealthTuning(), ...config };
   const alerts: string[] = [];
   const notes: string[] = [];
   let critical = false;
@@ -109,6 +110,7 @@ export function evaluateHealth(
   if (!prior) {
     return {
       status: sampled,
+      sampled,
       alerts,
       notes,
       hysteresis: { published: sampled, run: 0, clearing: false },
@@ -118,6 +120,7 @@ export function evaluateHealth(
   if (sampled === prior.published) {
     return {
       status: prior.published,
+      sampled,
       alerts,
       notes,
       hysteresis: { published: prior.published, run: 0, clearing: false },
@@ -130,7 +133,7 @@ export function evaluateHealth(
   // critical -> degraded de-escalates the restart signal and has to earn the
   // same patience as clearing it outright.
   const clearing = SEVERITY[sampled] < SEVERITY[prior.published];
-  const needed = clearing ? tuning.clearSamples : tuning.assertSamples;
+  const needed = clearing ? cfg.clearSamples : cfg.assertSamples;
   // The run counts samples that disagree with the published verdict, not
   // identical consecutive samples. A daemon oscillating degraded <-> critical
   // disagrees on every sample; counting identity would reset the run on each
@@ -144,6 +147,7 @@ export function evaluateHealth(
   const published = run >= needed ? sampled : prior.published;
   return {
     status: published,
+    sampled,
     alerts,
     notes,
     hysteresis: {
