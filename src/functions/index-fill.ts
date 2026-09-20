@@ -15,7 +15,7 @@
 //
 // Single-flight: a second invocation while one runs returns immediately with
 // `skipped: true`.
-import type { ISdk } from "iii-sdk";
+import type { ISdk } from "../engine/types.js";
 import type { SqliteState } from "../engine/inproc/state.js";
 import type { SqliteVectorStore } from "../engine/inproc/vectors.js";
 import type { VectorIndex } from "../state/vector-index.js";

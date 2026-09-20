@@ -16,7 +16,7 @@
 import { existsSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { ApiRequest, ISdk } from "iii-sdk";
+import type { ApiRequest, ISdk } from "../engine/types.js";
 
 import { getSqlitePath } from "../config.js";
 import type { SqliteState } from "../engine/inproc/state.js";

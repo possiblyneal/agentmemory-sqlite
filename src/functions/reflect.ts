@@ -1,4 +1,4 @@
-import type { ISdk } from "iii-sdk";
+import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, fingerprintId } from "../state/schema.js";
 import type {
