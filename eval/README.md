@@ -2,8 +2,6 @@
 
 Public benchmarks for agentmemory's hybrid memory stack (BM25 + embeddings + consolidation + graph).
 
-The sandbox these benchmarks run in is upstream's two-engine runtime, not this fork's: `eval/scripts/sandbox.sh` requires the iii engine binary on `PATH` and writes an iii config, so a run does not exercise this fork's single in-process Engine ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)).
-
 Two families, both reproducible:
 
 - **LongMemEval** — public 500-question retrieval benchmark over multi-session chat

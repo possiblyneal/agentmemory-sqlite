@@ -16,8 +16,6 @@ package from npm and still run the iii binary, so they deploy
 upstream's two-engine runtime rather than this fork's single
 in-process Engine ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)).
 
-These templates are upstream's two-engine runtime, not this fork's: they install the published `@agentmemory/agentmemory` package from npm and run the iii engine binary alongside it, so none of this fork's single in-process Engine ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)) applies to a container built from them.
-
 | Platform | Pitch | Cost floor |
 |----------|-------|------------|
 | [fly.io](./fly/README.md) | Single machine with auto-stop. Cheapest idle cost on a managed host; cold-start on first request after sleep. | ~$0.15/month at full idle |

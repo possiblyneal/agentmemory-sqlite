@@ -789,8 +789,6 @@ package from npm and still run the iii binary, so they deploy
 upstream's two-engine runtime rather than the single in-process
 Engine described in [Architecture](#architecture).
 
-These templates are upstream's two-engine runtime, not this fork's: they install the published `@agentmemory/agentmemory` package from npm and run the iii engine binary alongside it, so none of this fork's single in-process Engine ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)) applies to a container built from them.
-
 <p>
   <a href="https://fly.io/launch?repo=https://github.com/rohitg00/agentmemory&path=deploy/fly"><img src="https://img.shields.io/badge/Deploy%20to-fly.io-8b5cf6?style=for-the-badge&logo=fly.io&logoColor=white" alt="Deploy to fly.io" /></a>
   <a href="https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Frohitg00%2Fagentmemory&rootDirectory=deploy%2Frailway"><img src="https://img.shields.io/badge/Deploy%20to-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white" alt="Deploy to Railway" /></a>
