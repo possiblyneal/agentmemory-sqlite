@@ -11,7 +11,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 - **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100.
 - **Build**: TypeScript → ESM via tsdown, output to `dist/`
 - **Test**: vitest (`npm test` excludes integration tests)
-- **Runtime floor**: Node >=22.13. `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg.
+- **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
 
@@ -148,9 +148,9 @@ Nothing is published from here — there is no release workflow and `dist/` is g
 the only install path is clone → `npm install --legacy-peer-deps` → `npm run build` →
 `npm link`. User-facing docs (`README.md`, `INSTALL_FOR_AGENTS.md`, `SECURITY.md`) must
 describe that path, never `npx`/`npm install -g @agentmemory/*`, which resolve to upstream's
-code. `plugin/.mcp.json` and `plugin/.mcp.copilot.json` still spawn `npx -y @agentmemory/mcp`
-on purpose: that shim is a proxy, and in proxy mode the tool surface comes from this fork's
-running server. The translated `READMEs/` were deleted rather than kept stale — do not
+code. The one exception is the `@agentmemory/mcp` shim wherever it is invoked as a proxy —
+`plugin/.mcp.json`, `plugin/.mcp.copilot.json` and the README's MCP-standalone blocks — because
+in proxy mode the tool surface comes from this fork's running server, not from the shim. The translated `READMEs/` were deleted rather than kept stale — do not
 re-add translations without a way to keep them current.
 
 ## Current Stats (v0.9.29)
