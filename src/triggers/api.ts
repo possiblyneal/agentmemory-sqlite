@@ -4,6 +4,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
+import { checkPayloadSize } from "../state/payload-bound.js";
 import { getLatestHealth } from "../health/monitor.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import type { ResilientProvider } from "../providers/resilient.js";
@@ -1330,6 +1331,11 @@ export function registerApiTriggers(
         function_id: "mem::export",
         payload,
       });
+      // mem::export refuses an oversized payload rather than serializing it;
+      // over HTTP that refusal is a 413, not a 200 carrying an error body.
+      if ((result as { oversized?: boolean } | null)?.oversized) {
+        return { status_code: 413, body: result };
+      }
       return { status_code: 200, body: result };
     },
   );
@@ -2959,6 +2965,12 @@ export function registerApiTriggers(
           body.graphEdges = df(graphEdges, "createdAt");
         }
       }
+      // Fail an oversized export with 413 rather than on heap.
+      const oversized = checkPayloadSize(
+        body,
+        "use ?since to fetch only changes after a timestamp, or ?project to scope the export",
+      );
+      if (oversized) return { status_code: 413, body: oversized };
       return { status_code: 200, body };
     },
   );

@@ -34,6 +34,7 @@ import {
 } from "../state/graph-indexes.js";
 import { graphWritesDisabled } from "./graph.js";
 import { capRecordProvenance } from "./graph-provenance.js";
+import { checkPayloadSize } from "../state/payload-bound.js";
 import { StateKV } from "../state/kv.js";
 import { VERSION } from "../version.js";
 import { recordAudit } from "./audit.js";
@@ -191,6 +192,17 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         memories: memories.length,
         summaries: summaries.length,
       });
+
+      // Only session collections page on ?maxSessions/?offset, so a large
+      // store can outgrow the response bound even at ?maxSessions=1.
+      const oversized = checkPayloadSize(
+        exportData,
+        "narrow the range with ?maxSessions / ?offset, or export fewer collections; the non-session collections (memories, graph, semantic, actions, lessons, ...) are not yet paginated",
+      );
+      if (oversized) {
+        logger.warn("Export exceeds the response bound", { bytes: oversized.bytes });
+        return oversized;
+      }
 
       return exportData;
     },
