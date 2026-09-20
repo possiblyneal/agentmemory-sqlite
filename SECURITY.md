@@ -59,11 +59,9 @@ This fork is installed by cloning and building from source — there is no tarba
 
 - The build is reproduced from this repository alone. Without the lockfile, `git archive` drops it and a build host resolves a different dependency tree than the one that was tested.
 - The pin is the supply-chain control: what you build is what CI tested, not whatever npm resolves the day you clone.
-- CI deliberately does not use `npm ci` — see below.
+- CI installs with `npm ci`, which fails rather than silently resolving something else if the lockfile and `package.json` disagree.
 
-If you ship agentmemory inside a hardened pipeline that requires reproducible installs, clone at a pinned commit, `npm install --legacy-peer-deps` in a controlled environment, audit `node_modules/` once at that point, and rebuild internally.
-
-CI runs a single `npm install --legacy-peer-deps --no-audit --no-fund` per job rather than `npm ci`, because Node 24+'s stricter npm rejects rolldown's optional platform bindings that the lockfile does not fully enumerate.
+If you ship agentmemory inside a hardened pipeline that requires reproducible installs, clone at a pinned commit, `npm ci` in a controlled environment, audit `node_modules/` once at that point, and rebuild internally.
 
 Supply-chain monitoring we already do:
 

@@ -426,7 +426,6 @@ function printReadyHint(): void {
   // required" blocks, so the visual language stays consistent.
   p.note(lines.join("\n"), `agentmemory v${c.accent(VERSION)}`);
 
-  // Pick a runnable form for the suggested next-step. Users invoked
   process.stdout.write(`\n${c.dim("Try:")} ${c.cmd("agentmemory demo")}\n`);
 }
 

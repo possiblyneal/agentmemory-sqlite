@@ -26,7 +26,7 @@ If it's a feature: describe the user problem before the implementation. "I could
    - `feat/<short-name>` for features
    - `fix/<issue-number>-<short-name>` for bug fixes
    - `docs/<topic>`, `refactor/<topic>`, `chore/<topic>` for the rest
-2. `npm install` — you need Node >=22.13 (the Engine imports `node:sqlite`, unflagged from 22.13).
+2. `npm ci` — you need Node >=22.13 (the Engine imports `node:sqlite`, unflagged from 22.13).
 3. `npm run build` — TypeScript must compile clean.
 4. `npm test` — the full test suite must pass. The one integration test under `test/integration.test.ts` needs a live server on `:3111` and is fine to skip locally.
 5. Commit with sign-off. Rebase over tiny fixup commits so the history stays readable.
