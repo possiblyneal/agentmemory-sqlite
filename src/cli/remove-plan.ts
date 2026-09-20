@@ -1,8 +1,7 @@
 // `agentmemory remove` — destruction plan.
 //
 // Generating the plan is a pure function of the on-disk state (which files
-// exist, whether ~/.local/bin/iii matches the version we installed, the
-// connect-manifest contents). All side effects live in src/cli.ts; this
+// exist, the connect-manifest contents). All side effects live in src/cli.ts; this
 // module owns only the planning logic so it's unit-testable without
 // touching $HOME.
 //
@@ -39,13 +38,6 @@ export type RemoveOptions = {
 export type RemoveContext = {
   /** $HOME (so tests can sandbox). */
   home: string;
-  /** Pinned engine version we expect ~/.local/bin/iii to match. */
-  pinnedVersion: string;
-  /**
-   * `iii --version` result for ~/.local/bin/iii, or null if it's missing /
-   * unreadable / not executable. Passed in so the plan module stays pure.
-   */
-  localBinIiiVersion: string | null;
   /** Loaded connect manifest, or null if missing. */
   connectManifest: ConnectManifest | null;
 };
@@ -67,10 +59,16 @@ export type ConnectManifest = {
 };
 
 export function pidfilePath(home: string): string {
+  return join(home, ".agentmemory", "worker.pid");
+}
+
+// Leftovers from the removed engine runtime. Nothing writes them any more,
+// but an install that predates ADR 0001 still has them on disk.
+export function legacyEnginePidfilePath(home: string): string {
   return join(home, ".agentmemory", "iii.pid");
 }
 
-export function enginePath(home: string): string {
+export function legacyEngineStatePath(home: string): string {
   return join(home, ".agentmemory", "engine-state.json");
 }
 
@@ -96,14 +94,14 @@ function iiiBinFile(): string {
   return process.platform === "win32" ? "iii.exe" : "iii";
 }
 
-// Legacy install location. Older agentmemory versions wrote the pinned iii
-// engine here. Kept so `agentmemory remove` can still clean up after them.
+// Legacy install location. Older agentmemory versions wrote the iii engine
+// here. Kept so `agentmemory remove` can still clean up after them.
 export function legacyLocalBinIii(home: string): string {
   return join(home, ".local", "bin", iiiBinFile());
 }
 
-// Current private install location. Lives under ~/.agentmemory/ so it
-// stays isolated from any user-managed iii on PATH.
+// The private install location older agentmemory versions used for the iii
+// engine. Nothing writes it now; remove still cleans it up.
 export function privateIiiBin(home: string): string {
   return join(home, ".agentmemory", "bin", iiiBinFile());
 }
@@ -138,15 +136,15 @@ export function buildRemovePlan(
   ctx: RemoveContext,
   options: RemoveOptions,
 ): RemovePlanItem[] {
-  const { home, pinnedVersion, localBinIiiVersion, connectManifest } = ctx;
+  const { home, connectManifest } = ctx;
   const plan: RemovePlanItem[] = [];
 
   plan.push({
-    id: "stop-engine",
-    description: "Stop running iii-engine (if any) cleanly",
+    id: "stop-daemon",
+    description: "Stop the running agentmemory daemon (if any) cleanly",
     path: null,
     alwaysAsk: false,
-    applicable: pathExists(pidfilePath(home)) || pathExists(enginePath(home)),
+    applicable: pathExists(pidfilePath(home)),
     sizeBytes: -1,
   });
 
@@ -160,12 +158,21 @@ export function buildRemovePlan(
   });
 
   plan.push({
-    id: "engine-state",
-    description: "Delete engine-state.json",
-    path: enginePath(home),
+    id: "legacy-engine-pidfile",
+    description: "Delete iii.pid (leftover from the removed engine runtime)",
+    path: legacyEnginePidfilePath(home),
     alwaysAsk: false,
-    applicable: pathExists(enginePath(home)),
-    sizeBytes: safeSize(enginePath(home)),
+    applicable: pathExists(legacyEnginePidfilePath(home)),
+    sizeBytes: safeSize(legacyEnginePidfilePath(home)),
+  });
+
+  plan.push({
+    id: "legacy-engine-state",
+    description: "Delete engine-state.json (leftover from the removed engine runtime)",
+    path: legacyEngineStatePath(home),
+    alwaysAsk: false,
+    applicable: pathExists(legacyEngineStatePath(home)),
+    sizeBytes: safeSize(legacyEngineStatePath(home)),
   });
 
   // .env holds the user's API keys. Always ask before deleting, even on
@@ -212,15 +219,14 @@ export function buildRemovePlan(
     }
   }
 
-  // Private install (~/.agentmemory/bin/iii) — agentmemory owns this path,
-  // so it's always safe to remove. The version check still gates the
-  // legacy ~/.local/bin/iii path which may be a user-managed install we
-  // don't own.
+  // ~/.agentmemory/bin/iii — agentmemory owns this path, so it's always
+  // safe to remove. The ~/.local/bin/iii path may be a user-managed install
+  // we don't own, so that one always asks.
   const privIii = privateIiiBin(home);
   if (pathExists(privIii)) {
     plan.push({
       id: "private-bin-iii",
-      description: `Delete ~/.agentmemory/bin/iii (agentmemory's private install)`,
+      description: `Delete ~/.agentmemory/bin/iii (leftover engine binary agentmemory installed)`,
       path: privIii,
       alwaysAsk: false,
       applicable: true,
@@ -228,21 +234,16 @@ export function buildRemovePlan(
     });
   }
 
-  // Legacy ~/.local/bin/iii — only remove if it matches the version we
-  // installed. Older agentmemory wrote here; newer versions don't but the
-  // file may still be a leftover from a previous install.
-  // Heuristic: spawn `iii --version`; if it returns pinnedVersion, safe to
-  // remove. Otherwise mark `alwaysAsk` so the operator confirms explicitly.
+  // Legacy ~/.local/bin/iii — this may be a user-managed install that
+  // predates agentmemory, so it always asks before deleting.
   const legacyIii = legacyLocalBinIii(home);
   if (pathExists(legacyIii)) {
-    const matches = localBinIiiVersion === pinnedVersion;
     plan.push({
       id: "legacy-local-bin-iii",
-      description: matches
-        ? `Delete ~/.local/bin/iii (legacy install location, matches pinned v${pinnedVersion})`
-        : `Delete ~/.local/bin/iii (legacy install location, version ${localBinIiiVersion ?? "unknown"} != pinned v${pinnedVersion}) — will ask`,
+      description:
+        "Delete ~/.local/bin/iii (legacy engine install location) — will ask",
       path: legacyIii,
-      alwaysAsk: !matches,
+      alwaysAsk: true,
       applicable: true,
       sizeBytes: safeSize(legacyIii),
     });

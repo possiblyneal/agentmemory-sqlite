@@ -20,8 +20,6 @@ let sandbox: string;
 function ctx(overrides: Partial<RemoveContext> = {}): RemoveContext {
   return {
     home: sandbox,
-    pinnedVersion: "0.11.2",
-    localBinIiiVersion: null,
     connectManifest: null,
     ...overrides,
   };
@@ -52,14 +50,23 @@ describe("buildRemovePlan", () => {
     expect(applicable.length).toBe(0);
   });
 
-  it("includes pidfile + engine-state when both exist", () => {
+  it("includes stop-daemon + pidfile when the worker pidfile exists", () => {
+    touch(".agentmemory/worker.pid", "12345\n");
+    const plan = buildRemovePlan(ctx(), { force: false, keepData: false });
+    const ids = plan.filter((p) => p.applicable).map((p) => p.id);
+    expect(ids).toContain("stop-daemon");
+    expect(ids).toContain("pidfile");
+  });
+
+  it("includes the leftover engine files when they exist", () => {
     touch(".agentmemory/iii.pid", "12345\n");
     touch(".agentmemory/engine-state.json", "{}");
     const plan = buildRemovePlan(ctx(), { force: false, keepData: false });
     const ids = plan.filter((p) => p.applicable).map((p) => p.id);
-    expect(ids).toContain("stop-engine");
-    expect(ids).toContain("pidfile");
-    expect(ids).toContain("engine-state");
+    expect(ids).toContain("legacy-engine-pidfile");
+    expect(ids).toContain("legacy-engine-state");
+    // Leftovers from the removed runtime are not a running daemon.
+    expect(ids).not.toContain("stop-daemon");
   });
 
   it("marks .env as alwaysAsk", () => {
@@ -109,27 +116,14 @@ describe("buildRemovePlan", () => {
     expect(connectItems.every((p) => p.applicable)).toBe(true);
   });
 
-  it("local-bin/iii is alwaysAsk when version does not match", () => {
+  // ~/.local/bin/iii may predate agentmemory and be user-managed, so it
+  // always asks — unlike ~/.agentmemory/bin/iii, which agentmemory owns.
+  it("local-bin/iii is alwaysAsk", () => {
     touch(".local/bin/iii", "fakebin");
-    const plan = buildRemovePlan(
-      ctx({ localBinIiiVersion: "9.9.9" }),
-      { force: false, keepData: false },
-    );
+    const plan = buildRemovePlan(ctx(), { force: false, keepData: false });
     const item = plan.find((p) => p.id === "legacy-local-bin-iii")!;
     expect(item.applicable).toBe(true);
     expect(item.alwaysAsk).toBe(true);
-  });
-
-  it("local-bin/iii is auto-fixable when version matches pinned", () => {
-    touch(".local/bin/iii", "fakebin");
-    const plan = buildRemovePlan(
-      ctx({ localBinIiiVersion: "0.11.2" }),
-      { force: false, keepData: false },
-    );
-    const item = plan.find((p) => p.id === "legacy-local-bin-iii")!;
-    expect(item.applicable).toBe(true);
-    expect(item.alwaysAsk).toBe(false);
-    expect(item.description).toContain("matches pinned");
   });
 
   it("local-bin/iii absent: no plan entry created", () => {
@@ -145,13 +139,13 @@ describe("buildRemovePlan", () => {
     expect(item).toBeDefined();
     expect(item.applicable).toBe(true);
     expect(item.alwaysAsk).toBe(false);
-    expect(item.description).toContain("private install");
+    expect(item.description).toContain("~/.agentmemory/bin/iii");
   });
 });
 
 describe("formatPlan", () => {
   it("renders applicable items with numbers", () => {
-    touch(".agentmemory/iii.pid", "1");
+    touch(".agentmemory/worker.pid", "1");
     touch(".agentmemory/engine-state.json", "{}");
     const plan = buildRemovePlan(ctx(), { force: false, keepData: false });
     const out = formatPlan(plan);

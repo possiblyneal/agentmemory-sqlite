@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-// #640 + #474: stop must also kill the worker process, not just the
-// iii engine. We expose the worker pidfile from src/index.ts and read it
-// from src/cli.ts. Static check that both files agree on the path
-// (~/.agentmemory/worker.pid) and that stop reads it.
+// #640 + #474: the daemon records its pid in ~/.agentmemory/worker.pid so
+// stop can reap it. Static check that src/index.ts writes the pidfile,
+// src/cli.ts reads it in runStop, and both agree on the path.
 describe("stop reaps the worker process (#640, #474)", () => {
-  it("src/index.ts writes worker.pid alongside iii.pid", () => {
+  it("src/index.ts writes worker.pid on boot", () => {
     const source = readFileSync("src/index.ts", "utf-8");
     expect(source).toMatch(/workerPidfilePath\(\)/);
     expect(source).toMatch(/"worker\.pid"/);
@@ -20,10 +19,11 @@ describe("stop reaps the worker process (#640, #474)", () => {
     expect(source).toMatch(/"worker\.pid"/);
     expect(source).toMatch(/readWorkerPidfile\(\)/);
     expect(source).toMatch(/clearWorkerPidfile\(\)/);
-    // Verify stop wiring: workerCandidates set is built from the pidfile
-    // and signaled alongside the engine pids.
-    expect(source).toMatch(/workerCandidates/);
-    expect(source).toMatch(/Stopping agentmemory worker/);
+    // Verify stop wiring: the pid read from the file is signaled, and the
+    // pidfile is cleared afterwards.
+    const stopBody = source.slice(source.indexOf("async function runStop()"));
+    expect(stopBody).toMatch(/const workerPid = readWorkerPidfile\(\)/);
+    expect(stopBody).toMatch(/stopWorkerPid\(workerPid, \d+\)/);
   });
 
   it("both files agree on the pidfile path: ~/.agentmemory/worker.pid", () => {

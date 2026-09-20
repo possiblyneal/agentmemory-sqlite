@@ -118,12 +118,10 @@ import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
-// #640 + #474: the worker process (this file) is spawned by iii-exec
-// inside the engine. When `agentmemory stop` kills only the engine pid,
-// this worker can survive (detached spawn, signal not propagated, or a
-// wrapper script keeps it running) and reconnects to the next engine as
-// a duplicate worker. Write the worker pid alongside iii.pid so
-// `agentmemory stop` can reap us too.
+// #640 + #474: record this process's pid so `agentmemory stop` and
+// `agentmemory doctor` can identify the daemon. Without it they can only
+// scan the REST port, which cannot tell our `node` process apart from a
+// tunnel or a stray dev server holding the same port.
 function workerPidfilePath(): string {
   return join(homedir(), ".agentmemory", "worker.pid");
 }
@@ -133,7 +131,7 @@ function writeWorkerPidfile(): void {
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, `${process.pid}\n`, { encoding: "utf-8" });
   } catch {
-    // best-effort; stop still has the engine pidfile + port scan fallback
+    // best-effort; stop still has the port scan fallback
   }
 }
 function clearWorkerPidfile(): void {
@@ -142,9 +140,9 @@ function clearWorkerPidfile(): void {
   } catch {}
 }
 
-// Top-level safety net for iii-engine invocation timeouts (issue #204).
+// Top-level safety net for state invocation timeouts (issue #204).
 // Under sustained write load (e.g. Claude Code hooks across many
-// projects) `state::set` can occasionally exceed the SDK's 30s timeout.
+// projects) `state::set` can occasionally exceed its 30s timeout.
 // We don't want one such timeout to terminate the long-lived memory
 // service — the rejection is surfaced to the relevant call site via
 // .catch() where it matters; everything else is logged-and-continued.

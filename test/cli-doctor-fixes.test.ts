@@ -22,9 +22,7 @@ function stubCtx(overrides: Partial<DoctorContext> = {}): DoctorContext {
     baseUrl: "http://localhost:3111",
     viewerUrl: "http://localhost:3113",
     envPath: "/tmp/test/.agentmemory/.env",
-    pidfilePath: "/tmp/test/.agentmemory/iii.pid",
-    enginePath: "/tmp/test/.agentmemory/engine-state.json",
-    pinnedVersion: "0.11.2",
+    pidfilePath: "/tmp/test/.agentmemory/worker.pid",
     ...overrides,
   };
 }
@@ -35,16 +33,12 @@ function stubEffects(overrides: Partial<DoctorEffects> = {}): DoctorEffects {
     readEnvFile: () => ({ ANTHROPIC_API_KEY: "sk-ant-real-key-value" }),
     pidfileExists: () => false,
     pidfilePidIsAlive: () => null,
-    findIiiBinary: () => "/Users/test/.local/bin/iii",
-    localBinIiiPath: () => "/Users/test/.local/bin/iii",
-    iiiBinaryVersion: () => "0.11.2",
     viewerReachable: async () => true,
     runInit: async () => ({ ok: true, message: "wrote .env" }),
     openEditor: async () => ({ ok: true, message: "saved" }),
-    runIiiInstaller: async () => ({ ok: true, message: "installed" }),
     runStop: async () => ({ ok: true, message: "stopped" }),
     runStart: async () => ({ ok: true, message: "started" }),
-    clearEnginePidAndState: () => {},
+    clearDaemonPidfile: () => {},
     ...overrides,
   };
 }
@@ -53,11 +47,9 @@ describe("doctor v2 diagnostic catalog", () => {
   it("exports a stable list of diagnostic ids", () => {
     expect(DIAGNOSTIC_IDS).toContain("env-missing");
     expect(DIAGNOSTIC_IDS).toContain("no-llm-provider-key");
-    expect(DIAGNOSTIC_IDS).toContain("engine-version-mismatch");
     expect(DIAGNOSTIC_IDS).toContain("viewer-unreachable");
     expect(DIAGNOSTIC_IDS).toContain("stale-pidfile");
     expect(DIAGNOSTIC_IDS).toContain("env-placeholder-keys");
-    expect(DIAGNOSTIC_IDS).toContain("iii-on-path-not-local-bin");
   });
 
   it("every diagnostic has check, fix, message, and fixPreview", () => {
@@ -112,24 +104,6 @@ describe("doctor v2 diagnostic catalog", () => {
     expect(status.ok).toBe(true);
   });
 
-  it("engine-version-mismatch fails when iii reports the wrong version", async () => {
-    const diagnostics = buildDiagnostics(
-      stubEffects({ iiiBinaryVersion: () => "0.99.99" }),
-    );
-    const check = diagnostics.find((d) => d.id === "engine-version-mismatch")!;
-    const status = await check.check(stubCtx());
-    expect(status.ok).toBe(false);
-    expect(status.detail).toContain("0.99.99");
-    expect(status.detail).toContain("0.11.2");
-  });
-
-  it("engine-version-mismatch passes when iii matches pinned version", async () => {
-    const diagnostics = buildDiagnostics(stubEffects());
-    const check = diagnostics.find((d) => d.id === "engine-version-mismatch")!;
-    const status = await check.check(stubCtx());
-    expect(status.ok).toBe(true);
-  });
-
   it("viewer-unreachable fails when viewer probe returns false", async () => {
     const diagnostics = buildDiagnostics(
       stubEffects({ viewerReachable: async () => false }),
@@ -167,19 +141,6 @@ describe("doctor v2 diagnostic catalog", () => {
     const status = await check.check(stubCtx());
     expect(status.ok).toBe(false);
     expect(status.detail).toContain("ANTHROPIC_API_KEY");
-  });
-
-  it("iii-on-path-not-local-bin warns when iii lives in another location", async () => {
-    const diagnostics = buildDiagnostics(
-      stubEffects({
-        findIiiBinary: () => "/opt/homebrew/bin/iii",
-        localBinIiiPath: () => "/Users/test/.local/bin/iii",
-      }),
-    );
-    const check = diagnostics.find((d) => d.id === "iii-on-path-not-local-bin")!;
-    const status = await check.check(stubCtx());
-    expect(status.ok).toBe(false);
-    expect(check.manualOnly).toBe(true);
   });
 
   it("dryRunPlan lists each failing diagnostic with the fix preview", () => {
