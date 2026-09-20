@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import type { GraphNode, GraphEdge, MemoryProvider } from "../src/types.js";
 
 vi.mock("../src/logger.js", () => ({
@@ -377,5 +377,89 @@ describe("TemporalGraph", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("No observations provided");
+  });
+  // #1168: the temporal path has its own create and merge sites; they are
+  // bounded on the same terms as the graph path.
+  describe("bounded provenance (#1168)", () => {
+    const ORIG_CAP = process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+
+    afterEach(() => {
+      if (ORIG_CAP === undefined) delete process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+      else process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = ORIG_CAP;
+    });
+
+    const RESPONSE = `<temporal_graph>
+  <entities>
+    <entity type="person" name="Alice"><property key="role">engineer</property></entity>
+    <entity type="organization" name="Acme Corp"><property key="industry">tech</property></entity>
+  </entities>
+  <relationships>
+    <relationship type="works_at" source="Alice" target="Acme Corp" weight="0.9">
+      <reasoning>Alice joined Acme Corp as an engineer</reasoning>
+    </relationship>
+  </relationships>
+</temporal_graph>`;
+
+    const obs = (id: string) => ({
+      id,
+      title: "Alice at Acme",
+      narrative: "Alice works at Acme Corp as an engineer",
+      concepts: ["career"],
+      files: [],
+      type: "conversation",
+      timestamp: "2024-01-01T00:00:00Z",
+    });
+
+    const setup = async () => {
+      const { registerTemporalGraphFunctions } = await import(
+        "../src/functions/temporal-graph.js"
+      );
+      const provider: MemoryProvider = {
+        name: "test",
+        compress: vi.fn().mockResolvedValue(RESPONSE),
+        summarize: vi.fn().mockResolvedValue(RESPONSE),
+      };
+      const sdk = mockSdk();
+      const kv = mockKV();
+      registerTemporalGraphFunctions(sdk as never, kv as never, provider);
+      return { sdk, kv };
+    };
+
+    it("bounds a create whose batch is larger than the cap", async () => {
+      process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "2";
+      const { sdk, kv } = await setup();
+
+      await sdk.trigger("mem::temporal-graph-extract", {
+        observations: ["obs_1", "obs_2", "obs_3", "obs_4"].map(obs),
+      });
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) {
+        expect(node.sourceObservationIds).toEqual(["obs_3", "obs_4"]);
+      }
+      const edges = await kv.list<GraphEdge>("mem:graph:edges");
+      expect(edges.length).toBeGreaterThan(0);
+      for (const edge of edges) {
+        expect(edge.sourceObservationIds).toEqual(["obs_3", "obs_4"]);
+      }
+    });
+
+    it("keeps only the newest ids when an entity is re-extracted", async () => {
+      process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "3";
+      const { sdk, kv } = await setup();
+
+      for (const id of ["obs_1", "obs_2", "obs_3", "obs_4", "obs_5"]) {
+        await sdk.trigger("mem::temporal-graph-extract", {
+          observations: [obs(id)],
+        });
+      }
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) {
+        expect(node.sourceObservationIds).toEqual(["obs_3", "obs_4", "obs_5"]);
+      }
+    });
   });
 });

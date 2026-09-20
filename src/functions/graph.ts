@@ -27,6 +27,7 @@ import {
   buildGraphExtractionPrompt,
 } from "../prompts/graph-extraction.js";
 import { isGraphExtractionEnabled } from "../config.js";
+import { capSourceIds } from "./graph-provenance.js";
 import { recordAudit } from "./audit.js";
 import { logger } from "../logger.js";
 
@@ -408,13 +409,11 @@ function mergeNode(
 ): GraphNode {
   return {
     ...existing,
-    sourceObservationIds: [
-      ...new Set([
-        ...existing.sourceObservationIds,
-        ...incoming.sourceObservationIds,
-        ...obsIds,
-      ]),
-    ],
+    sourceObservationIds: capSourceIds([
+      ...existing.sourceObservationIds,
+      ...incoming.sourceObservationIds,
+      ...obsIds,
+    ]),
     properties: { ...existing.properties, ...incoming.properties },
     // Refresh to the newest source's session (#656). The incoming node
     // is the more recent extract; prefer its sessionId when present so a
@@ -432,9 +431,7 @@ function mergeEdge(
 ): GraphEdge {
   return {
     ...existing,
-    sourceObservationIds: [
-      ...new Set([...existing.sourceObservationIds, ...obsIds]),
-    ],
+    sourceObservationIds: capSourceIds([...existing.sourceObservationIds, ...obsIds]),
   };
 }
 
@@ -564,7 +561,7 @@ function parseGraphXml(
       type,
       name,
       properties,
-      sourceObservationIds: observationIds,
+      sourceObservationIds: capSourceIds(observationIds),
       ...(sessionId !== undefined && { sessionId }),
       createdAt: now,
     });
@@ -597,7 +594,7 @@ function parseGraphXml(
       sourceNodeId: sourceNode.id,
       targetNodeId: targetNode.id,
       weight: Math.max(0, Math.min(1, weight)),
-      sourceObservationIds: observationIds,
+      sourceObservationIds: capSourceIds(observationIds),
       createdAt: now,
     });
   }
@@ -638,7 +635,10 @@ export function extractGraphHeuristics(
       nodeByKey.set(key, node);
       nodes.push(node);
     } else if (!node.sourceObservationIds.includes(obsId)) {
-      node.sourceObservationIds.push(obsId);
+      node.sourceObservationIds = capSourceIds([
+        ...node.sourceObservationIds,
+        obsId,
+      ]);
     }
     return node;
   };
@@ -651,7 +651,10 @@ export function extractGraphHeuristics(
       const existing = edgeByPair.get(pair);
       if (existing) {
         if (!existing.sourceObservationIds.includes(obs.id)) {
-          existing.sourceObservationIds.push(obs.id);
+          existing.sourceObservationIds = capSourceIds([
+            ...existing.sourceObservationIds,
+            obs.id,
+          ]);
         }
         return;
       }

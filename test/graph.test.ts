@@ -761,4 +761,86 @@ describe("Graph Functions", () => {
       expect(listCalls).toBe(0);
     });
   });
+  // #1168: provenance on a node or edge grew with every mention. It is
+  // evidence of origin, not a complete history, so it is capped and the
+  // newest ids are the ones worth keeping.
+  describe("bounded provenance (#1168)", () => {
+    const ORIG_CAP = process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+
+    afterEach(() => {
+      if (ORIG_CAP === undefined) delete process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+      else process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = ORIG_CAP;
+    });
+
+    const extract = async (obsId: string): Promise<void> => {
+      await sdk.trigger("mem::graph-extract", {
+        observations: [{ ...testObs, id: obsId }],
+      });
+    };
+
+    it("keeps only the newest ids on a node mentioned more often than the cap", async () => {
+      process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "3";
+      for (const id of ["obs_1", "obs_2", "obs_3", "obs_4", "obs_5"]) await extract(id);
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      for (const node of nodes) {
+        expect(node.sourceObservationIds).toEqual(["obs_3", "obs_4", "obs_5"]);
+      }
+    });
+
+    it("keeps only the newest ids on an edge mentioned more often than the cap", async () => {
+      process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "3";
+      for (const id of ["obs_1", "obs_2", "obs_3", "obs_4", "obs_5"]) await extract(id);
+
+      const edges = await kv.list<GraphEdge>("mem:graph:edges");
+      expect(edges.length).toBeGreaterThan(0);
+      for (const edge of edges) {
+        expect(edge.sourceObservationIds).toEqual(["obs_3", "obs_4", "obs_5"]);
+      }
+    });
+
+    it("bounds a first write whose batch is larger than the cap", async () => {
+      process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "2";
+      await sdk.trigger("mem::graph-extract", {
+        observations: ["obs_1", "obs_2", "obs_3", "obs_4"].map((id) => ({
+          ...testObs,
+          id,
+        })),
+      });
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) {
+        expect(node.sourceObservationIds).toEqual(["obs_3", "obs_4"]);
+      }
+    });
+
+    it("leaves a node under the cap untouched", async () => {
+      process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "10";
+      for (const id of ["obs_1", "obs_2"]) await extract(id);
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      for (const node of nodes) {
+        expect(node.sourceObservationIds).toEqual(["obs_1", "obs_2"]);
+      }
+    });
+
+    it("caps at 50 when no override is set", async () => {
+      delete process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+      await sdk.trigger("mem::graph-extract", {
+        observations: Array.from({ length: 60 }, (_, i) => ({
+          ...testObs,
+          id: `obs_${i + 1}`,
+        })),
+      });
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) {
+        expect(node.sourceObservationIds.length).toBe(50);
+        expect(node.sourceObservationIds.at(-1)).toBe("obs_60");
+        expect(node.sourceObservationIds[0]).toBe("obs_11");
+      }
+    });
+  });
 });

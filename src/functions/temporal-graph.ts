@@ -18,6 +18,7 @@ import {
   GRAPH_INDEX_NOT_READY,
 } from "../state/graph-indexes.js";
 import { logger } from "../logger.js";
+import { capSourceIds } from "./graph-provenance.js";
 
 const TEMPORAL_EXTRACTION_SYSTEM = `You are a temporal knowledge extraction engine. Given observations, extract entities AND their temporal relationships with full context metadata.
 
@@ -101,7 +102,7 @@ function parseTemporalGraphXml(
       type,
       name,
       properties,
-      sourceObservationIds: observationIds,
+      sourceObservationIds: capSourceIds(observationIds),
       ...(sessionId !== undefined && { sessionId }),
       createdAt: now,
       aliases: aliases.length > 0 ? aliases : undefined,
@@ -155,7 +156,7 @@ function parseTemporalGraphXml(
         sourceNodeId: sourceNode.id,
         targetNodeId: targetNode.id,
         weight: Math.max(0, Math.min(1, weight)),
-        sourceObservationIds: observationIds,
+        sourceObservationIds: capSourceIds(observationIds),
         createdAt: now,
         tcommit: now,
         tvalid:
@@ -247,12 +248,10 @@ export function registerTemporalGraphFunctions(
             const oldId = node.id;
             const merged = {
               ...existing,
-              sourceObservationIds: [
-                ...new Set([
-                  ...existing.sourceObservationIds,
-                  ...obsIds,
-                ]),
-              ],
+              sourceObservationIds: capSourceIds([
+                ...existing.sourceObservationIds,
+                ...obsIds,
+              ]),
               properties: { ...existing.properties, ...node.properties },
               // Refresh to the newest source's session (#656); keep the
               // existing value when this extract couldn't resolve one.

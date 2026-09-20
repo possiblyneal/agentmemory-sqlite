@@ -409,6 +409,20 @@ export function getGraphBatchSize(): number {
   return safeParseInt(getMergedEnv()["GRAPH_EXTRACTION_BATCH_SIZE"], 10);
 }
 
+// #1168: provenance on a graph node or edge used to grow with every mention,
+// unbounded, because every write site unioned ids and none ever trimmed. 50
+// keeps enough evidence to trace a node back to recent work while making row
+// size independent of how often the agent happens to touch a thing.
+const MAX_SOURCE_OBSERVATION_IDS_DEFAULT = 50;
+
+export function getMaxSourceObservationIds(): number {
+  const parsed = safeParseInt(
+    getMergedEnv()["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"],
+    MAX_SOURCE_OBSERVATION_IDS_DEFAULT,
+  );
+  return parsed > 0 ? parsed : MAX_SOURCE_OBSERVATION_IDS_DEFAULT;
+}
+
 // window for the smart-search followup-rate diagnostic. A second
 // search arriving within this many seconds (with disjoint results)
 // counts as a "follow-up" — a directional signal that the first result
