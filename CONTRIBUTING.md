@@ -105,7 +105,7 @@ Maintainers cut releases. Every bump touches these files in lockstep (the consis
 
 No lockfiles are committed. `test/export-import.test.ts` asserts against the `VERSION` constant, so it needs no per-release edit. Run `npm run skills:gen` if the endpoint or env surface changed.
 
-Then: CHANGELOG section, PR, merge, tag, GitHub release. The `Publish to npm` workflow picks up the release trigger and publishes `@agentmemory/agentmemory`, `@agentmemory/mcp`, and `@agentmemory/fs-watcher` to npm with provenance (`@agentmemory/fs-watcher` versions independently from `integrations/filesystem-watcher/package.json`).
+Then: CHANGELOG section, PR, merge, tag, GitHub release. Nothing is published to npm. This fork does not own `@agentmemory/agentmemory`, `@agentmemory/mcp` or `@agentmemory/fs-watcher`, so the release-triggered publish workflow was removed rather than left one secret away from running. A release here is a tag and a set of notes.
 
 ## Security issues
 

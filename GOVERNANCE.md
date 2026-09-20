@@ -68,7 +68,7 @@ A breaking change to the REST / MCP surface requires:
 
 ## Release process
 
-Releases follow [Semantic Versioning](https://semver.org). See the [release process](./CONTRIBUTING.md#release-process) in `CONTRIBUTING.md` and the automated `.github/workflows/publish.yml` pipeline for the mechanics.
+Releases follow [Semantic Versioning](https://semver.org). See the [release process](./CONTRIBUTING.md#release-process) in `CONTRIBUTING.md` for the mechanics. This fork publishes nothing to npm.
 
 ## Conflicts of interest
 
