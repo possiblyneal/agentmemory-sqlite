@@ -135,7 +135,8 @@ adapters, manifests and tests were removed rather than maintained.
 Two survivors are named for Codex but are not Codex-specific — do not delete them with a host:
 `plugin/hooks/hooks.codex.json` is the manifest `connect dsh` merges (`src/cli/connect/dsh.ts`),
 and `src/cli/connect/codex-hooks.ts` is the shared merge engine behind Claude Code
-`--with-hooks`, Droid and Devin.
+`--with-hooks`, Droid, Devin and dsh, and also exports the `findPluginRoot` helper that
+`antigravity-cli.ts` and `pi.ts` import.
 
 Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `plugin install`
 and `skills add` commands) must name `possiblyneal/agentmemory-sqlite`. Installing from
