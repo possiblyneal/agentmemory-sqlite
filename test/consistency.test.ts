@@ -59,7 +59,7 @@ describe("Consistency checks", () => {
 
   it("documented REST endpoint counts match registered API paths", () => {
     const readme = readText("README.md");
-    const agents = readText("AGENTS.md");
+    const agents = readText("CLAUDE.md");
     const index = readText("src/index.ts");
 
     expect(restEndpointCount).toBeGreaterThan(0);

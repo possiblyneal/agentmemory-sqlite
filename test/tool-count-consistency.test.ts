@@ -47,7 +47,7 @@ describe("Tool count consistency", () => {
     }).filter((e) => e.isDirectory() && e.name !== "_shared").length;
     expect(readText("src/cli/connect/index.ts")).toContain(`${skillCount} skills`);
     expect(readText("README.md")).toContain(`${skillCount} skills`);
-    expect(readText("AGENTS.md")).toContain(`12 hooks, ${skillCount} skills`);
+    expect(readText("CLAUDE.md")).toContain(`12 hooks, ${skillCount} skills`);
     expect(readText("plugin/plugin.json")).toContain(`${skillCount} skills`);
   });
 

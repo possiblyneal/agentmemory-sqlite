@@ -122,3 +122,19 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no iii-sdk import).
 - 12 hooks, 17 skills
 - 260+ iii functions
 - 1,596+ tests
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on this fork (`possiblyneal/agentmemory-sqlite`), driven via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. `CONTEXT.md` holds the glossary — use its terms in specs, issues, and commit messages. ADRs live in `docs/adrs/`; read any whose scope covers what you are touching before editing. See `docs/agents/domain.md`.
+
+- [ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md) — this fork runs only the in-process SQLite engine; the iii-engine path is being removed. *Decided, not yet implemented: the `## Architecture` section above still describes the two-engine code as it stands today, and must be rewritten when the removal lands.*
