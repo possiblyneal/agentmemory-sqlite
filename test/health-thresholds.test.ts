@@ -186,12 +186,38 @@ describe("evaluateHealth verdict hysteresis", () => {
     expect(new Set(publish(alternating))).toEqual(new Set(["healthy"]));
   });
 
-  it("requires three consecutive samples to agree, not merely to disagree with the published verdict", () => {
+  it("counts samples that disagree with the verdict, however they disagree", () => {
+    // Three samples in a row say "not healthy", so the verdict moves even
+    // though they do not all name the same replacement. The daemon that
+    // oscillates is the one a supervisor most needs to hear about.
     expect(publish([healthy, critical, degraded, critical])).toEqual([
       "healthy",
       "healthy",
       "healthy",
+      "critical",
+    ]);
+  });
+
+  it("judges a daemon oscillating between two unhealthy verdicts", () => {
+    // Counting identical consecutive samples would reset the run on every
+    // flip and hold `healthy` forever while nothing is healthy. Once a
+    // verdict is published the next change starts its own run, so the last
+    // sample here does not move it again.
+    expect(publish([healthy, degraded, critical, degraded, critical])).toEqual([
       "healthy",
+      "healthy",
+      "healthy",
+      "degraded",
+      "degraded",
+    ]);
+  });
+
+  it("publishes the newest sample, not the one that started the run", () => {
+    expect(publish([healthy, degraded, degraded, critical])).toEqual([
+      "healthy",
+      "healthy",
+      "healthy",
+      "critical",
     ]);
   });
 

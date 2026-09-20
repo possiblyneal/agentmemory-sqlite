@@ -8,14 +8,13 @@ export type HealthStatus = "healthy" | "degraded" | "critical";
 
 // The published verdict is a restart signal to an external supervisor, so it
 // must not follow a single reading: one slow GC inside a sampling window is
-// not a sick daemon. `pending` is the verdict the recent samples are arguing
-// for and `run` is how many in a row have argued for it; the published verdict
-// only moves once that run reaches the configured count. The monitor holds
-// this in its own closure and never persists it — a restart legitimately
-// resets the judgement (#1170).
+// not a sick daemon. `run` is how many samples in a row have disagreed with
+// the published verdict; the published verdict only moves once that run
+// reaches the configured count, and then it moves to the newest sample. The
+// monitor holds this in its own closure and never persists it — a restart
+// legitimately resets the judgement (#1170).
 export type HealthHysteresis = {
   published: HealthStatus;
-  pending: HealthStatus;
   run: number;
 };
 
@@ -108,7 +107,7 @@ export function evaluateHealth(
       status: sampled,
       alerts,
       notes,
-      hysteresis: { published: sampled, pending: sampled, run: 0 },
+      hysteresis: { published: sampled, run: 0 },
     };
   }
 
@@ -117,7 +116,7 @@ export function evaluateHealth(
       status: prior.published,
       alerts,
       notes,
-      hysteresis: { published: prior.published, pending: sampled, run: 0 },
+      hysteresis: { published: prior.published, run: 0 },
     };
   }
 
@@ -129,12 +128,17 @@ export function evaluateHealth(
   const needed = SEVERITY[sampled] < SEVERITY[prior.published]
     ? tuning.clearSamples
     : tuning.assertSamples;
-  const run = sampled === prior.pending ? prior.run + 1 : 1;
+  // The run counts samples that disagree with the published verdict, not
+  // identical consecutive samples. A daemon oscillating degraded <-> critical
+  // disagrees on every sample; counting identity would reset the run on each
+  // flip and hold `healthy` forever while nothing is healthy. One agreeing
+  // sample still breaks the run, and the verdict moves to the newest sample.
+  const run = prior.run + 1;
   const published = run >= needed ? sampled : prior.published;
   return {
     status: published,
     alerts,
     notes,
-    hysteresis: { published, pending: sampled, run: published === sampled ? 0 : run },
+    hysteresis: { published, run: published === sampled ? 0 : run },
   };
 }
