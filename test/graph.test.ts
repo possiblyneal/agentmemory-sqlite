@@ -4,6 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { logger } from "../src/logger.js";
 import { registerGraphFunction } from "../src/functions/graph.js";
 import type {
   CompressedObservation,
@@ -841,6 +842,112 @@ describe("Graph Functions", () => {
         expect(node.sourceObservationIds.at(-1)).toBe("obs_60");
         expect(node.sourceObservationIds[0]).toBe("obs_11");
       }
+    });
+  });
+  // #1169: a Graph Snapshot read failure used to be swallowed, and extraction
+  // then wrote its empty view back over the real Snapshot. Absence is not
+  // failure: a first run still proceeds on an empty graph.
+  describe("snapshot read failure aborts extraction (#1169)", () => {
+    const storedSnapshot = {
+      version: 1,
+      topNodes: [],
+      topEdges: [],
+      topDegrees: {},
+      stats: {
+        totalNodes: 7,
+        totalEdges: 3,
+        nodesByType: { file: 7 },
+        edgesByType: { uses: 3 },
+      },
+      updatedAt: "2026-01-01T00:00:00Z",
+      dirty: false,
+    };
+
+    const failingKv = () => {
+      const base = mockKV();
+      return {
+        ...base,
+        get: async <T,>(scope: string, key: string): Promise<T | null> => {
+          if (scope === "mem:graph:snapshot") {
+            throw new Error("state store unavailable");
+          }
+          return base.get<T>(scope, key);
+        },
+        set: base.set,
+      };
+    };
+
+    it("performs no writes when the snapshot cannot be read", async () => {
+      const kvLocal = failingKv();
+      await kvLocal.set("mem:graph:snapshot", "current", storedSnapshot);
+      const sdkLocal = mockSdk();
+      registerGraphFunction(sdkLocal as never, kvLocal as never, mockProvider as never);
+
+      await sdkLocal.trigger("mem::graph-extract", { observations: [testObs] });
+
+      expect(await kvLocal.list<GraphNode>("mem:graph:nodes")).toEqual([]);
+      expect(await kvLocal.list<GraphEdge>("mem:graph:edges")).toEqual([]);
+    });
+
+    it("leaves the stored snapshot and its statistics unchanged", async () => {
+      const kvLocal = failingKv();
+      await kvLocal.set("mem:graph:snapshot", "current", storedSnapshot);
+      const sdkLocal = mockSdk();
+      registerGraphFunction(sdkLocal as never, kvLocal as never, mockProvider as never);
+
+      await sdkLocal.trigger("mem::graph-extract", { observations: [testObs] });
+
+      const [stored] = await kvLocal.list<typeof storedSnapshot>("mem:graph:snapshot");
+      expect(stored).toEqual(storedSnapshot);
+    });
+
+    it("logs the abort at warning level, naming the snapshot read", async () => {
+      const kvLocal = failingKv();
+      const sdkLocal = mockSdk();
+      registerGraphFunction(sdkLocal as never, kvLocal as never, mockProvider as never);
+
+      await sdkLocal.trigger("mem::graph-extract", { observations: [testObs] });
+
+      const warned = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
+      expect(warned.some((m) => /snapshot read/i.test(m))).toBe(true);
+    });
+
+    it("treats a genuinely absent snapshot as an empty graph and proceeds", async () => {
+      const result = (await sdk.trigger("mem::graph-extract", {
+        observations: [testObs],
+      })) as { success: boolean; nodesAdded: number };
+
+      expect(result.success).toBe(true);
+      expect(result.nodesAdded).toBe(2);
+    });
+
+    it("proceeds normally on the next batch once the read recovers", async () => {
+      let failing = true;
+      const base = mockKV();
+      const kvLocal = {
+        ...base,
+        get: async <T,>(scope: string, key: string): Promise<T | null> => {
+          if (failing && scope === "mem:graph:snapshot") {
+            throw new Error("state store unavailable");
+          }
+          return base.get<T>(scope, key);
+        },
+        set: base.set,
+      };
+      await kvLocal.set("mem:graph:snapshot", "current", storedSnapshot);
+      const sdkLocal = mockSdk();
+      registerGraphFunction(sdkLocal as never, kvLocal as never, mockProvider as never);
+
+      await sdkLocal.trigger("mem::graph-extract", { observations: [testObs] });
+      expect(await kvLocal.list<GraphNode>("mem:graph:nodes")).toEqual([]);
+
+      failing = false;
+      const result = (await sdkLocal.trigger("mem::graph-extract", {
+        observations: [{ ...testObs, id: "obs_2" }],
+      })) as { success: boolean; nodesAdded: number };
+
+      expect(result.success).toBe(true);
+      expect((await kvLocal.list<GraphNode>("mem:graph:nodes")).length).toBe(2);
     });
   });
 });

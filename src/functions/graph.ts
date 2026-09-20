@@ -91,13 +91,20 @@ function emptySnapshot(): GraphSnapshot {
   };
 }
 
+// Absence is not failure. A missing or unreadable-shaped snapshot returns
+// null and the caller treats the graph as empty; a store error propagates,
+// so a write path can tell the two apart (#1169).
+async function loadSnapshot(kv: StateKV): Promise<GraphSnapshot | null> {
+  const snap = await kv.get<GraphSnapshot>(KV.graphSnapshot, SNAPSHOT_KEY);
+  if (snap && typeof snap === "object" && snap.version === 1) {
+    return snap;
+  }
+  return null;
+}
+
 async function readSnapshot(kv: StateKV): Promise<GraphSnapshot | null> {
   try {
-    const snap = await kv.get<GraphSnapshot>(KV.graphSnapshot, SNAPSHOT_KEY);
-    if (snap && typeof snap === "object" && snap.version === 1) {
-      return snap;
-    }
-    return null;
+    return await loadSnapshot(kv);
   } catch (err) {
     logger.warn("Graph snapshot read failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -724,7 +731,20 @@ export async function persistGraphDelta(
   obsIds: string[],
 ): Promise<{ newNodeCount: number; newEdgeCount: number }> {
   if (graphWritesDisabled()) return { newNodeCount: 0, newEdgeCount: 0 };
-  const snap = (await readSnapshot(kv)) ?? emptySnapshot();
+  // A snapshot we cannot read is not an empty graph. Writing on top of that
+  // assumption overwrites the stored snapshot with an empty view and zeroes
+  // its statistics, so abort the batch before its first write and leave the
+  // stored snapshot alone. The batch is lost, not retried in place: a
+  // persistent store fault must not spin (#1169).
+  let snap: GraphSnapshot;
+  try {
+    snap = (await loadSnapshot(kv)) ?? emptySnapshot();
+  } catch (err) {
+    logger.warn("Graph snapshot read failed; skipping graph write for this batch", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { newNodeCount: 0, newEdgeCount: 0 };
+  }
   const capturedAt = new Date().toISOString();
   let newNodeCount = 0;
   let newEdgeCount = 0;
