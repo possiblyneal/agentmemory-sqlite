@@ -52,7 +52,10 @@ jobs:
         # src/functions/obsidian-export.ts needs os.tmpdir() + path.join
         # rework before Windows can be added back. Tracked as follow-up.
         os: [ubuntu-latest, macos-latest]
-        node-version: [20, 22, 24, 26]
+        # Node 20 dropped: the Engine imports node:sqlite (ADR 0001), which
+        # only exists from 22.5 and is unflagged from 22.13, so every inproc
+        # test fails at import on 20.
+        node-version: [22, 24, 26]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -60,13 +63,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
-      # Lockfiles are gitignored, so `npm ci` (which strictly re-validates a
-      # committed lockfile) buys no reproducibility here — and Node 24+'s
-      # stricter npm rejects rolldown's optional platform bindings that a
-      # `--package-lock-only` pass doesn't fully enumerate, failing the matrix
-      # on 24/26 only. A single lenient `npm install` resolves and installs
-      # in one pass.
-      - run: npm install --legacy-peer-deps --no-audit --no-fund
+      # `npm ci` over the committed package-lock.json, so every leg installs
+      # the tree the lockfile pins rather than whatever npm resolves that day.
+      - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npm run skills:check
       - run: npm test

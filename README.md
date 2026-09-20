@@ -11,21 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="READMEs/README.zh-CN.md">简体中文</a> |
-  <a href="READMEs/README.zh-TW.md">繁體中文</a> |
-  <a href="READMEs/README.ja-JP.md">日本語</a> |
-  <a href="READMEs/README.ko-KR.md">한국어</a> |
-  <a href="READMEs/README.es-ES.md">Español</a> |
-  <a href="READMEs/README.tr-TR.md">Türkçe</a> |
-  <a href="READMEs/README.ru-RU.md">Русский</a> |
-  <a href="READMEs/README.hi-IN.md">हिन्दी</a> |
-  <a href="READMEs/README.pt-BR.md">Português</a> |
-  <a href="READMEs/README.fr-FR.md">Français</a> |
-  <a href="READMEs/README.de-DE.md">Deutsch</a>
-</p>
-
-<p align="center">
   <a href="https://trendshift.io/repositories/25123" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25123" alt="rohitg00/agentmemory | Trendshift" width="250" height="55"/></a>
 </p>
 
@@ -38,10 +23,9 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@agentmemory/agentmemory"><img src="https://img.shields.io/npm/v/@agentmemory/agentmemory?color=CB3837&label=npm&style=for-the-badge&logo=npm" alt="npm version" /></a>
-  <a href="https://github.com/rohitg00/agentmemory/actions"><img src="https://img.shields.io/github/actions/workflow/status/rohitg00/agentmemory/ci.yml?label=tests&style=for-the-badge&logo=github" alt="CI" /></a>
-  <a href="https://github.com/rohitg00/agentmemory/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rohitg00/agentmemory?color=blue&style=for-the-badge" alt="License" /></a>
-  <a href="https://github.com/rohitg00/agentmemory/stargazers"><img src="https://img.shields.io/github/stars/rohitg00/agentmemory?style=for-the-badge&color=yellow&logo=github" alt="Stars" /></a>
+  <a href="https://github.com/possiblyneal/agentmemory-sqlite/actions"><img src="https://img.shields.io/github/actions/workflow/status/possiblyneal/agentmemory-sqlite/ci.yml?label=tests&style=for-the-badge&logo=github" alt="CI" /></a>
+  <a href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/LICENSE"><img src="https://img.shields.io/github/license/possiblyneal/agentmemory-sqlite?color=blue&style=for-the-badge" alt="License" /></a>
+  <a href="https://github.com/possiblyneal/agentmemory-sqlite/stargazers"><img src="https://img.shields.io/github/stars/possiblyneal/agentmemory-sqlite?style=for-the-badge&color=yellow&logo=github" alt="Stars" /></a>
 </p>
 
 <p align="center">
@@ -75,13 +59,20 @@
 
 ## Install
 
-One command:
+This fork is not published to npm — clone it, build it, and link the `agentmemory` command:
 
 ```bash
-npx @agentmemory/agentmemory
+git clone https://github.com/possiblyneal/agentmemory-sqlite.git
+cd agentmemory-sqlite
+npm ci
+npm run build
+npm link          # puts `agentmemory` on your PATH
+agentmemory
 ```
 
-The first run is an interactive setup: pick the agents to wire (Claude Code, Copilot CLI, Gemini CLI, OpenCode, ...), pick an LLM provider or stay keyless, and it seeds the config, starts the memory server on `:3111`, and offers to install globally so the bare `agentmemory` command works everywhere afterwards.
+Node >=22.13 is the only prerequisite: the Engine imports `node:sqlite`, which is unflagged from 22.13.
+
+The first run is an interactive setup: pick the agents to wire (Claude Code, Copilot CLI, Gemini CLI, OpenCode, ...), pick an LLM provider or stay keyless, and it seeds the config and starts the memory server on `:3111`.
 
 Then prove recall works and give your agent its skills:
 
@@ -99,32 +90,39 @@ Wire more agents any time with `agentmemory connect <agent>` — 19 adapters lis
 <details>
 <summary><strong>Windows</strong></summary>
 
-Node is the only prerequisite, so `npx @agentmemory/agentmemory` works natively. `agentmemory connect` is currently unsupported on Windows; WSL2 is the fast path if you want it. See the [Windows notes](#windows).
+Node is the only prerequisite, so the clone-and-build install works natively. `agentmemory connect` is currently unsupported on Windows; WSL2 is the fast path if you want it. See the [Windows notes](#windows).
 
 </details>
 
 <details>
-<summary><strong>Global install / EACCES</strong></summary>
+<summary><strong>`npm link` and EACCES</strong></summary>
+
+`npm link` writes into the global prefix. On a system Node install (macOS/Linux) that can fail with `EACCES`. Either point npm at a writable prefix once:
 
 ```bash
-npm install -g @agentmemory/agentmemory
-# If you hit EACCES on macOS/Linux system Node installs:
-sudo npm install -g @agentmemory/agentmemory
+npm config set prefix ~/.npm-global
+export PATH="$HOME/.npm-global/bin:$PATH"   # add to your shell rc
 ```
+
+or skip the link entirely and run the CLI from the clone with `node dist/cli.mjs` everywhere this README says `agentmemory`.
 
 </details>
 
 <details>
-<summary><strong>npx serves an old version</strong></summary>
+<summary><strong>Updating</strong></summary>
 
-npx caches per version. Force the latest with `npx -y @agentmemory/agentmemory@latest`, or clear the cache once with `rm -rf ~/.npm/_npx` (macOS/Linux; on Windows delete `%LOCALAPPDATA%\npm-cache\_npx`).
+Pull and rebuild in the clone; the linked `agentmemory` command follows it automatically:
+
+```bash
+git pull && npm ci && npm run build
+```
 
 </details>
 
 <details>
 <summary><strong>Running more than one instance</strong></summary>
 
-Each instance owns its ports and its own SQLite file, so give the second one both: `npx -y @agentmemory/agentmemory@latest --instance 1 --data-dir ~/.agentmemory-projects/other`. `--instance 1` moves the whole trio to 3211 / 3212 / 3213; streams and the viewer always derive from the REST port.
+Each instance owns its ports and its own SQLite file, so give the second one both: `agentmemory --instance 1 --data-dir ~/.agentmemory-projects/other`. `--instance 1` moves the whole trio to 3211 / 3212 / 3213; streams and the viewer always derive from the REST port.
 
 </details>
 
@@ -234,14 +232,14 @@ You explain the same architecture every session. You re-discover the same bugs. 
 **What changes:** Session 1 you set up JWT auth. Session 2 you ask for rate limiting. The agent already knows your auth uses jose middleware in `src/middleware/auth.ts`, your tests cover token validation, and you chose jose over jsonwebtoken for Edge compatibility, with no re-explaining and no copy-pasting.
 
 ```bash
-npx @agentmemory/agentmemory
+agentmemory
 ```
 
 By default, agentmemory keeps its SQLite file outside the repository you start it from: `~/Library/Application Support/agentmemory` on macOS, `$XDG_DATA_HOME/agentmemory` or `~/.local/share/agentmemory` on Linux, and `%APPDATA%\agentmemory` on Windows. To choose a location, pass `--data-dir <path>` or set `AGENTMEMORY_DATA_DIR`:
 
 ```bash
-npx @agentmemory/agentmemory --data-dir ~/.agentmemory-projects/main
-AGENTMEMORY_DATA_DIR=~/.agentmemory-projects/main npx @agentmemory/agentmemory
+agentmemory --data-dir ~/.agentmemory-projects/main
+AGENTMEMORY_DATA_DIR=~/.agentmemory-projects/main agentmemory
 ```
 
 The database lands at `<data-dir>/agentmemory.sqlite`; point `AGENTMEMORY_SQLITE_PATH` at a specific file to override just that.
@@ -480,10 +478,10 @@ Prerequisite: Node.js. Nothing else to install — no native binary, no Docker, 
 
 ```bash
 # Terminal 1: start the server
-npx @agentmemory/agentmemory
+agentmemory
 
 # Terminal 2: seed sample data and see recall in action
-npx @agentmemory/agentmemory demo
+agentmemory demo
 ```
 
 `demo` seeds 3 realistic sessions (JWT auth, N+1 query fix, rate limiting) and runs semantic searches against them. You'll see it find "N+1 query fix" when you search "database performance optimization", which keyword matching cannot do.
@@ -510,10 +508,10 @@ To bring in older Claude Code JSONL transcripts:
 
 ```bash
 # Import everything under the default ~/.claude/projects
-npx @agentmemory/agentmemory import-jsonl
+agentmemory import-jsonl
 
 # Or import a single file
-npx @agentmemory/agentmemory import-jsonl ~/.claude/projects/-my-project/abc123.jsonl
+agentmemory import-jsonl ~/.claude/projects/-my-project/abc123.jsonl
 ```
 
 Imported sessions show up in the Replay picker alongside native ones. Under the hood each entry routes through the `mem::replay::load`, `mem::replay::sessions`, and `mem::replay::import-jsonl` functions inside the running process, with no side-channel servers. Each imported transcript is indexed for search, stamped with origin channel `import`, and mined for a session crystal and lessons.
@@ -525,7 +523,7 @@ Imported sessions show up in the Replay picker alongside native ones. Under the 
 Use the maintenance command when you intentionally want to update your local runtime:
 
 ```bash
-npx @agentmemory/agentmemory upgrade
+agentmemory upgrade
 ```
 
 Warning: this command mutates the current workspace. It runs `pnpm install` or `npm install` against the package.json in your working directory to refresh JavaScript dependencies, and does nothing when there isn't one.
@@ -535,7 +533,7 @@ Implementation details live in `src/cli.ts` (see `runUpgrade`).
 ### Claude Code (one block, paste it)
 
 ```text
-Install agentmemory: run `npx @agentmemory/agentmemory` in a separate terminal to start the memory server. Then run `/plugin marketplace add possiblyneal/agentmemory-sqlite` and `/plugin install agentmemory` — the plugin registers all 12 hooks, 17 skills, AND auto-wires the `@agentmemory/mcp` stdio server via its `.mcp.json`, so you get 54 MCP tools (memory_smart_search, memory_save, memory_sessions, memory_governance_delete, etc.) without any extra config step. Verify with `curl http://localhost:3111/agentmemory/health`. The real-time viewer is at http://localhost:3113.
+Install agentmemory: run `agentmemory` in a separate terminal to start the memory server. Then run `/plugin marketplace add possiblyneal/agentmemory-sqlite` and `/plugin install agentmemory` — the plugin registers all 12 hooks, 17 skills, AND auto-wires the `@agentmemory/mcp` stdio server via its `.mcp.json`, so you get 54 MCP tools (memory_smart_search, memory_save, memory_sessions, memory_governance_delete, etc.) without any extra config step. Verify with `curl http://localhost:3111/agentmemory/health`. The real-time viewer is at http://localhost:3113.
 ```
 
 #### Claude Code without the plugin install (MCP-standalone path)
@@ -548,7 +546,7 @@ Workaround:
 agentmemory connect claude-code --with-hooks
 ```
 
-This merges the same hook commands into `~/.claude/settings.json` with absolute paths resolved to the bundled `plugin/` directory of the currently installed `@agentmemory/agentmemory` package. Re-run the command after upgrading agentmemory to refresh the paths. User entries in the same file are preserved; only previous agentmemory entries are replaced. Using the `/plugin install` path remains the recommended approach.
+This merges the same hook commands into `~/.claude/settings.json` with absolute paths resolved to the `plugin/` directory of your agentmemory clone. Re-run the command after pulling and rebuilding to refresh the paths. User entries in the same file are preserved; only previous agentmemory entries are replaced. Using the `/plugin install` path remains the recommended approach.
 For remote or protected deployments, launch Claude Code with `AGENTMEMORY_URL` and `AGENTMEMORY_SECRET` set. The plugin passes both values through to its bundled MCP server; when `AGENTMEMORY_URL` is empty, the MCP shim uses `http://localhost:3111`.
 
 ### GitHub Copilot CLI
@@ -567,7 +565,7 @@ copilot plugin install possiblyneal/agentmemory-sqlite:plugin
 <summary><b>OpenClaw (paste this prompt)</b></summary>
 
 ```text
-Install agentmemory for OpenClaw. Run `npx @agentmemory/agentmemory` in a separate terminal to start the memory server on localhost:3111. Then add this to my OpenClaw MCP config so agentmemory is available with all 54 memory tools:
+Install agentmemory for OpenClaw. Run `agentmemory` in a separate terminal to start the memory server on localhost:3111. Then add this to my OpenClaw MCP config so agentmemory is available with all 54 memory tools:
 
 {
   "mcpServers": {
@@ -592,7 +590,7 @@ Full guide: [`integrations/openclaw/`](integrations/openclaw/)
 <summary><b>Hermes Agent (paste this prompt)</b></summary>
 
 ```text
-Install agentmemory for Hermes. Run `npx @agentmemory/agentmemory` in a separate terminal to start the memory server on localhost:3111. Then add this to ~/.hermes/config.yaml so Hermes can use agentmemory as an MCP server with all 54 memory tools:
+Install agentmemory for Hermes. Run `agentmemory` in a separate terminal to start the memory server on localhost:3111. Then add this to ~/.hermes/config.yaml so Hermes can use agentmemory as an MCP server with all 54 memory tools:
 
 mcp_servers:
   agentmemory:
@@ -611,7 +609,7 @@ Full guide: [`integrations/hermes/`](integrations/hermes/)
 
 ### Other agents
 
-Start the memory server: `npx @agentmemory/agentmemory`
+Start the memory server: `agentmemory`
 
 #### Native skills via `npx skills add` (50+ agents)
 
@@ -694,17 +692,17 @@ Full endpoint list under [API](#api).
 
 ```bash
 git clone https://github.com/possiblyneal/agentmemory-sqlite.git && cd agentmemory-sqlite
-npm install && npm run build && npm start
+npm ci && npm run build && npm start
 ```
 
 `npm start` is the whole daemon: one Node process that opens the SQLite file, registers every function, and binds REST, streams, and the viewer to `127.0.0.1`. There is no second process to install or supervise.
 
 ### Windows
 
-agentmemory runs natively on Windows 10/11. Node is the only prerequisite, so the same one-liner works:
+agentmemory runs natively on Windows 10/11. Node >=22.13 is the only prerequisite, so the same clone-and-link install works; afterwards:
 
 ```powershell
-npx -y @agentmemory/agentmemory
+agentmemory
 ```
 
 State lands in `%APPDATA%\agentmemory` unless you pass `--data-dir`. `agentmemory connect` has no Windows adapters yet, so wire your agent's MCP config by hand (the blocks are in [Works with every agent](#works-with-every-agent)) or run agentmemory under WSL2.
@@ -712,17 +710,17 @@ State lands in `%APPDATA%\agentmemory` unless you pass `--data-dir`. `agentmemor
 **MCP only.** If you only need the MCP tools and not the REST API, viewer, or scheduled jobs:
 
 ```powershell
-npx -y @agentmemory/agentmemory mcp
+agentmemory mcp
 # or via the shim package:
 npx -y @agentmemory/mcp
 ```
 
-**Diagnostics for Windows:** if `npx @agentmemory/agentmemory` fails, re-run with `--verbose` for the boot log.
+**Diagnostics for Windows:** if `agentmemory` fails, re-run with `--verbose` for the boot log.
 
 | Symptom | Fix |
 |---|---|
 | Port conflict | `netstat -ano \| findstr :3111` to see what's bound, then kill it or use `--port <N>` |
-| `Cannot find module 'node:sqlite'` | Your Node is too old for the embedded database; upgrade Node and retry |
+| `Cannot find module 'node:sqlite'` | Your Node predates 22.13; upgrade Node and retry |
 | Viewer unreachable at `:3113` | Another process holds the port; the viewer retries the next 10 and logs which one it took |
 
 ---
@@ -916,7 +914,7 @@ npm install @huggingface/transformers
 
 54 tools, 6 resources, 3 prompts, and 17 skills.
 
-> **MCP shim vs full server:** the published `@agentmemory/mcp` package is a thin shim. It exposes the full 54-tool surface **only when it can reach a running agentmemory server** via `AGENTMEMORY_URL` (proxy mode). With no server reachable, the shim falls back to a 7-tool local set (`memory_save`, `memory_recall`, `memory_smart_search`, `memory_sessions`, `memory_export`, `memory_audit`, `memory_governance_delete`). The `AGENTMEMORY_TOOLS=core|all` env var is a *server-side* flag; setting it in the shim's `env` block has no effect. If you see only 7 tools in Cursor / OpenCode / Gemini CLI, start `npx @agentmemory/agentmemory` and set `AGENTMEMORY_URL=http://localhost:3111`.
+> **MCP shim vs full server:** the published `@agentmemory/mcp` package is a thin shim. It exposes the full 54-tool surface **only when it can reach a running agentmemory server** via `AGENTMEMORY_URL` (proxy mode). With no server reachable, the shim falls back to a 7-tool local set (`memory_save`, `memory_recall`, `memory_smart_search`, `memory_sessions`, `memory_export`, `memory_audit`, `memory_governance_delete`). The `AGENTMEMORY_TOOLS=core|all` env var is a *server-side* flag; setting it in the shim's `env` block has no effect. If you see only 7 tools in Cursor / OpenCode / Gemini CLI, start `agentmemory` and set `AGENTMEMORY_URL=http://localhost:3111`.
 
 ### 54 Tools
 
@@ -1008,7 +1006,7 @@ The table shows the four core skills. The full set is 9 invocable skills plus 8 
 Run without the full server, for any MCP client. Either of these works:
 
 ```bash
-npx -y @agentmemory/agentmemory mcp   # canonical (always available)
+agentmemory mcp   # canonical (always available)
 npx -y @agentmemory/mcp                # shim package alias
 ```
 
@@ -1070,7 +1068,7 @@ The viewer server binds to `127.0.0.1` by default. The REST-served `/agentmemory
 
 agentmemory is **one Node process**. Starting it opens a SQLite file, registers every memory operation as a named function, and binds the REST API, the stream feed, and the viewer. There is no second process to install, start, adopt, or stop, and nothing to supervise if the first one exits.
 
-That is the whole deployment story: `npx @agentmemory/agentmemory` and a file on disk.
+That is the whole deployment story: `agentmemory` and a file on disk.
 
 ### What the process contains
 

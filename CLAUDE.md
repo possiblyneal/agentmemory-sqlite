@@ -9,8 +9,11 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 - **Engine**: `createInprocSdk()` in `src/engine/inproc/sdk.ts`, over `node:sqlite`. It binds the ports itself. Engine-facing types (`ISdk`, `ApiRequest`, `TriggerAction`) come from `src/engine/types.ts` — this repository owns them; there is no external SDK package.
 - **State**: `SqliteState` (`src/engine/inproc/state.ts`), one file at `AGENTMEMORY_SQLITE_PATH` (default `<data-dir>/agentmemory.sqlite`). Reach it as `StateKV` over the scopes in `src/state/schema.ts`.
 - **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100.
-- **Build**: TypeScript → ESM via tsdown, output to `dist/`
+- **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 14 hook entries, to
+  `plugin/scripts/*.mjs` — those are committed build output, and tsdown gives them mode 755 for
+  their shebang. Regenerate them with `npm run build`; never hand-edit one or reset its mode.
 - **Test**: vitest (`npm test` excludes integration tests)
+- **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
 
@@ -142,6 +145,16 @@ Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `pl
 and `skills add` commands) must name `possiblyneal/agentmemory-sqlite`. Installing from
 upstream pulls upstream's 8 skills over this fork's 17. npm package metadata still names
 upstream deliberately: this fork does not own those package names.
+
+Nothing is published from here — there is no release workflow and `dist/` is gitignored, so
+the only install path is clone → `npm ci` → `npm run build` →
+`npm link`. User-facing docs (`README.md`, `INSTALL_FOR_AGENTS.md`, `SECURITY.md`) must
+describe that path, never `npx`/`npm install -g @agentmemory/*`, which resolve to upstream's
+code. The one exception is the `@agentmemory/mcp` shim wherever it is invoked as a proxy —
+`plugin/.mcp.json`, `plugin/.mcp.copilot.json` and the README's MCP-standalone blocks — because
+in proxy mode the tool surface comes from this fork's running server, not from the shim.
+The translated `READMEs/` were deleted rather than kept stale — do not re-add translations
+without a way to keep them current.
 
 ## Current Stats (v0.9.29)
 

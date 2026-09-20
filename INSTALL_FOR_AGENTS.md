@@ -10,25 +10,31 @@ Default mode needs no API key and no cloud account. Out of the box it runs hybri
 
 ## Prerequisites
 
-- Node.js >= 20 and npm. Check with `node -v`.
+- Node.js >= 22.13 and npm. Check with `node -v`. The Engine imports `node:sqlite`, which is unflagged from 22.13; older Node fails at import.
 - macOS, Linux, or Windows. `agentmemory connect` is not supported on Windows; wire MCP config by hand there, or use WSL2.
 - Ports 3111 (REST), 3112 (streams), and 3113 (viewer) free. If any are taken, stop whatever is using them before starting (see Troubleshooting), or pass `--port <N>` to move all three.
 
 ## Running non-interactively
 
-Several commands prompt on a TTY (for example the first-run "install globally?" question). As an agent you usually want no prompts. Either set `CI=1` in the environment for the commands below, or rely on the fact that agentmemory skips all prompts automatically when stdin/stdout are not a TTY. Prompts are also never-nag: once answered they persist and are not asked again. Re-run onboarding any time with `agentmemory --reset`.
+Several commands prompt on a TTY. As an agent you usually want no prompts. Either set `CI=1` in the environment for the commands below, or rely on the fact that agentmemory skips all prompts automatically when stdin/stdout are not a TTY. Prompts are also never-nag: once answered they persist and are not asked again. Re-run onboarding any time with `agentmemory --reset`.
 
-## 1. Install globally
+## 1. Clone, build, and link
+
+This fork is not published to npm, so there is nothing to install from a registry. Build it from source:
 
 ```bash
-npm install -g @agentmemory/agentmemory
+git clone https://github.com/possiblyneal/agentmemory-sqlite.git
+cd agentmemory-sqlite
+npm ci
+npm run build
+npm link
 ```
 
-`npm install -g` already fetches the latest published release. If you hit `EACCES` on a system Node install (macOS/Linux), retry with `sudo npm install -g @agentmemory/agentmemory`.
+`npm link` puts `agentmemory` on your `PATH`. If it fails with `EACCES` on a system Node install (macOS/Linux), point npm at a writable prefix (`npm config set prefix ~/.npm-global` and add `~/.npm-global/bin` to `PATH`), then re-run `npm link`.
 
-No-install alternative: skip this step and run the server with `npx -y @agentmemory/agentmemory@latest` everywhere this runbook says `agentmemory`. The `@latest` and `-y` flags matter because npx caches per version and a bare `npx @agentmemory/agentmemory` can serve a stale release.
+No-link alternative: skip `npm link` and run `node dist/cli.mjs` from the clone everywhere this runbook says `agentmemory`.
 
-Expect: the install completes without errors.
+Expect: each command completes without errors.
 
 ## 2. Verify the install
 
@@ -36,7 +42,7 @@ Expect: the install completes without errors.
 agentmemory --version
 ```
 
-Expect: a version string is printed. If `command not found`, the global bin is not on `PATH`; use the `npx -y @agentmemory/agentmemory@latest` form instead.
+Expect: a version string is printed. If `command not found`, the linked bin is not on `PATH`; use the `node dist/cli.mjs` form from the clone instead.
 
 ## 3. Start the server
 
@@ -141,12 +147,12 @@ The MCP server exposes 54 tools by default (`--tools all`). Use `--tools core` (
 
 ## Troubleshooting
 
-- `command not found: agentmemory`: the global bin is not on `PATH`. Use `npx -y @agentmemory/agentmemory@latest`.
-- `EACCES` during global install: retry with `sudo`, or use the npx form.
-- Stale npx version: run `npx -y @agentmemory/agentmemory@latest`, or clear the cache with `rm -rf ~/.npm/_npx` (macOS/Linux).
+- `command not found: agentmemory`: the linked bin is not on `PATH`. Run `node dist/cli.mjs` from the clone instead.
+- `EACCES` during `npm link`: set a writable npm prefix (`npm config set prefix ~/.npm-global`), or use the `node dist/cli.mjs` form.
+- Stale build after a `git pull`: re-run `npm ci && npm run build`.
 - Port already in use: another process holds 3111, 3112, or 3113. Stop that process, or start with `--port <N>` to move all three at once.
 - Server starts but `livez` never returns 200: re-run with `agentmemory --verbose` to see the boot log.
-- Only 7 tools visible in the agent: the MCP shim is in local fallback because it could not reach a server. Start `npx @agentmemory/agentmemory` and ensure `AGENTMEMORY_URL` points at it (default `http://localhost:3111`), then reload MCP.
+- Only 7 tools visible in the agent: the MCP shim is in local fallback because it could not reach a server. Start `agentmemory` and ensure `AGENTMEMORY_URL` points at it (default `http://localhost:3111`), then reload MCP.
 - Windows: the server runs natively, but `connect` has no Windows adapters. Wire the agent's MCP config by hand, or use WSL2.
 
 ## Report success
