@@ -11,6 +11,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 - **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100.
 - **Build**: TypeScript → ESM via tsdown, output to `dist/`
 - **Test**: vitest (`npm test` excludes integration tests)
+- **Runtime floor**: Node >=22.13. `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg.
 
 ## Consistency Rules
 
@@ -142,6 +143,15 @@ Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `pl
 and `skills add` commands) must name `possiblyneal/agentmemory-sqlite`. Installing from
 upstream pulls upstream's 8 skills over this fork's 17. npm package metadata still names
 upstream deliberately: this fork does not own those package names.
+
+Nothing is published from here — there is no release workflow and `dist/` is gitignored, so
+the only install path is clone → `npm install --legacy-peer-deps` → `npm run build` →
+`npm link`. User-facing docs (`README.md`, `INSTALL_FOR_AGENTS.md`, `SECURITY.md`) must
+describe that path, never `npx`/`npm install -g @agentmemory/*`, which resolve to upstream's
+code. `plugin/.mcp.json` and `plugin/.mcp.copilot.json` still spawn `npx -y @agentmemory/mcp`
+on purpose: that shim is a proxy, and in proxy mode the tool surface comes from this fork's
+running server. The translated `READMEs/` were deleted rather than kept stale — do not
+re-add translations without a way to keep them current.
 
 ## Current Stats (v0.9.29)
 
