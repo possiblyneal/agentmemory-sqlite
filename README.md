@@ -92,9 +92,9 @@ npx skills add possiblyneal/agentmemory-sqlite -y   # 17 native skills so your a
 
 Prefer to let a coding agent do the whole thing? Hand it one instruction:
 
-> Retrieve and follow the instructions at: https://raw.githubusercontent.com/rohitg00/agentmemory/main/INSTALL_FOR_AGENTS.md
+> Retrieve and follow the instructions at: https://raw.githubusercontent.com/possiblyneal/agentmemory-sqlite/main/INSTALL_FOR_AGENTS.md
 
-Wire more agents any time with `agentmemory connect <agent>` — 20 adapters listed at [Works with every agent](#works-with-every-agent). Full command reference at [Quick Start](#quick-start).
+Wire more agents any time with `agentmemory connect <agent>` — 19 adapters listed at [Works with every agent](#works-with-every-agent). Full command reference at [Quick Start](#quick-start).
 
 <details>
 <summary><strong>Windows</strong></summary>
@@ -558,7 +558,7 @@ For remote or protected deployments, launch Claude Code with `AGENTMEMORY_URL` a
 agentmemory connect copilot-cli
 
 # Full hooks/skills plugin from the GitHub subdir
-copilot plugin install rohitg00/agentmemory:plugin
+copilot plugin install possiblyneal/agentmemory-sqlite:plugin
 ```
 
 `agentmemory connect copilot-cli` merges `mcpServers.agentmemory` into `~/.copilot/mcp-config.json` (or `$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set) and preserves existing servers. This adapter is Windows-safe even though other `connect` adapters still require manual Windows setup. Copilot picks up the MCP server on next launch or after `/mcp`. Install the plugin as well when you want the full hook/skill experience.
@@ -656,7 +656,7 @@ The agentmemory entry is the **same MCP server block** across every host that us
 | **Devin (cloud)** | Settings → Connections → MCP servers | Add a custom MCP (STDIO): command `npx`, args `-y @agentmemory/mcp@latest`, env `AGENTMEMORY_URL` pointing at a network-reachable agentmemory deployment plus `AGENTMEMORY_SECRET` (cloud sessions cannot reach localhost — see [`deploy/`](deploy/)). Store the secret in Devin Secrets, then use "Test listing tools" to verify all 54 tools appear. |
 | **Gemini CLI** | `~/.gemini/settings.json` | `gemini mcp add agentmemory npx -y @agentmemory/mcp --scope user` (auto-merges). |
 | **GitHub Copilot CLI (MCP only)** | `~/.copilot/mcp-config.json` | `agentmemory connect copilot-cli` merges `mcpServers.agentmemory`; Copilot picks it up on next launch or `/mcp`. |
-| **GitHub Copilot CLI (full plugin)** | Copilot plugin install | `copilot plugin install rohitg00/agentmemory:plugin` for the plugin from the GitHub subdir. |
+| **GitHub Copilot CLI (full plugin)** | Copilot plugin install | `copilot plugin install possiblyneal/agentmemory-sqlite:plugin` for the plugin from the GitHub subdir. |
 | **OpenClaw** | OpenClaw MCP config | Same `mcpServers` block. Deeper: `openclaw plugins install ./integrations/openclaw` claims OpenClaw's memory slot (auto-switches from `memory-core`); set `plugins.entries.agentmemory.hooks.allowConversationAccess=true` or turn capture is silently blocked. See [`integrations/openclaw`](integrations/openclaw/). |
 | **OpenCode (MCP only)** | `opencode.json` | Different shape: top-level `mcp` key, command as array: `{"mcp": {"agentmemory": {"type": "local", "command": ["npx", "-y", "@agentmemory/mcp"], "enabled": true}}}`. |
 | **OpenCode (full plugin)** | `plugin/opencode/` | 22 auto-capture hooks covering session lifecycle, messages, tools, errors. Project attribution is per-session, so one OpenCode process spanning several repositories files each session under its own project. Two slash commands (`/recall`, `/remember`). Copy `plugin/opencode/` into your OpenCode workspace and add the plugin entry to `opencode.json`. See [`plugin/opencode/README.md`](plugin/opencode/README.md) for the full hook table + gap analysis. |
@@ -693,7 +693,7 @@ Full endpoint list under [API](#api).
 ### From source
 
 ```bash
-git clone https://github.com/rohitg00/agentmemory.git && cd agentmemory
+git clone https://github.com/possiblyneal/agentmemory-sqlite.git && cd agentmemory-sqlite
 npm install && npm run build && npm start
 ```
 

@@ -241,3 +241,20 @@ with:
 ```
 git config core.hooksPath .githooks
 ```
+
+## 8. Supported hosts and distribution metadata
+
+Cursor and Codex are no longer supported hosts. Their `connect` adapters, plugin manifests
+(`.cursor-plugin/`, `.codex-plugin/`, `plugin/cursor/`, `plugin/.codex-plugin/`) and tests are
+gone rather than maintained against a surface nobody here runs. `plugin/hooks/hooks.codex.json`
+and `src/cli/connect/codex-hooks.ts` stay despite their names: the first is the manifest
+`connect dsh` merges, the second is the shared merge engine behind Claude Code `--with-hooks`
+and Droid's native install.
+
+Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `plugin install` and
+`skills add` commands) points at this fork. Installing from upstream would pull upstream's 8
+skills over this fork's 17. npm package metadata still names upstream and is left alone: the fork
+does not publish, so that surface is inert.
+
+`READMEs/*` are upstream's translations and are not maintained here. They still describe the
+removed hosts and upstream install commands; the English `README.md` is the current one.
