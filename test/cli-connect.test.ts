@@ -32,7 +32,7 @@ describe("agentmemory connect — dispatcher", () => {
 
   it("resolves case-insensitively", () => {
     expect(resolveAdapter("Claude-Code")?.name).toBe("claude-code");
-    expect(resolveAdapter("CURSOR")?.name).toBe("cursor");
+    expect(resolveAdapter("CLINE")?.name).toBe("cline");
   });
 
   it("returns null for unknown agents", () => {
@@ -48,9 +48,7 @@ describe("agentmemory connect — dispatcher", () => {
         "claude-code",
         "cline",
         "copilot-cli",
-        "codex",
         "continue",
-        "cursor",
     "devin",
         "droid",
         "dsh",
@@ -66,7 +64,7 @@ describe("agentmemory connect — dispatcher", () => {
         "zed",
       ].sort(),
     );
-    expect(ADAPTERS.length).toBe(21);
+    expect(ADAPTERS.length).toBe(19);
   });
 
   it("every adapter exposes detect() and install()", () => {

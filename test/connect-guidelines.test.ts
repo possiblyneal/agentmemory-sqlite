@@ -18,17 +18,6 @@ afterEach(() => {
 });
 
 describe("writeGuideline", () => {
-  it("writes a Cursor .mdc project rule with alwaysApply frontmatter", () => {
-    const r = writeGuideline("cursor", { cwd, home });
-    expect(r.kind).toBe("written");
-    const path = join(cwd, ".cursor", "rules", "agentmemory.mdc");
-    expect(existsSync(path)).toBe(true);
-    const body = readFileSync(path, "utf8");
-    expect(body).toContain("alwaysApply: true");
-    expect(body).toContain("memory_recall");
-    expect(body).toContain("memory_save");
-  });
-
   it("writes a Kiro steering file with inclusion: always (global)", () => {
     const r = writeGuideline("kiro", { cwd, home });
     expect(r.kind).toBe("written");
@@ -102,8 +91,8 @@ describe("writeGuideline", () => {
   });
 
   it("is idempotent for dedicated files (second run unchanged)", () => {
-    expect(writeGuideline("cursor", { cwd, home }).kind).toBe("written");
-    expect(writeGuideline("cursor", { cwd, home }).kind).toBe("unchanged");
+    expect(writeGuideline("cline", { cwd, home }).kind).toBe("written");
+    expect(writeGuideline("cline", { cwd, home }).kind).toBe("unchanged");
   });
 
   it("dry-run reports would-write without creating the file", () => {
@@ -114,7 +103,6 @@ describe("writeGuideline", () => {
 
   it("returns no-target for agents that already auto-capture (claude-code)", () => {
     expect(writeGuideline("claude-code", { cwd, home }).kind).toBe("no-target");
-    expect(writeGuideline("codex", { cwd, home }).kind).toBe("no-target");
   });
 
   it("Gemini and Antigravity share ~/.gemini/GEMINI.md idempotently", () => {
@@ -137,7 +125,6 @@ describe("guidelineTargets coverage", () => {
         "cline",
         "continue",
         "copilot-cli",
-        "cursor",
         "droid",
         "gemini-cli",
         "kiro",

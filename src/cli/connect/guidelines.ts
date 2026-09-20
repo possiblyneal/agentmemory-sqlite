@@ -20,10 +20,9 @@ You have persistent long-term memory via the agentmemory MCP server. Tools: \`me
 - Prefer recalling over re-deriving, and save concise reusable facts rather than transcripts.`;
 
 // "block"    -> upsert a marked block inside a shared instructions file
-// "mdc"      -> Cursor project rule: dedicated .mdc with alwaysApply frontmatter
 // "steering" -> Kiro steering file: dedicated .md with inclusion:always frontmatter
 // "rule"     -> dedicated always-on markdown rule file (own file, safe to own)
-type GuidelineFormat = "block" | "mdc" | "steering" | "rule";
+type GuidelineFormat = "block" | "steering" | "rule";
 
 type GuidelineTarget = {
   // Preferred user-global rules file (absolute). Omitted when the agent has no
@@ -41,13 +40,6 @@ export function guidelineTargets(
   home: string = homedir(),
 ): Record<string, GuidelineTarget> {
   return {
-    // No global rules FILE (User Rules are UI-only) -> project .cursor/rules/*.mdc
-    cursor: {
-      projectPath: join(".cursor", "rules", "agentmemory.mdc"),
-      format: "mdc",
-      scope: "project",
-      source: "https://cursor.com/docs/rules",
-    },
     // Cline's global rules dir is a non-standard ~/Documents path; the dedicated
     // project rule (no frontmatter = always active) is the verified stable form.
     cline: {
@@ -140,9 +132,6 @@ export function guidelineTargets(
 }
 
 function renderDedicated(format: GuidelineFormat): string {
-  if (format === "mdc") {
-    return `---\ndescription: agentmemory long-term memory usage\nalwaysApply: true\n---\n\n${GUIDELINE_BODY}\n`;
-  }
   if (format === "steering") {
     return `---\ninclusion: always\n---\n\n${GUIDELINE_BODY}\n`;
   }

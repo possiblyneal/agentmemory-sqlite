@@ -85,7 +85,7 @@ Expect: the agent now lists agentmemory's tools. With the server running you sho
 ## 6. Install native skills
 
 ```bash
-npx skills add rohitg00/agentmemory -y
+npx skills add possiblyneal/agentmemory-sqlite -y
 ```
 
 This installs the native skills so the agent knows when to call the memory tools, not just that they exist. `connect` makes the tools available; skills teach the agent when to use them.

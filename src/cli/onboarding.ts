@@ -42,8 +42,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENT_GLYPH: Record<string, string> = {
   "claude-code": "⟁",
   "copilot-cli": "◈",
-  codex: "◎",
-  cursor: "◫",
   "gemini-cli": "✦",
   opencode: "⬡",
 };

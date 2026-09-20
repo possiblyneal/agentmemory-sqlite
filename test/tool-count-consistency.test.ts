@@ -49,6 +49,9 @@ describe("Tool count consistency", () => {
     expect(readText("README.md")).toContain(`${skillCount} skills`);
     expect(readText("CLAUDE.md")).toContain(`12 hooks, ${skillCount} skills`);
     expect(readText("plugin/plugin.json")).toContain(`${skillCount} skills`);
+    expect(readText("plugin/.claude-plugin/plugin.json")).toContain(
+      `${skillCount} skills`,
+    );
   });
 
   it("INSTALL_FOR_AGENTS.md names the real core tool set", () => {
