@@ -21,10 +21,10 @@ agentmemory-debug/
 
 # Lock files — never commit (see feedback_no_lockfiles memory)
 package-lock.json
-# ...except ours. The build is reproduced from this repo alone; without the
-# lockfile `git archive` drops it and `npm ci` on the build host fails or
-# silently resolves a different dependency tree than the one that produced
-# the shipped dist.
+# ...except ours. Nothing is published from this fork, so the clone is the
+# only install path and the build is reproduced from this repo alone: without
+# the lockfile `git archive` drops it and `npm ci` on the build host fails or
+# silently resolves a different dependency tree than the one CI tested.
 !package-lock.json
 pnpm-lock.yaml
 yarn.lock

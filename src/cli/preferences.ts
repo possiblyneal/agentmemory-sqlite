@@ -41,14 +41,6 @@ export interface Prefs {
   // The first onboarding sets this to true so the second invocation
   // skips the banner.
   skipSplash: boolean;
-  // Reserved for a later "do not nag me about the npx vs install
-  // tradeoff" toggle. Kept on the schema so we don't have to bump
-  // schemaVersion when we ship the flag.
-  skipNpxHint: boolean;
-  // Set to true when the user declines the "install agentmemory
-  // globally?" prompt on first npx run. We never ask again on this
-  // machine so the prompt stays a one-time DX nudge, not a nag.
-  skipGlobalInstall: boolean;
   // Set to true when the user declines the "install iii console?"
   // prompt. iii console is first-class engine UI but optional at the
   // install step — once the user says no, we stop asking.
@@ -59,7 +51,7 @@ export interface Prefs {
   firstRunAt: string | null;
   // Set to true once the user has answered the context-injection prompt
   // (either way). We never re-ask after this so the prompt stays a
-  // one-time choice, matching the skipGlobalInstall / skipConsoleInstall
+  // one-time choice, matching the skipConsoleInstall
   // never-nag pattern.
   injectContextChosen: boolean;
 }
@@ -70,8 +62,6 @@ const DEFAULTS: Prefs = {
   lastAgents: [],
   lastProvider: null,
   skipSplash: false,
-  skipNpxHint: false,
-  skipGlobalInstall: false,
   skipConsoleInstall: false,
   firstRunAt: null,
   injectContextChosen: false,

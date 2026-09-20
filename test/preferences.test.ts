@@ -36,7 +36,7 @@ describe("cli preferences", () => {
     expect(p.lastAgents).toEqual([]);
     expect(p.lastProvider).toBeNull();
     expect(p.skipSplash).toBe(false);
-    expect(p.skipNpxHint).toBe(false);
+    expect(p.skipConsoleInstall).toBe(false);
     expect(p.firstRunAt).toBeNull();
   });
 

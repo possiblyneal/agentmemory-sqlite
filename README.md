@@ -692,7 +692,7 @@ Full endpoint list under [API](#api).
 
 ```bash
 git clone https://github.com/possiblyneal/agentmemory-sqlite.git && cd agentmemory-sqlite
-npm install && npm run build && npm start
+npm ci && npm run build && npm start
 ```
 
 `npm start` is the whole daemon: one Node process that opens the SQLite file, registers every function, and binds REST, streams, and the viewer to `127.0.0.1`. There is no second process to install or supervise.
