@@ -68,11 +68,11 @@ PRs with commits lacking sign-off will not merge.
 | `src/mcp/` | Standalone MCP server (`@agentmemory/mcp`), tools registry, transport, in-memory KV. |
 | `src/functions/` | Core memory operations — observe, compress, consolidate, retention, forget, graph, smart-search, export-import, governance. |
 | `src/hooks/` | The 12 auto-hooks that capture sessions in agents. |
-| `src/cli/` | The `agentmemory` CLI, including `connect/` adapters for 18 agents and the guideline writer for hook-less agents. |
+| `src/cli/` | The `agentmemory` CLI, including `connect/` adapters for 19 agents and the guideline writer for hook-less agents. |
 | `src/health/` | Liveness + readiness + alert thresholds. |
 | `src/state/` | KV schema, keyed mutex, access log. |
 | `integrations/` | First-party plugins: `hermes/`, `openclaw/`, `pi/`, `filesystem-watcher/`. |
-| `plugin/` | Agent plugin bundle: Claude Code plugin, hook manifests for Codex/Copilot/Droid, the OpenCode capture plugin, and the skills. Hook manifests and skill REFERENCE files are partly generated; run `npm run skills:gen` after touching registered endpoints or env vars. |
+| `plugin/` | Agent plugin bundle: Claude Code plugin, hook manifests for Copilot/Droid, the OpenCode capture plugin, and the skills. Hook manifests and skill REFERENCE files are partly generated; run `npm run skills:gen` after touching registered endpoints or env vars. |
 | `website/` | Marketing site (Next.js 16). |
 | `test/` | Vitest test suite. |
 
@@ -99,10 +99,9 @@ Maintainers cut releases. Every bump touches these files in lockstep (the consis
 2. `src/version.ts`
 3. `plugin/.claude-plugin/plugin.json`
 4. `plugin/plugin.json`
-5. `plugin/.codex-plugin/plugin.json`
-6. `packages/mcp/package.json`
-7. `src/types.ts` (`ExportData.version` union)
-8. `src/functions/export-import.ts` (`supportedVersions` Set)
+5. `packages/mcp/package.json`
+6. `src/types.ts` (`ExportData.version` union)
+7. `src/functions/export-import.ts` (`supportedVersions` Set)
 
 No lockfiles are committed. `test/export-import.test.ts` asserts against the `VERSION` constant, so it needs no per-release edit. Run `npm run skills:gen` if the endpoint or env surface changed.
 

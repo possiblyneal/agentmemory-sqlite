@@ -9,7 +9,7 @@ user-invocable: false
 ## Quick start
 
 ```bash
-agentmemory connect claude-code   # or cursor, codex, gemini-cli, ...
+agentmemory connect claude-code   # or gemini-cli, opencode, copilot-cli, ...
 ```
 
 After wiring, restart the host or run its MCP reload (for example `/mcp` in Claude Code) so it picks up the server. Then confirm the agent lists agentmemory's tools.
@@ -22,7 +22,7 @@ After wiring, restart the host or run its MCP reload (for example `/mcp` in Clau
 
 ## Notes
 
-- The action skills (remember, recall, and the rest) are installed separately with `npx skills add rohitg00/agentmemory`. `connect` makes tools available; skills teach the agent when to use them.
+- The action skills (remember, recall, and the rest) are installed separately with `npx skills add possiblyneal/agentmemory-sqlite`. `connect` makes tools available; skills teach the agent when to use them.
 - Windows: use WSL2. Native Windows runs the server but `connect` is not supported there.
 
 ## See also

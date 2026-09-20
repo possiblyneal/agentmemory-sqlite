@@ -8,9 +8,7 @@ import { adapter as antigravityCli } from "./antigravity-cli.js";
 import { adapter as claudeCode } from "./claude-code.js";
 import { adapter as cline } from "./cline.js";
 import { adapter as copilotCli } from "./copilot-cli.js";
-import { adapter as codex } from "./codex.js";
 import { adapter as continueDev } from "./continue.js";
-import { adapter as cursor } from "./cursor.js";
 import { adapter as devin } from "./devin.js";
 import { adapter as droid } from "./droid.js";
 import { adapter as dsh } from "./dsh.js";
@@ -28,8 +26,6 @@ import { adapter as zed } from "./zed.js";
 export const ADAPTERS: readonly ConnectAdapter[] = [
   claudeCode,
   copilotCli,
-  codex,
-  cursor,
   devin,
   geminiCli,
   qwen,
@@ -238,7 +234,7 @@ function summarize(
   );
   if (wiredAny) {
     p.log.info(
-      "Next: install agentmemory's 17 skills into the same agent(s) so they know when to call the tools:\n  npx skills add rohitg00/agentmemory -y",
+      "Next: install agentmemory's 17 skills into the same agent(s) so they know when to call the tools:\n  npx skills add possiblyneal/agentmemory-sqlite -y",
     );
   }
 

@@ -6,8 +6,8 @@
     "name": "Rohit Ghumare",
     "email": "ghumare64@gmail.com"
   },
-  "homepage": "https://agent-memory.dev",
-  "repository": "https://github.com/rohitg00/agentmemory",
+  "homepage": "https://github.com/possiblyneal/agentmemory-sqlite",
+  "repository": "https://github.com/possiblyneal/agentmemory-sqlite",
   "license": "Apache-2.0",
   "keywords": [
     "memory",

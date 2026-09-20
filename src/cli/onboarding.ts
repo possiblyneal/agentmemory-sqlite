@@ -42,8 +42,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENT_GLYPH: Record<string, string> = {
   "claude-code": "⟁",
   "copilot-cli": "◈",
-  codex: "◎",
-  cursor: "◫",
   "gemini-cli": "✦",
   opencode: "⬡",
 };
@@ -194,7 +192,7 @@ export async function runOnboarding(): Promise<OnboardingResult> {
       [
         "━ how this works ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "All selected agents share the same memory at :3111.",
-        "A memory saved by Claude Code is visible to Copilot + Codex + Cursor instantly.",
+        "A memory saved by Claude Code is visible to Copilot + Gemini CLI + OpenCode instantly.",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
       ].join("\n"),
     );

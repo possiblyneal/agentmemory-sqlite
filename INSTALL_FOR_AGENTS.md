@@ -76,7 +76,7 @@ agentmemory connect <agent>
 
 `connect` merges agentmemory into that agent's MCP config and preserves any existing servers. Supported agent names:
 
-`claude-code`, `copilot-cli`, `codex`, `cursor`, `gemini-cli`, `opencode`, `cline`, `continue`, `droid`, `hermes`, `openclaw`, `openhuman`, `pi`, `qwen`, `warp`, `zed`, `antigravity`, `kiro`.
+`claude-code`, `copilot-cli`, `gemini-cli`, `opencode`, `cline`, `continue`, `droid`, `hermes`, `openclaw`, `openhuman`, `pi`, `qwen`, `warp`, `zed`, `antigravity`, `kiro`.
 
 If you cannot tell which agent you are, default to `claude-code`. After wiring, restart the agent or run its MCP reload command (for example `/mcp` in Claude Code) so it picks up the server.
 
@@ -85,7 +85,7 @@ Expect: the agent now lists agentmemory's tools. With the server running you sho
 ## 6. Install native skills
 
 ```bash
-npx skills add rohitg00/agentmemory -y
+npx skills add possiblyneal/agentmemory-sqlite -y
 ```
 
 This installs the native skills so the agent knows when to call the memory tools, not just that they exist. `connect` makes the tools available; skills teach the agent when to use them.
