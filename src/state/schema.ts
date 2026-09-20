@@ -102,6 +102,18 @@ export const KV = {
   recentSearches: "mem:recent-searches",
 } as const;
 
+// The removed engine's index persistence owned `mem:index:bm25` and wrote
+// every shard into its own scope beneath it. Nothing reads either now - BM25
+// is rebuilt from content at boot and vectors live in their own table - so the
+// whole subtree is dead. Both the startup repair that deletes it and the
+// import that refuses to carry it name the subtree from here.
+export const DEAD_INDEX_SCOPE = KV.bm25Index;
+export const DEAD_INDEX_SCOPE_PREFIX = `${KV.bm25Index}:`;
+
+export function isDeadIndexScope(scope: string): boolean {
+  return scope === DEAD_INDEX_SCOPE || scope.startsWith(DEAD_INDEX_SCOPE_PREFIX);
+}
+
 export const STREAM = {
   name: "mem-live",
   group: (sessionId: string) => sessionId,

@@ -78,18 +78,11 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 // #1171: the snapshot is derived and disposable, so it holds a projection of
 // each node and edge with provenance stripped. Origin is read from the record.
-function projectNode(
-  node: SnapshotNode & { sourceObservationIds?: string[] },
-): SnapshotNode {
-  const { sourceObservationIds: _drop, ...rest } = node;
-  return rest;
-}
-
-function projectEdge(
-  edge: SnapshotEdge & { sourceObservationIds?: string[] },
-): SnapshotEdge {
-  const { sourceObservationIds: _drop, ...rest } = edge;
-  return rest;
+function stripProvenance<T extends SnapshotNode | SnapshotEdge>(
+  record: T & { sourceObservationIds?: string[] },
+): T {
+  const { sourceObservationIds: _drop, ...rest } = record;
+  return rest as T;
 }
 
 function emptySnapshot(): GraphSnapshot {
@@ -166,8 +159,8 @@ function buildSnapshotFromArrays(
   }
   return {
     version: 1,
-    topNodes: ranked.map(projectNode),
-    topEdges: topEdges.map(projectEdge),
+    topNodes: ranked.map(stripProvenance),
+    topEdges: topEdges.map(stripProvenance),
     topDegrees,
     stats: {
       totalNodes: liveNodes.length,
@@ -385,7 +378,7 @@ async function applyDegreeDelta(
     // Capacity available — fetch + promote.
     const node = await kv.get<GraphNode>(KV.graphNodes, nodeId);
     if (node && !node.stale) {
-      snap.topNodes.push(projectNode(node));
+      snap.topNodes.push(stripProvenance(node));
       snap.topDegrees[node.id] = next;
       snap.topNodes.sort(
         (a, b) =>
@@ -404,7 +397,7 @@ async function applyDegreeDelta(
     if (node && !node.stale) {
       const evicted = snap.topNodes.pop();
       if (evicted) delete snap.topDegrees[evicted.id];
-      snap.topNodes.push(projectNode(node));
+      snap.topNodes.push(stripProvenance(node));
       snap.topDegrees[node.id] = next;
       snap.topNodes.sort(
         (a, b) =>
@@ -423,7 +416,7 @@ function snapshotPushEdgeIfBothInTop(
   if (topIds.has(edge.sourceNodeId) && topIds.has(edge.targetNodeId)) {
     // Dedupe in case the same edge gets pushed twice.
     if (!snap.topEdges.find((e) => e.id === edge.id)) {
-      snap.topEdges.push(projectEdge(edge));
+      snap.topEdges.push(stripProvenance(edge));
     }
   }
 }
@@ -809,7 +802,7 @@ export async function persistGraphDelta(
       // returned from the snapshot fast path.
       const topIdx = snap.topNodes.findIndex((n) => n.id === existing!.id);
       if (topIdx !== -1) {
-        snap.topNodes[topIdx] = projectNode(merged);
+        snap.topNodes[topIdx] = stripProvenance(merged);
         snapMutated = true;
       }
     } else {
@@ -824,7 +817,7 @@ export async function persistGraphDelta(
       if (snap.topNodes.length < SNAPSHOT_TOP_NODES) {
         // Degree 0 still beats an empty slot — sit at the tail
         // until edges arrive and promote.
-        snap.topNodes.push(projectNode(node));
+        snap.topNodes.push(stripProvenance(node));
         snap.topDegrees[node.id] = 0;
       }
     }
@@ -859,7 +852,7 @@ export async function persistGraphDelta(
       // Replace cached topEdges entry too if present.
       const topIdx = snap.topEdges.findIndex((e) => e.id === existing!.id);
       if (topIdx !== -1) {
-        snap.topEdges[topIdx] = projectEdge(merged);
+        snap.topEdges[topIdx] = stripProvenance(merged);
         snapMutated = true;
       }
     } else {
@@ -886,8 +879,8 @@ export async function persistGraphDelta(
   if (newNodeCount > 0 || newEdgeCount > 0 || snapMutated) {
     // A snapshot stored before #1171 still carries provenance on entries this
     // batch never touched; the next write replaces it with a projected one.
-    snap.topNodes = snap.topNodes.map(projectNode);
-    snap.topEdges = snap.topEdges.map(projectEdge);
+    snap.topNodes = snap.topNodes.map(stripProvenance);
+    snap.topEdges = snap.topEdges.map(stripProvenance);
     snap.updatedAt = capturedAt;
     snap.dirty = false;
     await kv.set(KV.graphSnapshot, SNAPSHOT_KEY, snap);

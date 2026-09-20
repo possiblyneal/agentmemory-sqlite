@@ -25,7 +25,7 @@ import { parseArgs } from "node:util";
 import { SqliteState } from "../engine/inproc/state.js";
 import { SqliteVectorStore } from "../engine/inproc/vectors.js";
 import { VectorIndex } from "../state/vector-index.js";
-import { KV } from "../state/schema.js";
+import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, isDeadIndexScope, KV } from "../state/schema.js";
 import {
   getSearchIndex,
   rebuildBm25FromContent,
@@ -230,10 +230,10 @@ export function* scanJsonArrayRows(chunks: Iterable<string>): IterableIterator<s
 
 // ---------------------------------------------------------------- scopes
 
-const SKIP_EXACT = new Set(["mem:audit", "mem:health", KV.bm25Index]);
+const SKIP_EXACT = new Set(["mem:audit", "mem:health"]);
 export function isSkippedScope(scope: string): boolean {
   return (
-    SKIP_EXACT.has(scope) || scope.startsWith("mem:graph:") || scope.startsWith(`${KV.bm25Index}:`)
+    SKIP_EXACT.has(scope) || scope.startsWith("mem:graph:") || isDeadIndexScope(scope)
   );
 }
 
@@ -417,8 +417,8 @@ export async function importStateStore(opts: ImportOptions): Promise<ImportRepor
         report.totals.skippedKeys += d.keys.length;
         log(`skip ${d.scope}  ${d.keys.length} keys  ${mib(d.bytes)} MiB`);
         if (d.scope === "mem:audit") report.auditDeletions = auditDeletions(d);
-        if (d.scope === KV.bm25Index) bm25Scope = d;
-        if (d.scope.startsWith(`${KV.bm25Index}:`)) indexScopeFiles.set(d.scope, path);
+        if (d.scope === DEAD_INDEX_SCOPE) bm25Scope = d;
+        if (d.scope.startsWith(DEAD_INDEX_SCOPE_PREFIX)) indexScopeFiles.set(d.scope, path);
         continue;
       }
       if (d.scope.startsWith(OBS_PREFIX)) {
