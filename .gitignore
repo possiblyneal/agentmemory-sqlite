@@ -39,3 +39,6 @@ eval/data/longmemeval/
 # Local-only privacy scanner for this fork. Never shipped: its marker list and
 # allowlist describe the private infrastructure it exists to detect.
 /scripts/check-private.sh
+
+# agent scratch space
+tmp/
