@@ -16,7 +16,7 @@ describe("capSourceIds", () => {
     expect(capSourceIds(["a", "b", "c", "d", "e"])).toEqual(["c", "d", "e"]);
   });
 
-  it("leaves a run within the cap untouched, duplicates and all", () => {
+  it("keeps the order of a run within the cap, dropping only duplicates", () => {
     process.env[ENV] = "5";
     expect(capSourceIds(["a", "b", "a"])).toEqual(["b", "a"]);
   });

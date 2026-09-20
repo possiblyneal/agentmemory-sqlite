@@ -319,6 +319,13 @@ describe("evaluateHealth environment overrides", () => {
     expect(evaluateHealth(s).status).toBe("degraded");
   });
 
+  it("falls back to the default on an env var set but left empty", () => {
+    // `Number("")` is 0, which would read as a deliberate threshold of zero.
+    process.env["AGENTMEMORY_HEALTH_CPU_WARN_PERCENT"] = "  ";
+    const s = snap({ cpu: { userMicros: 0, systemMicros: 0, percent: 1 } });
+    expect(evaluateHealth(s).status).toBe("healthy");
+  });
+
   it("falls back to the default on a sample count of zero", () => {
     // A count of zero would publish every sample unchallenged, which is not
     // hysteresis at all - one is the floor (#9).

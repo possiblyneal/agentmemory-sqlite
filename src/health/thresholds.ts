@@ -129,7 +129,7 @@ export function evaluateHealth(
   const needed = SEVERITY[sampled] < SEVERITY[prior.published]
     ? tuning.clearSamples
     : tuning.assertSamples;
-  const run = sampled === prior.pending ? prior.run + 1 : 1;
+  const run = sampled !== prior.published ? prior.run + 1 : 0;
   const published = run >= needed ? sampled : prior.published;
   return {
     status: published,

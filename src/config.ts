@@ -462,8 +462,10 @@ export function getHealthTuning(): HealthTuning {
   const tuned = {} as HealthTuning;
   for (const key of Object.keys(HEALTH_TUNING_DEFAULTS) as (keyof HealthTuning)[]) {
     const fallback = HEALTH_TUNING_DEFAULTS[key];
-    const raw = env[HEALTH_ENV_KEYS[key]];
-    const parsed = raw === undefined ? NaN : Number(raw);
+    // `Number("")` is 0, so an env var set but left empty would read as a
+    // deliberate zero rather than as the absence it is.
+    const raw = env[HEALTH_ENV_KEYS[key]]?.trim();
+    const parsed = raw === undefined || raw === "" ? NaN : Number(raw);
     const floor = HEALTH_SAMPLE_COUNT_KEYS.has(key) ? 1 : 0;
     tuned[key] = Number.isFinite(parsed) && parsed >= floor ? parsed : fallback;
   }
