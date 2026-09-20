@@ -372,6 +372,24 @@ describe("evaluateHealth environment overrides", () => {
     expect(r.status).toBe("degraded");
   });
 
+  it("does not spend a run toward trouble on the shorter clear count", () => {
+    // A run argues in one direction. When a recovering sample turns it around
+    // it starts its own run, or a single healthy reading would clear a verdict
+    // off samples that were arguing for a worse one.
+    process.env["AGENTMEMORY_HEALTH_ASSERT_SAMPLES"] = "5";
+    process.env["AGENTMEMORY_HEALTH_CLEAR_SAMPLES"] = "2";
+    let state = evaluateHealth(snap({ connectionState: "reconnecting" })).hysteresis;
+    for (const s of [
+      snap({ connectionState: "failed" }),
+      snap(),
+    ]) {
+      const r = evaluateHealth(s, {}, state);
+      state = r.hysteresis;
+      expect(r.status).toBe("degraded");
+    }
+    expect(evaluateHealth(snap(), {}, state).status).toBe("healthy");
+  });
+
   it("reads no signal from a dimension the snapshot does not measure", () => {
     process.env["AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT"] = "1";
     const s = snap({

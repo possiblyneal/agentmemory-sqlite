@@ -13,9 +13,13 @@ export type HealthStatus = "healthy" | "degraded" | "critical";
 // reaches the configured count, and then it moves to the newest sample. The
 // monitor holds this in its own closure and never persists it — a restart
 // legitimately resets the judgement (#1170).
+//
+// A run toward trouble and a run toward health are different arguments and
+// are counted separately, so `clearing` records which one the run is making.
 export type HealthHysteresis = {
   published: HealthStatus;
   run: number;
+  clearing: boolean;
 };
 
 const SEVERITY: Record<HealthStatus, number> = {
@@ -107,7 +111,7 @@ export function evaluateHealth(
       status: sampled,
       alerts,
       notes,
-      hysteresis: { published: sampled, run: 0 },
+      hysteresis: { published: sampled, run: 0, clearing: false },
     };
   }
 
@@ -116,7 +120,7 @@ export function evaluateHealth(
       status: prior.published,
       alerts,
       notes,
-      hysteresis: { published: prior.published, run: 0 },
+      hysteresis: { published: prior.published, run: 0, clearing: false },
     };
   }
 
@@ -125,20 +129,27 @@ export function evaluateHealth(
   // Clearing is any move toward healthy, not just arrival at it - stepping
   // critical -> degraded de-escalates the restart signal and has to earn the
   // same patience as clearing it outright.
-  const needed = SEVERITY[sampled] < SEVERITY[prior.published]
-    ? tuning.clearSamples
-    : tuning.assertSamples;
+  const clearing = SEVERITY[sampled] < SEVERITY[prior.published];
+  const needed = clearing ? tuning.clearSamples : tuning.assertSamples;
   // The run counts samples that disagree with the published verdict, not
   // identical consecutive samples. A daemon oscillating degraded <-> critical
   // disagrees on every sample; counting identity would reset the run on each
   // flip and hold `healthy` forever while nothing is healthy. One agreeing
   // sample still breaks the run, and the verdict moves to the newest sample.
-  const run = prior.run + 1;
+  //
+  // A sample that turns the run around starts a new one: otherwise a run
+  // accumulated toward trouble would be spent on the shorter count a single
+  // recovering sample asks for, publishing `healthy` off one healthy reading.
+  const run = prior.clearing === clearing ? prior.run + 1 : 1;
   const published = run >= needed ? sampled : prior.published;
   return {
     status: published,
     alerts,
     notes,
-    hysteresis: { published, run: published === sampled ? 0 : run },
+    hysteresis: {
+      published,
+      run: published === sampled ? 0 : run,
+      clearing: published === sampled ? false : clearing,
+    },
   };
 }
