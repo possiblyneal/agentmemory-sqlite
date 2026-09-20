@@ -80,9 +80,9 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 // each node and edge with provenance stripped. Origin is read from the record.
 function stripProvenance<T extends SnapshotNode | SnapshotEdge>(
   record: T & { sourceObservationIds?: string[] },
-): T {
+): Omit<T, "sourceObservationIds"> {
   const { sourceObservationIds: _drop, ...rest } = record;
-  return rest as T;
+  return rest;
 }
 
 function emptySnapshot(): GraphSnapshot {

@@ -1551,7 +1551,15 @@
       html += '<div class="stat-card" data-action="goto-tab" data-tab="crystals" role="link" tabindex="0"><div class="label">Crystals</div><div class="value">' + crystalCount + '</div><div class="sub">action digests</div></div>';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="graph" role="link" tabindex="0"><div class="label">Graph Nodes</div><div class="value">' + nodeCount + '</div><div class="sub">' + edgeCount + ' edges</div></div>';
       html += '<div class="stat-card"><div class="label">Health</div><div class="value"><div class="health-bar"><span class="health-dot ' + dotClass + '"></span> ' + esc(healthStatus) + '</div></div>';
-      html += '<div class="sub">' + esc(snap.connectionState || 'unknown') + '</div></div>';
+      html += '<div class="sub">' + esc(snap.connectionState || 'unknown') + '</div>';
+      // The dot shows the verdict published to a supervisor, which only moves
+      // once a run of samples agrees. Name the disagreement here as well as in
+      // the alerts card: on the way back up to healthy there are no alerts, so
+      // the card does not render and a stale-looking dot goes unexplained.
+      if (snap.sampledStatus && snap.sampledStatus !== healthStatus) {
+        html += '<div class="sub">latest sample: ' + esc(snap.sampledStatus) + '</div>';
+      }
+      html += '</div>';
       var totalCalls = fMetrics.reduce(function(a, m) { return a + (m.totalCalls || 0); }, 0);
       html += '<div class="stat-card"><div class="label">Function Calls</div><div class="value">' + totalCalls + '</div><div class="sub">' + fMetrics.length + ' functions tracked</div></div>';
       if (cb) {
