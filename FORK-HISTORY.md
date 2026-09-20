@@ -253,8 +253,14 @@ and Droid's native install.
 
 Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `plugin install` and
 `skills add` commands) points at this fork. Installing from upstream would pull upstream's 8
-skills over this fork's 17. npm package metadata still names upstream and is left alone: the fork
-does not publish, so that surface is inert.
+skills over this fork's 17. npm package metadata (`package.json`, `packages/mcp/package.json`,
+`integrations/*/package.json`) still names upstream and is left alone: those fields describe
+packages this fork does not own on npm, so repointing them would be misleading rather than
+corrective. `plugin/.devin-plugin/plugin.json` was the exception — its `homepage` pointed at
+upstream's site next to a fork `repository`, and it is a live plugin manifest, so it moved with
+the rest.
 
-`READMEs/*` are upstream's translations and are not maintained here. They still describe the
-removed hosts and upstream install commands; the English `README.md` is the current one.
+`website/` and `READMEs/*` are not maintained here. The translations and the marketing site
+still describe the removed hosts — `website/components/Agents.tsx` even links at upstream's
+`.cursor-plugin/` tree. Nothing deploys the site from this fork and `ci.yml` ignores
+`website/**`, so neither ships. The English `README.md` is the current one.
