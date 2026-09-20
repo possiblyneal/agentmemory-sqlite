@@ -1,8 +1,8 @@
-import type { HealthSnapshot } from "../types.js";
+import type { HealthSnapshot, HealthStatus } from "../types.js";
 import { getHealthTuning } from "../config.js";
 import type { HealthTuning } from "../config.js";
 
-export type HealthStatus = "healthy" | "degraded" | "critical";
+export type { HealthStatus };
 
 // The published verdict is a restart signal to an external supervisor, so it
 // must not follow a single reading: one slow GC inside a sampling window is
@@ -34,15 +34,22 @@ export function evaluateHealth(
   status: HealthStatus;
   // What this sample alone says, before hysteresis. `alerts` describes it,
   // `status` is the verdict published to a supervisor, and while a run
-  // accumulates the two disagree on purpose.
-  sampled: HealthStatus;
+  // accumulates the two disagree on purpose. Same name as the snapshot field
+  // it ends up in.
+  sampledStatus: HealthStatus;
   alerts: string[];
   notes: string[];
   hysteresis: HealthHysteresis;
 } {
   // Environment first, explicit config last: a caller that names a threshold
-  // means it (#1172).
-  const cfg = { ...getHealthTuning(), ...config };
+  // means it (#1172). A key present but `undefined` names nothing, and
+  // spreading it would erase the environment value - for the sample counts
+  // that is unrecoverable, since `run >= undefined` is never true and the
+  // published verdict would then never move again.
+  const named = Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  ) as Partial<HealthTuning>;
+  const cfg = { ...getHealthTuning(), ...named };
   const alerts: string[] = [];
   const notes: string[] = [];
   let critical = false;
@@ -98,33 +105,29 @@ export function evaluateHealth(
     notes.push(`memory_heap_tight_${Math.round(memPercent)}%_rss${memMb}mb`);
   }
 
-  const sampled: HealthStatus = critical
+  const sampledStatus: HealthStatus = critical
     ? "critical"
     : degraded
       ? "degraded"
       : "healthy";
 
+  const hysteresis = advance(sampledStatus, cfg, prior);
+  return { status: hysteresis.published, sampledStatus, alerts, notes, hysteresis };
+}
+
+// Decide what the newest sample does to the published verdict.
+function advance(
+  sampled: HealthStatus,
+  cfg: HealthTuning,
+  prior?: HealthHysteresis,
+): HealthHysteresis {
   // No prior state is the first sample after startup: publish it directly so
   // the daemon is judged promptly rather than staying unjudged while a run
   // accumulates.
-  if (!prior) {
-    return {
-      status: sampled,
-      sampled,
-      alerts,
-      notes,
-      hysteresis: { published: sampled, run: 0, clearing: false },
-    };
-  }
+  if (!prior) return { published: sampled, run: 0, clearing: false };
 
   if (sampled === prior.published) {
-    return {
-      status: prior.published,
-      sampled,
-      alerts,
-      notes,
-      hysteresis: { published: prior.published, run: 0, clearing: false },
-    };
+    return { published: prior.published, run: 0, clearing: false };
   }
 
   // Asserting a verdict and clearing one are counted separately: an operator
@@ -144,16 +147,6 @@ export function evaluateHealth(
   // accumulated toward trouble would be spent on the shorter count a single
   // recovering sample asks for, publishing `healthy` off one healthy reading.
   const run = prior.clearing === clearing ? prior.run + 1 : 1;
-  const published = run >= needed ? sampled : prior.published;
-  return {
-    status: published,
-    sampled,
-    alerts,
-    notes,
-    hysteresis: {
-      published,
-      run: published === sampled ? 0 : run,
-      clearing: published === sampled ? false : clearing,
-    },
-  };
+  if (run >= needed) return { published: sampled, run: 0, clearing: false };
+  return { published: prior.published, run, clearing };
 }

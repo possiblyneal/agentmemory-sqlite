@@ -246,8 +246,8 @@ describe("evaluateHealth verdict hysteresis", () => {
     const first = evaluateHealth(healthy);
     const second = evaluateHealth(critical, {}, first.hysteresis);
     expect(second.status).toBe("healthy");
-    expect(second.sampled).toBe("critical");
-    expect(first.sampled).toBe("healthy");
+    expect(second.sampledStatus).toBe("critical");
+    expect(first.sampledStatus).toBe("healthy");
   });
 
   it("honours a sample count named in explicit config", () => {
@@ -257,6 +257,20 @@ describe("evaluateHealth verdict hysteresis", () => {
     expect(
       publishWith({ assertSamples: 1 }, [healthy, critical]),
     ).toEqual(["healthy", "critical"]);
+  });
+
+  it("treats a config key present but undefined as unnamed", () => {
+    // Spreading it would erase the environment value, and a count of
+    // `undefined` is never reached - the published verdict would pin itself
+    // forever on a caller that only meant to pass an optional through.
+    expect(
+      publishWith({ assertSamples: undefined }, [
+        healthy,
+        critical,
+        critical,
+        critical,
+      ]),
+    ).toEqual(["healthy", "healthy", "healthy", "critical"]);
   });
 
   it("reports the alerts of the sample just taken, not of the published verdict", () => {

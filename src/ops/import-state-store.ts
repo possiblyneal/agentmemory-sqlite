@@ -25,7 +25,7 @@ import { parseArgs } from "node:util";
 import { SqliteState } from "../engine/inproc/state.js";
 import { SqliteVectorStore } from "../engine/inproc/vectors.js";
 import { VectorIndex } from "../state/vector-index.js";
-import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, isDeadIndexScope, KV } from "../state/schema.js";
+import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, KV } from "../state/schema.js";
 import {
   getSearchIndex,
   rebuildBm25FromContent,
@@ -233,7 +233,10 @@ export function* scanJsonArrayRows(chunks: Iterable<string>): IterableIterator<s
 const SKIP_EXACT = new Set(["mem:audit", "mem:health"]);
 export function isSkippedScope(scope: string): boolean {
   return (
-    SKIP_EXACT.has(scope) || scope.startsWith("mem:graph:") || isDeadIndexScope(scope)
+    SKIP_EXACT.has(scope) ||
+    scope.startsWith("mem:graph:") ||
+    scope === DEAD_INDEX_SCOPE ||
+    scope.startsWith(DEAD_INDEX_SCOPE_PREFIX)
   );
 }
 

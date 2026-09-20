@@ -106,13 +106,11 @@ export const KV = {
 // every shard into its own scope beneath it. Nothing reads either now - BM25
 // is rebuilt from content at boot and vectors live in their own table - so the
 // whole subtree is dead. Both the startup repair that deletes it and the
-// import that refuses to carry it name the subtree from here.
+// import that refuses to carry it name the subtree from here. The root and
+// the shards are separate constants because the import reports on them
+// separately; callers that mean the whole subtree test both.
 export const DEAD_INDEX_SCOPE = KV.bm25Index;
 export const DEAD_INDEX_SCOPE_PREFIX = `${KV.bm25Index}:`;
-
-export function isDeadIndexScope(scope: string): boolean {
-  return scope === DEAD_INDEX_SCOPE || scope.startsWith(DEAD_INDEX_SCOPE_PREFIX);
-}
 
 export const STREAM = {
   name: "mem-live",

@@ -1442,6 +1442,21 @@ Create `~/.agentmemory/.env`:
 
 # Tool visibility: "all" (54 tools, default) or "core" (8 tools, lean)
 # AGENTMEMORY_TOOLS=core
+
+# Health verdict thresholds. A verdict is published to whatever supervises the
+# daemon, so it changes only after a run of samples disagrees with it.
+# AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_WARN_MS=100
+# AGENTMEMORY_HEALTH_EVENT_LOOP_LAG_CRITICAL_MS=500
+# AGENTMEMORY_HEALTH_CPU_WARN_PERCENT=80
+# AGENTMEMORY_HEALTH_CPU_CRITICAL_PERCENT=90
+# AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT=80
+# AGENTMEMORY_HEALTH_MEMORY_CRITICAL_PERCENT=95
+# AGENTMEMORY_HEALTH_MEMORY_RSS_FLOOR_BYTES=536870912  # below this RSS, heap % alone never alerts
+# AGENTMEMORY_HEALTH_ASSERT_SAMPLES=3      # samples before an unhealthy verdict is published
+# AGENTMEMORY_HEALTH_CLEAR_SAMPLES=3       # samples before a recovery is published; 1 = no hysteresis
+
+# Graph provenance: how many source observation ids a node or edge keeps.
+# AGENTMEMORY_GRAPH_MAX_SOURCE_IDS=50
 ```
 
 ---

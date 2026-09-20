@@ -38,12 +38,12 @@ function alreadyRan(state: SqliteState): boolean {
 const yieldToEventLoop = (): Promise<void> =>
   new Promise((resolve) => setImmediate(resolve));
 
-// Walk a scope a chunk at a time, yielding between chunks. `page` takes the
-// seq of the last row already handled, so a pass that rewrites rows in place
-// can resume past them; a pass that deletes them ignores it and re-queries
-// from the start.
+// Walk a scope a chunk at a time, yielding between chunks. Each call to
+// `page` is handed the seq of the last row already handled: a pass that
+// rewrites rows in place resumes past them, while a pass that deletes them
+// has nothing left to resume past and ignores it.
 async function inChunks<T extends { seq: number }>(
-  page: (after: number) => T[],
+  page: (afterSeq: number) => T[],
   handle: (rows: T[]) => void,
 ): Promise<void> {
   let after = 0;
@@ -118,7 +118,8 @@ async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
   let deleted = 0;
 
   await inChunks(
-    () => pick.all(DEAD_INDEX_SCOPE, like, CHUNK_ROWS) as Array<{ seq: number }>,
+    // The rows this read are gone by the next call, so the cursor is moot.
+    (_afterSeq) => pick.all(DEAD_INDEX_SCOPE, like, CHUNK_ROWS) as Array<{ seq: number }>,
     (rows) => {
       const seqs = rows.map((row) => row.seq);
       const result = state.db
