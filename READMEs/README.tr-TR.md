@@ -5,9 +5,12 @@
 <p align="center">
   <strong>
     Kodlama ajanınız her şeyi hatırlasın. Aynı şeyi bir daha açıklamayın.
-    Built on <a href="https://github.com/iii-hq/iii">iii engine</a>
   </strong><br/>
   Claude Code, Cursor, Gemini CLI, Codex CLI, Hermes, OpenClaw, pi, OpenCode ve her MCP istemcisi için kalıcı bellek.
+</p>
+
+<p align="center">
+  <sub><em>Bu çeviri İngilizce README'nin gerisindedir; güncel bilgi için <a href="../README.md">README.md</a> dosyasına bakın.</em></sub>
 </p>
 
 <p align="center">
@@ -707,8 +710,6 @@ iii.trigger({
     "payload": {"project": "demo", "query": "how do tokens refresh"},
 })
 ```
-
-Çalışan örnek: [`examples/python/`](../examples/python/) (quickstart + gözlem/recall akışı). iii runtime'ı olmayan host'lar için REST `:3111` üzerinde kullanılmaya devam eder.
 
 ### Kaynaktan
 

@@ -47,12 +47,11 @@ In scope:
 Out of scope:
 
 - Third-party MCP clients consuming agentmemory — report to those projects.
-- `iii-sdk` upstream — report to the iii project.
 - The marketing site under `website/` unless the issue affects user security (XSS against visitors, credential leak in build output).
 
 ## Supply-chain stance
 
-agentmemory ships pre-built artifacts in the npm tarball — `dist/` is bundled at publish time, not built from `node_modules` at install time. The package's runtime dependency tree is intentionally small (6 production deps: `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, `@clack/prompts`, `dotenv`, `iii-sdk`, `zod`) plus an optional set guarded behind `optionalDependencies` for embeddings.
+agentmemory ships pre-built artifacts in the npm tarball — `dist/` is bundled at publish time, not built from `node_modules` at install time. The package's runtime dependency tree is intentionally small (7 production deps: `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, `@clack/prompts`, `dotenv`, `picocolors`, `ws`, `zod`) plus an optional set guarded behind `optionalDependencies` for embeddings. Storage is `node:sqlite` from the Node runtime itself, so the database is not a dependency at all.
 
 **No lockfile is committed** (#540). The reasoning:
 

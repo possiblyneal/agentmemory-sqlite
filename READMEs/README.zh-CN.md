@@ -5,9 +5,12 @@
 <p align="center">
   <strong>
     让你的编码代理记住一切。不再重复解释。
-    Built on <a href="https://github.com/iii-hq/iii">iii engine</a>
   </strong><br/>
   为 Claude Code、Cursor、Gemini CLI、Codex CLI、Hermes、OpenClaw、pi、OpenCode 以及任何 MCP 客户端提供持久化记忆。
+</p>
+
+<p align="center">
+  <sub><em>本译文落后于英文 README,最新信息请参阅 <a href="../README.md">README.md</a>。</em></sub>
 </p>
 
 <p align="center">
@@ -708,8 +711,6 @@ iii.trigger({
     "payload": {"project": "demo", "query": "how do tokens refresh"},
 })
 ```
-
-完整示例:[`examples/python/`](../examples/python/)(快速开始 + 观测/召回流程)。`:3111` 上的 REST 对没有 iii 运行时的宿主仍然可用。
 
 ### 从源码构建
 

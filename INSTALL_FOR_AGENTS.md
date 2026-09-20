@@ -4,15 +4,15 @@ You are a coding agent. Follow this runbook top to bottom to install agentmemory
 
 ## What you are installing
 
-agentmemory is a local memory server for coding agents. It runs on your machine, exposes a REST API on port 3111 and an MCP server, and stores memories on disk under `~/.agentmemory`. It is built on the iii engine, which agentmemory downloads and manages for you as a pinned binary under `~/.agentmemory/bin`. You do not install iii separately.
+agentmemory is a local memory server for coding agents. It runs on your machine, exposes a REST API on port 3111 and an MCP server, and stores memories in a SQLite file on disk. It is a single Node process with nothing else to install: no native binary, no Docker, no database server.
 
 Default mode needs no API key and no cloud account. Out of the box it runs hybrid retrieval (BM25 keyword search plus local on-device embeddings), so a full install proves real semantic recall with zero credentials. An LLM provider key is optional and only unlocks richer summaries and auto-injection (see "Optional: richer features").
 
 ## Prerequisites
 
 - Node.js >= 20 and npm. Check with `node -v`.
-- macOS or Linux for the one-command path. On Windows, use WSL2; native Windows engine setup is manual and `agentmemory connect` is not supported there.
-- Ports 3111 (REST), 3112 (streams), 3113 (viewer), and 49134 (engine) free. If any are taken, stop whatever is using them before starting (see Troubleshooting).
+- macOS, Linux, or Windows. `agentmemory connect` is not supported on Windows; wire MCP config by hand there, or use WSL2.
+- Ports 3111 (REST), 3112 (streams), and 3113 (viewer) free. If any are taken, stop whatever is using them before starting (see Troubleshooting), or pass `--port <N>` to move all three.
 
 ## Running non-interactively
 
@@ -40,7 +40,7 @@ Expect: a version string is printed. If `command not found`, the global bin is n
 
 ## 3. Start the server
 
-The server listens on port 3111 and auto-starts its pinned iii engine on first run (this can take a few seconds the first time while the engine binary is fetched into `~/.agentmemory/bin`). Run it in the background or in a separate terminal so the rest of the runbook can talk to it.
+The server listens on port 3111. Run it in the background or in a separate terminal so the rest of the runbook can talk to it.
 
 ```bash
 agentmemory &
@@ -54,7 +54,7 @@ Wait until it is reachable, then continue:
 curl -fsS http://localhost:3111/agentmemory/livez
 ```
 
-Expect: a `200` response. Retry for up to ~15 seconds on first run while the engine warms up.
+Expect: a `200` response. Retry for a few seconds on first run while the database is created and the index is built.
 
 ## 4. Prove recall in one command
 
@@ -132,10 +132,10 @@ The MCP server exposes 54 tools by default (`--tools all`). Use `--tools core` (
 
 ## Lifecycle commands
 
-- `agentmemory status` shows server and engine state.
+- `agentmemory status` shows connection status, memory count, flags, and health.
 - `agentmemory doctor` runs diagnostics and reports what is misconfigured.
-- `agentmemory stop` stops the engine this CLI started (`stop --force` bypasses the Docker guard).
-- `agentmemory upgrade` upgrades agentmemory and the iii runtime, best effort.
+- `agentmemory stop` stops the daemon this CLI started (`stop --force` also signals whatever holds the REST port when the pidfile is gone).
+- `agentmemory upgrade` refreshes JavaScript dependencies in the current directory, best effort.
 - `agentmemory --reset` wipes onboarding preferences and re-runs the wizard.
 - `agentmemory import-jsonl <file>` imports prior Claude Code session logs as memories.
 
@@ -144,12 +144,10 @@ The MCP server exposes 54 tools by default (`--tools all`). Use `--tools core` (
 - `command not found: agentmemory`: the global bin is not on `PATH`. Use `npx -y @agentmemory/agentmemory@latest`.
 - `EACCES` during global install: retry with `sudo`, or use the npx form.
 - Stale npx version: run `npx -y @agentmemory/agentmemory@latest`, or clear the cache with `rm -rf ~/.npm/_npx` (macOS/Linux).
-- Port already in use: another process holds 3111, 3112, 3113, or 49134. Stop that process, then re-run.
-- Server starts but `livez` never returns 200: re-run with `agentmemory --verbose` to see engine stderr.
-- Engine version warning on start: harmless. agentmemory uses its own pinned engine in `~/.agentmemory/bin` regardless of any `iii` on `PATH`. Set `AGENTMEMORY_III_VERSION` only to override deliberately.
-- "engine conflict" / another iii engine already running: if a different iii version is already serving the port (common if you run your own iii), agentmemory will not adopt it and stops with an "engine conflict" note. Stop that engine (`agentmemory stop --force`, or however you started it), then re-run `agentmemory` — it installs and runs the pinned engine in `~/.agentmemory/bin`, leaving your own iii untouched.
+- Port already in use: another process holds 3111, 3112, or 3113. Stop that process, or start with `--port <N>` to move all three at once.
+- Server starts but `livez` never returns 200: re-run with `agentmemory --verbose` to see the boot log.
 - Only 7 tools visible in the agent: the MCP shim is in local fallback because it could not reach a server. Start `npx @agentmemory/agentmemory` and ensure `AGENTMEMORY_URL` points at it (default `http://localhost:3111`), then reload MCP.
-- Windows: use WSL2 for the path above. Native Windows runs the server but `connect` and the automated engine install are not supported.
+- Windows: the server runs natively, but `connect` has no Windows adapters. Wire the agent's MCP config by hand, or use WSL2.
 
 ## Report success
 

@@ -5,9 +5,12 @@
 <p align="center">
   <strong>
     Votre agent de codage se souvient de tout. Fini de tout réexpliquer.
-    Built on <a href="https://github.com/iii-hq/iii">iii engine</a>
   </strong><br/>
   Mémoire persistante pour Claude Code, Cursor, Gemini CLI, Codex CLI, Hermes, OpenClaw, pi, OpenCode et tout client MCP.
+</p>
+
+<p align="center">
+  <sub><em>Cette traduction est en retard sur le README anglais ; consultez <a href="../README.md">README.md</a> pour les informations à jour.</em></sub>
 </p>
 
 <p align="center">
@@ -709,8 +712,6 @@ iii.trigger({
     "payload": {"project": "demo", "query": "how do tokens refresh"},
 })
 ```
-
-Exemple complet : [`examples/python/`](../examples/python/) (quickstart + flux observation/recall). REST sur `:3111` reste disponible pour les hôtes sans runtime iii.
 
 ### Depuis les sources
 

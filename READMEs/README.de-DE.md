@@ -5,9 +5,12 @@
 <p align="center">
   <strong>
     Ihr Coding-Agent merkt sich alles. Schluss mit dem ständigen Wiederholen.
-    Built on <a href="https://github.com/iii-hq/iii">iii engine</a>
   </strong><br/>
   Persistentes Gedächtnis für Claude Code, Cursor, Gemini CLI, Codex CLI, Hermes, OpenClaw, pi, OpenCode und jeden MCP-Client.
+</p>
+
+<p align="center">
+  <sub><em>Diese Übersetzung hinkt der englischen README hinterher; aktuelle Informationen finden Sie in <a href="../README.md">README.md</a>.</em></sub>
 </p>
 
 <p align="center">
@@ -709,8 +712,6 @@ iii.trigger({
     "payload": {"project": "demo", "query": "how do tokens refresh"},
 })
 ```
-
-Vollständiges Beispiel: [`examples/python/`](../examples/python/) (Quickstart + Beobachtungs-/Recall-Fluss). REST auf `:3111` bleibt verfügbar für Hosts ohne iii-Runtime.
 
 ### Aus den Quellen
 

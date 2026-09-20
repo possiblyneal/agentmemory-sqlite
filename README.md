@@ -5,7 +5,7 @@
 <p align="center">
   <strong>
     Your coding agent remembers everything. No more re-explaining.
-    Built on <a href="https://github.com/iii-hq/iii">iii engine</a>
+    One Node process, one SQLite file, zero external services.
   </strong><br/>
   Persistent memory for Claude Code, GitHub Copilot CLI, Cursor, Gemini CLI, Codex CLI, Hermes, OpenClaw, pi, OpenCode, and any MCP client.
 </p>
@@ -66,7 +66,7 @@
   <a href="#how-it-works">How It Works</a> &bull;
   <a href="#mcp-server">MCP</a> &bull;
   <a href="#real-time-viewer">Viewer</a> &bull;
-  <a href="#powered-by-iii">Powered by iii</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
   <a href="#configuration">Config</a> &bull;
   <a href="#api">API</a>
 </p>
@@ -99,7 +99,7 @@ Wire more agents any time with `agentmemory connect <agent>` — 20 adapters lis
 <details>
 <summary><strong>Windows</strong></summary>
 
-The fast path is WSL2. Native Windows engine setup is manual (about 10 to 20 minutes) and `agentmemory connect` is currently unsupported there. See the [Windows notes](#windows) for the step-by-step.
+Node is the only prerequisite, so `npx @agentmemory/agentmemory` works natively. `agentmemory connect` is currently unsupported on Windows; WSL2 is the fast path if you want it. See the [Windows notes](#windows).
 
 </details>
 
@@ -122,9 +122,9 @@ npx caches per version. Force the latest with `npx -y @agentmemory/agentmemory@l
 </details>
 
 <details>
-<summary><strong>Already running your own iii engine</strong></summary>
+<summary><strong>Running more than one instance</strong></summary>
 
-agentmemory pins iii-engine v0.11.2 and won't attach to a different version (the worker can't speak another engine's protocol). Stop the other engine, then run `npx -y @agentmemory/agentmemory@latest`. It installs and runs the pinned v0.11.2 in `~/.agentmemory/bin`, leaving your own `iii` untouched.
+Each instance owns its ports and its own SQLite file, so give the second one both: `npx -y @agentmemory/agentmemory@latest --instance 1 --data-dir ~/.agentmemory-projects/other`. `--instance 1` moves the whole trio to 3211 / 3212 / 3213; streams and the viewer always derive from the REST port.
 
 </details>
 
@@ -247,12 +247,14 @@ You explain the same architecture every session. You re-discover the same bugs. 
 npx @agentmemory/agentmemory
 ```
 
-By default, agentmemory stores iii-engine state outside the repository you start it from: `~/Library/Application Support/agentmemory` on macOS, `$XDG_DATA_HOME/agentmemory` or `~/.local/share/agentmemory` on Linux, and `%APPDATA%\agentmemory` on Windows. To choose a location, pass `--data-dir <path>` or set `AGENTMEMORY_DATA_DIR`:
+By default, agentmemory keeps its SQLite file outside the repository you start it from: `~/Library/Application Support/agentmemory` on macOS, `$XDG_DATA_HOME/agentmemory` or `~/.local/share/agentmemory` on Linux, and `%APPDATA%\agentmemory` on Windows. To choose a location, pass `--data-dir <path>` or set `AGENTMEMORY_DATA_DIR`:
 
 ```bash
 npx @agentmemory/agentmemory --data-dir ~/.agentmemory-projects/main
 AGENTMEMORY_DATA_DIR=~/.agentmemory-projects/main npx @agentmemory/agentmemory
 ```
+
+The database lands at `<data-dir>/agentmemory.sqlite`; point `AGENTMEMORY_SQLITE_PATH` at a specific file to override just that.
 
 Latest release notes: [CHANGELOG.md](CHANGELOG.md).
 
@@ -402,7 +404,7 @@ Latest release notes: [CHANGELOG.md](CHANGELOG.md).
 </tr>
 <tr>
 <td><strong>External deps</strong></td>
-<td>None (SQLite + iii-engine)</td>
+<td>None (embedded SQLite)</td>
 <td>Qdrant / pgvector</td>
 <td>Postgres + vector DB</td>
 <td>Multiple</td>
@@ -482,7 +484,7 @@ None of these auto-capture from coding-agent hooks, ship a local-first viewer, o
 
 <h2 id="quick-start"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/tags/light/section-quickstart.svg"><img src="assets/tags/section-quickstart.svg" alt="Quick Start" height="32" /></picture></h2>
 
-Compatibility: this release targets stable `iii-sdk` `^0.11.0` and iii-engine v0.11.x.
+Prerequisite: Node.js. Nothing else to install — no native binary, no Docker, no database server.
 
 ### Try it in 30 seconds
 
@@ -524,7 +526,7 @@ npx @agentmemory/agentmemory import-jsonl
 npx @agentmemory/agentmemory import-jsonl ~/.claude/projects/-my-project/abc123.jsonl
 ```
 
-Imported sessions show up in the Replay picker alongside native ones. Under the hood each entry routes through the `mem::replay::load`, `mem::replay::sessions`, and `mem::replay::import-jsonl` iii functions, with no side-channel servers. Each imported transcript is indexed for search, stamped with origin channel `import`, and mined for a session crystal and lessons.
+Imported sessions show up in the Replay picker alongside native ones. Under the hood each entry routes through the `mem::replay::load`, `mem::replay::sessions`, and `mem::replay::import-jsonl` functions inside the running process, with no side-channel servers. Each imported transcript is indexed for search, stamped with origin channel `import`, and mined for a session crystal and lessons.
 
 > **Heads-up if you rely on `import-jsonl` as your primary capture path:** Claude Code's `cleanupPeriodDays` (in `~/.claude/settings.json`, default **30**) auto-deletes JSONL transcripts older than that window from `~/.claude/projects/`. If you install agentmemory fresh on a months-old Claude Code history, anything older than 30 days is already gone before the first import. Either run `import-jsonl` on a cron, raise `cleanupPeriodDays` to something higher, or wire the auto-capture hooks (the default plugin install path) so each turn lands in agentmemory while the session is live and the JSONL cleanup stops mattering.
 
@@ -536,9 +538,9 @@ Use the maintenance command when you intentionally want to update your local run
 npx @agentmemory/agentmemory upgrade
 ```
 
-Warning: this command mutates the current workspace/runtime. It can update JavaScript dependencies and pull the pinned `iiidev/iii:0.11.2` Docker image. It never installs an unpinned or newer iii engine.
+Warning: this command mutates the current workspace. It runs `pnpm install` or `npm install` against the package.json in your working directory to refresh JavaScript dependencies, and does nothing when there isn't one.
 
-Implementation details live in `src/cli.ts` (see `runUpgrade` around the `src/cli.ts:544-595` region).
+Implementation details live in `src/cli.ts` (see `runUpgrade`).
 
 ### Claude Code (one block, paste it)
 
@@ -721,29 +723,17 @@ The agentmemory entry is the **same MCP server block** across every host that us
 
 **Sandboxed MCP clients** (Flatpak / Snap / restrictive containers) that can't reach the host's `localhost`: also set `"AGENTMEMORY_FORCE_PROXY": "1"` in the `env` block, and point `AGENTMEMORY_URL` at a route the sandbox can actually reach (e.g. your LAN IP).
 
-### Programmatic access (Python / Rust / Node)
+### Programmatic access (any language)
 
-agentmemory registers its core operations as iii functions (`mem::remember`, `mem::observe`, `mem::context`, `mem::smart-search`, `mem::forget`). Any language with an iii SDK can call them directly over `ws://localhost:49134`, with no separate REST client per language.
+The REST API on `:3111` is the programmatic surface. Anything that can make an HTTP request can drive agentmemory:
 
 ```bash
-pip install iii-sdk         # Python
-cargo add iii-sdk           # Rust
-npm  install iii-sdk        # Node
+curl -X POST http://localhost:3111/agentmemory/smart-search \
+  -H 'Content-Type: application/json' \
+  -d '{"project": "demo", "query": "how do tokens refresh"}'
 ```
 
-```python
-from iii import register_worker
-
-iii = register_worker("ws://localhost:49134")
-iii.connect()
-
-iii.trigger({
-    "function_id": "mem::smart-search",
-    "payload": {"project": "demo", "query": "how do tokens refresh"},
-})
-```
-
-Worked example: [`examples/python/`](examples/python/) (quickstart + observation/recall flow). REST on `:3111` remains available for hosts without an iii runtime.
+Full endpoint list under [API](#api).
 
 ### From source
 
@@ -752,51 +742,19 @@ git clone https://github.com/rohitg00/agentmemory.git && cd agentmemory
 npm install && npm run build && npm start
 ```
 
-This starts agentmemory with a local `iii-engine` if `iii` is already installed, or falls back to Docker Compose if Docker is available. REST, streams, and the viewer bind to `127.0.0.1` by default.
-
-Install `iii-engine` manually. **agentmemory currently pins `iii-engine` to `v0.11.2`**. `v0.11.6` introduces a new sandbox-everything-via-`iii worker add` model that agentmemory hasn't been refactored for yet. Pin lifts once the refactor lands. Override with `AGENTMEMORY_III_VERSION=<version>` if you've migrated to the sandbox model manually.
-
-- **macOS arm64:** `mkdir -p ~/.local/bin && curl -fsSL https://github.com/iii-hq/iii/releases/download/iii/v0.11.2/iii-aarch64-apple-darwin.tar.gz | tar -xz -C ~/.local/bin && chmod +x ~/.local/bin/iii`
-- **macOS x64:** swap `aarch64-apple-darwin` for `x86_64-apple-darwin`
-- **Linux x64:** swap for `x86_64-unknown-linux-gnu`
-- **Linux arm64:** swap for `aarch64-unknown-linux-gnu`
-- **Windows:** download `iii-x86_64-pc-windows-msvc.zip` from [iii-hq/iii releases v0.11.2](https://github.com/iii-hq/iii/releases/tag/iii%2Fv0.11.2), extract `iii.exe`, add to PATH
-
-Or use Docker (the bundled `docker-compose.yml` pulls `iiidev/iii:0.11.2`). Full docs: [iii.dev/docs](https://iii.dev/docs).
+`npm start` is the whole daemon: one Node process that opens the SQLite file, registers every function, and binds REST, streams, and the viewer to `127.0.0.1`. There is no second process to install or supervise.
 
 ### Windows
 
-agentmemory runs on Windows 10/11, but the Node.js package alone isn't enough; you also need the `iii-engine` runtime (a separate native binary) as a background process. The official upstream installer is a `sh` script and there is no PowerShell installer or scoop/winget package today, so Windows users have two paths:
-
-**Option A: prebuilt Windows binary (recommended)**
+agentmemory runs natively on Windows 10/11. Node is the only prerequisite, so the same one-liner works:
 
 ```powershell
-# 1. Open https://github.com/iii-hq/iii/releases/tag/iii%2Fv0.11.2 in your browser
-#    (we pin to v0.11.2 until agentmemory refactors for the new sandbox
-#     model that engine v0.11.6+ requires)
-# 2. Download iii-x86_64-pc-windows-msvc.zip
-#    (or iii-aarch64-pc-windows-msvc.zip if you're on an ARM machine)
-# 3. Extract iii.exe somewhere on PATH, or place it at:
-#    %USERPROFILE%\.local\bin\iii.exe
-#    (agentmemory checks that location automatically)
-# 4. Verify:
-iii --version
-# Should print: 0.11.2
-
-# 5. Then run agentmemory as usual:
 npx -y @agentmemory/agentmemory
 ```
 
-**Option B: Docker Desktop**
+State lands in `%APPDATA%\agentmemory` unless you pass `--data-dir`. `agentmemory connect` has no Windows adapters yet, so wire your agent's MCP config by hand (the blocks are in [Works with every agent](#works-with-every-agent)) or run agentmemory under WSL2.
 
-```powershell
-# 1. Install Docker Desktop for Windows
-# 2. Start Docker Desktop and make sure the engine is running
-# 3. Run agentmemory — it will auto-start the bundled compose file:
-npx -y @agentmemory/agentmemory
-```
-
-**Option C: standalone MCP only (no engine).** If you only need the MCP tools for your agent and don't need the REST API, viewer, or cron jobs, skip the engine entirely:
+**MCP only.** If you only need the MCP tools and not the REST API, viewer, or scheduled jobs:
 
 ```powershell
 npx -y @agentmemory/agentmemory mcp
@@ -804,16 +762,13 @@ npx -y @agentmemory/agentmemory mcp
 npx -y @agentmemory/mcp
 ```
 
-**Diagnostics for Windows:** if `npx @agentmemory/agentmemory` fails, re-run with `--verbose` to see the actual engine stderr. Common failure modes:
+**Diagnostics for Windows:** if `npx @agentmemory/agentmemory` fails, re-run with `--verbose` for the boot log.
 
 | Symptom | Fix |
 |---|---|
-| `iii-engine process started` then `did not become ready within 15s` | Engine crashed on startup; re-run with `--verbose`, check stderr |
-| `Could not start iii-engine` | Neither `iii.exe` nor Docker is installed. See Option A or B above |
 | Port conflict | `netstat -ano \| findstr :3111` to see what's bound, then kill it or use `--port <N>` |
-| Docker fallback skipped even though Docker is installed | Make sure Docker Desktop is actually running (system tray icon) |
-
-> Note: the iii **engine** is a prebuilt binary, not a cargo crate, so don't try to `cargo install` it. (The iii **SDKs** are published on crates.io, npm, and PyPI, but agentmemory doesn't need them.) Supported engine install methods, all pinned to v0.11.2: the prebuilt v0.11.2 binary above, the upstream sh install script **with the version pin** `curl -fsSL https://install.iii.dev/iii/main/install.sh | VERSION=0.11.2 sh` (macOS/Linux), and the Docker image `iiidev/iii:0.11.2`. A bare `install.sh | sh` installs the **latest** engine, which agentmemory does not support; always pass `VERSION=0.11.2`. Easiest of all: just run `npx @agentmemory/agentmemory`, which fetches the pinned engine into `~/.agentmemory/bin` for you.
+| `Cannot find module 'node:sqlite'` | Your Node is too old for the embedded database; upgrade Node and retry |
+| Viewer unreachable at `:3113` | Another process holds the port; the viewer retries the next 10 and logs which one it took |
 
 ---
 
@@ -828,6 +783,13 @@ npm-bundled iii config (which binds `127.0.0.1`) with a deploy-tuned
 one that binds `0.0.0.0` and uses absolute `/data` paths, generates
 the HMAC secret, then drops privileges from `root` to `node` via
 `gosu` before exec'ing the agentmemory CLI.
+
+These templates install the published `@agentmemory/agentmemory`
+package from npm and still run the iii binary, so they deploy
+upstream's two-engine runtime rather than the single in-process
+Engine described in [Architecture](#architecture).
+
+These templates are upstream's two-engine runtime, not this fork's: they install the published `@agentmemory/agentmemory` package from npm and run the iii engine binary alongside it, so none of this fork's single in-process Engine ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)) applies to a container built from them.
 
 <p>
   <a href="https://fly.io/launch?repo=https://github.com/rohitg00/agentmemory&path=deploy/fly"><img src="https://img.shields.io/badge/Deploy%20to-fly.io-8b5cf6?style=for-the-badge&logo=fly.io&logoColor=white" alt="Deploy to fly.io" /></a>
@@ -1001,7 +963,7 @@ npm install @huggingface/transformers
 
 54 tools, 6 resources, 3 prompts, and 17 skills.
 
-> **MCP shim vs full server:** the published `@agentmemory/mcp` package is a thin shim. It exposes the full 54-tool surface **only when it can reach a running agentmemory server** via `AGENTMEMORY_URL` (proxy mode). With no server reachable, the shim falls back to a 7-tool local set (`memory_save`, `memory_recall`, `memory_smart_search`, `memory_sessions`, `memory_export`, `memory_audit`, `memory_governance_delete`). The `AGENTMEMORY_TOOLS=core|all` env var is a *server-side* flag; setting it in the shim's `env` block has no effect. If you see only 7 tools in Cursor / OpenCode / Gemini CLI, start `npx @agentmemory/agentmemory` (or the Docker stack) and set `AGENTMEMORY_URL=http://localhost:3111`.
+> **MCP shim vs full server:** the published `@agentmemory/mcp` package is a thin shim. It exposes the full 54-tool surface **only when it can reach a running agentmemory server** via `AGENTMEMORY_URL` (proxy mode). With no server reachable, the shim falls back to a 7-tool local set (`memory_save`, `memory_recall`, `memory_smart_search`, `memory_sessions`, `memory_export`, `memory_audit`, `memory_governance_delete`). The `AGENTMEMORY_TOOLS=core|all` env var is a *server-side* flag; setting it in the shim's `env` block has no effect. If you see only 7 tools in Cursor / OpenCode / Gemini CLI, start `npx @agentmemory/agentmemory` and set `AGENTMEMORY_URL=http://localhost:3111`.
 
 ### 54 Tools
 
@@ -1151,116 +1113,44 @@ The viewer server binds to `127.0.0.1` by default. The REST-served `/agentmemory
 
 ---
 
-<h2 id="iii-console"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/tags/light/section-viewer.svg"><img src="assets/tags/section-viewer.svg" alt="iii Console" height="32" /></picture></h2>
+<h2 id="architecture"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/tags/light/section-architecture.svg"><img src="assets/tags/section-architecture.svg" alt="Architecture" height="32" /></picture></h2>
 
-The viewer at `:3113` shows what your agent **remembered**. The [iii console](https://iii.dev/docs/console) shows what your agent **did**: every memory op as an OpenTelemetry trace, every KV entry editable, every function invocable, every stream tappable. Two windows on the same memory: one product-shaped, one engine-shaped.
+agentmemory is **one Node process**. Starting it opens a SQLite file, registers every memory operation as a named function, and binds the REST API, the stream feed, and the viewer. There is no second process to install, start, adopt, or stop, and nothing to supervise if the first one exits.
 
-Watch a `memory_smart_search` fire and see the BM25 scan → embedding lookup → RRF fusion → reranker as a waterfall. Edit a stuck consolidation timer in the KV browser. Replay a `PostToolUse` hook with a tweaked payload. Pin the WebSocket stream and watch observations land live.
+That is the whole deployment story: `npx @agentmemory/agentmemory` and a file on disk.
 
-agentmemory ships this for free because every function call and trigger fires through iii; nothing custom, nothing to instrument.
+### What the process contains
 
-<p align="center">
-  <img src="assets/iii-console/workers.png" alt="iii console Workers page: connected workers including agentmemory instances with live function counts and runtime metadata" width="720" />
-  <br/>
-  <em>Workers page: every connected worker, including agentmemory itself, with PID, function count, runtime, and last-seen.</em>
-</p>
-
-**Already installed.** The console ships with `iii`; no separate installer.
-
-**Launch alongside agentmemory:**
-
-```bash
-# agentmemory viewer holds port 3113, so run the console on 3114.
-# Engine REST (3111), WebSocket (3112), and bridge (49134) defaults match agentmemory.
-iii console --port 3114
-```
-
-Then open `http://localhost:3114`. Add `--enable-flow` for the experimental architecture-graph page.
-
-Override engine endpoints only if you've moved them:
-
-```bash
-iii console --port 3114 \
-  --engine-port 3111 \
-  --ws-port 3112 \
-  --bridge-port 49134
-```
-
-**What you can do from the console:**
-
-| Page | Use it to |
-|------|-----------|
-| **Workers** | See every connected worker and its live metrics, including the agentmemory worker itself. |
-| **Functions** | Invoke any of agentmemory's functions directly with a JSON payload; handy for testing `memory.recall`, `memory.consolidate`, `graph.query` without wiring a client. |
-| **Triggers** | Replay HTTP, cron, event, and state triggers: fire the consolidation cron manually, retry an HTTP route, emit a state change. |
-| **States** | KV browser with full CRUD over sessions, memory slots, lifecycle timers, and the embeddings index; edit values in place. |
-| **Streams** | Live WebSocket monitor for memory writes, hook events, and observation updates as they flow through iii streams. |
-| **Queues** | Durable queue topics + dead-letter management. Replay or drop failed embedding / compression jobs. |
-| **Traces** | OpenTelemetry waterfall / flame / service-breakdown views. Filter by `trace_id` to see exactly which functions, DB calls, and embedding requests a single `memory.search` produced. |
-| **Logs** | Structured OTEL logs filtered and correlated to trace/span IDs. |
-| **Config** | Runtime configuration: see exactly which workers, providers, and ports your engine is running with. |
-| **Flow** | (Optional, `--enable-flow`) Interactive architecture graph of every worker, trigger, and stream. |
-
-<p align="center">
-  <img src="assets/iii-console/traces-waterfall.png" alt="iii console trace waterfall view showing per-span duration" width="720" />
-  <br/>
-  <em>Traces: waterfall / flame / service breakdown for every memory operation.</em>
-</p>
-
-**Traces are already on:**
-
-`iii-config.yaml` ships with the `iii-observability` worker enabled (`exporter: memory`, `sampling_ratio: 1.0`, metrics + logs). No extra config needed; the moment agentmemory starts, every memory operation emits a trace span and a structured log the console can read.
-
-If you want to export to Jaeger/Honeycomb/Grafana Tempo instead, change `exporter: memory` to `exporter: otlp` and set the collector endpoint per iii's observability docs.
-
-> **Heads-up:** no auth is enforced on the console itself; keep it bound to `127.0.0.1` (the default) and never expose it publicly.
-
----
-
-<h2 id="powered-by-iii"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/tags/light/section-architecture.svg"><img src="assets/tags/section-architecture.svg" alt="Powered by iii" height="32" /></picture></h2>
-
-agentmemory is **already a running [iii](https://iii.dev) instance**. Three primitives (worker, function, trigger) compose the runtime; KV state, streams, and OTEL traces come from iii-state, iii-stream, and iii-observability workers that ship with iii. You didn't install Postgres, Redis, Express, pm2, or Prometheus, because iii replaces them.
-
-That means one more command extends agentmemory with an entire new capability.
-
-### Extend agentmemory with one command
-
-```bash
-iii worker add iii-pubsub          # fan memory writes out to every connected instance
-iii worker add iii-cron            # scheduled consolidation, decay sweeps, snapshot rotation
-iii worker add iii-queue           # durable retries for embedding + compression jobs
-iii worker add iii-observability   # OTEL traces on every memory op (default on)
-iii worker add iii-sandbox         # run recalled code inside an isolated microVM
-iii worker add iii-database        # swap in a SQL-backed state adapter
-iii worker add mcp                 # generic MCP host alongside the agentmemory MCP
-```
-
-Each `iii worker add` registers new functions and triggers into the same engine agentmemory is already running on. The viewer and console pick them up immediately: no reload, no new integration, no new container.
-
-| `iii worker add` | What you get on top of agentmemory |
+| Concern | How agentmemory does it |
 |---|---|
-| [`iii-pubsub`](https://workers.iii.dev/workers/iii-pubsub) | Multi-instance memory: every `remember` fans out, every `search` reads the union |
-| [`iii-cron`](https://workers.iii.dev/workers/iii-cron) | Scheduled lifecycle: nightly consolidation, weekly snapshots, decay on a fixed clock |
-| [`iii-queue`](https://workers.iii.dev/workers/iii-queue) | Durable retries: failed embedding + compression jobs survive restart, no lost observations |
-| [`iii-observability`](https://workers.iii.dev/workers/iii-observability) | OTEL traces, metrics, logs on every function, wired in `iii-config.yaml` from day one |
-| [`iii-sandbox`](https://workers.iii.dev/workers/iii-sandbox) | Code that came out of `memory_recall` runs inside a throwaway VM, not your shell |
-| [`iii-database`](https://workers.iii.dev/workers/iii-database) | SQL-backed state adapter when you outgrow the in-memory KV defaults |
-| [`mcp`](https://workers.iii.dev/workers/mcp) | Stand up extra MCP servers next to agentmemory's, share the same engine |
+| HTTP API | `node:http` server on `3111`, routed to registered functions |
+| Persistence | `node:sqlite` over a single file, WAL-mode, no server |
+| Vector search | Embeddings in a `vectors` table alongside the data they index |
+| Keyword search | BM25 index rebuilt from stored content at boot |
+| Live updates | `ws` server on `3112`, consumed by the viewer |
+| Scheduled work | In-process timers for consolidation, decay, and snapshot rotation |
 
-Full registry: [workers.iii.dev](https://workers.iii.dev). Every worker there composes through the same primitives agentmemory uses, and the agentmemory you already have is one of them.
+### Ports
 
-### What iii replaces
+Three, all derived from one anchor. `--port 3211` (or `--instance 1`) moves the whole trio to 3211 / 3212 / 3213 so a second daemon never collides.
+
+| Port | Purpose |
+|---|---|
+| `3111` | REST API, MCP over HTTP, health |
+| `3112` | Stream feed (WebSocket) |
+| `3113` | Real-time viewer |
+
+### What you did not install
 
 | Traditional stack | agentmemory uses |
 |---|---|
-| Express.js / Fastify | iii HTTP Triggers |
-| SQLite / Postgres + pgvector | iii KV State + in-memory vector index |
-| SSE / Socket.io | iii Streams (WebSocket) |
-| pm2 / systemd | iii engine worker supervision |
-| Prometheus / Grafana | iii OTEL + health monitor |
-| Custom plugin systems | `iii worker add <name>` |
+| Postgres / MySQL server | An embedded SQLite file |
+| Qdrant / pgvector | A `vectors` table in that same file |
+| Redis | In-process state |
+| pm2 / systemd for a second daemon | Nothing — there is no second daemon |
+| Docker | Nothing — Node is the only prerequisite |
 
-**184 source files · ~42,200 LOC · 1,674 tests · 264 functions · 50 KV scopes**, all on three primitives. No `agentmemory plugin install`. The plugin system is iii itself.
+**195 source files · ~45,800 LOC · 1,854 tests · 262 functions · 57 KV scopes**, in a single process.
 
 ---
 
@@ -1377,29 +1267,27 @@ When `AGENT_ID` is unset, memory remains unscoped (legacy behavior, no tags, no 
 
 ### Ports
 
-agentmemory + iii-engine bind four ports by default. If a restart fails with `port in use`, this table tells you which process to look for.
+The single agentmemory process binds three ports. REST is the anchor; streams and the viewer derive from it, so `--port <N>` (or `--instance <N>`) relocates all three at once.
 
-| Port | Process | Purpose | Env override |
-|------|---------|---------|--------------|
-| `3111` | agentmemory | REST API + MCP HTTP + `/agentmemory/health` + `/agentmemory/livez` | `III_REST_PORT` |
-| `3112` | iii-engine | Internal streams worker (consumed by agentmemory + viewer) | `III_STREAMS_PORT` |
-| `3113` | agentmemory | Real-time viewer (`http://localhost:3113`) | `AGENTMEMORY_VIEWER_PORT` |
-| `49134` | iii-engine | WebSocket; workers register here, OTel telemetry flows over it | `III_ENGINE_URL` (full URL, default `ws://localhost:49134`) |
+| Port | Purpose | Env override |
+|------|---------|--------------|
+| `3111` | REST API + MCP HTTP + `/agentmemory/health` + `/agentmemory/livez` | `III_REST_PORT` |
+| `3112` | Stream feed consumed by the viewer | `III_STREAM_PORT` (defaults to REST + 1) |
+| `3113` | Real-time viewer (`http://localhost:3113`) | `III_VIEWER_PORT` (defaults to REST + 2) |
 
 Stale-process cleanup when ports stay bound after a crashed run:
 
 ```bash
 # macOS / Linux — find whatever is on each port and kill it
-lsof -i :3111,3112,3113,49134
+lsof -i :3111,3112,3113
 pkill -f agentmemory || true
-pkill -f 'iii ' || true
 
 # Windows
-netstat -ano | findstr ":3111 :3112 :3113 :49134"
+netstat -ano | findstr ":3111 :3112 :3113"
 taskkill /F /PID <pid>
 ```
 
-`agentmemory stop` reaps both the worker and the engine pidfile cleanly on graceful shutdown. In Docker mode it tears down only agentmemory's own compose services and reaps the native worker before the Docker teardown; the CLI also refuses to adopt or signal Docker or VM port holders (Docker backend, vpnkit, colima) as the native engine unless `--force` is passed. The manual cleanup above is only for the post-crash case where neither pidfile is left behind.
+`agentmemory stop` reaps the pidfile cleanly on graceful shutdown. The manual cleanup above is only for the post-crash case where no pidfile is left behind.
 
 ### Config File
 
@@ -1494,8 +1382,11 @@ Create `~/.agentmemory/.env`:
 # Auth
 # AGENTMEMORY_SECRET=your-secret
 
-# Ports (defaults: 3111 API, 3113 viewer)
+# Ports (defaults: 3111 API, 3112 streams, 3113 viewer)
 # III_REST_PORT=3111
+
+# Storage (default: <data-dir>/agentmemory.sqlite)
+# AGENTMEMORY_SQLITE_PATH=
 
 # Features
 # AGENTMEMORY_AUTO_COMPRESS=false  # OFF by default. When on,
@@ -1593,11 +1484,11 @@ Full endpoint list: [`src/triggers/api.ts`](src/triggers/api.ts)
 ```bash
 npm run dev               # Hot reload
 npm run build             # Production build
-npm test                  # 1,674 tests
-npm run test:integration  # API tests (requires running services)
+npm test                  # 1,854 tests
+npm run test:integration  # API tests (requires a running daemon)
 ```
 
-**Prerequisites:** Node.js >= 20, [iii-engine](https://iii.dev/docs) or Docker
+**Prerequisites:** Node.js >= 20
 
 <h2 id="license"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/tags/light/section-license.svg"><img src="assets/tags/section-license.svg" alt="License" height="32" /></picture></h2>
 

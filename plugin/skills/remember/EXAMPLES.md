@@ -2,14 +2,14 @@
 
 ## 1. Saving a decision
 
-User: "Remember that we decided to drop Redis and use the iii-engine state store for session caching."
+User: "Remember that we decided to drop Redis and use Postgres advisory locks for session caching."
 
 Invocation:
 
 ```json
 memory_save {
-  "content": "We decided to drop Redis and use the iii-engine state store for session caching to remove a moving part.",
-  "concepts": "session-caching, iii-state-store, dropped-redis",
+  "content": "We decided to drop Redis and use Postgres advisory locks for session caching to remove a moving part.",
+  "concepts": "session-caching, postgres-advisory-locks, dropped-redis",
   "files": ""
 }
 ```
@@ -17,12 +17,12 @@ memory_save {
 Response:
 
 ```json
-{ "id": "7f3a9c21", "concepts": ["session-caching", "iii-state-store", "dropped-redis"], "saved": true }
+{ "id": "7f3a9c21", "concepts": ["session-caching", "postgres-advisory-locks", "dropped-redis"], "saved": true }
 ```
 
 Present:
 
-> Saved. Tagged it `session-caching`, `iii-state-store`, `dropped-redis`, so a
+> Saved. Tagged it `session-caching`, `postgres-advisory-locks`, `dropped-redis`, so a
 > later recall on caching or Redis will surface this decision.
 
 ## 2. Saving a code-specific gotcha

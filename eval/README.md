@@ -2,6 +2,8 @@
 
 Public benchmarks for agentmemory's hybrid memory stack (BM25 + embeddings + consolidation + graph).
 
+The sandbox these benchmarks run in is upstream's two-engine runtime, not this fork's: `eval/scripts/sandbox.sh` requires the iii engine binary on `PATH` and writes an iii config, so a run does not exercise this fork's single in-process Engine ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)).
+
 Two families, both reproducible:
 
 - **LongMemEval** — public 500-question retrieval benchmark over multi-session chat
@@ -20,6 +22,8 @@ Two families, both reproducible:
 Running the `agentmemory` adapter against your real `~/.agentmemory` directory pollutes the eval with pre-existing memories AND pollutes your real store with eval test data. Always sandbox.
 
 `eval/scripts/sandbox.sh` spins up a clean agentmemory + iii-engine on ports 3411/3412 with state in `/tmp/agentmemory-eval-sandbox/`, exports `AGENTMEMORY_BASE_URL`, and tears down on exit.
+
+The script launches the built `dist/` under the iii binary, so it still expects upstream's two-engine runtime rather than this fork's single in-process Engine ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)).
 
 ```sh
 source eval/scripts/sandbox.sh

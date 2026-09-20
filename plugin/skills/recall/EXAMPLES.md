@@ -15,8 +15,8 @@ Response:
 ```json
 {
   "results": [
-    { "sessionId": "7f3a9c21", "type": "decision", "title": "Drop Redis for iii state store",
-      "narrative": "We decided to drop Redis and use the iii-engine state store for session caching.",
+    { "sessionId": "7f3a9c21", "type": "decision", "title": "Drop Redis for Postgres advisory locks",
+      "narrative": "We decided to drop Redis and use Postgres advisory locks for session caching.",
       "importance": 8 }
   ]
 }
@@ -24,8 +24,8 @@ Response:
 
 Present:
 
-> Yes. In session `7f3a9c21` you decided to drop Redis and use the iii-engine
-> state store for session caching (importance 8).
+> Yes. In session `7f3a9c21` you decided to drop Redis and use Postgres
+> advisory locks for session caching (importance 8).
 
 ## 2. Multiple results across sessions
 

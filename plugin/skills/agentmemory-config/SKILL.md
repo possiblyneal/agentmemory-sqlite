@@ -22,15 +22,16 @@ AGENTMEMORY_INJECT_CONTEXT=true
 - Token-spending features ship OFF on purpose: `AGENTMEMORY_AUTO_COMPRESS` (LLM summaries) and `AGENTMEMORY_INJECT_CONTEXT` (auto context injection) both cost tokens proportional to tool-use frequency.
 - Tool visibility: `AGENTMEMORY_TOOLS=all` (default) or `core` for the lean set.
 - Auth: set `AGENTMEMORY_SECRET` to require `Authorization: Bearer` on the REST API.
+- Storage: one SQLite file at `<data-dir>/agentmemory.sqlite`. Move the directory with `--data-dir` / `AGENTMEMORY_DATA_DIR`, or the file alone with `AGENTMEMORY_SQLITE_PATH`.
 
 ## Ports
 
-REST is the anchor at 3111. Streams = N+1 (3112), viewer = N+2 (3113), engine = N+46023 (49134). Relocate the whole block with `--port <N>` or `--instance <N>`.
+REST is the anchor at 3111. Streams = N+1 (3112), viewer = N+2 (3113). Three ports, no fourth. Relocate the whole block with `--port <N>` or `--instance <N>`.
 
 ## See also
 
 - agentmemory-rest-api for how the secret is used.
-- agentmemory-architecture for the port quartet rationale.
+- agentmemory-architecture for the port derivation rationale.
 
 ## Reference
 

@@ -1,14 +1,14 @@
 ---
 name: agentmemory-architecture
-description: How agentmemory is built, the iii engine primitives it runs on, its storage model, ports, and the viewer. Use when reasoning about how memory is stored or retrieved end to end, when extending the system, or when answering how agentmemory works under the hood.
+description: How agentmemory is built, the single in-process engine it runs on, its storage model, ports, and the viewer. Use when reasoning about how memory is stored or retrieved end to end, when extending the system, or when answering how agentmemory works under the hood.
 user-invocable: false
 ---
 
-agentmemory is a memory server for coding agents. It runs locally, captures observations, indexes them for hybrid retrieval, and serves them back over REST and MCP. It is built on the iii engine.
+agentmemory is a memory server for coding agents. It runs locally, captures observations, indexes them for hybrid retrieval, and serves them back over REST and MCP. It is a single Node process with no external services.
 
-## iii primitives
+## One in-process Engine
 
-Everything is a function, a trigger, or worker state on the iii engine. There is no separate plugin system; the worker registers functions (`mem::*`) and HTTP triggers (`api::*`) and the engine routes calls. agentmemory does not bypass iii; new capability is a new function plus a trigger.
+Starting agentmemory is the whole deployment: one process opens a SQLite file, registers every operation as a named function (`mem::*`) plus HTTP triggers (`api::*`), and dispatches calls by id without leaving the process. There is no second daemon to install or supervise, and no separate plugin system; new capability is a new function plus a trigger.
 
 ## Retrieval model
 
@@ -16,11 +16,11 @@ Recall is hybrid: BM25 keyword search plus vector similarity plus graph expansio
 
 ## Storage and lifecycle
 
-Memories carry content, concepts, files, importance, and timestamps, grouped into sessions and optionally linked to commits. A lifecycle of capture, compress, consolidate, and forget keeps the store useful over time rather than letting it grow unbounded.
+Everything persists to one SQLite file (`<data-dir>/agentmemory.sqlite`, overridable with `AGENTMEMORY_SQLITE_PATH`): key-value state in a `kv` table and embeddings in a `vectors` table. Memories carry content, concepts, files, importance, and timestamps, grouped into sessions and optionally linked to commits. A lifecycle of capture, compress, consolidate, and forget keeps the store useful over time rather than letting it grow unbounded.
 
 ## Ports
 
-REST is the anchor at 3111. Streams = N+1 (3112), viewer = N+2 (3113), engine = N+46023 (49134). `--instance N` shifts the whole block by N*100.
+REST is the anchor at 3111. Streams = N+1 (3112), viewer = N+2 (3113). Three ports, no fourth. `--instance N` shifts the whole block by N*100.
 
 ## Viewer
 
