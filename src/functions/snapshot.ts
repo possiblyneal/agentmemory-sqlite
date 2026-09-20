@@ -13,6 +13,7 @@ import type {
 import { KV, generateId } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { indexGraphNode, graphLegDisabled } from "../state/graph-indexes.js";
+import { capRecordProvenance } from "./graph-provenance.js";
 import { recordAudit } from "./audit.js";
 import { VERSION } from "../version.js";
 import { logger } from "../logger.js";
@@ -210,8 +211,9 @@ export function registerSnapshotFunction(
         }
         if (state.graphNodes) {
           for (const node of state.graphNodes) {
-            await kv.set(KV.graphNodes, node.id, node);
-            await indexGraphNode(kv, node as unknown as GraphNode);
+            const bounded = capRecordProvenance(node as unknown as GraphNode);
+            await kv.set(KV.graphNodes, bounded.id, bounded);
+            await indexGraphNode(kv, bounded);
           }
         }
         if (state.observations) {

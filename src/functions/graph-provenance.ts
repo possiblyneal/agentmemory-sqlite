@@ -20,3 +20,16 @@ export function capSourceIds(ids: string[]): string[] {
   }
   return newestFirst.reverse();
 }
+
+// Ingest paths - import, snapshot restore, mesh merge - write records a peer or
+// an older export handed them, so their provenance is only as bounded as
+// whatever produced it. The one-time startup repair has already stamped its
+// version by then and will not run again, so the cap has to be applied here or
+// the row stays over-bound forever.
+export function capRecordProvenance<T extends { sourceObservationIds?: string[] }>(
+  record: T,
+): T {
+  const ids = record.sourceObservationIds;
+  if (!Array.isArray(ids)) return record;
+  return { ...record, sourceObservationIds: capSourceIds(ids) };
+}

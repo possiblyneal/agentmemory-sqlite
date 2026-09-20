@@ -33,6 +33,7 @@ import {
   graphLegDisabled,
 } from "../state/graph-indexes.js";
 import { graphWritesDisabled } from "./graph.js";
+import { capRecordProvenance } from "./graph-provenance.js";
 import { StateKV } from "../state/kv.js";
 import { VERSION } from "../version.js";
 import { recordAudit } from "./audit.js";
@@ -481,8 +482,9 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
             const existing = await kv.get(KV.graphNodes, node.id).catch(() => null);
             if (existing) { stats.skipped++; return; }
           }
-          await kv.set(KV.graphNodes, node.id, node);
-          await indexGraphNode(kv, node);
+          const bounded = capRecordProvenance(node);
+          await kv.set(KV.graphNodes, bounded.id, bounded);
+          await indexGraphNode(kv, bounded);
         });
       }
       if (importData.graphEdges && !graphWritesDisabled()) {
@@ -491,8 +493,9 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
             const existing = await kv.get(KV.graphEdges, edge.id).catch(() => null);
             if (existing) { stats.skipped++; return; }
           }
-          await kv.set(KV.graphEdges, edge.id, edge);
-          await indexGraphEdge(kv, edge);
+          const bounded = capRecordProvenance(edge);
+          await kv.set(KV.graphEdges, bounded.id, bounded);
+          await indexGraphEdge(kv, bounded);
         });
       }
       if (importData.semanticMemories) {

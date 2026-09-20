@@ -14,8 +14,10 @@ const MARKER_KEY: keyof StateScope = "system:startupMaintenanceVersion";
 // Rows per SQL statement. Every statement blocks the event loop for its whole
 // duration, so the pass yields between chunks and a chunk is sized to be short
 // rather than to be efficient: requests arriving mid-pass get served between
-// them instead of queueing behind one long scan.
-const CHUNK_ROWS = 500;
+// them instead of queueing behind one long scan. 100 is the chunk StateKV
+// already bounds a setMany to, so one write lock is held no longer here than
+// anywhere else.
+const CHUNK_ROWS = 100;
 
 // The deleted engine's index persistence wrote its manifests into
 // `mem:index:bm25` and every shard into its own `mem:index:bm25:<kind>:...`

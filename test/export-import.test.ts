@@ -290,6 +290,42 @@ describe("Export/Import Functions", () => {
     expect(reExported.memories.length).toBe(exported.memories.length);
   });
 
+  it("import bounds the provenance of a graph node written before the cap", async () => {
+    // #3: an export taken before the write-time bound carries unbounded
+    // provenance. The startup repair has already stamped its version by the
+    // time anyone imports, so the cap has to be applied on the way in.
+    process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "2";
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
+    try {
+      const exportData = {
+        version: VERSION,
+        exportedAt: new Date().toISOString(),
+        sessions: [],
+        observations: {},
+        memories: [],
+        summaries: [],
+        graphNodes: [
+          {
+            id: "gnode_1",
+            name: "auth",
+            type: "concept",
+            sourceObservationIds: ["o1", "o2", "o3", "o4"],
+          },
+        ],
+      } as unknown as ExportData;
+
+      await sdk.trigger("mem::import", { exportData, strategy: "merge" });
+
+      const node = (await kv.get("mem:graph:nodes", "gnode_1")) as {
+        sourceObservationIds: string[];
+      };
+      expect(node.sourceObservationIds).toEqual(["o3", "o4"]);
+    } finally {
+      delete process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+      delete process.env["GRAPH_EXTRACTION_ENABLED"];
+    }
+  });
+
   it("import rejects unsupported version", async () => {
     const exportData = {
       version: "1.0.0",

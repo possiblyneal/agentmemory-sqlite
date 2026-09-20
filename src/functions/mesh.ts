@@ -8,6 +8,7 @@ import {
   graphLegDisabled,
 } from "../state/graph-indexes.js";
 import { recordAudit } from "./audit.js";
+import { capRecordProvenance } from "./graph-provenance.js";
 import type {
   MeshPeer,
   Memory,
@@ -124,7 +125,8 @@ async function lwwMergeGraphNodes(
 ): Promise<number> {
   if (!items || !Array.isArray(items)) return 0;
   let count = 0;
-  for (const item of items) {
+  for (const incoming of items) {
+    const item = capRecordProvenance(incoming);
     if (!item.id || typeof item.id !== "string") continue;
     const ts = graphNodeTs(item);
     if (!ts || Number.isNaN(new Date(ts).getTime())) continue;
@@ -376,7 +378,7 @@ export function registerMeshFunction(
       accepted += await lwwMergeList(
         kv,
         KV.graphEdges,
-        data.graphEdges,
+        data.graphEdges?.map(capRecordProvenance),
         "mem:gedge",
         "createdAt",
         (edge) => indexGraphEdge(kv, edge),
@@ -513,7 +515,7 @@ async function applySyncData(
     applied += await lwwMergeList(
       kv,
       KV.graphEdges,
-      data.graphEdges,
+      data.graphEdges?.map(capRecordProvenance),
       "mem:gedge",
       "createdAt",
       (edge) => indexGraphEdge(kv, edge),
