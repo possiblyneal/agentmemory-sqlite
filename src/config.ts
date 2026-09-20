@@ -220,11 +220,6 @@ export function getEnvVar(key: string): string | undefined {
   return getMergedEnv()[key];
 }
 
-// `AGENTMEMORY_ENGINE` is accepted and ignored. There is one Engine — the
-// in-process runtime in src/engine/inproc — so nothing selects between
-// runtimes any more (ADR 0001). The variable stays unread rather than
-// rejected so an existing environment file keeps loading untouched.
-
 export function getSqlitePath(): string {
   return (
     getEnvVar("AGENTMEMORY_SQLITE_PATH") || join(DATA_DIR, "agentmemory.sqlite")
@@ -453,6 +448,15 @@ const HEALTH_ENV_KEYS: Record<keyof HealthTuning, string> = {
   clearSamples: "AGENTMEMORY_HEALTH_CLEAR_SAMPLES",
 };
 
+// A sample count of zero would publish every sample unchallenged, which is
+// not hysteresis at all - one is the floor, and it already means "no
+// hysteresis". A threshold of zero is a real setting: it is how an Operator
+// disables the RSS floor or asks to hear about any CPU at all.
+const HEALTH_SAMPLE_COUNT_KEYS = new Set<keyof HealthTuning>([
+  "assertSamples",
+  "clearSamples",
+]);
+
 export function getHealthTuning(): HealthTuning {
   const env = getMergedEnv();
   const tuned = {} as HealthTuning;
@@ -460,7 +464,8 @@ export function getHealthTuning(): HealthTuning {
     const fallback = HEALTH_TUNING_DEFAULTS[key];
     const raw = env[HEALTH_ENV_KEYS[key]];
     const parsed = raw === undefined ? NaN : Number(raw);
-    tuned[key] = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    const floor = HEALTH_SAMPLE_COUNT_KEYS.has(key) ? 1 : 0;
+    tuned[key] = Number.isFinite(parsed) && parsed >= floor ? parsed : fallback;
   }
   return tuned;
 }

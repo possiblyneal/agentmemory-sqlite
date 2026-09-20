@@ -60,6 +60,8 @@ this fork does not execute. Rejected on cost against zero realised benefit.
   in-process engine already stores embeddings in its own `vectors` table and rebuilds the
   keyword index from stored content at boot. No embedding is recomputed because of this
   removal. The shards written by earlier iii-path runs become permanently dead bytes.
+- `AGENTMEMORY_ENGINE` no longer selects anything. Nothing reads it, and nothing rejects
+  it either, so an environment file that still sets it keeps loading untouched.
 - `iii-sdk` stops being a dependency, and the code drops a layer of indirection — function
   registration and `trigger()` become direct in-process calls.
 - Documentation describing agentmemory as built on iii-engine's three primitives becomes

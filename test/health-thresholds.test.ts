@@ -311,6 +311,34 @@ describe("evaluateHealth environment overrides", () => {
     expect(evaluateHealth(snap(), {}, r.hysteresis).status).toBe("healthy");
   });
 
+  it("honours a threshold explicitly set to zero", () => {
+    // Zero is a real setting - it is how an Operator asks to hear about any
+    // CPU at all, or disables the RSS floor - not a malformed value (#9).
+    process.env["AGENTMEMORY_HEALTH_CPU_WARN_PERCENT"] = "0";
+    const s = snap({ cpu: { userMicros: 0, systemMicros: 0, percent: 1 } });
+    expect(evaluateHealth(s).status).toBe("degraded");
+  });
+
+  it("falls back to the default on a sample count of zero", () => {
+    // A count of zero would publish every sample unchallenged, which is not
+    // hysteresis at all - one is the floor (#9).
+    process.env["AGENTMEMORY_HEALTH_ASSERT_SAMPLES"] = "0";
+    const state = evaluateHealth(snap()).hysteresis;
+    expect(
+      evaluateHealth(snap({ connectionState: "failed" }), {}, state).status,
+    ).toBe("healthy");
+  });
+
+  it("counts a de-escalation as clearing, not asserting (#5)", () => {
+    process.env["AGENTMEMORY_HEALTH_ASSERT_SAMPLES"] = "3";
+    process.env["AGENTMEMORY_HEALTH_CLEAR_SAMPLES"] = "1";
+    let state = evaluateHealth(snap({ connectionState: "failed" })).hysteresis;
+    // critical -> degraded lowers the restart signal, so it obeys the clear
+    // count and lands on the first sample.
+    const r = evaluateHealth(snap({ connectionState: "reconnecting" }), {}, state);
+    expect(r.status).toBe("degraded");
+  });
+
   it("reads no signal from a dimension the snapshot does not measure", () => {
     process.env["AGENTMEMORY_HEALTH_MEMORY_WARN_PERCENT"] = "1";
     const s = snap({

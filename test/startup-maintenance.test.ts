@@ -29,14 +29,14 @@ describe("startup maintenance", () => {
     store.close();
   });
 
-  it("trims over-bound provenance to the cap, keeping the newest ids", () => {
+  it("trims over-bound provenance to the cap, keeping the newest ids", async () => {
     store.set(KV.graphNodes, "node-1", {
       id: "node-1",
       name: "auth",
       sourceObservationIds: ids("obs", 10),
     });
 
-    const result = runStartupMaintenance(store);
+    const result = await runStartupMaintenance(store);
 
     expect(result.skipped).toBe(false);
     expect(result.rowsTrimmed).toBe(1);
@@ -49,14 +49,14 @@ describe("startup maintenance", () => {
     expect(node.name).toBe("auth");
   });
 
-  it("leaves rows already within the bound untouched", () => {
+  it("leaves rows already within the bound untouched", async () => {
     store.set(KV.graphEdges, "edge-1", {
       id: "edge-1",
       sourceObservationIds: ["a", "b"],
     });
     store.set(KV.graphNodes, "node-1", { id: "node-1" });
 
-    const result = runStartupMaintenance(store);
+    const result = await runStartupMaintenance(store);
 
     expect(result.rowsTrimmed).toBe(0);
     expect(
@@ -66,17 +66,17 @@ describe("startup maintenance", () => {
     expect(store.get(KV.graphNodes, "node-1")).toEqual({ id: "node-1" });
   });
 
-  it("trims nodes and edges alike", () => {
+  it("trims nodes and edges alike", async () => {
     store.set(KV.graphNodes, "node-1", { sourceObservationIds: ids("n", 5) });
     store.set(KV.graphEdges, "edge-1", { sourceObservationIds: ids("e", 6) });
 
-    const result = runStartupMaintenance(store);
+    const result = await runStartupMaintenance(store);
 
     expect(result.rowsTrimmed).toBe(2);
     expect(result.idsDropped).toBe(2 + 3);
   });
 
-  it("deletes the dead index scopes and nothing else", () => {
+  it("deletes the dead index scopes and nothing else", async () => {
     store.set(KV.bm25Index, "data:manifest", { generation: 4 });
     store.set(KV.bm25Index, "checkpoint:rollback", { at: 1 });
     store.set(`${KV.bm25Index}:bm25:4:0001`, "data", { postings: [] });
@@ -84,7 +84,7 @@ describe("startup maintenance", () => {
     store.set(KV.observations("sess-1"), "obs-1", { id: "obs-1", content: "keep me" });
     store.set(KV.graphNodes, "node-1", { sourceObservationIds: ["a"] });
 
-    const result = runStartupMaintenance(store);
+    const result = await runStartupMaintenance(store);
 
     expect(result.deadIndexRowsDeleted).toBe(4);
     expect(store.list(KV.bm25Index)).toEqual([]);
@@ -99,16 +99,16 @@ describe("startup maintenance", () => {
     });
   });
 
-  it("records the version so a second run is a no-op", () => {
+  it("records the version so a second run is a no-op", async () => {
     store.set(KV.graphNodes, "node-1", { sourceObservationIds: ids("obs", 10) });
 
-    expect(runStartupMaintenance(store).skipped).toBe(false);
+    expect((await runStartupMaintenance(store)).skipped).toBe(false);
     expect(store.get(KV.state, "system:startupMaintenanceVersion")).toBe(
       STARTUP_MAINTENANCE_VERSION,
     );
 
     store.set(KV.graphNodes, "node-2", { sourceObservationIds: ids("later", 9) });
-    const second = runStartupMaintenance(store);
+    const second = await runStartupMaintenance(store);
 
     expect(second).toEqual({
       skipped: true,
@@ -122,11 +122,44 @@ describe("startup maintenance", () => {
     ).toHaveLength(9);
   });
 
-  it("skips a row whose provenance is missing or malformed", () => {
+  it("applies the write path's dedupe rule to a repaired row", async () => {
+    // A row written by the merge path before the bound existed can carry the
+    // same id twice; the newest sighting is the one that survives (#3).
+    store.set(KV.graphNodes, "node-1", {
+      sourceObservationIds: ["a", "b", "c", "d", "a"],
+    });
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.rowsTrimmed).toBe(1);
+    expect(
+      (store.get(KV.graphNodes, "node-1") as { sourceObservationIds: string[] })
+        .sourceObservationIds,
+    ).toEqual(["c", "d", "a"]);
+    expect(result.idsDropped).toBe(2);
+  });
+
+  it("trims every row when the scan spans more than one chunk", async () => {
+    // More rows than CHUNK_ROWS, so the pass pages and yields mid-scan. Paging
+    // is by seq, which survives the in-place rewrite of rows already passed.
+    for (let i = 0; i < 1200; i++) {
+      store.set(KV.graphNodes, `node-${i}`, { sourceObservationIds: ids("o", 5) });
+    }
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.rowsTrimmed).toBe(1200);
+    expect(
+      (store.get(KV.graphNodes, "node-1199") as { sourceObservationIds: string[] })
+        .sourceObservationIds,
+    ).toEqual(["o-2", "o-3", "o-4"]);
+  });
+
+  it("skips a row whose provenance is missing or malformed", async () => {
     store.set(KV.graphNodes, "node-1", { id: "node-1" });
     store.set(KV.graphNodes, "node-2", { sourceObservationIds: "not-an-array" });
 
-    const result = runStartupMaintenance(store);
+    const result = await runStartupMaintenance(store);
 
     expect(result.rowsTrimmed).toBe(0);
     expect(store.get(KV.graphNodes, "node-2")).toEqual({

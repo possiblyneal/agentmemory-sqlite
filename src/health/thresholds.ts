@@ -19,6 +19,12 @@ export type HealthHysteresis = {
   run: number;
 };
 
+const SEVERITY: Record<HealthStatus, number> = {
+  healthy: 0,
+  degraded: 1,
+  critical: 2,
+};
+
 export function evaluateHealth(
   snapshot: HealthSnapshot,
   config: Partial<ThresholdConfig> = {},
@@ -117,8 +123,12 @@ export function evaluateHealth(
 
   // Asserting a verdict and clearing one are counted separately: an operator
   // may want to hear about trouble sooner than they hear about recovery.
-  const needed =
-    sampled === "healthy" ? tuning.clearSamples : tuning.assertSamples;
+  // Clearing is any move toward healthy, not just arrival at it - stepping
+  // critical -> degraded de-escalates the restart signal and has to earn the
+  // same patience as clearing it outright.
+  const needed = SEVERITY[sampled] < SEVERITY[prior.published]
+    ? tuning.clearSamples
+    : tuning.assertSamples;
   const run = sampled === prior.pending ? prior.run + 1 : 1;
   const published = run >= needed ? sampled : prior.published;
   return {

@@ -1,5 +1,6 @@
 import type { SqliteState } from "../engine/inproc/state.js";
 import { KV } from "./schema.js";
+import { capSourceIds } from "../functions/graph-provenance.js";
 import { getMaxSourceObservationIds } from "../config.js";
 import { logger } from "../logger.js";
 import type { StateScope } from "../types.js";
@@ -9,6 +10,12 @@ import type { StateScope } from "../types.js";
 export const STARTUP_MAINTENANCE_VERSION = 1;
 
 const MARKER_KEY: keyof StateScope = "system:startupMaintenanceVersion";
+
+// Rows per SQL statement. Every statement blocks the event loop for its whole
+// duration, so the pass yields between chunks and a chunk is sized to be short
+// rather than to be efficient: requests arriving mid-pass get served between
+// them instead of queueing behind one long scan.
+const CHUNK_ROWS = 500;
 
 // The deleted engine's index persistence wrote its manifests into
 // `mem:index:bm25` and every shard into its own `mem:index:bm25:<kind>:...`
@@ -33,49 +40,90 @@ function alreadyRan(state: SqliteState): boolean {
   return typeof recorded === "number" && recorded >= STARTUP_MAINTENANCE_VERSION;
 }
 
-function trimProvenance(
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
+
+async function trimProvenance(
   state: SqliteState,
   scope: string,
   max: number,
-): { rowsTrimmed: number; idsDropped: number } {
-  const rows = state.db
-    .prepare("SELECT key, value FROM kv WHERE scope = ? ORDER BY seq")
-    .all(scope) as Array<{ key: string; value: string }>;
+): Promise<{ rowsTrimmed: number; idsDropped: number }> {
+  // `seq` is the rowid and survives in-place updates, so paging by it is
+  // stable even though the trim rewrites rows it has already passed.
+  const page = state.db.prepare(
+    "SELECT seq, key, value FROM kv WHERE scope = ? AND seq > ? ORDER BY seq LIMIT ?",
+  );
 
-  const entries: Array<{ key: string; value: unknown }> = [];
+  let after = 0;
+  let rowsTrimmed = 0;
   let idsDropped = 0;
 
-  for (const row of rows) {
-    let parsed: { sourceObservationIds?: unknown };
-    try {
-      parsed = JSON.parse(row.value) as { sourceObservationIds?: unknown };
-    } catch {
-      continue;
+  for (;;) {
+    const rows = page.all(scope, after, CHUNK_ROWS) as Array<{
+      seq: number;
+      key: string;
+      value: string;
+    }>;
+    if (rows.length === 0) break;
+    after = rows[rows.length - 1].seq;
+
+    const entries: Array<{ key: string; value: unknown }> = [];
+    for (const row of rows) {
+      let parsed: { sourceObservationIds?: unknown };
+      try {
+        parsed = JSON.parse(row.value) as { sourceObservationIds?: unknown };
+      } catch {
+        continue;
+      }
+      const ids = parsed.sourceObservationIds;
+      if (!Array.isArray(ids) || ids.length <= max) continue;
+      // The write path's rule, not a second copy of it: dedupe from the tail,
+      // keep the newest `max`.
+      const capped = capSourceIds(ids as string[]);
+      parsed.sourceObservationIds = capped;
+      idsDropped += ids.length - capped.length;
+      entries.push({ key: row.key, value: parsed });
     }
-    const ids = parsed.sourceObservationIds;
-    if (!Array.isArray(ids) || ids.length <= max) continue;
-    // Same rule the write path applies: ids are appended as observed, so the
-    // newest sit at the tail and a tail slice is what survives.
-    parsed.sourceObservationIds = ids.slice(ids.length - max);
-    idsDropped += ids.length - max;
-    entries.push({ key: row.key, value: parsed });
+
+    if (entries.length > 0) {
+      state.setMany(scope, entries);
+      rowsTrimmed += entries.length;
+    }
+
+    if (rows.length < CHUNK_ROWS) break;
+    await yieldToEventLoop();
   }
 
-  if (entries.length === 0) return { rowsTrimmed: 0, idsDropped: 0 };
-  state.setMany(scope, entries);
-  return { rowsTrimmed: entries.length, idsDropped };
+  return { rowsTrimmed, idsDropped };
 }
 
 // Raw SQL rather than delete() per key: these scopes have no reader left, so
 // there is nobody to fire a state:deleted event at, and the row count is only
 // known by scanning anyway.
-function deleteDeadIndexRows(state: SqliteState): number {
-  return state.transaction(() => {
+async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
+  const pick = state.db.prepare(
+    "SELECT seq FROM kv WHERE (scope = ? OR scope LIKE ?) LIMIT ?",
+  );
+  const like = `${DEAD_INDEX_SCOPE}:%`;
+  let deleted = 0;
+
+  for (;;) {
+    const rows = pick.all(DEAD_INDEX_SCOPE, like, CHUNK_ROWS) as Array<{
+      seq: number;
+    }>;
+    if (rows.length === 0) break;
+    const seqs = rows.map((row) => row.seq);
     const result = state.db
-      .prepare("DELETE FROM kv WHERE scope = ? OR scope LIKE ?")
-      .run(DEAD_INDEX_SCOPE, `${DEAD_INDEX_SCOPE}:%`);
-    return Number(result.changes ?? 0);
-  });
+      .prepare(
+        `DELETE FROM kv WHERE seq IN (${seqs.map(() => "?").join(",")})`,
+      )
+      .run(...seqs);
+    deleted += Number(result.changes ?? 0);
+    if (rows.length < CHUNK_ROWS) break;
+    await yieldToEventLoop();
+  }
+
+  return deleted;
 }
 
 /**
@@ -83,18 +131,21 @@ function deleteDeadIndexRows(state: SqliteState): number {
  * write-time bound existed, reclaims the dead index scopes, then records the
  * version so later boots skip the scan entirely.
  *
- * Synchronous and self-contained — it takes the open store, which is the seam
- * it is tested at, and touches nothing recallable.
+ * Chunked and yielding, so the daemon keeps serving while it runs. It takes
+ * the open store, which is the seam it is tested at, and touches nothing
+ * recallable.
  */
-export function runStartupMaintenance(state: SqliteState): StartupMaintenanceResult {
+export async function runStartupMaintenance(
+  state: SqliteState,
+): Promise<StartupMaintenanceResult> {
   if (alreadyRan(state)) {
     return { skipped: true, rowsTrimmed: 0, idsDropped: 0, deadIndexRowsDeleted: 0 };
   }
 
   const max = getMaxSourceObservationIds();
-  const nodes = trimProvenance(state, KV.graphNodes, max);
-  const edges = trimProvenance(state, KV.graphEdges, max);
-  const deadIndexRowsDeleted = deleteDeadIndexRows(state);
+  const nodes = await trimProvenance(state, KV.graphNodes, max);
+  const edges = await trimProvenance(state, KV.graphEdges, max);
+  const deadIndexRowsDeleted = await deleteDeadIndexRows(state);
 
   state.set(KV.state, MARKER_KEY, STARTUP_MAINTENANCE_VERSION);
 

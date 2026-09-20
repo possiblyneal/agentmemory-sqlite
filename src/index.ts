@@ -504,17 +504,14 @@ async function main() {
 
   // One-time repair of stores written before this fork: graph provenance that
   // predates the write-time bound, and the index shards the removed engine
-  // left behind. The scan is synchronous, so it goes behind setImmediate —
-  // readyz already answers 200 and the listener gets to accept first. It
-  // records its own version, so every later boot is a single marker read.
-  setImmediate(() => {
-    try {
-      runStartupMaintenance(sdk.store);
-    } catch (err) {
-      console.warn(
-        `[agentmemory] startup maintenance skipped: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  // left behind. Not awaited — readyz already answers 200 — and the pass
+  // itself yields between chunks, so requests arriving during it are served
+  // rather than queued. It records its own version, so every later boot is a
+  // single marker read.
+  void runStartupMaintenance(sdk.store).catch((err: unknown) => {
+    console.warn(
+      `[agentmemory] startup maintenance skipped: ${err instanceof Error ? err.message : String(err)}`,
+    );
   });
 
   // The vector fill/repair pass closes the gap between the content rows and
