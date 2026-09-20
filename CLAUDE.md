@@ -125,6 +125,23 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
 
+## Supported hosts
+
+19 `connect` adapters, enumerated by `ADAPTERS` in `src/cli/connect/index.ts` — that array is
+the source of truth for the count in `README.md`, `CONTRIBUTING.md` and the generated
+`plugin/skills/agentmemory-agents/REFERENCE.md`. Cursor and Codex are not supported: their
+adapters, manifests and tests were removed rather than maintained.
+
+Two survivors are named for Codex but are not Codex-specific — do not delete them with a host:
+`plugin/hooks/hooks.codex.json` is the manifest `connect dsh` merges (`src/cli/connect/dsh.ts`),
+and `src/cli/connect/codex-hooks.ts` is the shared merge engine behind Claude Code
+`--with-hooks`, Droid and Devin.
+
+Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `plugin install`
+and `skills add` commands) must name `possiblyneal/agentmemory-sqlite`. Installing from
+upstream pulls upstream's 8 skills over this fork's 17. npm package metadata still names
+upstream deliberately: this fork does not own those package names.
+
 ## Current Stats (v0.9.29)
 
 - 54 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
