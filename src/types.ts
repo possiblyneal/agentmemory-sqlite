@@ -230,6 +230,10 @@ export interface FunctionMetrics {
   avgQualityScore: number;
 }
 
+// The verdict vocabulary. Defined here rather than beside the evaluator so a
+// reader of a stored snapshot and a reader of the evaluator see one union.
+export type HealthStatus = "healthy" | "degraded" | "critical";
+
 export interface HealthSnapshot {
   connectionState: string;
   workers: Array<{ id: string; name: string; status: string }>;
@@ -245,7 +249,13 @@ export interface HealthSnapshot {
   eventLoopLagMs: number;
   uptimeSeconds: number;
   kvConnectivity?: { status: string; latencyMs?: number; error?: string };
-  status: "healthy" | "degraded" | "critical";
+  status: HealthStatus;
+  // What the latest sample alone said, before hysteresis. `alerts` describes
+  // this reading while `status` is the verdict published to a supervisor, so
+  // the two legitimately disagree while a run accumulates - a reader shown
+  // alerts beside `healthy` needs this to tell a lagging verdict from a bug.
+  // Absent on snapshots stored by builds that predate the field.
+  sampledStatus?: HealthStatus;
   alerts: string[];
   notes?: string[];
 }

@@ -141,13 +141,20 @@ describe("evaluateHealth verdict hysteresis", () => {
 
   // Feed a sequence through, threading hysteresis state the way the monitor
   // does, and return the Verdict published after each sample.
-  function publish(samples: HealthSnapshot[]): string[] {
+  function publishWith(
+    config: Parameters<typeof evaluateHealth>[1],
+    samples: HealthSnapshot[],
+  ): string[] {
     let state = undefined as ReturnType<typeof evaluateHealth>["hysteresis"] | undefined;
     return samples.map((s) => {
-      const r = evaluateHealth(s, {}, state);
+      const r = evaluateHealth(s, config, state);
       state = r.hysteresis;
       return r.status;
     });
+  }
+
+  function publish(samples: HealthSnapshot[]): string[] {
+    return publishWith({}, samples);
   }
 
   it("publishes a verdict on the first sample rather than staying unjudged", () => {
@@ -231,6 +238,39 @@ describe("evaluateHealth verdict hysteresis", () => {
     const direct = publish([healthy, critical, critical, critical]);
     const stepped = publish([healthy, degraded, degraded, degraded]);
     expect(direct.indexOf("critical")).toBe(stepped.indexOf("degraded"));
+  });
+
+  it("reports the verdict of the sample just taken beside the published one", () => {
+    // A reader shown alerts next to `healthy` has to be able to tell a
+    // lagging verdict from a bug, so the sample's own verdict is reported.
+    const first = evaluateHealth(healthy);
+    const second = evaluateHealth(critical, {}, first.hysteresis);
+    expect(second.status).toBe("healthy");
+    expect(second.sampledStatus).toBe("critical");
+    expect(first.sampledStatus).toBe("healthy");
+  });
+
+  it("honours a sample count named in explicit config", () => {
+    // Thresholds passed explicitly are honoured, so the counts are too -
+    // silently ignoring them is how a caller gets hysteresis it did not ask
+    // for.
+    expect(
+      publishWith({ assertSamples: 1 }, [healthy, critical]),
+    ).toEqual(["healthy", "critical"]);
+  });
+
+  it("treats a config key present but undefined as unnamed", () => {
+    // Spreading it would erase the environment value, and a count of
+    // `undefined` is never reached - the published verdict would pin itself
+    // forever on a caller that only meant to pass an optional through.
+    expect(
+      publishWith({ assertSamples: undefined }, [
+        healthy,
+        critical,
+        critical,
+        critical,
+      ]),
+    ).toEqual(["healthy", "healthy", "healthy", "critical"]);
   });
 
   it("reports the alerts of the sample just taken, not of the published verdict", () => {

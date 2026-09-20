@@ -1,5 +1,5 @@
 import type { SqliteState } from "../engine/inproc/state.js";
-import { KV } from "./schema.js";
+import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, KV } from "./schema.js";
 import { capSourceIds } from "../functions/graph-provenance.js";
 import { getMaxSourceObservationIds } from "../config.js";
 import { logger } from "../logger.js";
@@ -18,13 +18,6 @@ const MARKER_KEY: keyof StateScope = "system:startupMaintenanceVersion";
 // already bounds a setMany to, so one write lock is held no longer here than
 // anywhere else.
 const CHUNK_ROWS = 100;
-
-// The deleted engine's index persistence wrote its manifests into
-// `mem:index:bm25` and every shard into its own `mem:index:bm25:<kind>:...`
-// scope. Nothing reads either now — BM25 is rebuilt from content at boot and
-// vectors live in their own table — and the prefix belongs to that module
-// alone, so the whole subtree goes.
-const DEAD_INDEX_SCOPE = KV.bm25Index;
 
 export type StartupMaintenanceResult = {
   /** True when an earlier boot already completed this version of the pass. */
@@ -45,6 +38,25 @@ function alreadyRan(state: SqliteState): boolean {
 const yieldToEventLoop = (): Promise<void> =>
   new Promise((resolve) => setImmediate(resolve));
 
+// Walk a scope a chunk at a time, yielding between chunks. Each call to
+// `page` is handed the seq of the last row already handled: a pass that
+// rewrites rows in place resumes past them, while a pass that deletes them
+// has nothing left to resume past and ignores it.
+async function inChunks<T extends { seq: number }>(
+  page: (afterSeq: number) => T[],
+  handle: (rows: T[]) => void,
+): Promise<void> {
+  let after = 0;
+  for (;;) {
+    const rows = page(after);
+    if (rows.length === 0) break;
+    after = rows[rows.length - 1].seq;
+    handle(rows);
+    if (rows.length < CHUNK_ROWS) break;
+    await yieldToEventLoop();
+  }
+}
+
 async function trimProvenance(
   state: SqliteState,
   scope: string,
@@ -56,45 +68,41 @@ async function trimProvenance(
     "SELECT seq, key, value FROM kv WHERE scope = ? AND seq > ? ORDER BY seq LIMIT ?",
   );
 
-  let after = 0;
   let rowsTrimmed = 0;
   let idsDropped = 0;
 
-  for (;;) {
-    const rows = page.all(scope, after, CHUNK_ROWS) as Array<{
-      seq: number;
-      key: string;
-      value: string;
-    }>;
-    if (rows.length === 0) break;
-    after = rows[rows.length - 1].seq;
-
-    const entries: Array<{ key: string; value: unknown }> = [];
-    for (const row of rows) {
-      let parsed: { sourceObservationIds?: unknown };
-      try {
-        parsed = JSON.parse(row.value) as { sourceObservationIds?: unknown };
-      } catch {
-        continue;
+  await inChunks(
+    (after) =>
+      page.all(scope, after, CHUNK_ROWS) as Array<{
+        seq: number;
+        key: string;
+        value: string;
+      }>,
+    (rows) => {
+      const entries: Array<{ key: string; value: unknown }> = [];
+      for (const row of rows) {
+        let parsed: { sourceObservationIds?: unknown };
+        try {
+          parsed = JSON.parse(row.value) as { sourceObservationIds?: unknown };
+        } catch {
+          continue;
+        }
+        const ids = parsed.sourceObservationIds;
+        if (!Array.isArray(ids) || ids.length <= max) continue;
+        // The write path's rule, not a second copy of it: dedupe from the
+        // tail, keep the newest `max`.
+        const capped = capSourceIds(ids as string[], max);
+        parsed.sourceObservationIds = capped;
+        idsDropped += ids.length - capped.length;
+        entries.push({ key: row.key, value: parsed });
       }
-      const ids = parsed.sourceObservationIds;
-      if (!Array.isArray(ids) || ids.length <= max) continue;
-      // The write path's rule, not a second copy of it: dedupe from the tail,
-      // keep the newest `max`.
-      const capped = capSourceIds(ids as string[]);
-      parsed.sourceObservationIds = capped;
-      idsDropped += ids.length - capped.length;
-      entries.push({ key: row.key, value: parsed });
-    }
 
-    if (entries.length > 0) {
-      state.setMany(scope, entries);
-      rowsTrimmed += entries.length;
-    }
-
-    if (rows.length < CHUNK_ROWS) break;
-    await yieldToEventLoop();
-  }
+      if (entries.length > 0) {
+        state.setMany(scope, entries);
+        rowsTrimmed += entries.length;
+      }
+    },
+  );
 
   return { rowsTrimmed, idsDropped };
 }
@@ -106,24 +114,20 @@ async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
   const pick = state.db.prepare(
     "SELECT seq FROM kv WHERE (scope = ? OR scope LIKE ?) LIMIT ?",
   );
-  const like = `${DEAD_INDEX_SCOPE}:%`;
+  const like = `${DEAD_INDEX_SCOPE_PREFIX}%`;
   let deleted = 0;
 
-  for (;;) {
-    const rows = pick.all(DEAD_INDEX_SCOPE, like, CHUNK_ROWS) as Array<{
-      seq: number;
-    }>;
-    if (rows.length === 0) break;
-    const seqs = rows.map((row) => row.seq);
-    const result = state.db
-      .prepare(
-        `DELETE FROM kv WHERE seq IN (${seqs.map(() => "?").join(",")})`,
-      )
-      .run(...seqs);
-    deleted += Number(result.changes ?? 0);
-    if (rows.length < CHUNK_ROWS) break;
-    await yieldToEventLoop();
-  }
+  await inChunks(
+    // The rows this read are gone by the next call, so the cursor is moot.
+    (_afterSeq) => pick.all(DEAD_INDEX_SCOPE, like, CHUNK_ROWS) as Array<{ seq: number }>,
+    (rows) => {
+      const seqs = rows.map((row) => row.seq);
+      const result = state.db
+        .prepare(`DELETE FROM kv WHERE seq IN (${seqs.map(() => "?").join(",")})`)
+        .run(...seqs);
+      deleted += Number(result.changes ?? 0);
+    },
+  );
 
   return deleted;
 }

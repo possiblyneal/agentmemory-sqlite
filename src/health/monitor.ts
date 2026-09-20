@@ -93,6 +93,7 @@ export function registerHealthMonitor(
     const evaluated = evaluateHealth(snapshot, {}, hysteresis);
     hysteresis = evaluated.hysteresis;
     snapshot.status = evaluated.status;
+    snapshot.sampledStatus = evaluated.sampledStatus;
     snapshot.alerts = evaluated.alerts;
     snapshot.notes = evaluated.notes;
 

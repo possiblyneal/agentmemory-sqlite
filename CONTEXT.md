@@ -87,3 +87,10 @@ The daemon's own judgement of its condition, one of *healthy*, *degraded*, or *c
 Verdict is a sustained reading, not an instantaneous one: it changes only after consecutive
 samples agree, because an external supervisor may restart the daemon on it.
 _Avoid_: status, state, health check
+
+**Sample Verdict**:
+What a single reading says on its own, before the Health Verdict has had a chance to move.
+Alerts describe the Sample Verdict, so the two legitimately disagree while a run of samples
+accumulates. It is shown to an Operator so a lagging Verdict is not mistaken for a bug, and
+is never a restart signal — only the Health Verdict is.
+_Avoid_: instantaneous status, raw health, current health
