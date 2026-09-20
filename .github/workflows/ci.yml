@@ -63,12 +63,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
-      # Lockfiles are gitignored, so `npm ci` (which strictly re-validates a
-      # committed lockfile) buys no reproducibility here — and Node 24+'s
-      # stricter npm rejects rolldown's optional platform bindings that a
-      # `--package-lock-only` pass doesn't fully enumerate, failing the matrix
-      # on 24/26 only. A single lenient `npm install` resolves and installs
-      # in one pass.
+      # package-lock.json is committed, but `npm ci` still cannot be used:
+      # Node 24+'s stricter npm rejects rolldown's optional platform bindings
+      # that the lockfile does not fully enumerate, failing the matrix on
+      # 24/26 only. A single lenient `npm install` resolves and installs in
+      # one pass across every leg.
       - run: npm install --legacy-peer-deps --no-audit --no-fund
       - run: npm run build
       - run: npm run skills:check

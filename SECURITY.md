@@ -55,18 +55,15 @@ Out of scope:
 
 This fork is installed by cloning and building from source — there is no tarball and `dist/` is gitignored. The runtime dependency tree is intentionally small (7 production deps: `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, `@clack/prompts`, `dotenv`, `picocolors`, `ws`, `zod`) plus an optional set guarded behind `optionalDependencies` for embeddings. Storage is `node:sqlite` from the Node runtime itself, so the database is not a dependency at all.
 
-**No lockfile is committed.** The reasoning:
+**`package-lock.json` is committed** — `.gitignore` ignores lockfiles generally and then negates this one. The reasoning:
 
-- Pinning one would shift the supply-chain attack surface from "what npm resolves today" to "what was resolved when the lockfile was last regenerated," which is a different tradeoff, not strictly better.
-- SemVer ranges (`^x.y.z`) on the deps mean security patches reach a rebuild without a re-release.
+- The build is reproduced from this repository alone. Without the lockfile, `git archive` drops it and a build host resolves a different dependency tree than the one that was tested.
+- The pin is the supply-chain control: what you build is what CI tested, not whatever npm resolves the day you clone.
+- CI deliberately does not use `npm ci` — see below.
 
-If you ship agentmemory inside a hardened pipeline that requires reproducible installs, the recommended path is:
+If you ship agentmemory inside a hardened pipeline that requires reproducible installs, clone at a pinned commit, `npm install --legacy-peer-deps` in a controlled environment, audit `node_modules/` once at that point, and rebuild internally.
 
-1. `npm install --legacy-peer-deps` against a pinned clone in a controlled environment.
-2. `npm shrinkwrap` to produce a versioned `npm-shrinkwrap.json` that travels with your deployment.
-3. Audit `node_modules/` once at that point and rebuild internally.
-
-CI runs a single `npm install --legacy-peer-deps --no-audit --no-fund` per job, so every test job resolves its own tree at run time.
+CI runs a single `npm install --legacy-peer-deps --no-audit --no-fund` per job rather than `npm ci`, because Node 24+'s stricter npm rejects rolldown's optional platform bindings that the lockfile does not fully enumerate.
 
 Supply-chain monitoring we already do:
 

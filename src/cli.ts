@@ -166,13 +166,13 @@ Environment:
                                (default 30). Long values overcount, short values undercount.
 
 Quick start:
-  npx @agentmemory/agentmemory          # start the daemon
-  npx @agentmemory/agentmemory demo     # see semantic recall in 30 seconds
-  npx @agentmemory/agentmemory doctor   # diagnose config + feature flags
-  npx @agentmemory/agentmemory status   # health + memory count + flags
-  npx @agentmemory/agentmemory upgrade  # upgrade agentmemory
-  npx @agentmemory/agentmemory mcp      # standalone MCP server
-  npx @agentmemory/mcp                  # same as above (shim package)
+  agentmemory          # start the daemon
+  agentmemory demo     # see semantic recall in 30 seconds
+  agentmemory doctor   # diagnose config + feature flags
+  agentmemory status   # health + memory count + flags
+  agentmemory upgrade  # upgrade agentmemory
+  agentmemory mcp      # standalone MCP server
+  npx @agentmemory/mcp # same as above (shim package, proxies to this server)
 `);
   process.exit(0);
 }
@@ -385,69 +385,6 @@ function clearWorkerPidfile(): void {
   } catch {}
 }
 
-function isInvokedViaNpx(): boolean {
-  if (process.env["npm_lifecycle_event"] === "npx") return true;
-  const argv1 = process.argv[1] ?? "";
-  if (argv1.includes("_npx")) return true;
-  const ua = process.env["npm_config_user_agent"] ?? "";
-  if (ua.startsWith("npm/") || ua.includes(" npm/")) return true;
-  return false;
-}
-
-// First-run global-install prompt. Replaces the previous passive
-// `p.log.info` hint that users ignored — typing `agentmemory stop`
-// in a new shell would then 404 with `command not found`. We now
-// ask once, persist the answer in preferences, and never ask again.
-async function maybeOfferGlobalInstall(): Promise<void> {
-  if (!isInvokedViaNpx()) return;
-  if (!process.stdin.isTTY) return;
-  if (process.env["CI"]) return;
-  const prefs = readPrefs();
-  if (prefs.skipGlobalInstall || prefs.skipNpxHint) return;
-
-  const answer = await p.confirm({
-    message:
-      "Install agentmemory globally so the bare `agentmemory` command works in any shell? [Y/n]",
-    initialValue: true,
-  });
-  if (p.isCancel(answer)) {
-    // Treat Ctrl+C as "not now" rather than "never". Don't persist.
-    return;
-  }
-  if (answer === false) {
-    writePrefs({ skipGlobalInstall: true });
-    p.log.info(
-      "Skipped. Re-run via `npx @agentmemory/agentmemory` or install later with: npm install -g @agentmemory/agentmemory",
-    );
-    return;
-  }
-
-  const npmBin = whichBinary("npm");
-  if (!npmBin) {
-    p.log.warn(
-      "npm not found on PATH. Install manually: npm install -g @agentmemory/agentmemory",
-    );
-    return;
-  }
-  const ok = runCommand(
-    npmBin,
-    ["install", "-g", `@agentmemory/agentmemory@${VERSION}`],
-    { label: `Installing @agentmemory/agentmemory@${VERSION} globally` },
-  );
-  if (ok) {
-    p.log.success(
-      "Installed globally. `agentmemory stop` etc. will now work in new shells.",
-    );
-    // Persist so we never re-prompt even if the user happens to npx
-    // again from a CI-less TTY.
-    writePrefs({ skipGlobalInstall: true });
-  } else {
-    p.log.warn(
-      "Global install failed. Try manually: npm install -g @agentmemory/agentmemory",
-    );
-  }
-}
-
 async function waitForAgentmemoryReady(timeoutMs: number): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -490,14 +427,7 @@ function printReadyHint(): void {
   p.note(lines.join("\n"), `agentmemory v${c.accent(VERSION)}`);
 
   // Pick a runnable form for the suggested next-step. Users invoked
-  // via `npx` don't have the bare `agentmemory` command on PATH yet
-  // (unless they accepted the global-install prompt and the npm bin
-  // dir was already on PATH in this shell), so we suggest the npx
-  // form for them; everyone else gets the global form.
-  const demoCommand = isInvokedViaNpx()
-    ? "npx @agentmemory/agentmemory demo"
-    : "agentmemory demo";
-  process.stdout.write(`\n${c.dim("Try:")} ${c.cmd(demoCommand)}\n`);
+  process.stdout.write(`\n${c.dim("Try:")} ${c.cmd("agentmemory demo")}\n`);
 }
 
 async function main() {
@@ -546,7 +476,6 @@ async function main() {
   // ports itself (ADR 0001). Importing it IS starting the daemon.
   await import("./index.js");
   if (await waitForAgentmemoryReady(15000)) {
-    await maybeOfferGlobalInstall();
     printReadyHint();
   }
   // Mark splash as something to skip on subsequent runs. This is a

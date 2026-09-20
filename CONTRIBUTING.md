@@ -103,7 +103,7 @@ Maintainers cut releases. Every bump touches these files in lockstep (the consis
 6. `src/types.ts` (`ExportData.version` union)
 7. `src/functions/export-import.ts` (`supportedVersions` Set)
 
-No lockfiles are committed. `test/export-import.test.ts` asserts against the `VERSION` constant, so it needs no per-release edit. Run `npm run skills:gen` if the endpoint or env surface changed.
+`package-lock.json` is committed and should be regenerated when dependencies change. `test/export-import.test.ts` asserts against the `VERSION` constant, so it needs no per-release edit. Run `npm run skills:gen` if the endpoint or env surface changed.
 
 Then: CHANGELOG section, PR, merge, tag, GitHub release. Nothing is published to npm — this fork does not own `@agentmemory/agentmemory`, `@agentmemory/mcp` or `@agentmemory/fs-watcher`. A release here is a tag and a set of notes. `integrations/filesystem-watcher/package.json` versions independently of the trio above and is deliberately absent from the lockstep list.
 
