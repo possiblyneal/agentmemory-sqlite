@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   checkPayloadSize,
+  isOversizedPayload,
   MAX_PAYLOAD_BYTES,
 } from "../src/state/payload-bound.js";
 
@@ -35,6 +36,12 @@ describe("payload bound", () => {
 
     expect(result).toMatchObject({ oversized: true, bytes: null });
     expect(result?.error).toContain("too large to serialize");
+  });
+
+  it("tells a refusal apart from a successful export", () => {
+    expect(isOversizedPayload(checkPayloadSize("x".repeat(64), "hint", 8))).toBe(true);
+    expect(isOversizedPayload({ sessions: [], memories: [] })).toBe(false);
+    expect(isOversizedPayload(null)).toBe(false);
   });
 
   it("bounds the default far above a reasonable response", () => {

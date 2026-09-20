@@ -19,6 +19,10 @@ export type OversizedPayload = {
   limitBytes: number;
 };
 
+export function isOversizedPayload(value: unknown): value is OversizedPayload {
+  return (value as OversizedPayload | null)?.oversized === true;
+}
+
 // `limitBytes` is overridable so a test can exercise the refusal without
 // allocating a quarter of a gigabyte to trip the real bound.
 export function checkPayloadSize(

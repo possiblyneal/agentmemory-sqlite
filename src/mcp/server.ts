@@ -393,7 +393,10 @@ export function registerMcpEndpoints(
               status_code: 200,
               body: {
                 content: [
-                  { type: "text", text: JSON.stringify(result, null, 2) },
+                  // Compact, unlike the other tools: mem::export measures its
+                  // payload against the response bound in this encoding, and
+                  // indenting it here would ship more than was measured.
+                  { type: "text", text: JSON.stringify(result) },
                 ],
               },
             };

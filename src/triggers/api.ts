@@ -4,7 +4,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
-import { checkPayloadSize } from "../state/payload-bound.js";
+import { checkPayloadSize, isOversizedPayload } from "../state/payload-bound.js";
 import { getLatestHealth } from "../health/monitor.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import type { ResilientProvider } from "../providers/resilient.js";
@@ -1333,9 +1333,7 @@ export function registerApiTriggers(
       });
       // mem::export refuses an oversized payload rather than serializing it;
       // over HTTP that refusal is a 413, not a 200 carrying an error body.
-      if ((result as { oversized?: boolean } | null)?.oversized) {
-        return { status_code: 413, body: result };
-      }
+      if (isOversizedPayload(result)) return { status_code: 413, body: result };
       return { status_code: 200, body: result };
     },
   );
