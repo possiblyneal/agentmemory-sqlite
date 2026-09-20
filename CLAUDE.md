@@ -141,6 +141,13 @@ and `src/cli/connect/codex-hooks.ts` is the shared merge engine behind Claude Co
 `--with-hooks`, Droid, Devin and dsh, and also exports the `findPluginRoot` helper that
 `antigravity-cli.ts` and `pi.ts` import.
 
+## Relationship to upstream
+
+This fork is deliberately divergent: `rohitg00/agentmemory` is where the code came from and
+nothing more. Do not merge, rebase or cherry-pick from it, and do not restore a branch, tag or
+file merely because upstream still carries it. `origin` carries `main` plus the branches of
+live PRs — an inherited upstream branch is deleted, never tracked.
+
 Plugin distribution metadata (`homepage`, `repository`, marketplace sources, `plugin install`
 and `skills add` commands) must name `possiblyneal/agentmemory-sqlite`. Installing from
 upstream pulls upstream's 8 skills over this fork's 17. npm package metadata still names
