@@ -9,7 +9,7 @@ user-invocable: false
 ## Quick start
 
 ```bash
-agentmemory connect claude-code   # or cursor, codex, gemini-cli, ...
+agentmemory connect claude-code   # or gemini-cli, opencode, copilot-cli, ...
 ```
 
 After wiring, restart the host or run its MCP reload (for example `/mcp` in Claude Code) so it picks up the server. Then confirm the agent lists agentmemory's tools.
