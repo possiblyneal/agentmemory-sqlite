@@ -33,7 +33,6 @@ Anything not on this list that a contributor wants to pursue is welcome — open
 
 ### Active
 - [ ] **Multimodal memory** — content-addressed image store, vision-prompt compression, disk quota + refcount on eviction (#64, PR #111)
-- [ ] **Governance baseline** — this file, plus `GOVERNANCE.md`, `CONTRIBUTING.md`, `MAINTAINERS.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`
 
 ### Planned
 - [ ] **GitHub connector** (`@agentmemory/github-watcher`) — sync issues, PRs, discussions as observations. Shares the `POST /agentmemory/observe` wire format with the filesystem connector.
@@ -44,9 +43,9 @@ Anything not on this list that a contributor wants to pursue is welcome — open
 ## Q3 2026 — Breadth (July – September)
 
 ### Planned
-- [ ] **Additional maintainer onboarding** — at least one Maintainer from a different organization added via the process in `GOVERNANCE.md`. This is a prerequisite for advancing past the foundation's Growth Stage.
+- [ ] **Additional maintainer onboarding** — at least one Maintainer from a different organization added. This is a prerequisite for advancing past the foundation's Growth Stage.
 - [ ] **Slack / Discord connector** — third source in the connector family.
-- [ ] **OpenSSF Scorecard** — enroll, reach a Silver-equivalent score. Badged in the README.
+- [ ] **OpenSSF Scorecard** — enroll, reach a Silver-equivalent score.
 - [ ] **Hermes integration hardening** — reach parity with the OpenClaw plugin surface (session lifecycle + tool-use hooks).
 - [ ] **Knowledge graph query language** — small DSL on top of `/agentmemory/graph` for multi-hop questions.
 - [ ] **First conference talk** — submit to KubeCon / LlamaCon / similar.
@@ -70,7 +69,7 @@ Anything not on this list that a contributor wants to pursue is welcome — open
 ## Q1 2027 — v1.0 (January – March)
 
 ### Planned
-- [ ] **REST + MCP surface freeze.** Any break requires a major-version tag per `GOVERNANCE.md`.
+- [ ] **REST + MCP surface freeze.** Any break requires a major-version tag.
 - [ ] **LTS branch `v1.x`** — 12-month security-fix commitment.
 - [ ] **v1.0 release** — full documentation pass, all roadmap items from prior quarters either shipped or formally deferred.
 - [ ] **Foundation membership** — Growth → Impact stage application if adoption + maintainer diversity metrics justify.

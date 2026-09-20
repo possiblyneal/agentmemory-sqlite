@@ -1,33 +1,23 @@
 name: CI
 
-# `paths-ignore` keeps doc-only / website / README / CHANGELOG churn from
+# `paths-ignore` keeps doc-only / website churn from
 # burning runner minutes. Source / config / workflow changes always run.
 # `workflow_dispatch` gives a manual re-run button for flake debugging.
 on:
   push:
     branches: [main]
     paths-ignore:
-      - "README.md"
-      - "CHANGELOG.md"
-      - "AGENTS.md"
-      - "ROADMAP.md"
       - "website/**"
       - "docs/**"
       - "assets/**"
-      - "deploy/**/README.md"
       - "**/*.md"
       - "**/*.mdx"
   pull_request:
     branches: [main]
     paths-ignore:
-      - "README.md"
-      - "CHANGELOG.md"
-      - "AGENTS.md"
-      - "ROADMAP.md"
       - "website/**"
       - "docs/**"
       - "assets/**"
-      - "deploy/**/README.md"
       - "**/*.md"
       - "**/*.mdx"
   workflow_dispatch:

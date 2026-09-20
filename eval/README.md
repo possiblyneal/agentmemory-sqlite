@@ -19,22 +19,19 @@ Two families, both reproducible:
 
 Running the `agentmemory` adapter against your real `~/.agentmemory` directory pollutes the eval with pre-existing memories AND pollutes your real store with eval test data. Always sandbox.
 
-`eval/scripts/sandbox.sh` spins up a clean agentmemory + iii-engine on ports 3411/3412 with state in `/tmp/agentmemory-eval-sandbox/`, exports `AGENTMEMORY_BASE_URL`, and tears down on exit.
-
-The script launches the built `dist/` under the iii binary, so it still expects upstream's two-engine runtime rather than this fork's single in-process Engine ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)).
+The Engine is in-process ([ADR 0001](../docs/adrs/0001-single-in-process-sqlite-engine.md)), so a sandbox is a second daemon on its own port block pointed at its own store. `AGENTMEMORY_SQLITE_PATH` is the whole store, and it outranks the value in `~/.agentmemory/.env`; `--instance 3` takes the 3411/3412/3413 trio, leaving the default 3111 block alone:
 
 ```sh
-source eval/scripts/sandbox.sh
-npm run eval:coding-life -- --adapters grep,agentmemory
+npm run build
+rm -rf /tmp/agentmemory-eval-sandbox && mkdir -p /tmp/agentmemory-eval-sandbox
+AGENTMEMORY_SQLITE_PATH=/tmp/agentmemory-eval-sandbox/agentmemory.sqlite \
+  node dist/cli.mjs --instance 3 &
+export AGENTMEMORY_BASE_URL=http://localhost:3411
 ```
 
-Requires iii v0.11.2 on PATH (agentmemory pin). If you already have a different version installed, install the pinned build into `~/.local/bin` and make sure that directory comes first on `PATH`:
+The daemon does not create the directory, only the file, so the `mkdir` is required — without it SQLite fails with `unable to open database file`. Tear the sandbox down with `kill %1` and `rm -rf /tmp/agentmemory-eval-sandbox` when the run finishes.
 
-```sh
-mkdir -p ~/.local/bin
-curl -fsSL https://github.com/iii-hq/iii/releases/download/iii/v0.11.2/iii-aarch64-apple-darwin.tar.gz | tar -xz -C ~/.local/bin
-export PATH="$HOME/.local/bin:$PATH"  # add to ~/.zshrc or ~/.bashrc for persistence
-```
+Do not reach for `--data-dir` here: it sets `AGENTMEMORY_DATA_DIR`, which nothing reads, so the daemon would open your real store while looking sandboxed.
 
 ## Quickstart
 
@@ -44,8 +41,7 @@ export PATH="$HOME/.local/bin:$PATH"  # add to ~/.zshrc or ~/.bashrc for persist
 # grep baseline, no sandbox needed
 npm run eval:coding-life -- --adapters grep
 
-# add agentmemory + vector (sandbox + OpenAI key)
-source eval/scripts/sandbox.sh
+# add agentmemory + vector (sandbox running, OpenAI key)
 OPENAI_API_KEY=sk-... npm run eval:coding-life -- --adapters grep,vector,agentmemory
 ```
 
@@ -55,8 +51,6 @@ OPENAI_API_KEY=sk-... npm run eval:coding-life -- --adapters grep,vector,agentme
 mkdir -p ~/datasets/longmemeval
 curl -Lo ~/datasets/longmemeval/longmemeval_s.json \
   https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s
-
-source eval/scripts/sandbox.sh
 
 # Stratified sample of 10 per type (fast iteration, ~$0.20 OpenAI cost)
 OPENAI_API_KEY=sk-... LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json \

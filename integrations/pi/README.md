@@ -72,6 +72,5 @@ You should see `agentmemory healthy` and a footer status like `🧠 agentmemory`
 
 ## See also
 
-- [agentmemory main README](../../README.md)
 - [Hermes integration](../hermes/README.md)
 - [OpenClaw integration](../openclaw/README.md)

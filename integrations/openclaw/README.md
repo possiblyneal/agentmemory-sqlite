@@ -157,7 +157,6 @@ The plugin currently registers a `promptBuilder` only — not a full `MemoryPlug
 
 ## See also
 
-- [agentmemory main README](../../README.md)
 - [Hermes integration](../hermes/README.md)
 - [pi integration](../pi/README.md)
 

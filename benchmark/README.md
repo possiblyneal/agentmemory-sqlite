@@ -93,8 +93,7 @@ the harness against the same git sha should give the same content
 mixture going in, so latency variance comes from the daemon and not
 from JSON payload jitter.
 
-### Publishing numbers per release
+### Publishing numbers
 
-The release flow appends a `## Performance` section to `CHANGELOG.md`
-referencing the JSON in `benchmark/results/` for that release's git
-sha. p99 is the headline number; the JSON is the receipt.
+Quote the JSON in `benchmark/results/` for the git sha the run measured.
+p99 is the headline number; the JSON is the receipt.
