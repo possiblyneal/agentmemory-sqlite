@@ -94,6 +94,34 @@ export const CORE_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: "memory_forget",
+    description:
+      "Permanently remove one saved memory, or one or more observations from a session, by id. " +
+      "Removes them from search as well as from the store and records an audit entry. " +
+      "Ids that do not exist are skipped, and the reply says how many records were actually removed. " +
+      "There is no undo — restore from a snapshot if you need one back.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        memoryId: {
+          type: "string",
+          description: "Id of a single saved memory to forget",
+        },
+        sessionId: {
+          type: "string",
+          description:
+            "Session holding the observations to forget. Required with observationIds. " +
+            "On its own it forgets the entire session, its observations and its summary.",
+        },
+        observationIds: {
+          type: "string",
+          description:
+            "Comma-separated observation ids to forget from sessionId",
+        },
+      },
+    },
+  },
+  {
     name: "memory_file_history",
     description: "Get past observations about specific files.",
     inputSchema: {

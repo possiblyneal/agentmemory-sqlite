@@ -307,9 +307,13 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             KV.observations(data.sessionId),
             obsId,
           );
+          // An id that is not there is not an error, but it is also not a
+          // removal: counting it would tell the caller their record is
+          // gone when nothing of theirs was ever found.
+          if (!obs) continue;
           await deleteIndexed(kv, KV.observations(data.sessionId), obsId);
-          if (obs?.imageData) await decrementImageRef(kv, sdk, obs.imageData);
-          if (obs?.imageRef && obs.imageRef !== obs.imageData) {
+          if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
+          if (obs.imageRef && obs.imageRef !== obs.imageData) {
             await decrementImageRef(kv, sdk, obs.imageRef);
           }
           deletedObservationIds.push(obsId);

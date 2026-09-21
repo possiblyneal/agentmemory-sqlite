@@ -22,13 +22,16 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 2. `src/mcp/server.ts` — handler case in the `mcp::tools::call` switch
 3. `src/triggers/api.ts` — REST endpoint registration
 4. `src/index.ts` — function registration + endpoint count in the log line
-5. `test/mcp-standalone.test.ts` — tool count assertion
-6. `plugin/.claude-plugin/plugin.json` — tool count in description
-7. `plugin/plugin.json` and `plugin/.mcp.copilot.json` (when present) — tool count or MCP exposure
+5. `test/mcp-standalone.test.ts` — per-group tool count assertion
+6. `test/tool-count-consistency.test.ts` — `EXPECTED_TOOL_COUNT`
+7. `plugin/.claude-plugin/plugin.json` — tool count in description
+8. `plugin/plugin.json` and `plugin/.mcp.copilot.json` (when present) — tool count or MCP exposure
+9. `npm run skills:gen` — regenerates the counts and tables in `plugin/skills/*/REFERENCE.md`
 
 **When adding REST endpoints, you MUST update:**
 1. `src/triggers/api.ts` — endpoint registration
 2. `src/index.ts` — endpoint count in the log line
+3. `npm run skills:gen` — regenerates the endpoint count and route table
 
 **When bumping version, you MUST update ALL of the following:**
 1. `package.json` — version field
@@ -161,8 +164,8 @@ stale — do not re-add translations without a way to keep them current.
 
 ## Current Stats (v0.9.29)
 
-- 54 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
-- 131 REST endpoints
+- 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
+- 132 REST endpoints
 - 6 MCP resources, 3 MCP prompts
 - 11 hooks, 17 skills
 - 260+ registered functions

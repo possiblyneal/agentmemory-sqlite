@@ -31,7 +31,7 @@ Present and gate:
 After the user says yes:
 
 ```json
-memory_governance_delete { "memoryIds": ["abc12345"], "reason": "user privacy request" }
+memory_forget { "memoryId": "abc12345" }
 ```
 
 Response:
@@ -44,18 +44,39 @@ Present:
 
 > Deleted 1 memory (`abc12345`).
 
-## 2. Drop a whole session's observations
+## 2. Drop two observations, not the session
+
+User: "Forget the two shell commands I ran in that debugging session, keep the rest."
+
+```json
+memory_smart_search { "query": "debugging shell commands", "limit": 20 }
+```
+
+Response has 2 results with `sessionId: c98f1100` and ids `o1`, `o2`. Show both,
+get a yes, then name them:
+
+```json
+memory_forget { "sessionId": "c98f1100", "observationIds": "o1,o2" }
+```
+
+Response:
+
+```json
+{ "deleted": 2, "observationsDeleted": 2 }
+```
+
+## 3. Drop a whole session
 
 User: "Delete everything from the throwaway spike session."
 
-Search, identify the session, then collect every memory id in it:
+Only when the whole session is what was asked for:
 
 ```json
-memory_smart_search { "query": "spike prototype throwaway", "limit": 20 }
+memory_forget { "sessionId": "c98f1100" }
 ```
 
-Response has 4 results all with `sessionId: c98f1100`. Show all four, get a yes,
-then pass every id:
+This removes every observation in it plus the session and its summary. To remove
+several memories instead, pass their ids together:
 
 ```json
 memory_governance_delete {
@@ -64,9 +85,7 @@ memory_governance_delete {
 }
 ```
 
-Never send `{ "sessionId": "c98f1100" }`; the MCP deletes by memory id only.
-
-## 3. User declines
+## 4. User declines
 
 User: "Actually, on second thought, keep them."
 

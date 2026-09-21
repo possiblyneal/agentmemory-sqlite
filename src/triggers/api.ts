@@ -1073,7 +1073,17 @@ export function registerApiTriggers(
           body: { error: "sessionId or memoryId is required" },
         };
       }
-      const result = await sdk.trigger({ function_id: "mem::forget", payload: req.body });
+      const observationIds = Array.isArray(req.body.observationIds)
+        ? req.body.observationIds.filter((id): id is string => typeof id === "string")
+        : undefined;
+      const result = await sdk.trigger({
+        function_id: "mem::forget",
+        payload: {
+          ...(req.body.sessionId !== undefined && { sessionId: req.body.sessionId }),
+          ...(req.body.memoryId !== undefined && { memoryId: req.body.memoryId }),
+          ...(observationIds !== undefined && { observationIds }),
+        },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -2172,6 +2182,31 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::memory-by-id",
     config: { api_path: "/agentmemory/memories/:id", http_method: "GET" },
+  });
+
+  // The route an operator reaches for first. Without it, removing one
+  // memory means discovering either /agentmemory/forget or the
+  // governance bulk paths, and the filter-based one invites deleting by
+  // date window and hoping the window held only the target.
+  sdk.registerFunction("api::memory-delete",
+    async (req: ApiRequest): Promise<Response> => {
+      const authErr = checkAuth(req, secret);
+      if (authErr) return authErr;
+      const id = req.path_params?.["id"];
+      if (!id || typeof id !== "string") {
+        return { status_code: 400, body: { error: "id path parameter is required" } };
+      }
+      const result = await sdk.trigger({
+        function_id: "mem::forget",
+        payload: { memoryId: id },
+      });
+      return { status_code: 200, body: result };
+    },
+  );
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::memory-delete",
+    config: { api_path: "/agentmemory/memories/:id", http_method: "DELETE" },
   });
 
   sdk.registerFunction("api::semantic-list",
