@@ -196,6 +196,23 @@ the `@agentmemory/mcp` shim wherever it is invoked as a proxy — `plugin/.mcp.j
 running server, not from the shim. The translated `READMEs/` were deleted rather than kept
 stale — do not re-add translations without a way to keep them current.
 
+`docs/upstream-issue-triage.yaml` scores every open upstream issue by severity and fix
+difficulty. It is a survey of defects in the shared code lineage, used to pick what is worth
+fixing *here* — it is not a backlog to merge from, and it is a dated snapshot, not a live
+mirror. Re-generate it from `gh issue list` rather than editing rows by hand. Its rows
+cross-link the open upstream PRs that claim to fix them; `docs/upstream-pr-triage.yaml`
+covers the remaining PRs — the ones that reference no open issue — scored by whether they
+land in code this fork carries. Both are read for the defect and the diagnosis, never for
+the patch.
+
+Every row in both files carries a `disposition`: `already-fixed` (verified against this tree;
+`fixed_by`/`status` names the evidence), `wont-fix` (out of scope here — no iii engine, no npm
+publish, no Windows CI, no deploy tree, or a host with no adapter in `src/cli/connect/`;
+`wont_fix_reason` says which), or `candidate` — the working set. A row that was opened against
+this tree also carries `status`, whose leading token says what the read found
+(`fixed-here`, `present-here`, `partly-present-here`, `unresolved`). No `status` means
+unchecked: the note is still upstream's claim, not a verified defect.
+
 ## Current Stats (v0.9.29)
 
 - 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)

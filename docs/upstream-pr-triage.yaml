@@ -1,0 +1,2388 @@
+# Upstream orphan-PR triage — rohitg00/agentmemory
+#
+# Scope: the 168 open upstream PRs that reference no open upstream issue, and are
+# therefore absent from docs/upstream-issue-triage.yaml. The other 123 open PRs are
+# cross-linked from the issues they claim to fix in that file.
+#
+# This fork does not merge, rebase or cherry-pick from upstream (see CLAUDE.md). These
+# rows are read for the defect and the diagnosis, not for the patch.
+#
+# kind — fix | feature | provider | host | deps | docs | test | ci | deploy
+#
+# relevance — worth acting on in THIS fork:
+#   high  a real defect or a recall-quality gain in code this fork carries and runs
+#   med   applies here, but narrower: one host, one provider path, or a smaller win
+#   low   another host/provider/deploy target, dependency bumps, or code absent here
+#
+# in_fork — <paths this fork tracks>/<paths the PR touches>. A low ratio usually means
+# the PR lands in files this fork deleted (deploy/, README translations, iii engine
+# config, dropped hosts) — read it before assuming it does not apply.
+# paths lists only the tracked ones, capped at 10.
+#
+# disposition — what this fork intends to do:
+#   already-fixed  verified fixed in this tree; see status
+#   wont-fix       out of scope here; wont_fix_reason says why
+#   candidate      applies here and is unclaimed — the working set
+#
+# status — present only where the claim was checked against this tree by reading the
+# code. "fixed-here" means this fork already carries the fix; "present-here" means the
+# defect reproduces here as reported; "partly-present-here" means part of it was already
+# fixed. Absent means unchecked: the note is still upstream's claim.
+#
+# Snapshot: 168 orphan PRs as of 2026-09-21 (gh pr list --repo rohitg00/agentmemory,
+# changed files from repos/rohitg00/agentmemory/pulls/N/files).
+
+prs:
+  - number: 228
+    title: "feat(vector): auto-index observations into vector store | 向量索引自动集成"
+    kind: feature
+    relevance: high
+    in_fork: 2/2
+    churn: 19
+    paths:
+      - src/functions/observe.ts
+      - src/index.ts
+    note: "Auto-index compressed observations into the vector store during observe; without it hybrid search needs a manual build."
+    disposition: already-fixed
+    status: "fixed-here — observe already indexes into the vector store via vectorIndexAddGuarded (src/functions/observe.ts:12,327)."
+    url: https://github.com/rohitg00/agentmemory/pull/228
+  - number: 264
+    title: "Implement surgical security and robustness improvements"
+    kind: fix
+    relevance: high
+    in_fork: 9/9
+    churn: 110
+    paths:
+      - src/auth.ts
+      - src/functions/claude-bridge.ts
+      - src/functions/snapshot.ts
+      - src/index.ts
+      - src/mcp/server.ts
+      - src/triggers/api.ts
+      - src/viewer/server.ts
+      - test/claude-bridge.test.ts
+      - test/snapshot.test.ts
+    note: "Viewer-proxy auth, snapshot write integrity and several hardening fixes across 9 files this fork carries."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/264
+  - number: 300
+    title: "feat: add sqlite-vec vector backend with Strategy pattern"
+    kind: feature
+    relevance: high
+    in_fork: 9/16
+    churn: 805
+    paths:
+      - benchmark/longmemeval-bench.ts
+      - benchmark/quality-eval.ts
+      - benchmark/real-embeddings-eval.ts
+      - benchmark/scale-eval.ts
+      - package.json
+      - src/index.ts
+      - src/state/hybrid-search.ts
+      - src/state/vector-index.ts
+      - test/vector-index.test.ts
+    note: "sqlite-vec vector backend behind a Strategy interface — the closest upstream work to this fork's own storage model."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/300
+  - number: 470
+    title: "Add consistency guards for MCP tools and REST endpoint drift"
+    kind: test
+    relevance: high
+    in_fork: 1/1
+    churn: 20
+    paths:
+      - test/consistency.test.ts
+    note: "Guards that every getAllTools() entry has a server switch case and that the endpoint count matches — directly automates this fork's Consistency Rules."
+    disposition: already-fixed
+    status: "fixed-here — test/consistency.test.ts and test/tool-count-consistency.test.ts already guard tool and endpoint drift."
+    url: https://github.com/rohitg00/agentmemory/pull/470
+  - number: 532
+    title: "fix(mcp): route memory_recall through full search"
+    kind: fix
+    relevance: high
+    in_fork: 3/3
+    churn: 389
+    paths:
+      - src/mcp/standalone.ts
+      - test/mcp-standalone-proxy.test.ts
+      - test/mcp-standalone.test.ts
+    note: "Standalone memory_recall proxies to smart-search, so format and token_budget are ignored and advertised recall modes do not work."
+    disposition: already-fixed
+    status: "fixed-here — Standalone memory_recall calls /agentmemory/search and forwards format and token_budget (src/mcp/standalone.ts:205-217); only memory_smart_search goes to /smart-search."
+    url: https://github.com/rohitg00/agentmemory/pull/532
+  - number: 571
+    title: "feat(smart-search): boost title/narrative matches on 'who/what is X' queries"
+    kind: feature
+    relevance: high
+    in_fork: 3/3
+    churn: 262
+    paths:
+      - src/functions/smart-search.ts
+      - src/types.ts
+      - test/smart-search.test.ts
+    note: "Boosts title/narrative matches on 'who/what is X' queries, where BM25 currently ranks busy observations over the record that names the concept."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/571
+  - number: 572
+    title: "perf(summarize): skip mem::summarize when a fresh summary exists"
+    kind: fix
+    relevance: high
+    in_fork: 1/1
+    churn: 38
+    paths:
+      - src/functions/summarize.ts
+    note: "Stop hooks fire mem::summarize every turn and stack full LLM passes; skips when a fresh summary exists."
+    disposition: candidate
+    status: "present-here — Same evidence as issue #1062: mem::summarize never checks for an existing fresh summary (src/functions/summarize.ts:235-360)."
+    url: https://github.com/rohitg00/agentmemory/pull/572
+  - number: 615
+    title: "feat(context,smart-search): inject insights into session context and smart search results (#457)"
+    kind: feature
+    relevance: high
+    in_fork: 2/2
+    churn: 79
+    paths:
+      - src/functions/context.ts
+      - src/functions/smart-search.ts
+    note: "mem::context and smart-search load lessons but skip insights, so mem::reflect output is reachable only by explicit tool call."
+    disposition: candidate
+    status: "present-here — KV.insights (src/state/schema.ts:88) is written by reflect.ts and read only by diagnostics.ts and export-import.ts. mem::context loads slots, profile and lessons and never insights (src/functions/context.ts:73-161); smart-search has no reference either."
+    url: https://github.com/rohitg00/agentmemory/pull/615
+  - number: 667
+    title: "fix(cli): status uses /memories?count=true instead of /export"
+    kind: fix
+    relevance: high
+    in_fork: 1/3
+    churn: 83
+    paths:
+      - src/cli.ts
+    note: "agentmemory status calls unbounded /export to get two counts and times out on any grown install."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/667
+  - number: 757
+    title: "fix(compression): fallback to synthetic compression when memory provider is noop"
+    kind: fix
+    relevance: high
+    in_fork: 2/2
+    churn: 146
+    paths:
+      - src/functions/compress.ts
+      - test/auto-compress.test.ts
+    note: "Compression against the noop provider produces nothing; falls back to local synthetic compression so keyless installs still store something."
+    disposition: already-fixed
+    status: "fixed-here — compress.ts already degrades to buildSyntheticCompression on provider failure (src/functions/compress.ts:113-130)."
+    url: https://github.com/rohitg00/agentmemory/pull/757
+  - number: 829
+    title: "Add project isolation for agentmemory"
+    kind: feature
+    relevance: high
+    in_fork: 50/56
+    churn: 1605
+    paths:
+      - .env.example
+      - plugin/.mcp.copilot.json
+      - plugin/.mcp.json
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/pre-tool-use.mjs
+      - plugin/scripts/prompt-submit.mjs
+      # +40 more
+    note: "AGENTMEMORY_PROJECT_ISOLATION enforced across MCP, REST and search, including a cross-project leak in hybrid smart-search."
+    disposition: candidate
+    status: "present-here — no AGENTMEMORY_PROJECT_ISOLATION."
+    url: https://github.com/rohitg00/agentmemory/pull/829
+  - number: 878
+    title: "Security: escape stored memory content in injected context (H1)"
+    kind: fix
+    relevance: high
+    in_fork: 5/6
+    churn: 316
+    paths:
+      - src/functions/context.ts
+      - src/functions/enrich.ts
+      - src/functions/slots.ts
+      - src/prompts/xml.ts
+      - test/context-lessons.test.ts
+    note: "Stored memory content is interpolated raw into <agentmemory-context>, so a memory can close the wrapper and inject instructions."
+    disposition: candidate
+    status: "present-here — src/functions/context.ts escapes only the project attribute (line 26); stored fields are still interpolated raw."
+    url: https://github.com/rohitg00/agentmemory/pull/878
+  - number: 898
+    title: "fix(viewer): prevent path-traversal SSRF in proxy (CWE-918)"
+    kind: fix
+    relevance: high
+    in_fork: 1/2
+    churn: 221
+    paths:
+      - src/viewer/server.ts
+    note: "Path-traversal SSRF (CWE-918) in the viewer proxy: local callers escape the /agentmemory/ prefix with the auth header attached."
+    disposition: candidate
+    status: "present-here — pathname is a raw slice of req.url with no normalization (src/viewer/server.ts:253) and the proxy concatenates it straight into the upstream URL (src/viewer/server.ts:399-403) while attaching Authorization: Bearer <secret>. A ../ segment resolves during fetch, so the secret rides a request outside the /agentmemory/ prefix. Local-only reach."
+    url: https://github.com/rohitg00/agentmemory/pull/898
+  - number: 922
+    title: "fix(security): close secret-scrubbing bypass paths in all MCP write routes"
+    kind: fix
+    relevance: high
+    in_fork: 8/11
+    churn: 1599
+    paths:
+      - src/functions/compress.ts
+      - src/functions/export-import.ts
+      - src/functions/lessons.ts
+      - src/functions/privacy.ts
+      - src/functions/remember.ts
+      - src/functions/sketches.ts
+      - src/functions/slots.ts
+      - src/functions/team.ts
+    note: "stripPrivateData runs only in the observe pipeline; seven MCP write tools store secrets in plaintext."
+    disposition: candidate
+    status: "present-here — stripPrivateData is called only from src/functions/observe.ts."
+    url: https://github.com/rohitg00/agentmemory/pull/922
+  - number: 928
+    title: "feat(search): add temporal decay to recall ranking"
+    kind: feature
+    relevance: high
+    in_fork: 4/8
+    churn: 1676
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/index.ts
+      - src/state/hybrid-search.ts
+    note: "Opt-in exponential temporal decay in RRF fusion; today a note from this morning ranks identically to one from a year ago."
+    disposition: candidate
+    status: "present-here — no temporal decay in src/state/hybrid-search.ts."
+    url: https://github.com/rohitg00/agentmemory/pull/928
+  - number: 975
+    title: "Fix: unified environment behavior"
+    kind: fix
+    relevance: high
+    in_fork: 18/19
+    churn: 210
+    paths:
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/pre-tool-use.mjs
+      - plugin/scripts/prompt-submit.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/session-start.mjs
+      - plugin/scripts/stop.mjs
+      # +8 more
+    note: "Every hook script reads AGENTMEMORY_* at module level, so config living only in ~/.agentmemory/.env is silently ignored; touches 18 hook scripts this fork carries."
+    disposition: candidate
+    status: "present-here — No hook imports ../config.js; pre-tool-use.ts has no imports at all and reads process.env at module load (src/hooks/pre-tool-use.ts:23-26) while its own comment tells you to set the value in ~/.agentmemory/.env (line 20). Only the daemon hydrates that file (src/config.ts:75-83), so hook-only config set there is silently ignored."
+    url: https://github.com/rohitg00/agentmemory/pull/975
+  - number: 1005
+    title: "fix: evicted observations leave ghost entries in search indexes"
+    kind: fix
+    relevance: high
+    in_fork: 1/1
+    churn: 13
+    paths:
+      - src/functions/evict.ts
+    note: "Evicted observations are never removed from the BM25 or vector index, so search returns ids whose KV lookup is null and silently under-fills pages."
+    disposition: candidate
+    status: "present-here — src/functions/evict.ts deletes from KV without touching the BM25 or vector index."
+    url: https://github.com/rohitg00/agentmemory/pull/1005
+  - number: 1039
+    title: "fix: schedule periodic snapshot timer (#1006)"
+    kind: fix
+    relevance: high
+    in_fork: 1/2
+    churn: 93
+    paths:
+      - src/index.ts
+    note: "SNAPSHOT_ENABLED is loaded and logged but no timer ever calls mem::snapshot-create — the feature never runs."
+    disposition: already-fixed
+    status: "fixed-here — the periodic snapshot timer exists (src/index.ts:357)."
+    url: https://github.com/rohitg00/agentmemory/pull/1039
+  - number: 1174
+    title: "fix: evict lowest-value observations at the session cap instead of refusing writes"
+    kind: fix
+    relevance: high
+    in_fork: 1/2
+    churn: 211
+    paths:
+      - src/functions/observe.ts
+    note: "At MAX_OBS_PER_SESSION every further observation is discarded; evicts the lowest-value one instead of dropping the newest."
+    disposition: candidate
+    status: "present-here — At MAX_OBS_PER_SESSION mem::observe refuses every further observation outright (src/functions/observe.ts:147-154). The newest work is dropped rather than the least valuable one evicted."
+    url: https://github.com/rohitg00/agentmemory/pull/1174
+  - number: 1175
+    title: "feat(slots): reject stale slot overwrites, keep an undo copy, report headroom"
+    kind: fix
+    relevance: high
+    in_fork: 4/5
+    churn: 389
+    paths:
+      - src/functions/slots.ts
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+      - src/types.ts
+    note: "mem::slot-replace is an unguarded whole-object write, so two sessions silently clobber each other."
+    disposition: candidate
+    status: "partly-present-here — mem::slot-replace is serialized by withKeyedLock (src/functions/slots.ts:319), so it is not the unguarded write described. It still has no version precondition and no undo copy, so a read-modify-write across two sessions silently loses the first write."
+    url: https://github.com/rohitg00/agentmemory/pull/1175
+  - number: 1176
+    title: "fix: bound the audit log with AGENTMEMORY_AUDIT_MAX"
+    kind: fix
+    relevance: high
+    in_fork: 1/2
+    churn: 143
+    paths:
+      - src/functions/audit.ts
+    note: "recordAudit has no retention and the KV adapter rewrites the whole scope per write, so audit cost compounds on long-lived installs."
+    disposition: candidate
+    status: "present-here — recordAudit has no retention bound."
+    url: https://github.com/rohitg00/agentmemory/pull/1176
+  - number: 1210
+    title: "fix(providers): replace retired Anthropic default model identifiers"
+    kind: fix
+    relevance: high
+    in_fork: 3/3
+    churn: 16
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/providers/index.ts
+    note: "claude-sonnet-4-20250514 was retired on 15 June 2026 and is still the fallback default in six places."
+    disposition: already-fixed
+    status: "fixed-here — claude-sonnet-4-20250514 appears nowhere in src/."
+    url: https://github.com/rohitg00/agentmemory/pull/1210
+  - number: 1220
+    title: "fix(hooks): scope pre-tool-use enrichment to the current project"
+    kind: fix
+    relevance: high
+    in_fork: 2/3
+    churn: 199
+    paths:
+      - plugin/scripts/pre-tool-use.mjs
+      - src/hooks/pre-tool-use.ts
+    note: "PreToolUse carries no project field, so hook enrichment is always unscoped and pulls context across projects."
+    disposition: already-fixed
+    status: "fixed-here — pre-tool-use resolves project and forwards it on the enrich call (src/hooks/pre-tool-use.ts:97-111)."
+    url: https://github.com/rohitg00/agentmemory/pull/1220
+  - number: 1247
+    title: "feat(api): add /agentmemory/memories/search"
+    kind: feature
+    relevance: high
+    in_fork: 1/1
+    churn: 179
+    paths:
+      - src/triggers/api.ts
+    note: "No search endpoint covers memories written by remember — /memories only lists."
+    disposition: candidate
+    status: "present-here — no /agentmemory/memories/search route in src/triggers/api.ts."
+    url: https://github.com/rohitg00/agentmemory/pull/1247
+  - number: 1259
+    title: "fix(providers): bound LLM provider concurrency and stop counting 429s as breaker failures"
+    kind: fix
+    relevance: high
+    in_fork: 1/3
+    churn: 341
+    paths:
+      - src/providers/resilient.ts
+    note: "No concurrency bound on the provider path and 429s count as circuit-breaker failures, so load trips the breaker."
+    disposition: candidate
+    status: "partly-present-here — 429 and 503 are already retried with Retry-After before reaching the breaker (src/providers/_fetch.ts:13,76-82). A concurrency cap exists, but only on the agent-sdk provider (src/providers/agent-sdk.ts:99) — the HTTP providers have none."
+    url: https://github.com/rohitg00/agentmemory/pull/1259
+  - number: 1260
+    title: "fix(mcp): read graph stats from the snapshot instead of enumerating the graph"
+    kind: fix
+    relevance: high
+    in_fork: 2/2
+    churn: 56
+    paths:
+      - src/mcp/server.ts
+      - test/mcp-resources.test.ts
+    note: "agentmemory://graph/stats enumerates every node and edge over the transport to compute four aggregates."
+    disposition: already-fixed
+    status: "fixed-here — mem::graph-stats reads the snapshot and never enumerates (src/functions/graph.ts:1105)."
+    url: https://github.com/rohitg00/agentmemory/pull/1260
+  - number: 1287
+    title: "fix(evict): schedule the eviction sweep at boot"
+    kind: fix
+    relevance: high
+    in_fork: 5/6
+    churn: 204
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/functions/evict.ts
+      - src/index.ts
+      - test/evict.test.ts
+    note: "mem::evict is fully implemented but nothing schedules it — Eviction never runs."
+    disposition: candidate
+    status: "present-here — mem::evict is registered (src/functions/evict.ts:109) but src/index.ts schedules only auto-forget and consolidate-pipeline."
+    url: https://github.com/rohitg00/agentmemory/pull/1287
+  - number: 1307
+    title: "fix(sessions): close idle sessions no client ever ended"
+    kind: fix
+    relevance: high
+    in_fork: 5/11
+    churn: 862
+    paths:
+      - src/config.ts
+      - src/index.ts
+      - src/triggers/api.ts
+      - src/triggers/events.ts
+      - src/types.ts
+    note: "Sessions only reach completed when a client POSTs /session/end; clients that never do leave sessions active forever."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1307
+  - number: 1309
+    title: "feat(graph): delta graph extraction"
+    kind: fix
+    relevance: high
+    in_fork: 5/5
+    churn: 250
+    paths:
+      - src/functions/graph.ts
+      - src/state/schema.ts
+      - test/graph-heuristic-extract.test.ts
+      - test/graph.test.ts
+      - test/schema.test.ts
+    note: "Graph extraction re-runs over all observations every trigger, duplicating nodes and burning LLM calls."
+    disposition: candidate
+    status: "present-here — no graphExtracted scope in src/state/schema.ts."
+    url: https://github.com/rohitg00/agentmemory/pull/1309
+  - number: 1310
+    title: "fix(compression): guard empty compression prompts and watermark summarization"
+    kind: fix
+    relevance: high
+    in_fork: 10/11
+    churn: 575
+    paths:
+      - src/functions/compress-synthetic.ts
+      - src/functions/compress.ts
+      - src/functions/summarize.ts
+      - src/prompts/compression.ts
+      - src/state/schema.ts
+      - src/triggers/api.ts
+      - src/triggers/events.ts
+      - src/types.ts
+      - test/schema.test.ts
+      - test/summarize.test.ts
+    note: "Empty observations produce empty compression prompts, and summarization re-runs on an unchanged observation count."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1310
+  - number: 1317
+    title: "fix(health): measure heap saturation against the heap ceiling, not heapTotal"
+    kind: fix
+    relevance: high
+    in_fork: 4/4
+    churn: 62
+    paths:
+      - src/health/monitor.ts
+      - src/health/thresholds.ts
+      - src/types.ts
+      - test/health-thresholds.test.ts
+    note: "Health measured heapUsed/heapTotal, which reads 80-95% in any healthy process; measures against the real ceiling instead."
+    disposition: already-fixed
+    status: "fixed-here — saturation is measured against the heap ceiling (src/health/thresholds.ts:88)."
+    url: https://github.com/rohitg00/agentmemory/pull/1317
+  - number: 1319
+    title: "fix(consolidation): dedupe double-fired consolidation LLM runs + crash-safe audit"
+    kind: fix
+    relevance: high
+    in_fork: 3/3
+    churn: 383
+    paths:
+      - src/functions/audit.ts
+      - src/functions/consolidation-pipeline.ts
+      - test/consolidation-pipeline.test.ts
+    note: "The consolidation pipeline fires the same full-corpus LLM run twice for one corpus state."
+    disposition: already-fixed
+    status: "fixed-here — The consolidation pipeline already holds a lock that joins a second run over the same corpus state (src/functions/consolidation-pipeline.ts:52-56)."
+    url: https://github.com/rohitg00/agentmemory/pull/1319
+  - number: 1324
+    title: "fix(viewer): dashboard shows 0 sessions when unbounded KV scopes overflow iii invocation"
+    kind: fix
+    relevance: high
+    in_fork: 2/2
+    churn: 58
+    paths:
+      - src/triggers/api.ts
+      - src/viewer/index.html
+    note: "api::semantic-list and siblings run unbounded kv.list over a ~17MB scope, overflowing the invocation and blanking the dashboard."
+    disposition: candidate
+    status: "present-here — api::semantic-list and api::procedural-list run unbounded kv.list with no limit and return the whole scope (src/triggers/api.ts:2235, 2249)."
+    url: https://github.com/rohitg00/agentmemory/pull/1324
+  - number: 1344
+    title: "feat(reflect): project-level namespace isolation for reflection and consolidation"
+    kind: fix
+    relevance: high
+    in_fork: 6/6
+    churn: 191
+    paths:
+      - src/functions/consolidation-pipeline.ts
+      - src/functions/reflect.ts
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+      - test/consolidation-pipeline.test.ts
+      - test/reflect.test.ts
+    note: "Reflection and consolidation are not project-scoped, so concept clusters and insights cross-contaminate between repos."
+    disposition: candidate
+    status: "partly-present-here — mem::reflect accepts and filters on project (src/functions/reflect.ts:187,354,385), so the capability is present; it is opt-in, and the scheduled run passes no project."
+    url: https://github.com/rohitg00/agentmemory/pull/1344
+  - number: 1350
+    title: "fix(providers): clear the circuit breaker failure count on success"
+    kind: fix
+    relevance: high
+    in_fork: 4/4
+    churn: 138
+    paths:
+      - src/config.ts
+      - src/providers/circuit-breaker.ts
+      - src/providers/resilient.ts
+      - test/circuit-breaker.test.ts
+    note: "recordSuccess() does not reset the failure count in the closed state, so unrelated failures accumulate until the breaker trips."
+    disposition: candidate
+    status: "partly-present-here — recordSuccess only resets in half-open (src/providers/circuit-breaker.ts:47-54), but recordFailure already zeroes the count when the previous failure is older than the 60s window (src/providers/circuit-breaker.ts:63-65). Failures do not accumulate forever; the real gap is that successes never reduce the count inside a window."
+    url: https://github.com/rohitg00/agentmemory/pull/1350
+  - number: 1351
+    title: "perf(search): reuse one graph view per store and bound traversal"
+    kind: fix
+    relevance: high
+    in_fork: 3/5
+    churn: 703
+    paths:
+      - src/functions/graph-retrieval.ts
+      - src/state/hybrid-search.ts
+      - src/state/kv.ts
+    note: "Rebuilds the graph view per search and traverses unbounded; reuses one view per store and caps the traversal."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1351
+  - number: 1367
+    title: "fix(summarize): detect wrapped noop provider so keyless installs skip the pipeline"
+    kind: fix
+    relevance: high
+    in_fork: 2/2
+    churn: 27
+    paths:
+      - src/functions/summarize.ts
+      - test/summarize.test.ts
+    note: "The noop provider is wrapped, so the no_provider early return never fires and keyless installs run the whole summarize pipeline on every Stop hook."
+    disposition: candidate
+    status: "present-here — Every provider is wrapped: createProvider returns ResilientProvider (src/providers/index.ts:55) whose name is `resilient(<inner>)` (src/providers/resilient.ts:9). summarize.ts:263 compares name === \"noop\", which can never match, so keyless installs run the whole summarize pipeline. graph.ts:926 already uses .includes(\"noop\") — the fix has a precedent in this tree."
+    url: https://github.com/rohitg00/agentmemory/pull/1367
+  - number: 1368
+    title: "fix(reflect): read bounded graph snapshot and cap cluster prompt"
+    kind: fix
+    relevance: high
+    in_fork: 6/6
+    churn: 326
+    paths:
+      - .env.example
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - src/functions/graph.ts
+      - src/functions/reflect.ts
+      - src/prompts/reflect.ts
+      - test/reflect.test.ts
+    note: "mem::reflect enumerates the full graph and blows the invocation limit on a large store; bounds the snapshot and caps the cluster prompt."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1368
+  - number: 218
+    title: "fix(viewer): prevent tab bar crush and fix graph canvas overflow"
+    kind: fix
+    relevance: med
+    in_fork: 1/1
+    churn: 12
+    paths:
+      - src/viewer/index.html
+    note: "Two viewer CSS bugs: tab bar collapses to ~8px and the graph canvas overflows."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/218
+  - number: 223
+    title: "feat(smart-search): add format parameter (full/narrative/compact) | 添加 format 参数"
+    kind: feature
+    relevance: med
+    in_fork: 1/1
+    churn: 48
+    paths:
+      - src/functions/smart-search.ts
+    note: "format=full/narrative/compact on mem::smart-search, matching mem::search."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/223
+  - number: 224
+    title: "feat(search): add CJK character bigram tokenization | 添加 CJK Bigram 分词"
+    kind: feature
+    relevance: med
+    in_fork: 1/1
+    churn: 17
+    paths:
+      - src/state/search-index.ts
+    note: "CJK bigram tokenization in the BM25 index; without it CJK text is effectively unsearchable."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/224
+  - number: 225
+    title: "feat(embedding): configurable local model, cache dir, and HF mirror | 嵌入模型可配置"
+    kind: feature
+    relevance: med
+    in_fork: 1/1
+    churn: 38
+    paths:
+      - src/providers/embedding/local.ts
+    note: "Env-configurable local embedding model, cache dir and HF mirror."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/225
+  - number: 266
+    title: "fix: suppress floating promise in keyed-mutex to prevent unhandled-rejection warnings"
+    kind: fix
+    relevance: med
+    in_fork: 1/1
+    churn: 6
+    paths:
+      - src/state/keyed-mutex.ts
+    note: "Floating promise in withKeyedLock can raise unhandled-rejection warnings."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/266
+  - number: 273
+    title: "feat: opt-in fail-loud when AGENTMEMORY_URL is unreachable"
+    kind: fix
+    relevance: med
+    in_fork: 2/4
+    churn: 131
+    paths:
+      - src/mcp/rest-proxy.ts
+      - test/mcp-standalone-proxy.test.ts
+    note: "The MCP shim silently falls back to local in-memory mode when AGENTMEMORY_URL is unreachable; this makes it opt-in loud."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/273
+  - number: 319
+    title: "fix(fs-watcher): load agentmemory env file"
+    kind: fix
+    relevance: med
+    in_fork: 3/3
+    churn: 194
+    paths:
+      - integrations/filesystem-watcher/README.md
+      - integrations/filesystem-watcher/watcher.mjs
+      - test/fs-watcher.test.ts
+    note: "fs-watcher never loads ~/.agentmemory/.env, so its config is silently ignored."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/319
+  - number: 365
+    title: "fix: tolerate partial dashboard payloads"
+    kind: fix
+    relevance: med
+    in_fork: 1/2
+    churn: 278
+    paths:
+      - src/viewer/index.html
+    note: "Dashboard crashes on partial payloads instead of rendering empty lists."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/365
+  - number: 465
+    title: "feat(connect): automate Hermes config merge"
+    kind: host
+    relevance: med
+    in_fork: 3/3
+    churn: 299
+    paths:
+      - src/cli/connect/hermes.ts
+      - src/cli/connect/util.ts
+      - test/cli-connect.test.ts
+    note: "Turns the Hermes connect stub into a real ~/.hermes/config.yaml merge."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/465
+  - number: 467
+    title: "fix(embeddings): allow custom OpenAI embedding path"
+    kind: fix
+    relevance: med
+    in_fork: 4/5
+    churn: 57
+    paths:
+      - .env.example
+      - src/providers/_openai-shared.ts
+      - src/providers/embedding/openai.ts
+      - test/embedding-provider.test.ts
+    note: "OPENAI_EMBEDDING_PATH for OpenAI-compatible endpoints that do not use /v1/embeddings."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/467
+  - number: 468
+    title: "fix(memory): audit remember attribution"
+    kind: fix
+    relevance: med
+    in_fork: 8/9
+    churn: 279
+    paths:
+      - src/functions/remember.ts
+      - src/mcp/server.ts
+      - src/mcp/standalone.ts
+      - src/mcp/tools-registry.ts
+      - src/types.ts
+      - test/mcp-standalone-proxy.test.ts
+      - test/mcp-standalone.test.ts
+      - test/remember-forget-audit.test.ts
+    note: "mem::remember records no audit row and drops sessionId/tags from attribution."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/468
+  - number: 502
+    title: "fix: run graph extraction on manual session end"
+    kind: fix
+    relevance: med
+    in_fork: 2/3
+    churn: 180
+    paths:
+      - src/triggers/api.ts
+      - src/triggers/events.ts
+    note: "POST /session/end skips the stopped-session pipeline, so graph extraction never runs on a manual end."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/502
+  - number: 529
+    title: "fix(viewer): show explicit error banner when dashboard endpoints fail"
+    kind: fix
+    relevance: med
+    in_fork: 8/9
+    churn: 227
+    paths:
+      - plugin/hooks/hooks.codex.json
+      - plugin/hooks/hooks.json
+      - src/config.ts
+      - src/index.ts
+      - src/mcp/standalone.ts
+      - src/viewer/index.html
+      - test/env-loader.test.ts
+      - test/mcp-standalone-proxy.test.ts
+    note: "Dashboard shows 0 memories rather than an error when the backend is down."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/529
+  - number: 568
+    title: "feat(graph): auto-trigger mem::graph-extract on mem::remember"
+    kind: feature
+    relevance: med
+    in_fork: 2/2
+    churn: 34
+    paths:
+      - src/functions/remember.ts
+      - test/cross-project-isolation.test.ts
+    note: "mem::remember never triggers graph-extract, so explicit saves never enter the graph."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/568
+  - number: 569
+    title: "feat(provider): AGENTMEMORY_DISABLE_THINKING to recover structured output on Qwen3/GLM/Kimi"
+    kind: feature
+    relevance: med
+    in_fork: 3/3
+    churn: 32
+    paths:
+      - .env.example
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - src/providers/openai.ts
+    note: "AGENTMEMORY_DISABLE_THINKING to recover structured output from hybrid-reasoning models (Qwen3/GLM/Kimi)."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/569
+  - number: 610
+    title: "fix: iii reconnect route loss + Voyage env config + heap calc against actual ceiling"
+    kind: fix
+    relevance: med
+    in_fork: 3/3
+    churn: 413
+    paths:
+      - src/health/thresholds.ts
+      - src/index.ts
+      - src/providers/embedding/voyage.ts
+    note: "Three unrelated fixes; the heap-ceiling one duplicates #1317 and the iii reconnect one does not apply here."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/610
+  - number: 665
+    title: "fix: pass agentId per-call for integration-scoped memory"
+    kind: fix
+    relevance: med
+    in_fork: 6/8
+    churn: 214
+    paths:
+      - integrations/hermes/__init__.py
+      - integrations/openclaw/plugin.mjs
+      - src/config.ts
+      - src/mcp/server.ts
+      - test/agent-id-scope.test.ts
+      - test/openclaw-plugin.test.ts
+    note: "Integrations send no agentId, so every memory lands unscoped even with multi-agent isolation on."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/665
+  - number: 689
+    title: "feat(team): per-request userId + TEAM_MODE=private enforcement"
+    kind: fix
+    relevance: med
+    in_fork: 5/7
+    churn: 393
+    paths:
+      - src/config.ts
+      - src/functions/team.ts
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+      - test/team.test.ts
+    note: "TEAM_MODE=private was read but never enforced, and team-share accepted any sharedBy value."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/689
+  - number: 742
+    title: "fix: LLM provider works with subscription proxies + honor SUMMARIZE_CHUNK_SIZE from .env"
+    kind: fix
+    relevance: med
+    in_fork: 2/2
+    churn: 19
+    paths:
+      - src/functions/summarize.ts
+      - src/providers/anthropic.ts
+    note: "Folds the Anthropic system prompt into messages for subscription proxies, and honors SUMMARIZE_CHUNK_SIZE."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/742
+  - number: 802
+    title: "fix: prefer embedding API key for OpenAI embeddings"
+    kind: fix
+    relevance: med
+    in_fork: 2/2
+    churn: 23
+    paths:
+      - src/providers/embedding/index.ts
+      - test/embedding-provider.test.ts
+    note: "createEmbeddingProvider passes OPENAI_API_KEY over a set OPENAI_EMBEDDING_API_KEY; same defect as #832."
+    disposition: already-fixed
+    status: "fixed-here — OPENAI_EMBEDDING_API_KEY takes precedence (src/providers/embedding/openai.ts:61)."
+    url: https://github.com/rohitg00/agentmemory/pull/802
+  - number: 832
+    title: "Fix OpenAI embedding provider key selection"
+    kind: fix
+    relevance: med
+    in_fork: 2/2
+    churn: 16
+    paths:
+      - src/providers/embedding/index.ts
+      - test/embedding-provider.test.ts
+    note: "Prefer OPENAI_EMBEDDING_API_KEY in the embedding factory; cleaner duplicate of #802."
+    disposition: already-fixed
+    status: "fixed-here — same as #802."
+    url: https://github.com/rohitg00/agentmemory/pull/832
+  - number: 846
+    title: "Add stdio MCP resources and prompts"
+    kind: feature
+    relevance: med
+    in_fork: 2/2
+    churn: 556
+    paths:
+      - src/mcp/standalone.ts
+      - test/mcp-standalone.test.ts
+    note: "Resources and prompts capabilities on the stdio MCP shim, proxied to the running server."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/846
+  - number: 862
+    title: "Allow XENOVA_CACHE_HOME to redirect local embedding model path"
+    kind: fix
+    relevance: med
+    in_fork: 1/1
+    churn: 18
+    paths:
+      - src/providers/embedding/local.ts
+    note: "XENOVA_CACHE_HOME to redirect the local embedding model path out of node_modules."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/862
+  - number: 927
+    title: "fix(cli): add clear warning when import-jsonl brings zero files"
+    kind: fix
+    relevance: med
+    in_fork: 1/1
+    churn: 6
+    paths:
+      - src/cli.ts
+    note: "import-jsonl reports success when it imported zero files."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/927
+  - number: 953
+    title: "fix: preserve Zed settings during connect"
+    kind: fix
+    relevance: med
+    in_fork: 5/5
+    churn: 146
+    paths:
+      - package.json
+      - src/cli/connect/json-mcp-adapter.ts
+      - src/cli/connect/util.ts
+      - src/cli/connect/zed.ts
+      - test/connect-new-agents.test.ts
+    note: "connect zed overwrites existing settings.json instead of merging JSONC."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/953
+  - number: 970
+    title: "fix: make consolidation timeouts configurable"
+    kind: fix
+    relevance: med
+    in_fork: 4/13
+    churn: 270
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/functions/consolidate.ts
+      - src/index.ts
+    note: "Consolidate per-concept and worker invocation timeouts hardcoded; adjacent to this fork's own LLM-timeout work."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/970
+  - number: 974
+    title: "fix(context,compress-synthetic): conversation observations render with full content"
+    kind: fix
+    relevance: med
+    in_fork: 5/6
+    churn: 102
+    paths:
+      - .github/workflows/ci.yml
+      - package.json
+      - src/functions/compress-synthetic.ts
+      - src/functions/context.ts
+      - website/package.json
+    note: "tool_name 'conversation' observations render as type 'other' with no content in injected context."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/974
+  - number: 1011
+    title: "feat(replay): support OpenAI chat-format JSONL in parseJsonlText"
+    kind: feature
+    relevance: med
+    in_fork: 2/3
+    churn: 129
+    paths:
+      - src/replay/jsonl-parser.ts
+      - test/replay.test.ts
+    note: "parseJsonlText only knows the Claude Code transcript shape; OpenAI chat-format JSONL imports produce zero observations."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1011
+  - number: 1023
+    title: "fix(replay): surface compressed observation content in replay detail"
+    kind: fix
+    relevance: med
+    in_fork: 2/2
+    churn: 153
+    paths:
+      - src/functions/replay.ts
+      - test/replay.test.ts
+    note: "Replay detail panel is empty because rawFromCompressed() drops the compressed content."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1023
+  - number: 1037
+    title: "fix: CJK-aware remember dedup with negation guard (#1021)"
+    kind: fix
+    relevance: med
+    in_fork: 2/5
+    churn: 395
+    paths:
+      - src/functions/remember.ts
+      - src/state/schema.ts
+    note: "remember dedup tokenizes on whitespace, so repeated CJK preferences never dedupe."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1037
+  - number: 1089
+    title: "feat: forward agentId on remember + Hermes multi-profile project tagging"
+    kind: fix
+    relevance: med
+    in_fork: 12/14
+    churn: 1064
+    paths:
+      - integrations/hermes/README.md
+      - integrations/hermes/__init__.py
+      - src/config.ts
+      - src/functions/remember.ts
+      - src/mcp/server.ts
+      - src/mcp/standalone.ts
+      - src/mcp/tools-registry.ts
+      - src/triggers/api.ts
+      - src/triggers/events.ts
+      - test/agent-id-scope.test.ts
+      # +2 more
+    note: "remember and memory_save drop agentId, and standalone MCP drops project despite advertising it."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1089
+  - number: 1177
+    title: "feat(health): surface search-index freshness"
+    kind: feature
+    relevance: med
+    in_fork: 3/5
+    churn: 189
+    paths:
+      - src/health/monitor.ts
+      - src/health/thresholds.ts
+      - src/types.ts
+    note: "Health surfaces search-index freshness; today a broken persister is visible only as a throttled warn line."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1177
+  - number: 1215
+    title: "fix(embedding): route transformers cacheDir to user home cache"
+    kind: fix
+    relevance: med
+    in_fork: 5/7
+    churn: 210
+    paths:
+      - __mocks__/@huggingface/transformers.ts
+      - src/providers/embedding/clip.ts
+      - src/providers/embedding/local.ts
+      - src/state/reranker.ts
+      - test/local-embedding-provider.test.ts
+    note: "transformers writes its model cache next to its own package, which fails on global or containerized installs."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1215
+  - number: 1290
+    title: "fix(metrics): window failure rate to recent activity + track lastFailureAt"
+    kind: fix
+    relevance: med
+    in_fork: 3/4
+    churn: 125
+    paths:
+      - src/eval/metrics-store.ts
+      - src/health/monitor.ts
+      - src/types.ts
+    note: "Health reports a cumulative failure rate, so a fixed bug leaves a stale high number forever."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1290
+  - number: 1291
+    title: "fix(metrics): serialize MetricsStore.record per function"
+    kind: fix
+    relevance: med
+    in_fork: 1/2
+    churn: 130
+    paths:
+      - src/eval/metrics-store.ts
+    note: "MetricsStore.record() loses updates: concurrent callers meet in the kv.get() gap."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1291
+  - number: 1293
+    title: "fix(hooks): retry a failed observe POST instead of dropping it"
+    kind: fix
+    relevance: med
+    in_fork: 16/18
+    churn: 654
+    paths:
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/prompt-submit.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/subagent-start.mjs
+      - plugin/scripts/subagent-stop.mjs
+      - plugin/scripts/task-completed.mjs
+      - src/hooks/notification.ts
+      - src/hooks/post-tool-failure.ts
+      # +6 more
+    note: "Adds retry/queue to hook observe POSTs; conflicts with this fork's fire-and-forget hook contract, so take the diagnosis, not the design."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1293
+  - number: 1308
+    title: "fix(pipeline): classify telemetry observations and extract semantic fields for non-tool events"
+    kind: fix
+    relevance: med
+    in_fork: 8/13
+    churn: 1416
+    paths:
+      - plugin/opencode/agentmemory-capture.ts
+      - src/functions/compress-synthetic.ts
+      - src/functions/consolidate.ts
+      - src/functions/context.ts
+      - src/functions/observe.ts
+      - src/functions/summarize.ts
+      - src/prompts/summary.ts
+      - src/types.ts
+    note: "Non-tool hook events carry payload data that mem::observe never extracts, so telemetry observations are contentless."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1308
+  - number: 1311
+    title: "fix(opencode): skip replayed history observation on session fork"
+    kind: host
+    relevance: med
+    in_fork: 1/3
+    churn: 348
+    paths:
+      - plugin/opencode/agentmemory-capture.ts
+    note: "Forking an OpenCode session re-observes the whole conversation history as new observations."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1311
+  - number: 1318
+    title: "fix(replay): reinforce lesson confidence on JSONL re-import"
+    kind: fix
+    relevance: med
+    in_fork: 2/3
+    churn: 99
+    paths:
+      - src/functions/lessons.ts
+      - src/functions/replay.ts
+    note: "JSONL re-import bumps reinforcements but never confidence, unlike reinforceLesson()."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1318
+  - number: 1322
+    title: "fix(memory): reject leaked tool-call args in remember"
+    kind: fix
+    relevance: med
+    in_fork: 1/2
+    churn: 185
+    paths:
+      - src/functions/remember.ts
+    note: "A mis-encoded tool call writes its trailing arguments into memory content as literal text."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1322
+  - number: 1323
+    title: "fix(mcp): stop masking tool errors as unknown-tool fallback"
+    kind: fix
+    relevance: med
+    in_fork: 4/4
+    churn: 57
+    paths:
+      - src/mcp/rest-proxy.ts
+      - src/mcp/server.ts
+      - src/mcp/standalone.ts
+      - test/mcp-standalone-proxy.test.ts
+    note: "Any non-ok proxy response is treated as unreachable, hiding real tool errors behind an unknown-tool fallback."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1323
+  - number: 1327
+    title: "fix(clip): encode text with CLIP text tower so text→image vision-search works"
+    kind: fix
+    relevance: med
+    in_fork: 2/2
+    churn: 96
+    paths:
+      - src/providers/embedding/clip.ts
+      - test/clip-embedding-provider.test.ts
+    note: "ClipEmbeddingProvider encoded text with the image tower, so text-to-image vision-search always failed."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1327
+  - number: 1336
+    title: "fix(slots): line-boundary truncation in slot reflection to prevent mid-line slicing"
+    kind: fix
+    relevance: med
+    in_fork: 34/51
+    churn: 7795
+    paths:
+      - .gitignore
+      - plugin/opencode/agentmemory-capture.ts
+      - src/functions/audit.ts
+      - src/functions/compress-synthetic.ts
+      - src/functions/compress.ts
+      - src/functions/consolidation-pipeline.ts
+      - src/functions/diagnostics.ts
+      - src/functions/graph.ts
+      - src/functions/observe.ts
+      - src/functions/reflect.ts
+      # +24 more
+    note: "Line-boundary truncation in slot reflection instead of a raw mid-line slice; the fix is small but the PR carries 7.8k churn across 51 files."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1336
+  - number: 1363
+    title: "feat(scope): dynamic project identity and tiered observation lifecycle"
+    kind: feature
+    relevance: med
+    in_fork: 57/100
+    churn: 13022
+    paths:
+      - .gitignore
+      - CONTEXT.md
+      - docs/agents/domain.md
+      - docs/agents/issue-tracker.md
+      - plugin/opencode/agentmemory-capture.ts
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/prompt-submit.mjs
+      # +47 more
+    note: "Git-remote-derived canonical project slugs and a tiered observation lifecycle; the right-scope idea is good, the 13k-churn PR is not."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1363
+  - number: 1369
+    title: "fix(embeddings): send OPENAI_EMBEDDING_DIMENSIONS as the dimensions field"
+    kind: fix
+    relevance: med
+    in_fork: 3/4
+    churn: 218
+    paths:
+      - .env.example
+      - src/providers/embedding/openai.ts
+      - test/embedding-provider.test.ts
+    note: "OPENAI_EMBEDDING_DIMENSIONS is read into the provider but never sent in the request body, breaking matryoshka models."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1369
+  - number: 194
+    title: "feat: add --host flag and AGENTMEMORY_HOST for configurable bind address"
+    kind: feature
+    relevance: low
+    in_fork: 6/6
+    churn: 114
+    paths:
+      - src/auth.ts
+      - src/cli.ts
+      - src/config.ts
+      - src/index.ts
+      - src/types.ts
+      - src/viewer/server.ts
+    note: "--host/AGENTMEMORY_HOST to bind off localhost; the fork already runs one local daemon."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/194
+  - number: 219
+    title: "feat(providers): add Azure OpenAI provider"
+    kind: provider
+    relevance: low
+    in_fork: 4/5
+    churn: 109
+    paths:
+      - src/config.ts
+      - src/providers/index.ts
+      - src/types.ts
+      - src/viewer/index.html
+    note: "Azure OpenAI LLM provider."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/219
+  - number: 220
+    title: "fix(providers): support Azure AI Foundry (Anthropic) endpoint and corporate proxy"
+    kind: provider
+    relevance: low
+    in_fork: 21/25
+    churn: 579
+    paths:
+      - package.json
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/pre-tool-use.mjs
+      - plugin/scripts/prompt-submit.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/session-start.mjs
+      # +11 more
+    note: "Azure OpenAI / AI Foundry plus HTTP CONNECT corporate-proxy support; overlaps #594."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/220
+  - number: 226
+    title: "feat(health): configurable health check thresholds via env vars | 健康阈值可配置"
+    kind: feature
+    relevance: low
+    in_fork: 1/1
+    churn: 14
+    paths:
+      - src/health/thresholds.ts
+    note: "Health thresholds via env; the defaults false-alarm on small hosts."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/226
+  - number: 227
+    title: "feat(shutdown): graceful shutdown timeout with force exit | 优雅关闭超时"
+    kind: fix
+    relevance: low
+    in_fork: 1/1
+    churn: 7
+    paths:
+      - src/index.ts
+    note: "Force-exit if graceful shutdown hangs on the iii WebSocket — a failure mode this fork does not have."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/227
+  - number: 241
+    title: "feat: hierarchical outline index for long markdown artifacts"
+    kind: feature
+    relevance: low
+    in_fork: 7/16
+    churn: 1328
+    paths:
+      - plugin/.claude-plugin/plugin.json
+      - src/index.ts
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+      - src/state/schema.ts
+      - src/triggers/api.ts
+      - src/types.ts
+    note: "PageIndex-style outline index, 3 MCP tools + 3 endpoints; a new subsystem."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/241
+  - number: 245
+    title: "feat: add Codex Desktop hooks integration"
+    kind: host
+    relevance: low
+    in_fork: 0/4
+    churn: 635
+    note: "Codex Desktop hook bridge; Codex is not a supported host here."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/245
+  - number: 267
+    title: "Enhance auto-forget with redundancy tracking"
+    kind: feature
+    relevance: low
+    in_fork: 1/1
+    churn: 76
+    paths:
+      - src/functions/auto-forget.ts
+    note: "Redundancy tracking in auto-forget; CodeRabbit-authored, thin rationale."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/267
+  - number: 302
+    title: "fix(openclaw): register memory capability for memory slot"
+    kind: host
+    relevance: low
+    in_fork: 2/2
+    churn: 19
+    paths:
+      - integrations/openclaw/README.md
+      - integrations/openclaw/plugin.mjs
+    note: "OpenClaw memory-slot capability registration."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/302
+  - number: 333
+    title: "Refactor health monitoring logic and snapshot collection"
+    kind: chore
+    relevance: low
+    in_fork: 1/1
+    churn: 61
+    paths:
+      - src/health/monitor.ts
+    note: "Health monitor refactor, 5s cadence; CodeRabbit-authored."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/333
+  - number: 376
+    title: "feat: configurable bind hosts for iii-engine and viewer"
+    kind: feature
+    relevance: low
+    in_fork: 2/3
+    churn: 47
+    paths:
+      - src/cli.ts
+      - src/viewer/server.ts
+    note: "Configurable bind host for engine and viewer; overlaps #194."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/376
+  - number: 378
+    title: "build(docker): unify per-platform deploys behind single GHCR image"
+    kind: deploy
+    relevance: low
+    in_fork: 0/16
+    churn: 793
+    note: "Single GHCR image for all platform deploys; no file here."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/378
+  - number: 464
+    title: "docs: refresh integration capability counts"
+    kind: docs
+    relevance: low
+    in_fork: 6/8
+    churn: 62
+    paths:
+      - .env.example
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - integrations/hermes/README.md
+      - integrations/openclaw/README.md
+      - test/consistency.test.ts
+    note: "Refreshes stale tool/test counts in integration docs."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/464
+  - number: 488
+    title: "fix(hermes): keep plugin hook manifest in sync"
+    kind: fix
+    relevance: low
+    in_fork: 2/2
+    churn: 57
+    paths:
+      - integrations/hermes/plugin.yaml
+      - test/consistency.test.ts
+    note: "Hermes plugin.yaml missing hook names, plus a manifest consistency guard."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/488
+  - number: 528
+    title: "fix(cli): tie iii engine lifecycle and skip prompts in non-TTY context"
+    kind: fix
+    relevance: low
+    in_fork: 8/9
+    churn: 195
+    paths:
+      - plugin/hooks/hooks.codex.json
+      - plugin/hooks/hooks.json
+      - src/cli.ts
+      - src/config.ts
+      - src/index.ts
+      - src/mcp/standalone.ts
+      - test/env-loader.test.ts
+      - test/mcp-standalone-proxy.test.ts
+    note: "TTY heuristic orphans iii.exe; no iii engine in this fork."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/528
+  - number: 543
+    title: "Improve Hermes manual install status messaging"
+    kind: chore
+    relevance: low
+    in_fork: 2/2
+    churn: 25
+    paths:
+      - src/cli/connect/hermes.ts
+      - src/viewer/index.html
+    note: "Replaces the Hermes 'stub' install status with clearer wording."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/543
+  - number: 558
+    title: "Add Azure OpenAI provider configuration"
+    kind: provider
+    relevance: low
+    in_fork: 9/11
+    churn: 285
+    paths:
+      - .env.example
+      - src/cli.ts
+      - src/cli/doctor-diagnostics.ts
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/functions/summarize.ts
+      - src/providers/index.ts
+      - src/providers/openai.ts
+      - test/openai-shared.test.ts
+    note: "Azure OpenAI config path; third competing Azure PR with #219/#594."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/558
+  - number: 566
+    title: "docs: sync MCP tool counts across metadata"
+    kind: docs
+    relevance: low
+    in_fork: 4/5
+    churn: 37
+    paths:
+      - .env.example
+      - plugin/.claude-plugin/plugin.json
+      - src/mcp/standalone.ts
+      - website/components/Compare.tsx
+    note: "Tool-count sync across metadata."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/566
+  - number: 583
+    title: "Add optional external_id metadata passthrough for memory retrieval results"
+    kind: feature
+    relevance: low
+    in_fork: 8/11
+    churn: 219
+    paths:
+      - src/functions/remember.ts
+      - src/functions/search.ts
+      - src/mcp/server.ts
+      - src/mcp/standalone.ts
+      - src/mcp/tools-registry.ts
+      - src/state/memory-utils.ts
+      - src/triggers/api.ts
+      - src/types.ts
+    note: "external_id + metadata passthrough for imported memories."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/583
+  - number: 594
+    title: "feat(providers): add Azure OpenAI / AI Foundry provider with HTTP CONNECT proxy support"
+    kind: provider
+    relevance: low
+    in_fork: 20/21
+    churn: 354
+    paths:
+      - package.json
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/pre-tool-use.mjs
+      - plugin/scripts/prompt-submit.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/session-start.mjs
+      # +10 more
+    note: "Azure OpenAI / AI Foundry with proxy support; overlaps #220/#558."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/594
+  - number: 604
+    title: "feat(pi): add full lifecycle hooks to pi integration"
+    kind: host
+    relevance: low
+    in_fork: 1/1
+    churn: 246
+    paths:
+      - integrations/pi/index.ts
+    note: "pi integration from 3 to 6 lifecycle hooks."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/604
+  - number: 606
+    title: "feat(providers): add DeepSeek provider"
+    kind: provider
+    relevance: low
+    in_fork: 2/4
+    churn: 106
+    paths:
+      - src/providers/index.ts
+      - src/types.ts
+    note: "DeepSeek embedding provider."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/606
+  - number: 607
+    title: "feat(cli): allow AGENTMEMORY_IMPORT_TIMEOUT_MS override for import-jsonl"
+    kind: fix
+    relevance: low
+    in_fork: 1/1
+    churn: 20
+    paths:
+      - src/cli.ts
+    note: "AGENTMEMORY_IMPORT_TIMEOUT_MS instead of a hardcoded 120s import ceiling."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/607
+  - number: 617
+    title: "feat: add privacy-safe audit receipts"
+    kind: feature
+    relevance: low
+    in_fork: 6/7
+    churn: 196
+    paths:
+      - src/functions/audit.ts
+      - src/mcp/server.ts
+      - src/mcp/standalone.ts
+      - src/mcp/tools-registry.ts
+      - src/triggers/api.ts
+      - test/audit.test.ts
+    note: "Hashed privacy-safe audit receipt format."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/617
+  - number: 624
+    title: "fix(cli): honor --force on unresponsive engine; detect listening PIDs on Windows"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 183
+    paths:
+      - src/cli.ts
+    note: "Windows: --force ignored on a wedged engine socket."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    url: https://github.com/rohitg00/agentmemory/pull/624
+  - number: 630
+    title: "feat(connect): add Kilo CLI adapter"
+    kind: host
+    relevance: low
+    in_fork: 1/2
+    churn: 114
+    paths:
+      - src/cli/connect/index.ts
+    note: "Kilo CLI connect adapter."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/630
+  - number: 634
+    title: "fix(windows): make agentmemory actually start on Windows (watch path + IPv4 engine WS + configurable timeout)"
+    kind: fix
+    relevance: low
+    in_fork: 2/4
+    churn: 44
+    paths:
+      - src/cli.ts
+      - src/config.ts
+    note: "Windows startup failure rooted in the iii engine watch path and WS binding."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/634
+  - number: 672
+    title: "feat(viewer): add timeline sort toggle"
+    kind: feature
+    relevance: low
+    in_fork: 2/2
+    churn: 127
+    paths:
+      - src/viewer/index.html
+      - test/viewer-session-id.test.ts
+    note: "Viewer timeline newest/oldest sort toggle."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/672
+  - number: 679
+    title: "feat: add memory metacognition foundation"
+    kind: feature
+    relevance: low
+    in_fork: 4/15
+    churn: 2864
+    paths:
+      - src/index.ts
+      - src/state/schema.ts
+      - src/triggers/api.ts
+      - src/types.ts
+    note: "Metacognition phase 1: policy, write candidates, readback, 8 endpoints."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/679
+  - number: 693
+    title: "fix(cli): prioritize user iii config lookup"
+    kind: fix
+    relevance: low
+    in_fork: 3/7
+    churn: 190
+    paths:
+      - .gitignore
+      - package.json
+      - src/cli.ts
+    note: "iii-config lookup precedence; no iii engine here."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/693
+  - number: 694
+    title: "fix(viewer): preserve dashboard scroll and show API errors"
+    kind: feature
+    relevance: low
+    in_fork: 2/2
+    churn: 190
+    paths:
+      - src/viewer/index.html
+      - test/viewer-session-id.test.ts
+    note: "Preserve dashboard scroll across refreshes plus API error toasts."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/694
+  - number: 699
+    title: "feat(cli): materialize ~/.agentmemory/config/iii-config.yaml with absolute paths"
+    kind: fix
+    relevance: low
+    in_fork: 1/4
+    churn: 378
+    paths:
+      - src/cli.ts
+    note: "Materializes ~/.agentmemory/config/iii-config.yaml with absolute paths."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/699
+  - number: 711
+    title: "feat: add AGENTMEMORY_OUTPUT_LANG to control generated-text language"
+    kind: feature
+    relevance: low
+    in_fork: 2/3
+    churn: 74
+    paths:
+      - .env.example
+      - src/providers/resilient.ts
+    note: "AGENTMEMORY_OUTPUT_LANG for generated memory text; overlaps #914."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/711
+  - number: 721
+    title: "fix(viewer): correct Token Savings calculation to match CLI"
+    kind: fix
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - src/viewer/index.html
+    note: "Viewer token-savings formula disagrees with the CLI and reads 0%."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/721
+  - number: 741
+    title: "feat: AWS Bedrock provider (LLM + embeddings) with SSO + auth-refresh"
+    kind: provider
+    relevance: low
+    in_fork: 9/16
+    churn: 1338
+    paths:
+      - .env.example
+      - package.json
+      - src/config.ts
+      - src/functions/compress-file.ts
+      - src/providers/embedding/index.ts
+      - src/providers/index.ts
+      - src/providers/resilient.ts
+      - src/types.ts
+      - test/compress-file.test.ts
+    note: "AWS Bedrock LLM + embeddings with SigV4 and SSO auth refresh."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/741
+  - number: 756
+    title: "feat(embedding): support configurable vector dimensions for OpenRouter provider"
+    kind: feature
+    relevance: low
+    in_fork: 2/2
+    churn: 65
+    paths:
+      - src/providers/embedding/openrouter.ts
+      - test/embedding-provider.test.ts
+    note: "OPENROUTER_EMBEDDING_DIMENSIONS."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/756
+  - number: 799
+    title: "fix: handle undefined manifest value in loadShardedData"
+    kind: fix
+    relevance: low
+    in_fork: 0/1
+    churn: 2
+    note: "Undefined-vs-null manifest check crashes the sharded loader on upgrade; the file does not exist in this fork."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/799
+  - number: 818
+    title: "feat: upgrade MiniMax default model to M3"
+    kind: chore
+    relevance: low
+    in_fork: 8/8
+    churn: 20
+    paths:
+      - .env.example
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/providers/index.ts
+      - src/providers/minimax.ts
+      - test/fallback-model-resolution.test.ts
+      - test/fetch-timeout.test.ts
+      - test/minimax-provider.test.ts
+    note: "MiniMax default model to M3; duplicates #1056."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/818
+  - number: 822
+    title: "fix(codex): declare agentmemory MCP server as stdio"
+    kind: host
+    relevance: low
+    in_fork: 0/2
+    churn: 79
+    note: "type = stdio in the Codex MCP block."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/822
+  - number: 841
+    title: "feat(deploy): add systemd service template"
+    kind: deploy
+    relevance: low
+    in_fork: 0/3
+    churn: 324
+    note: "systemd unit template; no deploy/ tree in this fork."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/841
+  - number: 860
+    title: "[codex] Fix OpenClaw terminal capture"
+    kind: host
+    relevance: low
+    draft: true
+    in_fork: 2/2
+    churn: 614
+    paths:
+      - integrations/openclaw/plugin.mjs
+      - test/openclaw-plugin.test.ts
+    note: "DRAFT. OpenClaw terminal capture through llm_output/agent_end."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/860
+  - number: 891
+    title: "Hermes plugin: stable project scoping + close sessions on process exit"
+    kind: fix
+    relevance: low
+    in_fork: 1/1
+    churn: 114
+    paths:
+      - integrations/hermes/__init__.py
+    note: "Hermes project scoping under ephemeral worktrees, plus session close on exit."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/891
+  - number: 914
+    title: "Add configurable prompt output language"
+    kind: feature
+    relevance: low
+    in_fork: 6/8
+    churn: 136
+    paths:
+      - .env.example
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - src/prompts/compression.ts
+      - src/prompts/graph-extraction.ts
+      - src/prompts/reflect.ts
+      - src/prompts/summary.ts
+    note: "AGENTMEMORY_OUTPUT_LANGUAGE across compression/summary/graph/reflect prompts; overlaps #711."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/914
+  - number: 920
+    title: "feat(connect): add Qoder CLI CN adapter"
+    kind: host
+    relevance: low
+    in_fork: 1/5
+    churn: 451
+    paths:
+      - src/cli/connect/index.ts
+    note: "Qoder CLI CN connect adapter."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/920
+  - number: 923
+    title: "fly: Enhance Dockerfile with local embeddings installation"
+    kind: deploy
+    relevance: low
+    in_fork: 0/1
+    churn: 7
+    note: "Fly Dockerfile preloads local embedding weights."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/923
+  - number: 963
+    title: "feat(providers): add configurable OpenRouter and Gemini base URLs"
+    kind: feature
+    relevance: low
+    in_fork: 8/12
+    churn: 311
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/providers/embedding/gemini.ts
+      - src/providers/embedding/openrouter.ts
+      - src/providers/index.ts
+      - src/providers/openrouter.ts
+      - test/fallback-model-resolution.test.ts
+      - test/fetch-timeout.test.ts
+    note: "OPENROUTER_BASE_URL and GEMINI_BASE_URL, and splits Gemini into its own provider."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/963
+  - number: 967
+    title: "ci(deps)(deps): bump actions/checkout from 6 to 7"
+    kind: deps
+    relevance: low
+    in_fork: 1/2
+    churn: 4
+    paths:
+      - .github/workflows/ci.yml
+    note: "dependabot: actions/checkout 6 to 7."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/967
+  - number: 1000
+    title: "Add wire support for IBM Bob"
+    kind: host
+    relevance: low
+    in_fork: 1/3
+    churn: 17
+    paths:
+      - src/cli/connect/index.ts
+    note: "IBM Bob connect adapter."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1000
+  - number: 1012
+    title: "feat(hermes): capture tool calls individually and remove content truncation in sync_turn"
+    kind: fix
+    relevance: low
+    in_fork: 2/2
+    churn: 123
+    paths:
+      - integrations/hermes/__init__.py
+      - test/hermes-plugin.test.ts
+    note: "Hermes sync_turn truncates tool_input/tool_output and collapses tool calls."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1012
+  - number: 1016
+    title: "Support Codex pre-tool-use targets"
+    kind: host
+    relevance: low
+    draft: true
+    in_fork: 5/6
+    churn: 433
+    paths:
+      - plugin/hooks/hooks.codex.json
+      - plugin/scripts/pre-tool-use.mjs
+      - src/hooks/pre-tool-use.ts
+      - test/codex-connect-hooks.test.ts
+      - test/context-injection.test.ts
+    note: "DRAFT. Codex-native PreToolUse payload adaptation."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1016
+  - number: 1049
+    title: "feat: add Amp (Sourcegraph) integration with auto-capture plugin"
+    kind: host
+    relevance: low
+    in_fork: 3/8
+    churn: 782
+    paths:
+      - package.json
+      - src/cli/connect/index.ts
+      - test/cli-connect.test.ts
+    note: "Amp (Sourcegraph) integration with auto-capture plugin."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1049
+  - number: 1053
+    title: "deps(website)(deps-dev): bump typescript from 6.0.3 to 7.0.2 in /website"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - website/package.json
+    note: "dependabot: website typescript 6 to 7."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1053
+  - number: 1055
+    title: "feat: durable candidates MVP + scoped traceable recall + Codex archive watcher"
+    kind: feature
+    relevance: low
+    in_fork: 51/92
+    churn: 7774
+    paths:
+      - .env.example
+      - .gitignore
+      - package.json
+      - plugin/plugin.json
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/pre-tool-use.mjs
+      # +41 more
+    note: "Durable candidates MVP, traceable recall and a Codex archive watcher; 7.7k churn across 92 files."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1055
+  - number: 1056
+    title: "Update MiniMax provider defaults for MiniMax-M3"
+    kind: chore
+    relevance: low
+    in_fork: 7/8
+    churn: 112
+    paths:
+      - .env.example
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/providers/index.ts
+      - src/providers/minimax.ts
+      - test/fallback-model-resolution.test.ts
+      - test/minimax-provider.test.ts
+    note: "MiniMax M3 defaults plus base-URL normalization; supersedes #1032, duplicates #818."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1056
+  - number: 1076
+    title: "docs(hermes): enable copied provider plugin"
+    kind: docs
+    relevance: low
+    draft: true
+    in_fork: 1/2
+    churn: 10
+    paths:
+      - integrations/hermes/README.md
+    note: "DRAFT. Documents the hermes plugins enable step."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1076
+  - number: 1082
+    title: "ci(deps)(deps): bump actions/setup-node from 6 to 7"
+    kind: deps
+    relevance: low
+    in_fork: 1/2
+    churn: 4
+    paths:
+      - .github/workflows/ci.yml
+    note: "dependabot: actions/setup-node 6 to 7."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1082
+  - number: 1084
+    title: "deps(deps-dev): bump typescript from 6.0.3 to 7.0.2"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - package.json
+    note: "dependabot: typescript 6 to 7."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1084
+  - number: 1085
+    title: "deps(deps-dev): bump @types/node from 25.9.5 to 26.1.1"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - package.json
+    note: "dependabot: @types/node 25 to 26."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1085
+  - number: 1111
+    title: "feat(providers): add Cloudflare Workers AI as an LLM and embedding provider"
+    kind: provider
+    relevance: low
+    in_fork: 12/17
+    churn: 676
+    paths:
+      - .env.example
+      - src/cli.ts
+      - src/cli/doctor-diagnostics.ts
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/functions/consolidation-pipeline.ts
+      - src/functions/summarize.ts
+      - src/providers/embedding/index.ts
+      - src/providers/index.ts
+      - src/types.ts
+      # +2 more
+    note: "Cloudflare Workers AI as LLM and embedding provider."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1111
+  - number: 1112
+    title: "feat(cursor): workspace adapter on top of the marketplace plugin"
+    kind: host
+    relevance: low
+    in_fork: 2/20
+    churn: 3972
+    paths:
+      - .gitignore
+      - tsdown.config.ts
+    note: "Cursor workspace adapter; Cursor is not supported here."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1112
+  - number: 1139
+    title: "fix: make build and test suite pass on Windows"
+    kind: fix
+    relevance: low
+    in_fork: 6/7
+    churn: 136
+    paths:
+      - package.json
+      - test/cli-remove.test.ts
+      - test/compress-file.test.ts
+      - test/copilot-plugin.test.ts
+      - test/obsidian-export.test.ts
+      - test/slots-flag-gate.test.ts
+    note: "Cross-platform build script and Windows test fixes."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    url: https://github.com/rohitg00/agentmemory/pull/1139
+  - number: 1147
+    title: "fix(docs): sync REST endpoint counts + skills reference (unblocks CI on main)"
+    kind: docs
+    relevance: low
+    in_fork: 2/4
+    churn: 8
+    paths:
+      - plugin/skills/agentmemory-rest-api/REFERENCE.md
+      - src/index.ts
+    note: "Endpoint-count sync to unblock upstream CI."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1147
+  - number: 1150
+    title: "fix(cli): refresh Codex hooks when MCP is already wired"
+    kind: host
+    relevance: low
+    in_fork: 3/4
+    churn: 169
+    paths:
+      - plugin/skills/agentmemory-agents/REFERENCE.md
+      - plugin/skills/agentmemory-rest-api/REFERENCE.md
+      - test/codex-connect-hooks.test.ts
+    note: "connect codex --with-hooks skips hook install when MCP is already wired."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1150
+  - number: 1164
+    title: "feat: add docker-compose deployment and config for local embeddings"
+    kind: deploy
+    relevance: low
+    in_fork: 2/8
+    churn: 229
+    paths:
+      - src/index.ts
+      - src/providers/embedding/local.ts
+    note: "docker-compose deployment plus configurable local embedding model/dimensions."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/1164
+  - number: 1172
+    title: "docs: document Novita AI as an OpenAI-compatible LLM provider"
+    kind: docs
+    relevance: low
+    in_fork: 7/9
+    churn: 241
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/providers/_openai-shared.ts
+      - src/providers/index.ts
+      - src/providers/openai.ts
+      - test/fallback-model-resolution.test.ts
+      - test/openai-shared.test.ts
+    note: "Documents Novita AI as an OpenAI-compatible endpoint."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1172
+  - number: 1185
+    title: "fix(pi): scope memory_save memories to the current project"
+    kind: host
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - integrations/pi/index.ts
+    note: "pi memory_save had no project, so its memories landed global."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1185
+  - number: 1186
+    title: "feat(pi): summarize and end the session on quit"
+    kind: host
+    relevance: low
+    in_fork: 1/1
+    churn: 30
+    paths:
+      - integrations/pi/index.ts
+    note: "pi never ended sessions, leaving zombies with no summary."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1186
+  - number: 1206
+    title: "feat(pi): observe per-tool results (PostToolUse parity)"
+    kind: host
+    relevance: low
+    in_fork: 1/1
+    churn: 41
+    paths:
+      - integrations/pi/index.ts
+    note: "pi per-tool observations for PostToolUse parity."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1206
+  - number: 1207
+    title: "feat(pi): robustness — client dedup, session/start, prompt_submit, larger turn capture"
+    kind: host
+    relevance: low
+    in_fork: 1/1
+    churn: 52
+    paths:
+      - integrations/pi/index.ts
+    note: "pi client-side dedup, session/start, prompt_submit, larger turn capture."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1207
+  - number: 1222
+    title: "feat: klaatcode support (cli adapter, native hooks)"
+    kind: host
+    relevance: low
+    in_fork: 19/25
+    churn: 559
+    paths:
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/prompt-submit.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/session-start.mjs
+      - plugin/scripts/subagent-start.mjs
+      - plugin/scripts/subagent-stop.mjs
+      # +9 more
+    note: "Klaat Code connect adapter and native hooks."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1222
+  - number: 1227
+    title: "fix(pi): attribute sessions to Pi cwd"
+    kind: host
+    relevance: low
+    in_fork: 2/2
+    churn: 15
+    paths:
+      - integrations/pi/index.ts
+      - test/connect-pi.test.ts
+    note: "pi attributes sessions to ctx.cwd."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1227
+  - number: 1234
+    title: "fix: reject state reads without keys"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 23
+    paths:
+      - src/state/kv.ts
+    note: "StateKV rejects missing/empty keys before hitting the engine."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1234
+  - number: 1248
+    title: "feat: expose hook REST endpoints as MCP tools"
+    kind: feature
+    relevance: low
+    in_fork: 2/2
+    churn: 407
+    paths:
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+    note: "Exposes 6 hook REST endpoints as MCP tools for hostless MCP clients."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1248
+  - number: 1257
+    title: "Project: Windows USB portable kit (in-tree + runtime pack)"
+    kind: feature
+    relevance: low
+    in_fork: 14/36
+    churn: 1506
+    paths:
+      - .gitignore
+      - plugin/scripts/notification.mjs
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/pre-tool-use.mjs
+      - plugin/scripts/prompt-submit.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/session-start.mjs
+      # +4 more
+    note: "Windows USB portable kit under agentmemory-portable/."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    url: https://github.com/rohitg00/agentmemory/pull/1257
+  - number: 1261
+    title: "fix(test): point USERPROFILE at the temp home on Windows"
+    kind: test
+    relevance: low
+    in_fork: 1/1
+    churn: 12
+    paths:
+      - test/slots-flag-gate.test.ts
+    note: "Windows: point USERPROFILE at the temp home."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    url: https://github.com/rohitg00/agentmemory/pull/1261
+  - number: 1262
+    title: "fix(test): normalise fs mock paths so they match on Windows"
+    kind: test
+    relevance: low
+    in_fork: 2/2
+    churn: 35
+    paths:
+      - test/compress-file.test.ts
+      - test/obsidian-export.test.ts
+    note: "Windows: normalize fs mock paths."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    url: https://github.com/rohitg00/agentmemory/pull/1262
+  - number: 1263
+    title: "fix(test): drop POSIX-only assumptions from six suites"
+    kind: test
+    relevance: low
+    in_fork: 2/6
+    churn: 30
+    paths:
+      - test/cli-remove.test.ts
+      - test/copilot-plugin.test.ts
+    note: "Windows: drop POSIX assumptions from six suites."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    url: https://github.com/rohitg00/agentmemory/pull/1263
+  - number: 1301
+    title: "fix(opencode): dynamic project repository detection from tool execution and workspace paths"
+    kind: host
+    relevance: low
+    in_fork: 1/2
+    churn: 511
+    paths:
+      - plugin/opencode/agentmemory-capture.ts
+    note: "OpenCode resolves the project directory once at startup and stays locked to it."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1301
+  - number: 1320
+    title: "feat: Kimi Code CLI plugin support"
+    kind: host
+    relevance: low
+    in_fork: 0/3
+    churn: 103
+    note: "Kimi Code CLI plugin manifest."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1320
+  - number: 1355
+    title: "feat: add Requesty provider (chat + embeddings)"
+    kind: provider
+    relevance: low
+    in_fork: 17/32
+    churn: 469
+    paths:
+      - .env.example
+      - src/cli.ts
+      - src/cli/doctor-diagnostics.ts
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/functions/consolidation-pipeline.ts
+      - src/functions/summarize.ts
+      - src/providers/embedding/index.ts
+      - src/providers/index.ts
+      - src/types.ts
+      # +7 more
+    note: "Requesty router as LLM and embedding provider."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1355
+  - number: 1356
+    title: "mcp-http: per-request agent attribution for the shared bridge"
+    kind: feature
+    relevance: low
+    in_fork: 57/100
+    churn: 18717
+    paths:
+      - .env.example
+      - .github/workflows/ci.yml
+      - assets/tags/light/stat-tools.svg
+      - assets/tags/stat-tools.svg
+      - benchmark/README.md
+      - integrations/hermes/README.md
+      - integrations/hermes/__init__.py
+      - integrations/openclaw/README.md
+      - integrations/openclaw/plugin.mjs
+      - integrations/pi/README.md
+      # +47 more
+    note: "Per-request agent attribution on the shared Streamable HTTP MCP bridge; 18.7k churn across 100 files."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1356
+  - number: 1357
+    title: "fix(cli): stop interpolating $HOME-derived paths into the iii installer shell command"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 125
+    paths:
+      - src/cli.ts
+    note: "Shell injection through $HOME-derived paths in the iii installer command; this fork has no iii installer."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1357
+  - number: 1375
+    title: "feat: add OrcaRouter as a first-class provider with API-key and OAuth 2.0 + PKCE login"
+    kind: provider
+    relevance: low
+    in_fork: 16/33
+    churn: 6469
+    paths:
+      - .env.example
+      - .gitignore
+      - package.json
+      - plugin/skills/agentmemory-rest-api/REFERENCE.md
+      - src/cli.ts
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/index.ts
+      - src/providers/embedding/index.ts
+      - src/providers/index.ts
+      # +6 more
+    note: "OrcaRouter as a first-class provider with OAuth 2.0 + PKCE login."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1375
+  - number: 1376
+    title: "feat(providers): dedicated opencode provider for OpenCode Go relay"
+    kind: provider
+    relevance: low
+    in_fork: 4/7
+    churn: 246
+    paths:
+      - src/config.ts
+      - src/providers/index.ts
+      - src/providers/openai.ts
+      - src/types.ts
+    note: "Dedicated provider for the OpenCode Go relay, which requires an x-opencode-session header."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1376
+  - number: 1380
+    title: "deps(website)(deps-dev): bump @types/node from 25.9.8 to 26.6.1 in /website"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - website/package.json
+    note: "dependabot: website @types/node 25 to 26."
+    disposition: candidate
+    url: https://github.com/rohitg00/agentmemory/pull/1380
