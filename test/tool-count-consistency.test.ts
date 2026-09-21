@@ -40,7 +40,14 @@ describe("Tool count consistency", () => {
       withFileTypes: true,
     }).filter((e) => e.isDirectory() && e.name !== "_shared").length;
     expect(readText("src/cli/connect/index.ts")).toContain(`${skillCount} skills`);
-    expect(readText("CLAUDE.md")).toContain(`12 hooks, ${skillCount} skills`);
+    // Read the hook count rather than spelling it: the two counts sit in one
+    // sentence, so a hook added or retired silently invalidates this line.
+    const hookCount = Object.keys(
+      JSON.parse(readText("plugin/hooks/hooks.json")).hooks,
+    ).length;
+    expect(readText("CLAUDE.md")).toContain(
+      `${hookCount} hooks, ${skillCount} skills`,
+    );
     expect(readText("plugin/plugin.json")).toContain(`${skillCount} skills`);
     expect(readText("plugin/.claude-plugin/plugin.json")).toContain(
       `${skillCount} skills`,

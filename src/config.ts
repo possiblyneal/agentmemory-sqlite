@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { refreshBootVerbose } from "./logger.js";
 import pc from "picocolors";
 import type {
   AgentMemoryConfig,
@@ -81,6 +82,7 @@ export function hydrateProcessEnvFromFile(): void {
   for (const [k, v] of Object.entries(loadEnvFile())) {
     if (process.env[k] === undefined) process.env[k] = v;
   }
+  refreshBootVerbose();
 }
 
 function detectProvider(env: Record<string, string>): ProviderConfig {

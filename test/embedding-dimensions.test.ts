@@ -37,9 +37,20 @@ describe("resolveDimensions", () => {
     );
   });
 
-  it("falls back to the default (1536) for unknown models", () => {
-    expect(resolveDimensions("mystery-self-hosted-model", undefined, ENV)).toBe(1536);
-    expect(resolveDimensions("someprovider/unknown-model", undefined, ENV)).toBe(1536);
+  it("refuses an unknown model rather than guessing a width", () => {
+    // A guess is unverifiable until the store is already full of vectors at
+    // the real width, so the failure has to land at construction.
+    expect(() => resolveDimensions("mystery-self-hosted-model", undefined, ENV)).toThrow(
+      /dimensions for model "mystery-self-hosted-model" are unknown/,
+    );
+    // The message names the caller's own knob, not a fixed variable.
+    expect(() => resolveDimensions("someprovider/unknown-model", undefined, ENV)).toThrow(
+      new RegExp(`Set ${ENV} to the width`),
+    );
+  });
+
+  it("still takes an explicit width for an unknown model", () => {
+    expect(resolveDimensions("wemm-embedding", "4096", ENV)).toBe(4096);
   });
 });
 
