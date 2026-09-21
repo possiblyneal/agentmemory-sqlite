@@ -133,10 +133,11 @@ describe("OpenAIEmbeddingProvider", () => {
     expect(provider.dimensions).toBe(768);
   });
 
-  it("falls back to 1536 for unknown custom models", () => {
+  it("refuses an unknown custom model with no declared width", () => {
     process.env["OPENAI_EMBEDDING_MODEL"] = "mystery-self-hosted-model";
-    const provider = new OpenAIEmbeddingProvider("test-key");
-    expect(provider.dimensions).toBe(1536);
+    expect(() => new OpenAIEmbeddingProvider("test-key")).toThrow(
+      /dimensions for model "mystery-self-hosted-model" are unknown/,
+    );
   });
 
   it("rejects invalid OPENAI_EMBEDDING_DIMENSIONS values", () => {

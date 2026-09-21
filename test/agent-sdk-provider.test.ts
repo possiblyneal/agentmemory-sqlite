@@ -158,3 +158,84 @@ describe("AgentSDKProvider recursion guard (#781)", () => {
     expect(innerResult).toBe("");
   });
 });
+
+describe("AgentSDKProvider concurrency cap", () => {
+  // Every query spawns a ~190MB `claude` child, and nothing above this
+  // provider bounds the arrival rate: one broker outage turned every
+  // in-flight observation into a child that then ignored SIGTERM.
+  beforeEach(() => {
+    state.queryCalls.length = 0;
+    state.mockResult = "<result>ok</result>";
+    delete process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY;
+    delete process.env.AGENTMEMORY_LLM_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    delete process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY;
+    delete process.env.AGENTMEMORY_LLM_TIMEOUT_MS;
+  });
+
+  it("never runs more children at once than the cap allows", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY = "2";
+    const provider = new AgentSDKProvider();
+    let live = 0;
+    let peak = 0;
+
+    state.mockResult = async (sysPrompt, _user) => {
+      live++;
+      peak = Math.max(peak, live);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      live--;
+      return `<result>${sysPrompt}</result>`;
+    };
+
+    const results = await Promise.all(
+      ["a", "b", "c", "d", "e", "f"].map((id) => provider.summarize(id, "x")),
+    );
+
+    expect(peak).toBe(2);
+    // Queued callers are served, not dropped: the chunked-summarize
+    // fan-out must still get every chunk back or the skip-ratio bailout
+    // throws away the whole summary.
+    expect(results).toEqual(
+      ["a", "b", "c", "d", "e", "f"].map((id) => `<result>${id}</result>`),
+    );
+  });
+
+  it("gives up waiting rather than queueing forever behind a wedged child", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY = "1";
+    process.env.AGENTMEMORY_LLM_TIMEOUT_MS = "20";
+    const provider = new AgentSDKProvider();
+
+    let releaseWedged: () => void = () => {};
+    const wedged = new Promise<void>((resolve) => {
+      releaseWedged = resolve;
+    });
+    state.mockResult = async (sysPrompt, _user) => {
+      if (sysPrompt === "wedged") await wedged;
+      return `<result>${sysPrompt}</result>`;
+    };
+
+    const first = provider.summarize("wedged", "x");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(await provider.summarize("queued", "y")).toBe("");
+
+    releaseWedged();
+    expect(await first).toBe("<result>wedged</result>");
+    expect(state.queryCalls.length).toBe(1);
+  });
+
+  it("releases the slot when the SDK call throws", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY = "1";
+    process.env.AGENTMEMORY_LLM_TIMEOUT_MS = "20";
+    const provider = new AgentSDKProvider();
+
+    state.mockResult = () => {
+      throw new Error("sdk exploded");
+    };
+    await expect(provider.summarize("boom", "x")).rejects.toThrow("sdk exploded");
+
+    state.mockResult = "<result>after</result>";
+    expect(await provider.summarize("sys", "x")).toBe("<result>after</result>");
+  });
+});

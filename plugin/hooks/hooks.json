@@ -81,16 +81,6 @@
         ]
       }
     ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/notification.mjs\""
-          }
-        ]
-      }
-    ],
     "TaskCompleted": [
       {
         "hooks": [

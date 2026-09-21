@@ -164,7 +164,7 @@ stale — do not re-add translations without a way to keep them current.
 - 54 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
 - 131 REST endpoints
 - 6 MCP resources, 3 MCP prompts
-- 12 hooks, 17 skills
+- 11 hooks, 17 skills
 - 260+ registered functions
 - 1,850+ tests
 

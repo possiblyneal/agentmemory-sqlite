@@ -105,7 +105,7 @@ describe("loadEnvFile", () => {
 });
 
 describe("hydrateProcessEnvFromFile", () => {
-  const TOUCHED = ["HYDRATE_ONLY", "HYDRATE_WINS"];
+  const TOUCHED = ["HYDRATE_ONLY", "HYDRATE_WINS", "AGENTMEMORY_VERBOSE"];
 
   beforeEach(() => {
     sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-hydrate-"));
@@ -137,6 +137,18 @@ describe("hydrateProcessEnvFromFile", () => {
     const cfg = await freshConfig();
     cfg.hydrateProcessEnvFromFile();
     expect(process.env["HYDRATE_WINS"]).toBe("from-process");
+  });
+
+  it("turns on the boot log for AGENTMEMORY_VERBOSE set only in the .env", async () => {
+    // logger.ts snapshots the variable when it is imported, long before the
+    // .env is read, so without the refresh the whole boot log - engine,
+    // provider, index sizes, Ready - never reaches the journal.
+    writeEnv("AGENTMEMORY_VERBOSE=true");
+    const cfg = await freshConfig();
+    const logger = await import("../src/logger.js");
+    expect(logger.isBootVerbose()).toBe(false);
+    cfg.hydrateProcessEnvFromFile();
+    expect(logger.isBootVerbose()).toBe(true);
   });
 
   it("exposes a .env-only key via getEnvVar and, after hydrate, via raw process.env", async () => {

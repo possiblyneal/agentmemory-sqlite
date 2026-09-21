@@ -18,8 +18,6 @@ const MODEL_DIMENSIONS: Record<string, number> = {
   "text-embedding-ada-002": 1536,
 };
 
-const DEFAULT_DIMENSIONS = 1536;
-
 function lookupModelDimensions(model: string): number | undefined {
   if (model in MODEL_DIMENSIONS) return MODEL_DIMENSIONS[model];
   const slash = model.indexOf("/");
@@ -42,7 +40,20 @@ export function resolveDimensions(
     }
     return parsed;
   }
-  return lookupModelDimensions(model) ?? DEFAULT_DIMENSIONS;
+  const known = lookupModelDimensions(model);
+  if (known !== undefined) return known;
+  // The table holds OpenAI's three models and nothing else, so a self-hosted
+  // or brokered model is always unknown here. Guessing 1536 produces a
+  // provider that claims one width while the model returns another: every
+  // vector is written at the real width, cross-dimension cosine returns 0,
+  // and the mismatch only surfaces as a refusal to start on some later boot -
+  // by which time the store is full of vectors the guard cannot reconcile.
+  // Refuse now, naming the one knob that answers it.
+  throw new Error(
+    `Embedding dimensions for model "${model}" are unknown. Set ${envName} to ` +
+      `the width the model actually returns (known models: ` +
+      `${Object.keys(MODEL_DIMENSIONS).join(", ")}).`,
+  );
 }
 
-export { MODEL_DIMENSIONS, DEFAULT_DIMENSIONS };
+export { MODEL_DIMENSIONS };

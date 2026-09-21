@@ -61,12 +61,6 @@
         "type": "command",
         "command": "node ${COPILOT_PLUGIN_ROOT}/scripts/subagent-stop.mjs"
       }
-    ],
-    "notification": [
-      {
-        "type": "command",
-        "command": "node ${COPILOT_PLUGIN_ROOT}/scripts/notification.mjs"
-      }
     ]
   }
 }

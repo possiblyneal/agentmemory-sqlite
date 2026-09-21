@@ -70,9 +70,23 @@ export const logger = {
 // `--verbose` or `AGENTMEMORY_VERBOSE=1`) the lines pass straight
 // through to stderr exactly like the old console.log calls.
 
-let bootVerbose =
-  process.env["AGENTMEMORY_VERBOSE"] === "1" ||
-  process.env["AGENTMEMORY_VERBOSE"] === "true";
+function envWantsBootVerbose(): boolean {
+  return (
+    process.env["AGENTMEMORY_VERBOSE"] === "1" ||
+    process.env["AGENTMEMORY_VERBOSE"] === "true"
+  );
+}
+
+let bootVerbose = envWantsBootVerbose();
+
+// This module is imported long before `~/.agentmemory/.env` is folded into
+// process.env, so the snapshot above can only see a variable the unit already
+// exported. `hydrateProcessEnvFromFile` calls this afterwards so the setting
+// works from the .env file too. It only ever turns verbosity on: `--verbose`
+// may already have set it and the file must not switch that back off.
+export function refreshBootVerbose(): void {
+  bootVerbose = bootVerbose || envWantsBootVerbose();
+}
 
 const bootBuffer: string[] = [];
 
