@@ -1,5 +1,30 @@
 # agentmemory — Agent Instructions
 
+## Goal
+
+Put the right Memory in front of an Agent at the moment it needs it, and pay as little as
+possible to be able to do that. Every feature here is judged against that sentence.
+
+- **Right content** — Recall returns what bears on the work in hand, not everything that
+  matched the query. A near-miss that costs the Agent a read is worse than one fewer result.
+- **Right moment** — context arrives at hook boundaries (session start, pre-tool-use,
+  pre-compact) without the Agent having to know to ask. Memory the Agent must remember to
+  query is memory that goes unused.
+- **Right scope** — results are bounded by project, branch, and Session
+  (`scope: "project" | "global"`, `src/types.ts:277`). One repo's work never surfaces in
+  another's.
+- **Least record that restates** — store the smallest durable claim that reconstructs a
+  decision later: the conclusion and why, not the transcript that produced it. Observations
+  are raw and cheap; a Memory earns its place by being worth re-reading.
+- **Durable beats recent** — a correction that changes future behaviour outranks a log of
+  what happened. Volume is a cost, not a measure of success; Eviction is expected, not a
+  failure mode.
+- **Never on the critical path** — memory accelerates a Session and is never a dependency of
+  one. A dead daemon, a missed hook, or a slow Recall degrades the work; it does not block
+  it.
+- **The Operator's attention is the scarce resource** — disk growth, restarts, and noisy
+  recall are the real costs, and they land on one person.
+
 ## Architecture
 
 agentmemory is a persistent memory system for AI coding agents. It runs as a single process on one in-process Engine ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)) — importing `src/index.ts` *is* starting the daemon. There is no separate runtime to install, spawn, adopt or stop.
