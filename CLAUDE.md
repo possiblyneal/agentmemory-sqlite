@@ -125,6 +125,11 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - REST endpoints must whitelist fields — never pass raw request body to `sdk.trigger()`
 - Use `recordAudit()` for state-changing operations
 - Timestamps: capture once with `new Date().toISOString()` and reuse
+- Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the configured
+  bound (`OPENAI_TIMEOUT_MS` → `AGENTMEMORY_LLM_TIMEOUT_MS` → 60s) exactly. The in-process
+  Engine has no invocation timeout, so never reintroduce a ceiling that clamps that bound —
+  the old 170s `HARD_BUDGET_CAP_MS` cited iii's 180s limit, silently cut every longer
+  timeout, and still reported the configured value in the error.
 
 ## Testing
 
