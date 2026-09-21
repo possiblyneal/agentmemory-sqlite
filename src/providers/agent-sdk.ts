@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { MemoryProvider } from '../types.js'
+import { getEnvVar } from '../config.js'
+import { logger } from '../logger.js'
 
 // #781: the recursion guard used to live on `process.env.AGENTMEMORY_SDK_CHILD`
 // (#181). #472 then introduced chunked summarize that runs chunks
@@ -31,6 +33,72 @@ const sdkChildContext = new AsyncLocalStorage<true>()
 // original value and only the last exit restores it.
 let sdkActiveCount = 0
 let sdkOriginalEnv: string | undefined
+
+// Every SDK query spawns a real `claude` child process of its own, around
+// 190 MB resident, and nothing upstream of this provider bounds how many
+// callers arrive at once: one broker outage turns every in-flight
+// observation into a child, and children that wedge ignore SIGTERM. Cap
+// the number that may exist at a time. Callers over the cap wait for a
+// slot rather than being refused, because legitimate concurrency here is
+// the chunked summarize fan-out (SUMMARIZE_CHUNK_CONCURRENCY, default 6)
+// and refusing those chunks would trip the skip-ratio bailout and lose
+// the whole summary.
+const MAX_CONCURRENT_DEFAULT = 2
+// A wedged child holds its slot forever, so the wait has to end somewhere.
+// Reuse the LLM budget: a caller that has queued for longer than one call
+// is allowed to take is not waiting on load, it is waiting on a wedge.
+const QUEUE_WAIT_DEFAULT_MS = 60000
+
+let sdkInFlight = 0
+const sdkWaiters: Array<() => void> = []
+
+function positiveIntEnv(key: string, fallback: number): number {
+  const raw = getEnvVar(key)
+  if (!raw) return fallback
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+// Resolves true once a slot is held, false when the wait expired. The
+// waiter removes itself from the queue on expiry so a released slot is
+// never handed to a caller that has already given up.
+function acquireSlot(): Promise<boolean> {
+  if (sdkInFlight < positiveIntEnv('AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY', MAX_CONCURRENT_DEFAULT)) {
+    sdkInFlight++
+    return Promise.resolve(true)
+  }
+  // Queueing is the cap working, not a fault: the give-up below is the
+  // line that means something is wrong.
+  logger.info('Agent-SDK concurrency cap reached — queueing', {
+    inFlight: sdkInFlight,
+    queued: sdkWaiters.length + 1,
+  })
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const grant = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      sdkInFlight++
+      resolve(true)
+    }
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      const i = sdkWaiters.indexOf(grant)
+      if (i >= 0) sdkWaiters.splice(i, 1)
+      resolve(false)
+    }, positiveIntEnv('AGENTMEMORY_LLM_TIMEOUT_MS', QUEUE_WAIT_DEFAULT_MS))
+    // The process must still be able to exit while a caller waits here.
+    timer.unref?.()
+    sdkWaiters.push(grant)
+  })
+}
+
+function releaseSlot(): void {
+  sdkInFlight--
+  sdkWaiters.shift()?.()
+}
 
 type ClaudeAgentSdkModule = typeof import('@anthropic-ai/claude-agent-sdk')
 
@@ -73,6 +141,22 @@ export class AgentSDKProvider implements MemoryProvider {
       return ''
     }
 
+    if (!(await acquireSlot())) {
+      logger.warn('Agent-SDK call gave up waiting for a concurrency slot', {
+        inFlight: sdkInFlight,
+        queued: sdkWaiters.length,
+      })
+      return ''
+    }
+
+    try {
+      return await this.runQuery(systemPrompt, userPrompt)
+    } finally {
+      releaseSlot()
+    }
+  }
+
+  private runQuery(systemPrompt: string, userPrompt: string): Promise<string> {
     return sdkChildContext.run(true, async () => {
       // Mark spawned subprocesses (the SDK's underlying Claude session
       // + its hook scripts) as SDK children via process.env. Hook scripts
