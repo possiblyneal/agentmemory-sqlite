@@ -44,10 +44,21 @@ let sdkOriginalEnv: string | undefined
 // and refusing those chunks would trip the skip-ratio bailout and lose
 // the whole summary.
 const MAX_CONCURRENT_DEFAULT = 2
-// A wedged child holds its slot forever, so the wait has to end somewhere.
-// Reuse the LLM budget: a caller that has queued for longer than one call
-// is allowed to take is not waiting on load, it is waiting on a wedge.
-const QUEUE_WAIT_DEFAULT_MS = 60000
+// Nothing else bounds an SDK call in time. `fetchWithTimeout`'s cap covers
+// the raw-fetch providers only; here the work happens inside a spawned
+// `claude` process, so a child that wedges leaves its caller awaiting for
+// as long as the process lives — and, since the cap above, holding its
+// concurrency slot for just as long. 180 s rather than the 60 s the fetch
+// providers default to: this budget has to cover a CLI cold start on top
+// of the model call. Resolved the way OpenAI's is — provider knob first,
+// then the shared one — and used for the queue wait too, so a caller that
+// has waited longer than a call is allowed to take stops waiting.
+// The slot goes back on the timeout, not on the child exiting: a wedged
+// child cannot be waited for without reintroducing the hang. So the cap
+// bounds children the daemon is still waiting on, and a host that wedges
+// repeatedly can hold more than the cap — the operator's `kill -KILL`
+// remains the recovery for those, as #27 says.
+const SDK_BUDGET_DEFAULT_MS = 180000
 
 let sdkInFlight = 0
 const sdkWaiters: Array<() => void> = []
@@ -55,9 +66,25 @@ const sdkWaiters: Array<() => void> = []
 function positiveIntEnv(key: string, fallback: number): number {
   const raw = getEnvVar(key)
   if (!raw) return fallback
-  const n = Number.parseInt(raw, 10)
+  // Pure digits only, the way `parsePositiveInt` reads the same
+  // AGENTMEMORY_LLM_TIMEOUT_MS for the OpenAI path: parseInt would read
+  // "30s" as 30 ms here while that provider rejected it, so one variable
+  // would mean two different things.
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return fallback
+  const n = Number(trimmed)
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
+
+function sdkBudgetMs(): number {
+  return positiveIntEnv(
+    'AGENTMEMORY_AGENT_SDK_TIMEOUT_MS',
+    positiveIntEnv('AGENTMEMORY_LLM_TIMEOUT_MS', SDK_BUDGET_DEFAULT_MS),
+  )
+}
+
+// Distinguishable from any string the drain can produce.
+const TIMED_OUT = Symbol('agent-sdk-timeout')
 
 // Resolves true once a slot is held, false when the wait expired. The
 // waiter removes itself from the queue on expiry so a released slot is
@@ -88,7 +115,7 @@ function acquireSlot(): Promise<boolean> {
       const i = sdkWaiters.indexOf(grant)
       if (i >= 0) sdkWaiters.splice(i, 1)
       resolve(false)
-    }, positiveIntEnv('AGENTMEMORY_LLM_TIMEOUT_MS', QUEUE_WAIT_DEFAULT_MS))
+    }, sdkBudgetMs())
     // The process must still be able to exit while a caller waits here.
     timer.unref?.()
     sdkWaiters.push(grant)
@@ -169,26 +196,68 @@ export class AgentSDKProvider implements MemoryProvider {
       }
       sdkActiveCount++
 
+      const budgetMs = sdkBudgetMs()
+      let expiry: ReturnType<typeof setTimeout> | undefined
       try {
         const { query } = await this.loadSdk()
 
+        // Aborting is what lets the SDK close the child down (stdin EOF,
+        // then a grace window) instead of leaving it orphaned.
+        const abortController = new AbortController()
         const messages = query({
           prompt: userPrompt,
           options: {
             systemPrompt,
             maxTurns: 1,
             allowedTools: [],
+            abortController,
           },
         })
 
-        let result = ''
-        for await (const msg of messages) {
-          if (msg.type === 'result') {
-            result = (msg as any).result ?? ''
+        const drain = (async () => {
+          let result = ''
+          for await (const msg of messages) {
+            if (msg.type === 'result') {
+              result = (msg as any).result ?? ''
+            }
           }
-        }
-        return result
+          return result
+        })()
+
+        // Raced rather than merely aborted: a child that ignores the
+        // shutdown is exactly the case this bounds, and waiting on the
+        // abort to take effect would be waiting on the same wedge again.
+        const outcome = await Promise.race([
+          drain,
+          new Promise<typeof TIMED_OUT>((resolve) => {
+            expiry = setTimeout(() => resolve(TIMED_OUT), budgetMs)
+            expiry.unref?.()
+          }),
+        ])
+
+        if (outcome !== TIMED_OUT) return outcome
+
+        logger.warn('Agent-SDK call timed out', {
+          budgetMs,
+          knob: 'AGENTMEMORY_AGENT_SDK_TIMEOUT_MS',
+        })
+        abortController.abort()
+        // Ask the iterator to close, and swallow whatever the abandoned
+        // drain settles as — nobody is reading it now. On the wedge this
+        // bounds, `return()` queues behind the `next()` the drain is
+        // already parked in and does not run until a message arrives, so
+        // it releases a cooperative child promptly and a wedged one only
+        // when the process finally dies. That is why the slot is freed on
+        // the timeout rather than on the child exiting.
+        void Promise.resolve(messages.return?.(undefined as never)).catch(
+          () => {},
+        )
+        void drain.catch(() => {})
+        // The same empty result the recursion guard returns: callers
+        // short-circuit to synthetic compression rather than hanging.
+        return ''
       } finally {
+        if (expiry) clearTimeout(expiry)
         sdkActiveCount--
         if (sdkActiveCount === 0) {
           if (sdkOriginalEnv === undefined) {

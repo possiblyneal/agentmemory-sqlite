@@ -108,6 +108,19 @@ describe("Governance Functions", () => {
     expect(remaining.length).toBe(3);
   });
 
+  // The single-item delete paths must not diverge: mem::forget releases
+  // the image a memory held, so deleting the same memory by id here has
+  // to release it too.
+  it("governance-delete releases the image the memory held", async () => {
+    const withImage = { ...makeMemory("mem_img", "pattern"), imageRef: "/img/a.png" };
+    await kv.set("mem:memories", "mem_img", withImage);
+    await kv.set("mem:image-refs", "/img/a.png", 2);
+
+    await sdk.trigger("mem::governance-delete", { memoryIds: ["mem_img"] });
+
+    expect(await kv.get("mem:image-refs", "/img/a.png")).toBe(1);
+  });
+
   it("governance-bulk deletes by type filter", async () => {
     const result = (await sdk.trigger("mem::governance-bulk", {
       type: ["pattern"],

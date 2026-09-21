@@ -228,6 +228,50 @@ export function registerMcpEndpoints(
             };
           }
 
+          case "memory_forget": {
+            const memoryId =
+              typeof args.memoryId === "string" && args.memoryId.trim()
+                ? args.memoryId.trim()
+                : undefined;
+            const sessionId =
+              typeof args.sessionId === "string" && args.sessionId.trim()
+                ? args.sessionId.trim()
+                : undefined;
+            const observationIds =
+              typeof args.observationIds === "string"
+                ? args.observationIds.split(",").map((id: string) => id.trim()).filter(Boolean)
+                : [];
+            if (!memoryId && !sessionId) {
+              return {
+                status_code: 400,
+                body: { error: "memoryId or sessionId is required for memory_forget" },
+              };
+            }
+            if (observationIds.length > 0 && !sessionId) {
+              return {
+                status_code: 400,
+                body: { error: "sessionId is required with observationIds" },
+              };
+            }
+            if (memoryId && sessionId) {
+              return {
+                status_code: 400,
+                body: { error: "name a memoryId or a sessionId, not both" },
+              };
+            }
+            const result = await sdk.trigger({ function_id: "mem::forget", payload: {
+              ...(memoryId !== undefined && { memoryId }),
+              ...(sessionId !== undefined && { sessionId }),
+              ...(observationIds.length > 0 && { observationIds }),
+            } });
+            return {
+              status_code: 200,
+              body: {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+              },
+            };
+          }
+
           case "memory_file_history": {
             if (typeof args.files !== "string" || !args.files.trim()) {
               return {

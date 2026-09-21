@@ -17,11 +17,18 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "memoryIds array is required" };
       }
 
+      const { decrementImageRef } = await import("./image-refs.js");
+
       let deleted = 0;
       for (const id of data.memoryIds) {
         const mem = await kv.get<Memory>(KV.memories, id);
         if (mem) {
           await deleteIndexed(kv, KV.memories, id);
+          // The same teardown mem::forget does, so the two single-item
+          // delete paths cannot diverge in what they release.
+          if (mem.imageRef) {
+            await decrementImageRef(kv, sdk, mem.imageRef);
+          }
           deleted++;
         }
       }

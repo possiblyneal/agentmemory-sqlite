@@ -16,31 +16,40 @@ memory_smart_search { "query": "old api key in config", "limit": 20 }
 Show the matches, get a yes, then:
 
 ```json
-memory_governance_delete { "memoryIds": ["abc12345", "def67890"], "reason": "user privacy request" }
+memory_forget { "memoryId": "abc12345" }
 ```
 
 Expected output:
 
 ```text
-Found 2 matching memories. Confirmed. Deleted 2 memories.
+Found 1 matching memory. Confirmed. Deleted 1 memory.
 ```
+
+`memory_forget` removes one memory, or named observations inside one session.
+`memory_governance_delete` takes several memory ids at once with a `reason`.
+Both de-index, release any image the record held, and write an audit entry.
 
 ## Why
 
 This is destructive and irreversible. Show exactly what will be deleted and get
-an explicit yes before calling delete. Delete by memory ID, never a bare session.
+an explicit yes before calling delete. Name the ids you are removing; a bare
+`sessionId` takes the whole session and is almost never what was asked for.
 
 ## Workflow
 
 1. Search with `memory_smart_search`, the user's text as `query`, `limit: 20`.
 2. Show what matched: session ids, memory ids, titles. Ask for explicit
    confirmation. Do not proceed on silence or a vague "sure, whatever".
-3. On confirmation, call `memory_governance_delete` with `memoryIds` (array or
-   comma-separated string) and optional `reason` (default `plugin skill request`).
-4. To drop a whole session, collect every memory id in that session from the
-   search results and pass them all. The MCP does not accept a bare `sessionId`.
+3. On confirmation, call `memory_forget` with `memoryId` for a single memory, or
+   with `sessionId` plus comma-separated `observationIds` for observations —
+   the layer recall actually surfaces. For several memories at once, use
+   `memory_governance_delete` with `memoryIds` and optional `reason` (default
+   `plugin skill request`).
+4. To drop a whole session, its observations and its summary, call
+   `memory_forget` with `sessionId` alone. Only do this when the user asked for
+   the whole session; otherwise name the ids.
 5. Lessons are separate: delete one with `memory_lesson_delete` and its
-   `lessonId`; `memory_governance_delete` does not touch lessons.
+   `lessonId`; neither delete tool touches lessons.
 6. Report the deletion count back. A count of 0 means the ids did not exist;
    say so instead of claiming a delete.
 
@@ -56,7 +65,8 @@ an explicit yes.
 
 - Matches were shown to the user before any delete.
 - An explicit yes was received, not assumed.
-- `memoryIds` holds real ids from the search, never a bare `sessionId`.
+- The ids passed are real ones from the search, and a bare `sessionId` was
+  used only when the whole session was what the user asked to drop.
 - Final message states the actual count deleted.
 
 ## See also
@@ -66,4 +76,4 @@ an explicit yes.
 
 ## Troubleshooting
 
-See ../_shared/TROUBLESHOOTING.md if `memory_smart_search` or `memory_governance_delete` is not available.
+See ../_shared/TROUBLESHOOTING.md if `memory_smart_search`, `memory_forget` or `memory_governance_delete` is not available.

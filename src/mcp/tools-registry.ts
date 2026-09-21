@@ -94,6 +94,35 @@ export const CORE_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: "memory_forget",
+    description:
+      "Permanently remove one saved memory, or one or more observations from a session, by id. " +
+      "Removes them from search as well as from the store and records an audit entry. " +
+      "Ids that do not exist are skipped, and the reply says how many records were actually removed. " +
+      "There is no undo — restore from a snapshot if you need one back.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        memoryId: {
+          type: "string",
+          description: "Id of a single saved memory to forget",
+        },
+        sessionId: {
+          type: "string",
+          description:
+            "Session holding the observations to forget. Required with observationIds, " +
+            "and not combined with memoryId. " +
+            "On its own it forgets the entire session, its observations and its summary.",
+        },
+        observationIds: {
+          type: "string",
+          description:
+            "Comma-separated observation ids to forget from sessionId",
+        },
+      },
+    },
+  },
+  {
     name: "memory_file_history",
     description: "Get past observations about specific files.",
     inputSchema: {
@@ -967,10 +996,10 @@ export function getAllTools(): McpToolDef[] {
   ];
 }
 
-// default switched from "core" (8 essential tools) to "all"
-// (full 54-tool surface). README and plugin manifests have always
-// advertised 54 tools "in proxy mode"; the old default left OpenCode /
-// Claude Code users seeing 8 with no indication the other tools existed.
+// default switched from "core" (8 essential tools) to "all" (the full
+// tool surface). The plugin manifests have always advertised every tool
+// "in proxy mode"; the old default left OpenCode / Claude Code users
+// seeing 8 with no indication the other tools existed.
 // Users who want the lean essentials can still set AGENTMEMORY_TOOLS=core.
 export function getVisibleTools(): McpToolDef[] {
   const mode = process.env["AGENTMEMORY_TOOLS"] || "all";

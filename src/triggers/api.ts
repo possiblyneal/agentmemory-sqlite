@@ -1067,13 +1067,42 @@ export function registerApiTriggers(
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      if (!req.body?.sessionId && !req.body?.memoryId) {
+      const sessionId =
+        typeof req.body?.sessionId === "string" ? req.body.sessionId : undefined;
+      const memoryId =
+        typeof req.body?.memoryId === "string" ? req.body.memoryId : undefined;
+      if (!sessionId && !memoryId) {
         return {
           status_code: 400,
           body: { error: "sessionId or memoryId is required" },
         };
       }
-      const result = await sdk.trigger({ function_id: "mem::forget", payload: req.body });
+      const rawObservationIds = req.body?.observationIds;
+      // Dropping the non-strings and forwarding what is left would turn a
+      // malformed list into an empty one, and an empty list is the whole-
+      // session wipe. Refuse instead of widening what was asked for.
+      if (
+        rawObservationIds !== undefined &&
+        (!Array.isArray(rawObservationIds) ||
+          !rawObservationIds.every((id) => typeof id === "string"))
+      ) {
+        return {
+          status_code: 400,
+          body: { error: "observationIds must be an array of strings" },
+        };
+      }
+      const result = (await sdk.trigger({
+        function_id: "mem::forget",
+        payload: {
+          ...(sessionId !== undefined && { sessionId }),
+          ...(memoryId !== undefined && { memoryId }),
+          ...(rawObservationIds !== undefined && { observationIds: rawObservationIds }),
+        },
+      })) as { success: boolean; error?: string };
+      // The refusals mem::forget raises are bad requests, not results.
+      if (!result.success) {
+        return { status_code: 400, body: result };
+      }
       return { status_code: 200, body: result };
     },
   );
@@ -2172,6 +2201,31 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::memory-by-id",
     config: { api_path: "/agentmemory/memories/:id", http_method: "GET" },
+  });
+
+  // The route an operator reaches for first. Without it, removing one
+  // memory means discovering either /agentmemory/forget or the
+  // governance bulk paths, and the filter-based one invites deleting by
+  // date window and hoping the window held only the target.
+  sdk.registerFunction("api::memory-delete",
+    async (req: ApiRequest): Promise<Response> => {
+      const authErr = checkAuth(req, secret);
+      if (authErr) return authErr;
+      const id = req.path_params?.["id"];
+      if (!id || typeof id !== "string") {
+        return { status_code: 400, body: { error: "id path parameter is required" } };
+      }
+      const result = await sdk.trigger({
+        function_id: "mem::forget",
+        payload: { memoryId: id },
+      });
+      return { status_code: 200, body: result };
+    },
+  );
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::memory-delete",
+    config: { api_path: "/agentmemory/memories/:id", http_method: "DELETE" },
   });
 
   sdk.registerFunction("api::semantic-list",
