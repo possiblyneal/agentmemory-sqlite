@@ -1067,23 +1067,42 @@ export function registerApiTriggers(
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      if (!req.body?.sessionId && !req.body?.memoryId) {
+      const sessionId =
+        typeof req.body?.sessionId === "string" ? req.body.sessionId : undefined;
+      const memoryId =
+        typeof req.body?.memoryId === "string" ? req.body.memoryId : undefined;
+      if (!sessionId && !memoryId) {
         return {
           status_code: 400,
           body: { error: "sessionId or memoryId is required" },
         };
       }
-      const observationIds = Array.isArray(req.body.observationIds)
-        ? req.body.observationIds.filter((id): id is string => typeof id === "string")
-        : undefined;
-      const result = await sdk.trigger({
+      const rawObservationIds = req.body?.observationIds;
+      // Dropping the non-strings and forwarding what is left would turn a
+      // malformed list into an empty one, and an empty list is the whole-
+      // session wipe. Refuse instead of widening what was asked for.
+      if (
+        rawObservationIds !== undefined &&
+        (!Array.isArray(rawObservationIds) ||
+          !rawObservationIds.every((id) => typeof id === "string"))
+      ) {
+        return {
+          status_code: 400,
+          body: { error: "observationIds must be an array of strings" },
+        };
+      }
+      const result = (await sdk.trigger({
         function_id: "mem::forget",
         payload: {
-          ...(req.body.sessionId !== undefined && { sessionId: req.body.sessionId }),
-          ...(req.body.memoryId !== undefined && { memoryId: req.body.memoryId }),
-          ...(observationIds !== undefined && { observationIds }),
+          ...(sessionId !== undefined && { sessionId }),
+          ...(memoryId !== undefined && { memoryId }),
+          ...(rawObservationIds !== undefined && { observationIds: rawObservationIds }),
         },
-      });
+      })) as { success: boolean; error?: string };
+      // The refusals mem::forget raises are bad requests, not results.
+      if (!result.success) {
+        return { status_code: 400, body: result };
+      }
       return { status_code: 200, body: result };
     },
   );

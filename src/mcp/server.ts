@@ -247,6 +247,18 @@ export function registerMcpEndpoints(
                 body: { error: "memoryId or sessionId is required for memory_forget" },
               };
             }
+            if (observationIds.length > 0 && !sessionId) {
+              return {
+                status_code: 400,
+                body: { error: "sessionId is required with observationIds" },
+              };
+            }
+            if (memoryId && sessionId) {
+              return {
+                status_code: 400,
+                body: { error: "name a memoryId or a sessionId, not both" },
+              };
+            }
             const result = await sdk.trigger({ function_id: "mem::forget", payload: {
               ...(memoryId !== undefined && { memoryId }),
               ...(sessionId !== undefined && { sessionId }),

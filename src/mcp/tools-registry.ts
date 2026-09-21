@@ -110,7 +110,8 @@ export const CORE_TOOLS: McpToolDef[] = [
         sessionId: {
           type: "string",
           description:
-            "Session holding the observations to forget. Required with observationIds. " +
+            "Session holding the observations to forget. Required with observationIds, " +
+            "and not combined with memoryId. " +
             "On its own it forgets the entire session, its observations and its summary.",
         },
         observationIds: {
@@ -995,10 +996,10 @@ export function getAllTools(): McpToolDef[] {
   ];
 }
 
-// default switched from "core" (8 essential tools) to "all"
-// (full 54-tool surface). README and plugin manifests have always
-// advertised 54 tools "in proxy mode"; the old default left OpenCode /
-// Claude Code users seeing 8 with no indication the other tools existed.
+// default switched from "core" (8 essential tools) to "all" (the full
+// tool surface). The plugin manifests have always advertised every tool
+// "in proxy mode"; the old default left OpenCode / Claude Code users
+// seeing 8 with no indication the other tools existed.
 // Users who want the lean essentials can still set AGENTMEMORY_TOOLS=core.
 export function getVisibleTools(): McpToolDef[] {
   const mode = process.env["AGENTMEMORY_TOOLS"] || "all";

@@ -279,6 +279,17 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       observationIds?: string[];
       memoryId?: string;
     }) => {
+      // The three targets are mutually exclusive in effect: naming a
+      // memory disables the session wipe below, and observation ids are
+      // only ever looked up inside a session. Silently honouring one and
+      // dropping the other would report success for a record still there.
+      if (data.observationIds && data.observationIds.length > 0 && !data.sessionId) {
+        return { success: false, error: "sessionId is required with observationIds" };
+      }
+      if (data.memoryId && data.sessionId) {
+        return { success: false, error: "name a memoryId or a sessionId, not both" };
+      }
+
       let deleted = 0;
       const deletedMemoryIds: string[] = [];
       const deletedObservationIds: string[] = [];
@@ -338,10 +349,21 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           deletedObservationIds.push(obs.id);
           deleted++;
         }
-        await kv.delete(KV.sessions, data.sessionId);
-        await kv.delete(KV.summaries, data.sessionId);
-        deletedSession = true;
-        deleted += 2;
+        // Counted only where a record was actually there, the same rule
+        // the memory and observation branches follow.
+        const [session, summary] = await Promise.all([
+          kv.get(KV.sessions, data.sessionId),
+          kv.get(KV.summaries, data.sessionId),
+        ]);
+        if (session) {
+          await kv.delete(KV.sessions, data.sessionId);
+          deletedSession = true;
+          deleted++;
+        }
+        if (summary) {
+          await kv.delete(KV.summaries, data.sessionId);
+          deleted++;
+        }
       }
 
       if (deleted > 0) {

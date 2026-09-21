@@ -53,6 +53,11 @@ const MAX_CONCURRENT_DEFAULT = 2
 // of the model call. Resolved the way OpenAI's is — provider knob first,
 // then the shared one — and used for the queue wait too, so a caller that
 // has waited longer than a call is allowed to take stops waiting.
+// The slot goes back on the timeout, not on the child exiting: a wedged
+// child cannot be waited for without reintroducing the hang. So the cap
+// bounds children the daemon is still waiting on, and a host that wedges
+// repeatedly can hold more than the cap — the operator's `kill -KILL`
+// remains the recovery for those, as #27 says.
 const SDK_BUDGET_DEFAULT_MS = 180000
 
 let sdkInFlight = 0
@@ -61,7 +66,13 @@ const sdkWaiters: Array<() => void> = []
 function positiveIntEnv(key: string, fallback: number): number {
   const raw = getEnvVar(key)
   if (!raw) return fallback
-  const n = Number.parseInt(raw, 10)
+  // Pure digits only, the way `parsePositiveInt` reads the same
+  // AGENTMEMORY_LLM_TIMEOUT_MS for the OpenAI path: parseInt would read
+  // "30s" as 30 ms here while that provider rejected it, so one variable
+  // would mean two different things.
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return fallback
+  const n = Number(trimmed)
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
@@ -231,16 +242,16 @@ export class AgentSDKProvider implements MemoryProvider {
           knob: 'AGENTMEMORY_AGENT_SDK_TIMEOUT_MS',
         })
         abortController.abort()
-        // Stop iterating so the generator is not pinned waiting for a
-        // message that is never coming, and swallow whatever the
-        // abandoned drain settles as — nobody is reading it now.
-        try {
-          void Promise.resolve(messages.return?.(undefined as never)).catch(
-            () => {},
-          )
-        } catch {
-          // An iterator that refuses to close is the wedge itself.
-        }
+        // Ask the iterator to close, and swallow whatever the abandoned
+        // drain settles as — nobody is reading it now. On the wedge this
+        // bounds, `return()` queues behind the `next()` the drain is
+        // already parked in and does not run until a message arrives, so
+        // it releases a cooperative child promptly and a wedged one only
+        // when the process finally dies. That is why the slot is freed on
+        // the timeout rather than on the child exiting.
+        void Promise.resolve(messages.return?.(undefined as never)).catch(
+          () => {},
+        )
         void drain.catch(() => {})
         // The same empty result the recursion guard returns: callers
         // short-circuit to synthetic compression rather than hanging.

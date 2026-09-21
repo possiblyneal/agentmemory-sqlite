@@ -71,6 +71,8 @@ sdk.registerFunction(
 sdk.registerFunction(
   "api::your-endpoint",
   async (req: ApiRequest<YourBody>): Promise<Response> => {
+    const authErr = checkAuth(req, secret);
+    if (authErr) return authErr;
     const body = (req.body ?? {}) as Record<string, unknown>;
     // validate + whitelist fields (never pass raw body to sdk.trigger)
     const result = await sdk.trigger({
@@ -86,11 +88,13 @@ sdk.registerTrigger({
   config: {
     api_path: "/agentmemory/your-path",
     http_method: "POST",
-    middleware_function_ids: ["middleware::api-auth"],
   },
 });
 ```
-Auth is the `middleware::api-auth` middleware, not an inline check in the handler.
+Auth is the inline `checkAuth(req, secret)` above, which is what nearly every endpoint in
+`src/triggers/api.ts` does. A `middleware_function_ids: ["middleware::api-auth"]` on the
+trigger is the minority form — follow whichever the endpoints around yours use, and do not
+put both on one endpoint.
 
 ### MCP Tool Handler
 ```typescript

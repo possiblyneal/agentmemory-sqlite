@@ -83,6 +83,9 @@ type Surfaces = {
   deleteMemory: (
     id: string,
   ) => Promise<{ status_code: number; body: Record<string, unknown> }>;
+  postForget: (
+    body: Record<string, unknown>,
+  ) => Promise<{ status_code: number; body: Record<string, unknown> }>;
 };
 
 function surfaces(): Surfaces {
@@ -103,6 +106,11 @@ function surfaces(): Surfaces {
       sdk._fns.get("api::memory-delete")!({
         headers: { authorization: `Bearer ${SECRET}` },
         path_params: { id },
+      }),
+    postForget: (body) =>
+      sdk._fns.get("api::forget")!({
+        headers: { authorization: `Bearer ${SECRET}` },
+        body,
       }),
   };
 }
@@ -181,6 +189,89 @@ describe("memory_forget MCP tool", () => {
     const res = await callTool("memory_forget", {});
 
     expect(res.status_code).toBe(400);
+  });
+
+  // Observation ids are only ever looked up inside a session, so a call
+  // that omits the session would report success while the observations
+  // it named are still there.
+  it("refuses observation ids with no session to look them up in", async () => {
+    const { kv, callTool } = surfaces();
+    await kv.set(KV.observations("ses_1"), "obs_a", { id: "obs_a" });
+
+    const res = await callTool("memory_forget", { observationIds: "obs_a" });
+
+    expect(res.status_code).toBe(400);
+    expect(await kv.get(KV.observations("ses_1"), "obs_a")).not.toBeNull();
+  });
+
+  it("refuses a memory and a session in one call", async () => {
+    const { callTool } = surfaces();
+
+    const res = await callTool("memory_forget", {
+      memoryId: "mem_a",
+      sessionId: "ses_1",
+    });
+
+    expect(res.status_code).toBe(400);
+  });
+});
+
+describe("POST /agentmemory/forget", () => {
+  beforeEach(() => {
+    getSearchIndex().clear();
+  });
+
+  // An id list the handler cannot read must not decay into "no ids named",
+  // which is the whole-session wipe.
+  it("refuses a malformed id list rather than wiping the session", async () => {
+    const { kv, postForget } = surfaces();
+    await kv.set(KV.sessions, "ses_1", { id: "ses_1" });
+    await kv.set(KV.observations("ses_1"), "obs_a", { id: "obs_a" });
+
+    const res = await postForget({ sessionId: "ses_1", observationIds: [123] });
+
+    expect(res.status_code).toBe(400);
+    expect(await kv.get(KV.sessions, "ses_1")).not.toBeNull();
+    expect(await kv.get(KV.observations("ses_1"), "obs_a")).not.toBeNull();
+  });
+
+  it("answers 400, not 200, when the call names both a memory and a session", async () => {
+    const { postForget } = surfaces();
+
+    const res = await postForget({ memoryId: "mem_a", sessionId: "ses_1" });
+
+    expect(res.status_code).toBe(400);
+  });
+});
+
+describe("mem::forget session branch", () => {
+  beforeEach(() => {
+    getSearchIndex().clear();
+  });
+
+  it("counts only the session records that were actually there", async () => {
+    const { kv, sdk } = surfaces();
+    await kv.set(KV.sessions, "ses_1", { id: "ses_1" });
+
+    const result = (await sdk.trigger({
+      function_id: "mem::forget",
+      payload: { sessionId: "ses_1" },
+    })) as { deleted: number };
+
+    // The session existed, its summary never did.
+    expect(result.deleted).toBe(1);
+  });
+
+  it("reports nothing removed for a session that does not exist", async () => {
+    const { kv, sdk } = surfaces();
+
+    const result = (await sdk.trigger({
+      function_id: "mem::forget",
+      payload: { sessionId: "ses_never_existed" },
+    })) as { deleted: number };
+
+    expect(result.deleted).toBe(0);
+    expect(await auditRows(kv)).toHaveLength(0);
   });
 });
 

@@ -347,4 +347,17 @@ describe("AgentSDKProvider call timeout", () => {
 
     expect(await provider.summarize("slow", "user")).toBe("<result>slow</result>");
   });
+
+  // The OpenAI path rejects a unit suffix on the same shared variable
+  // rather than reading "30s" as 30 ms. One variable, one meaning.
+  it("ignores a budget with a unit suffix instead of reading its digits", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "30s";
+    const provider = new AgentSDKProvider();
+    state.mockResult = async (sysPrompt, _user) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return `<result>${sysPrompt}</result>`;
+    };
+
+    expect(await provider.summarize("slow", "user")).toBe("<result>slow</result>");
+  });
 });
