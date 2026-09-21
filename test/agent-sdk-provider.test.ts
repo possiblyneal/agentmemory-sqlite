@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // declare the mock's mutable state alongside the mock itself.
 const state = vi.hoisted(() => ({
   queryCalls: [] as Array<{ systemPrompt: string; userPrompt: string }>,
+  lastAbortController: undefined as AbortController | undefined,
   mockResult: "<result>ok</result>" as
     | string
     | ((systemPrompt: string, userPrompt: string) => string),
@@ -21,9 +22,10 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     options,
   }: {
     prompt: string;
-    options: { systemPrompt: string };
+    options: { systemPrompt: string; abortController?: AbortController };
   }) => {
     state.queryCalls.push({ systemPrompt: options.systemPrompt, userPrompt: prompt });
+    state.lastAbortController = options.abortController;
     async function* gen() {
       const value =
         typeof state.mockResult === "function"
@@ -168,11 +170,13 @@ describe("AgentSDKProvider concurrency cap", () => {
     state.mockResult = "<result>ok</result>";
     delete process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY;
     delete process.env.AGENTMEMORY_LLM_TIMEOUT_MS;
+    delete process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS;
   });
 
   afterEach(() => {
     delete process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY;
     delete process.env.AGENTMEMORY_LLM_TIMEOUT_MS;
+    delete process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS;
   });
 
   it("never runs more children at once than the cap allows", async () => {
@@ -204,7 +208,10 @@ describe("AgentSDKProvider concurrency cap", () => {
 
   it("gives up waiting rather than queueing forever behind a wedged child", async () => {
     process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY = "1";
-    process.env.AGENTMEMORY_LLM_TIMEOUT_MS = "20";
+    // The holder's budget outlasts the test; the waiter's does not, so
+    // the give-up here is the queue's own backstop and not the caller
+    // being freed by the holder timing out.
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "5000";
     const provider = new AgentSDKProvider();
 
     let releaseWedged: () => void = () => {};
@@ -218,11 +225,38 @@ describe("AgentSDKProvider concurrency cap", () => {
 
     const first = provider.summarize("wedged", "x");
     await new Promise((resolve) => setTimeout(resolve, 1));
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "20";
     expect(await provider.summarize("queued", "y")).toBe("");
 
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "5000";
     releaseWedged();
     expect(await first).toBe("<result>wedged</result>");
     expect(state.queryCalls.length).toBe(1);
+  });
+
+  it("hands the slot to a queued caller when the holder's budget expires", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY = "1";
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "20";
+    const provider = new AgentSDKProvider();
+
+    let releaseWedged: () => void = () => {};
+    const wedged = new Promise<void>((resolve) => {
+      releaseWedged = resolve;
+    });
+    state.mockResult = async (sysPrompt, _user) => {
+      if (sysPrompt === "wedged") await wedged;
+      return `<result>${sysPrompt}</result>`;
+    };
+
+    const first = provider.summarize("wedged", "x");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    // A budget long enough that only the holder's expiry can free it.
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "5000";
+    const second = provider.summarize("queued", "y");
+
+    expect(await first).toBe("");
+    expect(await second).toBe("<result>queued</result>");
+    releaseWedged();
   });
 
   it("releases the slot when the SDK call throws", async () => {
@@ -237,5 +271,80 @@ describe("AgentSDKProvider concurrency cap", () => {
 
     state.mockResult = "<result>after</result>";
     expect(await provider.summarize("sys", "x")).toBe("<result>after</result>");
+  });
+});
+
+describe("AgentSDKProvider call timeout", () => {
+  // The concurrency cap bounds what a wedged child costs in memory. Only
+  // a bound on the call itself stops one from holding its caller — and,
+  // since the cap, its slot — for as long as the child lives.
+  beforeEach(() => {
+    state.queryCalls.length = 0;
+    state.lastAbortController = undefined;
+    state.mockResult = "<result>ok</result>";
+    delete process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS;
+    delete process.env.AGENTMEMORY_LLM_TIMEOUT_MS;
+    delete process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY;
+  });
+
+  afterEach(() => {
+    delete process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS;
+    delete process.env.AGENTMEMORY_LLM_TIMEOUT_MS;
+    delete process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY;
+  });
+
+  it("gives up on a child that never produces a result", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "20";
+    const provider = new AgentSDKProvider();
+    // Never yields, never rejects — the wedge, which no amount of
+    // waiting on the iterator resolves.
+    state.mockResult = () => new Promise<string>(() => {});
+
+    expect(await provider.summarize("sys", "user")).toBe("");
+  });
+
+  it("aborts the query it gave up on so the child is closed down", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "20";
+    const provider = new AgentSDKProvider();
+    state.mockResult = () => new Promise<string>(() => {});
+
+    await provider.summarize("sys", "user");
+
+    expect(state.lastAbortController?.signal.aborted).toBe(true);
+  });
+
+  it("frees the concurrency slot a timed-out call was holding", async () => {
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "20";
+    process.env.AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY = "1";
+    const provider = new AgentSDKProvider();
+    state.mockResult = () => new Promise<string>(() => {});
+
+    expect(await provider.summarize("wedged", "x")).toBe("");
+
+    state.mockResult = "<result>after</result>";
+    expect(await provider.summarize("sys", "y")).toBe("<result>after</result>");
+  });
+
+  it("takes the shared LLM budget when no agent-sdk budget is set", async () => {
+    process.env.AGENTMEMORY_LLM_TIMEOUT_MS = "20";
+    const provider = new AgentSDKProvider();
+    state.mockResult = () => new Promise<string>(() => {});
+
+    expect(await provider.summarize("sys", "user")).toBe("");
+  });
+
+  it("lets the agent-sdk budget win over the shared one", async () => {
+    // The shared budget is the one a fetch provider would use; a spawned
+    // CLI session legitimately outlives it, which is why the override
+    // exists. A tiny shared value must not cut this call short.
+    process.env.AGENTMEMORY_LLM_TIMEOUT_MS = "1";
+    process.env.AGENTMEMORY_AGENT_SDK_TIMEOUT_MS = "5000";
+    const provider = new AgentSDKProvider();
+    state.mockResult = async (sysPrompt, _user) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return `<result>${sysPrompt}</result>`;
+    };
+
+    expect(await provider.summarize("slow", "user")).toBe("<result>slow</result>");
   });
 });
