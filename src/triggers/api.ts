@@ -691,6 +691,11 @@ export function registerApiTriggers(
           body: { error: "sessionId is required and must be a non-empty string" },
         };
       }
+      // kv.update creates a missing key, so a stop for a Session that never
+      // started would invent a row; refuse it instead.
+      if (!(await kv.get<Session>(KV.sessions, sessionId))) {
+        return { status_code: 404, body: { error: "session_not_found" } };
+      }
       await kv.update(KV.sessions, sessionId, [
         { type: "set", path: "endedAt", value: new Date().toISOString() },
         { type: "set", path: "status", value: "completed" },
