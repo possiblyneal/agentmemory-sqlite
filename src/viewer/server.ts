@@ -5,7 +5,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderViewerDocument } from "./document.js";
 import { timingSafeCompare } from "../auth.js";
@@ -310,8 +310,14 @@ export function startViewerServer(
       return;
     }
 
+    const upstreamPath = resolveProxyPath(pathname);
+    if (upstreamPath === null) {
+      json(res, 404, { error: "not found" }, req);
+      return;
+    }
+
     try {
-      await proxyToRestApi(resolvedRestPort, pathname, qs, method, req, res, secret);
+      await proxyToRestApi(resolvedRestPort, upstreamPath, qs, method, req, res, secret);
     } catch (err) {
       console.error(`[viewer] proxy error on ${method} ${pathname}:`, err);
       json(res, 502, { error: "upstream error" }, req);
@@ -387,19 +393,34 @@ export function startViewerServer(
   return server;
 }
 
+const PROXY_PREFIX = "/agentmemory/";
+
+// The bearer is only ever attached to a path that is already canonical:
+// no percent-encoding, no dot segments, no doubled slashes. Anything
+// else is answered here and never reaches the REST port.
+export function resolveProxyPath(pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  const canonical = posix.normalize(decoded);
+  if (canonical !== pathname || !canonical.startsWith(PROXY_PREFIX)) {
+    return null;
+  }
+  return canonical;
+}
+
 async function proxyToRestApi(
   restPort: number,
-  pathname: string,
+  upstreamPath: string,
   qs: string,
   method: string,
   req: IncomingMessage,
   res: ServerResponse,
   secret?: string,
 ): Promise<void> {
-  const upstreamPath = pathname.startsWith("/agentmemory/")
-    ? pathname
-    : `/agentmemory${pathname.startsWith("/") ? pathname : "/" + pathname}`;
-
   const upstreamUrl = `http://127.0.0.1:${restPort}${upstreamPath}${qs ? "?" + qs : ""}`;
 
   const headers: Record<string, string> = {};
