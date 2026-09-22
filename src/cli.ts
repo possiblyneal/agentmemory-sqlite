@@ -511,7 +511,7 @@ async function runStatus() {
   try {
     const [healthRes, sessionsRes, graphRes, memoriesRes, flagsRes, followupRes] = await Promise.all([
       apiFetch<any>(base, "health"),
-      apiFetch<any>(base, "sessions"),
+      apiFetch<any>(base, "sessions?limit=all"),
       apiFetch<any>(base, "graph/stats"),
       apiFetch<any>(base, "memories?count=true"),
       apiFetch<any>(base, "config/flags"),

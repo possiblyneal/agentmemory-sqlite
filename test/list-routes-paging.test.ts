@@ -27,7 +27,6 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
-    update: async () => {},
     list: async <T>(scope: string): Promise<T[]> =>
       Array.from(store.get(scope)?.values() ?? []) as T[],
   };
@@ -46,7 +45,7 @@ function mockSdk() {
   };
 }
 
-type Route = "api::sessions" | "api::semantic-list" | "api::procedural-list";
+type Route = "api::sessions" | "api::semantic-list" | "api::procedural-list" | "api::memories";
 
 let kv: ReturnType<typeof mockKV>;
 let sdk: ReturnType<typeof mockSdk>;
@@ -121,6 +120,15 @@ describe("GET /agentmemory/sessions paging", () => {
     expect(res.body.limit).toBe("all");
   });
 
+  it("sorts a Session row without startedAt last instead of throwing", async () => {
+    await seedSessions(3);
+    await kv.set(KV.sessions, "ses_ghost", { endedAt: "2026-09-01T00:00:00.000Z", status: "completed" });
+    const res = await get("api::sessions");
+    const ids = (res.body.sessions as Array<{ id?: string }>).map((s) => s.id);
+    expect(ids).toEqual(["ses_2", "ses_1", "ses_0", undefined]);
+    expect(res.body.total).toBe(4);
+  });
+
   it("counts the total after the agent filter", async () => {
     await seedSessions(5);
     await kv.set(KV.sessions, "ses_other", { ...makeSession(99), id: "ses_other", agentId: "other" });
@@ -150,6 +158,7 @@ describe("GET /agentmemory/sessions paging", () => {
 describe.each([
   ["api::semantic-list" as const, KV.semantic, "semantic"],
   ["api::procedural-list" as const, KV.procedural, "procedural"],
+  ["api::memories" as const, KV.memories, "memories"],
 ])("GET %s paging", (route, scope, key) => {
   it("returns at most 100 rows plus the full total", async () => {
     await seedRows(scope, 120);
@@ -173,5 +182,22 @@ describe.each([
     const res = await get(route, { limit: "all" });
     expect(res.body[key]).toHaveLength(120);
     expect(res.body.limit).toBe("all");
+  });
+});
+
+describe("GET /agentmemory/memories paging", () => {
+  it("pages the latest-filtered set and counts total after the filter", async () => {
+    for (let n = 0; n < 6; n++) {
+      await kv.set(KV.memories, `mem_${n}`, { id: `mem_${n}`, isLatest: n % 2 === 0 });
+    }
+    const res = await get("api::memories", { latest: "true", limit: "2", offset: "1" });
+    expect((res.body.memories as Array<{ id: string }>).map((m) => m.id)).toEqual(["mem_2", "mem_4"]);
+    expect(res.body.total).toBe(3);
+  });
+
+  it("still answers count=true with totals only", async () => {
+    await seedRows(KV.memories, 3);
+    const res = await get("api::memories", { count: "true" });
+    expect(res.body).toEqual({ total: 3, latestCount: 0 });
   });
 });

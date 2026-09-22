@@ -897,7 +897,7 @@ export function registerApiTriggers(
         filterAgentId
           ? sessions.filter((s) => s.agentId === filterAgentId)
           : sessions
-      ).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+      ).sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
       const page = parsePage(req.query_params);
       const paged = takePage(filtered, page);
       // Bounded fan-out: each kv.get is a full engine invocation, so
@@ -2168,13 +2168,8 @@ export function registerApiTriggers(
         );
       }
 
-      // viewer + `agentmemory status` were hitting this endpoint to
-      // count memories. On a real corpus (8K+ memories) the unbounded
-      // response either timed out at the iii engine boundary ("Invocation
-      // stopped") or arrived too large for the viewer to render — so the
-      // UI showed 0 memories despite a healthy store. Two opt-in modes:
-      //   ?count=true       — totals only, no payload
-      //   ?limit=N&offset=M — page slice (default unlimited for back-compat)
+      // ?count=true answers totals only, so the viewer and
+      // `agentmemory status` never pull the rows just to count them.
       if (req.query_params?.["count"] === "true") {
         // Match the SAME scope that the list path applies — returning
         // unfiltered totals here would leak cross-agent counts to a
@@ -2188,28 +2183,13 @@ export function registerApiTriggers(
         };
       }
 
-      const rawLimit = req.query_params?.["limit"];
-      const rawOffset = req.query_params?.["offset"];
-      const parsedLimit =
-        typeof rawLimit === "string" ? Number(rawLimit) : Number.NaN;
-      const parsedOffset =
-        typeof rawOffset === "string" ? Number(rawOffset) : Number.NaN;
-      const limit =
-        Number.isInteger(parsedLimit) && parsedLimit > 0
-          ? Math.min(parsedLimit, 5000)
-          : undefined;
-      const offset =
-        Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
-      const sliced =
-        limit !== undefined ? filtered.slice(offset, offset + limit) : filtered;
-
+      const page = parsePage(req.query_params);
       return {
         status_code: 200,
         body: {
-          memories: sliced,
+          memories: takePage(filtered, page),
           total: filtered.length,
-          offset,
-          limit: limit ?? null,
+          ...page,
         },
       };
     },
