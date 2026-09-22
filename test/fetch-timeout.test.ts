@@ -106,11 +106,8 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
   });
 
-  // 0. The FIRST attempt must honor the caller's configured timeout in full.
-  //    Regression: a 170s HARD_BUDGET_CAP_MS silently shortened every budget
-  //    above it, so AGENTMEMORY_LLM_TIMEOUT_MS=480000 aborted at 170s while the
-  //    error message still reported 480000ms. Slow local models legitimately
-  //    run past 170s; the configured bound is the only bound.
+  // 0. The FIRST attempt must honor the caller's configured timeout in full:
+  //    the configured bound is the only bound (no clamp above it, ADR 0001).
   it("honors the full caller timeout on the first attempt", async () => {
     const signals: AbortSignal[] = [];
     const capturing = ((_url: string, init?: RequestInit) => {
@@ -125,16 +122,46 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(capturing);
     vi.useFakeTimers();
 
-    // 300s caller timeout — well past the 170s cap this used to be clamped to.
     const p = fetchWithTimeout("https://example.com", {}, 300000);
     p.catch(() => {}); // observe rejection so it isn't flagged unhandled
 
     expect(signals).toHaveLength(1);
-    // Past the old 170s cap the attempt must still be alive.
     await vi.advanceTimersByTimeAsync(200000);
     expect(signals[0].aborted).toBe(false);
     // It aborts only at the configured 300s bound.
     await vi.advanceTimersByTimeAsync(99999);
+    expect(signals[0].aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(signals[0].aborted).toBe(true);
+
+    await expect(p).rejects.toThrow();
+  });
+
+  // 0b. A retry gets only what is left of the budget, never a fresh `ms`.
+  it("bounds a retry attempt by the remaining budget, not the full caller timeout", async () => {
+    const signals: AbortSignal[] = [];
+    let calls = 0;
+    const impl = ((_url: string, init?: RequestInit) => {
+      calls++;
+      if (calls === 1) return Promise.resolve(new Response(null, { status: 429 }));
+      const signal = init!.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () =>
+          reject(new DOMException("AbortError", "AbortError")),
+        );
+      });
+    }) as typeof fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(impl);
+    vi.useFakeTimers();
+
+    const p = fetchWithTimeout("https://example.com", {}, 60000);
+    p.catch(() => {});
+
+    // Drain the 500ms backoff so the retry fires with 59500ms of budget left.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(signals).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(59499);
     expect(signals[0].aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(2);
     expect(signals[0].aborted).toBe(true);

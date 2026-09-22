@@ -62,11 +62,8 @@ export async function fetchWithTimeout(
     Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "60000", 10);
   const ms = Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
 
-  // The caller's timeout is the TOTAL budget for all attempts + sleeps, and it
-  // is honored exactly. This fork runs only the in-process Engine (ADR 0001),
-  // which imposes no invocation timeout to stay under, so a configured bound
-  // must not be silently shortened — a slow local model legitimately needs the
-  // minutes it was given.
+  // The caller's timeout is the TOTAL budget for all attempts + sleeps, honored
+  // exactly: nothing above this Engine imposes a shorter ceiling (ADR 0001).
   const start = Date.now();
 
   let response: Response = await fetchOnce(url, init, ms);

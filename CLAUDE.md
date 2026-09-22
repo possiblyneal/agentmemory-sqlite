@@ -150,11 +150,11 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - REST endpoints must whitelist fields — never pass raw request body to `sdk.trigger()`
 - Use `recordAudit()` for state-changing operations
 - Timestamps: capture once with `new Date().toISOString()` and reuse
-- Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the configured
-  bound (`OPENAI_TIMEOUT_MS` → `AGENTMEMORY_LLM_TIMEOUT_MS` → 60s) exactly. The in-process
-  Engine has no invocation timeout, so never reintroduce a ceiling that clamps that bound —
-  the old 170s `HARD_BUDGET_CAP_MS` cited iii's 180s limit, silently cut every longer
-  timeout, and still reported the configured value in the error.
+- Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the caller's
+  timeout exactly (falling back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s; the OpenAI LLM
+  provider resolves `OPENAI_TIMEOUT_MS` first). The in-process Engine has no invocation
+  timeout, so never reintroduce a ceiling that clamps that bound
+  ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)).
 
 ## Testing
 
@@ -199,16 +199,18 @@ stale — do not re-add translations without a way to keep them current.
 `docs/upstream-issue-triage.yaml` scores every open upstream issue by severity and fix
 difficulty. It is a survey of defects in the shared code lineage, used to pick what is worth
 fixing *here* — it is not a backlog to merge from, and it is a dated snapshot, not a live
-mirror. Re-generate it from `gh issue list` rather than editing rows by hand. Its rows
+mirror. Refresh the row set from `gh issue list`; the `disposition`, `status`, `fixed_by`
+and `wont_fix_reason` fields are hand-written verdicts, updated as fixes land here. Its rows
 cross-link the open upstream PRs that claim to fix them; `docs/upstream-pr-triage.yaml`
 covers the remaining PRs — the ones that reference no open issue — scored by whether they
 land in code this fork carries. Both are read for the defect and the diagnosis, never for
 the patch.
 
 Every row in both files carries a `disposition`: `already-fixed` (verified against this tree;
-`fixed_by`/`status` names the evidence), `wont-fix` (out of scope here — no iii engine, no npm
-publish, no Windows CI, no deploy tree, or a host with no adapter in `src/cli/connect/`;
-`wont_fix_reason` says which), or `candidate` — the working set. A row that was opened against
+`fixed_by`/`status` names the evidence), `wont-fix` (out of scope here — most often
+upstream-only housekeeping, or code this fork does not carry: the iii engine, npm publishing,
+Windows CI, the deploy tree, a host with no adapter in `src/cli/connect/`; `wont_fix_reason`
+says which), or `candidate` — the working set. A row that was opened against
 this tree also carries `status`, whose leading token says what the read found
 (`fixed-here`, `present-here`, `partly-present-here`, `unresolved`). No `status` means
 unchecked: the note is still upstream's claim, not a verified defect.

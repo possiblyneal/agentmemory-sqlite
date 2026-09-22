@@ -44,7 +44,7 @@ let sdkOriginalEnv: string | undefined
 // and refusing those chunks would trip the skip-ratio bailout and lose
 // the whole summary.
 const MAX_CONCURRENT_DEFAULT = 2
-// Nothing else bounds an SDK call in time. `fetchWithTimeout`'s cap covers
+// Nothing else bounds an SDK call in time. `fetchWithTimeout`'s deadline covers
 // the raw-fetch providers only; here the work happens inside a spawned
 // `claude` process, so a child that wedges leaves its caller awaiting for
 // as long as the process lives — and, since the cap above, holding its
