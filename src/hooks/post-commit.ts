@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-
+import { hydrateHookEnv } from "./_env.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { hookCwd } from "./_project.js";
+
+hydrateHookEnv();
 
 const exec = promisify(execFile);
 

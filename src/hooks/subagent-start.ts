@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+import { hydrateHookEnv } from "./_env.js";
 import { resolveProject, hookCwd } from "./_project.js";
+
+hydrateHookEnv();
 
 // Inlined from ./sdk-guard so each hook bundles to a single self-contained
 // .mjs (matches the pattern used by every other hook entry in tsdown.config).

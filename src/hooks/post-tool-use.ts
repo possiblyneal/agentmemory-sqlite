@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+import { hydrateHookEnv } from "./_env.js";
 import { resolveProject, hookCwd } from "./_project.js";
+
+hydrateHookEnv();
 
 function isSdkChildContext(payload: unknown): boolean {
   if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;

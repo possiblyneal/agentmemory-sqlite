@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { hydrateHookEnv } from "./_env.js";
+
+hydrateHookEnv();
 
 function isSdkChildContext(payload: unknown): boolean {
   if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
@@ -18,7 +21,8 @@ function isSdkChildContext(payload: unknown): boolean {
 //
 // Users who explicitly want pre-tool enrichment opt in with:
 //   AGENTMEMORY_INJECT_CONTEXT=true   in ~/.agentmemory/.env
-// and restart Claude Code. Expect your session input token count to grow
+// (read by hydrateHookEnv above on every hook run; a shell-exported value
+// wins) and restart Claude Code. Expect your session input token count to grow
 // proportionally with the number of file-touching tool calls per turn.
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 
