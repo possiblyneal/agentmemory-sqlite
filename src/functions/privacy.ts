@@ -28,6 +28,19 @@ export function stripPrivateData(input: string): string {
   return result;
 }
 
+// Every function that persists Agent-supplied free text scrubs it first,
+// so a pasted token never lands in the store whichever surface wrote it.
+export function scrubFields<T extends object>(data: T, ...fields: (keyof T)[]): T {
+  const out = { ...data };
+  for (const field of fields) {
+    const value = out[field];
+    if (typeof value === "string") {
+      out[field] = stripPrivateData(value) as T[keyof T];
+    }
+  }
+  return out;
+}
+
 export function registerPrivacyFunction(sdk: ISdk): void {
   sdk.registerFunction("mem::privacy", 
     async (data: { input?: unknown } | undefined) => {

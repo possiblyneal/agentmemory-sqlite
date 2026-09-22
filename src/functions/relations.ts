@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { safeAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { logger } from "../logger.js";
 
@@ -132,7 +133,7 @@ export function registerRelationsFunction(sdk: ISdk, kv: StateKV): void {
       newContent: string;
       newTitle?: string;
     }) => {
-
+      data = scrubFields(data, "newContent", "newTitle");
       const existing = await kv.get<Memory>(KV.memories, data.memoryId);
       if (!existing) {
         return { success: false, error: "memory not found" };

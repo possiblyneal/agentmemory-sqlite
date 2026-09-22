@@ -5,6 +5,7 @@ import type { Lesson } from "../types.js";
 import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 // Dedicated BM25 index for lessons, with the full records cached
 // alongside it. Recall previously listed every lesson from KV and
@@ -74,6 +75,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       source?: "crystal" | "manual" | "consolidation";
       sourceIds?: string[];
     }) => {
+      data = scrubFields(data, "content", "context");
       if (!data.content?.trim()) {
         return { success: false, error: "content is required" };
       }

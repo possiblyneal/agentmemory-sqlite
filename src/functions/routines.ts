@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { Action, Routine, RoutineStep, RoutineRun } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 export function registerRoutinesFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::routine-create", 
@@ -15,6 +16,7 @@ export function registerRoutinesFunction(sdk: ISdk, kv: StateKV): void {
       frozen?: boolean;
       sourceProceduralIds?: string[];
     }) => {
+      data = scrubFields(data, "name", "description");
       if (!data.name || !Array.isArray(data.steps) || data.steps.length === 0) {
         return { success: false, error: "name and steps are required" };
       }
@@ -45,13 +47,16 @@ export function registerRoutinesFunction(sdk: ISdk, kv: StateKV): void {
         id: generateId("rtn"),
         name: data.name.trim(),
         description: (data.description || "").trim(),
-        steps: data.steps.map((s, i) => ({
-          order: s.order ?? i,
-          title: s.title,
-          description: s.description || "",
-          actionTemplate: s.actionTemplate || {},
-          dependsOn: s.dependsOn || [],
-        })),
+        steps: data.steps.map((raw, i) => {
+          const s = scrubFields(raw, "title", "description");
+          return {
+            order: s.order ?? i,
+            title: s.title,
+            description: s.description || "",
+            actionTemplate: s.actionTemplate || {},
+            dependsOn: s.dependsOn || [],
+          };
+        }),
         createdAt: now,
         updatedAt: now,
         frozen: data.frozen ?? true,

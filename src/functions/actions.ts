@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { Action, ActionEdge } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 export function registerActionsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::action-create", 
@@ -19,6 +20,7 @@ export function registerActionsFunction(sdk: ISdk, kv: StateKV): void {
       sourceMemoryIds?: string[];
       edges?: Array<{ type: string; targetActionId: string }>;
     }) => {
+      data = scrubFields(data, "title", "description");
       if (!data.title || typeof data.title !== "string") {
         return { success: false, error: "title is required" };
       }
@@ -108,6 +110,7 @@ export function registerActionsFunction(sdk: ISdk, kv: StateKV): void {
       result?: string;
       tags?: string[];
     }) => {
+      data = scrubFields(data, "title", "description", "result");
       if (!data.actionId) {
         return { success: false, error: "actionId is required" };
       }

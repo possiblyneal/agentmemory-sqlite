@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { Action, ActionEdge, Checkpoint } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 export function registerCheckpointsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::checkpoint-create", 
@@ -14,6 +15,7 @@ export function registerCheckpointsFunction(sdk: ISdk, kv: StateKV): void {
       linkedActionIds?: string[];
       expiresInMs?: number;
     }) => {
+      data = scrubFields(data, "name", "description");
       if (!data.name) {
         return { success: false, error: "name is required" };
       }

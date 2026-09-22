@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { Action, ActionEdge, Checkpoint, CompressedObservation, FunctionMetrics, Sentinel, Session } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 const VALID_TYPES: Sentinel["type"][] = [
   "webhook",
@@ -23,6 +24,7 @@ export function registerSentinelsFunction(sdk: ISdk, kv: StateKV): void {
       linkedActionIds?: string[];
       expiresInMs?: number;
     }) => {
+      data = scrubFields(data, "name");
       if (!data.name || typeof data.name !== "string") {
         return { success: false, error: "name is required" };
       }

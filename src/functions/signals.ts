@@ -3,6 +3,7 @@ import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Signal } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 export function registerSignalsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::signal-send", 
@@ -16,6 +17,7 @@ export function registerSignalsFunction(sdk: ISdk, kv: StateKV): void {
       metadata?: Record<string, unknown>;
       expiresInMs?: number;
     }) => {
+      data = scrubFields(data, "content");
       if (!data.from?.trim() || !data.content?.trim()) {
         return { success: false, error: "from and non-empty content are required" };
       }

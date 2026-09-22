@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { Action, ActionEdge, Sketch } from "../types.js";
 import { safeAudit } from "./audit.js";
+import { scrubFields } from "./privacy.js";
 
 export function registerSketchesFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::sketch-create", 
@@ -13,6 +14,7 @@ export function registerSketchesFunction(sdk: ISdk, kv: StateKV): void {
       expiresInMs?: number;
       project?: string;
     }) => {
+      data = scrubFields(data, "title", "description");
       if (!data.title || typeof data.title !== "string") {
         return { success: false, error: "title is required" };
       }
@@ -47,6 +49,7 @@ export function registerSketchesFunction(sdk: ISdk, kv: StateKV): void {
       priority?: number;
       dependsOn?: string[];
     }) => {
+      data = scrubFields(data, "title", "description");
       if (!data.sketchId) {
         return { success: false, error: "sketchId is required" };
       }
