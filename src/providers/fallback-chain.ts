@@ -2,9 +2,15 @@ import type { MemoryProvider } from "../types.js";
 
 export class FallbackChainProvider implements MemoryProvider {
   name: string;
+  // Counts follow the primary: that is the model the text is chunked for.
+  countTokens?: (text: string) => Promise<number>;
 
   constructor(private providers: MemoryProvider[]) {
     this.name = `fallback(${providers.map((p) => p.name).join(" -> ")})`;
+    const primary = providers[0];
+    if (primary?.countTokens) {
+      this.countTokens = (text) => primary.countTokens!(text);
+    }
   }
 
   async compress(systemPrompt: string, userPrompt: string): Promise<string> {

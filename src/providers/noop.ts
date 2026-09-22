@@ -18,3 +18,17 @@ export class NoopProvider implements MemoryProvider {
     return "";
   }
 }
+
+const RESILIENT_PREFIX = "resilient(";
+
+/**
+ * Every provider is wrapped as `resilient(<inner>)`, so callers must look
+ * through the wrapper rather than compare against "noop" directly.
+ */
+export function isNoopProvider(provider: Pick<MemoryProvider, "name">): boolean {
+  let name = provider.name;
+  while (name.startsWith(RESILIENT_PREFIX) && name.endsWith(")")) {
+    name = name.slice(RESILIENT_PREFIX.length, -1);
+  }
+  return name === "noop";
+}

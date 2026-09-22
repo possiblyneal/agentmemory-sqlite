@@ -29,6 +29,7 @@ import {
   buildGraphExtractionPrompt,
 } from "../prompts/graph-extraction.js";
 import { isGraphExtractionEnabled } from "../config.js";
+import { isNoopProvider } from "../providers/noop.js";
 import { capSourceIds } from "./graph-provenance.js";
 import { recordAudit } from "./audit.js";
 import { logger } from "../logger.js";
@@ -923,7 +924,7 @@ export function registerGraphFunction(
       }
 
       const llmEnabled =
-        isGraphExtractionEnabled() && !provider.name.includes("noop");
+        isGraphExtractionEnabled() && !isNoopProvider(provider);
       let llmError: string | undefined;
       if (llmEnabled) {
         const prompt = buildGraphExtractionPrompt(

@@ -10,6 +10,7 @@ import { StateKV } from "../state/kv.js";
 import {
   SUMMARY_SYSTEM,
   buildSummaryPrompt,
+  renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
 } from "../prompts/summary.js";
@@ -19,28 +20,36 @@ import { validateOutput } from "../eval/validator.js";
 import { scoreSummary } from "../eval/quality.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { safeAudit } from "./audit.js";
+import { isNoopProvider } from "../providers/noop.js";
 import { logger } from "../logger.js";
 
-// Per-chunk observation budget when a session is too large to fit in one
-// LLM call. Default ≈ 50k input tokens per chunk at ~110 tok/obs — fits
-// comfortably in 128k-window models. Override via SUMMARIZE_CHUNK_SIZE.
-const CHUNK_SIZE_DEFAULT = 400;
-// Concurrent in-flight chunk calls. 6 keeps a 100-chunk session under
-// iii's 180s function-invocation timeout at ~8s/call while staying
-// inside generous-but-not-unlimited provider rate limits (well below
-// OpenAI free tier's 500 RPM). High-throughput providers
-// (Novita / DeepInfra / DeepSeek) typically allow 100+ concurrent — set
-// SUMMARIZE_CHUNK_CONCURRENCY higher to cover ~1000+ chunk sessions.
-const CHUNK_CONCURRENCY_DEFAULT = 6;
+// Per-chunk prompt budget in tokens when a Session is too large to fit in
+// one LLM call. Measured on the Operator's broker: a 50k-token chunk
+// summarizes cold in 60–89s solo. Override via SUMMARIZE_CHUNK_TOKENS.
+const CHUNK_TOKENS_DEFAULT = 50_000;
+// Tokens the system prompt and chat template add on top of the rendered
+// Observations, measured on the Operator's broker.
+const PROMPT_OVERHEAD_TOKENS = 400;
+// Tokens buildSummaryPrompt spends joining one Observation to the next.
+const SEPARATOR_TOKENS = 4;
+// Concurrent in-flight chunk calls. The Operator's broker serialises chunks
+// on one GPU, and AGENTMEMORY_LLM_TIMEOUT_MS was measured at 2 — raise
+// SUMMARIZE_CHUNK_CONCURRENCY only with the timeout re-measured.
+const CHUNK_CONCURRENCY_DEFAULT = 2;
+// Parallel tokenize calls while measuring a Session's Observations.
+const COUNT_CONCURRENCY = 16;
 // Bail on the merged summary if more than this fraction of chunks fail
 // to parse — a half-blind narrative is worse than a clean error.
 const MAX_SKIP_RATIO = 0.5;
 
-function getChunkSize(): number {
-  const raw = process.env.SUMMARIZE_CHUNK_SIZE;
-  if (!raw) return CHUNK_SIZE_DEFAULT;
+// A budget at or below the prompt overhead leaves no room for any
+// Observation, so it is floored to one payload token.
+function getChunkTokens(): number {
+  const raw = process.env.SUMMARIZE_CHUNK_TOKENS;
+  if (!raw) return CHUNK_TOKENS_DEFAULT;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : CHUNK_SIZE_DEFAULT;
+  if (!Number.isFinite(n) || n <= 0) return CHUNK_TOKENS_DEFAULT;
+  return Math.max(n, PROMPT_OVERHEAD_TOKENS + 1);
 }
 
 function getChunkConcurrency(): number {
@@ -48,6 +57,83 @@ function getChunkConcurrency(): number {
   if (!raw) return CHUNK_CONCURRENCY_DEFAULT;
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : CHUNK_CONCURRENCY_DEFAULT;
+}
+
+// The estimate idiom this tree already uses; it overcounts measured
+// content by ~17%, the safe direction for a budget.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  for (let start = 0; start < items.length; start += concurrency) {
+    const batch = items.slice(start, start + concurrency);
+    const results = await Promise.all(batch.map(fn));
+    results.forEach((r, j) => {
+      out[start + j] = r;
+    });
+  }
+  return out;
+}
+
+async function countObservationTokens(
+  provider: MemoryProvider,
+  texts: string[],
+  sessionId: string,
+): Promise<number[]> {
+  if (provider.countTokens) {
+    try {
+      return await mapWithConcurrency(texts, COUNT_CONCURRENCY, (t) =>
+        provider.countTokens!(t),
+      );
+    } catch (err) {
+      logger.warn("Token count failed, packing chunks by estimate", {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return texts.map(estimateTokens);
+}
+
+// Greedy in-order packing. An Observation that alone exceeds the budget
+// becomes its own chunk: dropping it would lose Session history, and the
+// provider's own context error is the right failure for that chunk.
+function packChunks(
+  compressed: CompressedObservation[],
+  counts: number[],
+  budget: number,
+  sessionId: string,
+): CompressedObservation[][] {
+  const payloadBudget = budget - PROMPT_OVERHEAD_TOKENS;
+  const chunks: CompressedObservation[][] = [];
+  let current: CompressedObservation[] = [];
+  let used = 0;
+  compressed.forEach((obs, i) => {
+    const tokens = (counts[i] ?? 0) + SEPARATOR_TOKENS;
+    if (current.length > 0 && used + tokens > payloadBudget) {
+      chunks.push(current);
+      current = [];
+      used = 0;
+    }
+    if (tokens > payloadBudget) {
+      logger.warn("Observation exceeds the chunk budget on its own", {
+        sessionId,
+        observationId: obs.id,
+        tokens,
+        budget,
+      });
+    }
+    current.push(obs);
+    used += tokens;
+  });
+  if (current.length > 0) chunks.push(current);
+  return chunks;
 }
 
 // One chunk call with retry-once. Returns null when both attempts fail —
@@ -90,14 +176,35 @@ async function summarizeChunkWithRetry(
   return null;
 }
 
-// Returns the final summary XML string. For sessions ≤ chunk size, this is
-// a single LLM call (legacy behavior). For larger sessions, observations
-// are split into chunks processed in parallel batches, each chunk retried
-// once on parse failure, persistently-bad chunks skipped, and remaining
+// Measures every Observation once and packs them against the chunk budget.
+async function planChunks(
+  provider: MemoryProvider,
+  compressed: CompressedObservation[],
+  sessionId: string,
+): Promise<CompressedObservation[][]> {
+  const budget = getChunkTokens();
+  const texts = compressed.map(renderSummaryObservation);
+  const counts = await countObservationTokens(provider, texts, sessionId);
+  const chunks = packChunks(compressed, counts, budget, sessionId);
+  if (chunks.length > 1) {
+    logger.info("Summarize chunking session", {
+      sessionId,
+      chunks: chunks.length,
+      budget,
+      concurrency: getChunkConcurrency(),
+      totalObservations: compressed.length,
+    });
+  }
+  return chunks;
+}
+
+// Returns the final summary XML string. A single chunk is one LLM call.
+// Several are processed in parallel batches, each chunk retried once on
+// parse failure, persistently-bad chunks skipped, and the remaining
 // partials merged via a reduce call.
 async function produceSummaryXml(
   provider: MemoryProvider,
-  compressed: CompressedObservation[],
+  chunks: CompressedObservation[][],
   sessionId: string,
   project: string,
 ): Promise<{
@@ -106,48 +213,22 @@ async function produceSummaryXml(
   chunks: number;
   skipped?: number;
 }> {
-  const chunkSize = getChunkSize();
-  if (compressed.length <= chunkSize) {
+  if (chunks.length === 1) {
     const response = await provider.summarize(
       SUMMARY_SYSTEM,
-      buildSummaryPrompt(compressed),
+      buildSummaryPrompt(chunks[0]!),
     );
     return { response, mode: "single", chunks: 1 };
   }
 
-  const chunks: CompressedObservation[][] = [];
-  for (let i = 0; i < compressed.length; i += chunkSize) {
-    chunks.push(compressed.slice(i, i + chunkSize));
-  }
-  const concurrency = getChunkConcurrency();
-  logger.info("Summarize chunking session", {
-    sessionId,
-    chunks: chunks.length,
-    chunkSize,
-    concurrency,
-    totalObservations: compressed.length,
-  });
-
-  // Sparse array preserves chunk → index mapping after parallel resolution,
-  // so the reduce step sees partials in chronological order even when some
-  // were skipped.
-  const partialByIdx: Array<SessionSummary | null> = new Array(chunks.length).fill(null);
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += concurrency) {
-    const batch = chunks.slice(batchStart, batchStart + concurrency);
-    await Promise.all(
-      batch.map(async (chunk, j) => {
-        const idx = batchStart + j;
-        partialByIdx[idx] = await summarizeChunkWithRetry(
-          provider,
-          chunk,
-          sessionId,
-          project,
-          idx,
-          chunks.length,
-        );
-      }),
-    );
-  }
+  // Results keep chunk order, so the reduce step sees partials in
+  // chronological order even when some were skipped.
+  const partialByIdx = await mapWithConcurrency(
+    chunks.map((chunk, idx) => ({ chunk, idx })),
+    getChunkConcurrency(),
+    ({ chunk, idx }) =>
+      summarizeChunkWithRetry(provider, chunk, sessionId, project, idx, chunks.length),
+  );
 
   const skipped = partialByIdx.filter((p) => p === null).length;
   const partials = partialByIdx.filter((p): p is SessionSummary => p !== null);
@@ -165,16 +246,22 @@ async function produceSummaryXml(
     });
   }
 
+  const chunkStarts: number[] = [];
+  for (let offset = 0, i = 0; i < chunks.length; i++) {
+    chunkStarts.push(offset);
+    offset += chunks[i]!.length;
+  }
   const reduceInput = partials.map((p) => {
     const originalIdx = partialByIdx.indexOf(p);
+    const start = chunkStarts[originalIdx] ?? 0;
     return {
       title: p.title,
       narrative: p.narrative,
       keyDecisions: p.keyDecisions,
       filesModified: p.filesModified,
       concepts: p.concepts,
-      obsRangeStart: originalIdx * chunkSize + 1,
-      obsRangeEnd: Math.min((originalIdx + 1) * chunkSize, compressed.length),
+      obsRangeStart: start + 1,
+      obsRangeEnd: start + chunks[originalIdx]!.length,
     };
   });
   const response = await provider.summarize(
@@ -233,7 +320,7 @@ export function registerSummarizeFunction(
   metricsStore?: MetricsStore,
 ): void {
   sdk.registerFunction("mem::summarize", 
-    async (data: { sessionId: string } | undefined) => {
+    async (data: { sessionId: string; force?: boolean } | undefined) => {
       const startMs = Date.now();
       if (!data || typeof data.sessionId !== "string" || !data.sessionId.trim()) {
         return { success: false, error: "sessionId is required" };
@@ -260,7 +347,26 @@ export function registerSummarizeFunction(
         return { success: false, error: "no_observations" };
       }
 
-      if (provider.name === "noop") {
+      // A stored summary is current when both the Observation count and the
+      // last Observation id still match: a delete followed by a new
+      // Observation keeps the count but moves the id.
+      const lastObservationId = compressed[compressed.length - 1]!.id;
+      if (!data.force) {
+        const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
+        if (
+          existing &&
+          existing.observationCount === compressed.length &&
+          existing.lastObservationId === lastObservationId
+        ) {
+          logger.info("Session Summary current, reused", {
+            sessionId,
+            observationCount: compressed.length,
+          });
+          return { success: true, summary: existing, reused: true };
+        }
+      }
+
+      if (isNoopProvider(provider)) {
         logger.info("Summarize skipped — no LLM provider configured", {
           sessionId,
         });
@@ -282,10 +388,11 @@ export function registerSummarizeFunction(
         let response = "";
         let mode = "single";
         let chunks = 1;
+        const planned = await planChunks(provider, compressed, sessionId);
         for (let attempt = 1; attempt <= 2; attempt++) {
           const produced = await produceSummaryXml(
             provider,
-            compressed,
+            planned,
             sessionId,
             session.project,
           );
@@ -309,7 +416,10 @@ export function registerSummarizeFunction(
             session.project,
             compressed.length,
           );
-          if (summary) break;
+          if (summary) {
+            summary.lastObservationId = lastObservationId;
+            break;
+          }
           logger.warn("Failed to parse summary XML", { sessionId, attempt });
         }
 

@@ -115,7 +115,7 @@ describe("keyless graph extraction wiring", () => {
     const graph = readFileSync("src/functions/graph.ts", "utf-8");
     expect(graph).toMatch(/extractGraphHeuristics\(data\.observations\)/);
     expect(graph).toMatch(
-      /isGraphExtractionEnabled\(\) && !provider\.name\.includes\("noop"\)/,
+      /isGraphExtractionEnabled\(\) && !isNoopProvider\(provider\)/,
     );
   });
 });

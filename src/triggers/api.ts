@@ -143,7 +143,7 @@ export function registerApiTriggers(
   kv: StateKV,
   secret?: string,
   metricsStore?: MetricsStore,
-  provider?: ResilientProvider | { circuitState?: unknown },
+  provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown },
 ): void {
   sdk.registerFunction(
     "middleware::api-auth",
@@ -270,6 +270,8 @@ export function registerApiTriggers(
       const functionMetrics = metricsStore ? await metricsStore.getAll() : [];
       const circuitBreaker =
         provider && "circuitState" in provider ? provider.circuitState : null;
+      const circuitBreakers =
+        provider && "circuitStates" in provider ? provider.circuitStates : null;
 
       const status = health?.status || "healthy";
       const statusCode = status === "critical" ? 503 : 200;
@@ -282,6 +284,7 @@ export function registerApiTriggers(
           health: health || null,
           functionMetrics,
           circuitBreaker,
+          circuitBreakers,
           ...instanceInfo(),
         },
       };
@@ -696,14 +699,15 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::summarize", 
-    async (req: ApiRequest<{ sessionId: string }>): Promise<Response> => {
-      const sessionId = asNonEmptyString((req.body as Record<string, unknown>)?.sessionId);
+    async (req: ApiRequest<{ sessionId: string; force?: boolean }>): Promise<Response> => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const sessionId = asNonEmptyString(body.sessionId);
       if (!sessionId) {
         return { status_code: 400, body: { error: "sessionId is required" } };
       }
       const result = await sdk.trigger({
         function_id: "mem::summarize",
-        payload: { sessionId },
+        payload: { sessionId, force: body.force === true },
       });
       return { status_code: 200, body: result };
     },
