@@ -761,15 +761,17 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         if (!tokenBudget) return { items, used: items.reduce((sum, item) => sum + estimateTokens(item), 0), truncated: false }
         const selected: T[] = []
         let used = 0
+        let truncated = false
         for (const item of items) {
           const itemTokens = estimateTokens(item)
           if (used + itemTokens > tokenBudget) {
-            return { items: selected, used, truncated: selected.length < items.length }
+            truncated = true
+            continue
           }
           selected.push(item)
           used += itemTokens
         }
-        return { items: selected, used, truncated: false }
+        return { items: selected, used, truncated }
       }
 
       if (format === 'compact') {
