@@ -47,13 +47,16 @@ export function registerRoutinesFunction(sdk: ISdk, kv: StateKV): void {
         id: generateId("rtn"),
         name: data.name.trim(),
         description: (data.description || "").trim(),
-        steps: data.steps.map((s, i) => ({
-          order: s.order ?? i,
-          title: s.title,
-          description: s.description || "",
-          actionTemplate: s.actionTemplate || {},
-          dependsOn: s.dependsOn || [],
-        })),
+        steps: data.steps.map((raw, i) => {
+          const s = scrubFields(raw, "title", "description");
+          return {
+            order: s.order ?? i,
+            title: s.title,
+            description: s.description || "",
+            actionTemplate: s.actionTemplate || {},
+            dependsOn: s.dependsOn || [],
+          };
+        }),
         createdAt: now,
         updatedAt: now,
         frozen: data.frozen ?? true,

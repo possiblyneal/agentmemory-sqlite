@@ -14,6 +14,7 @@ import { isSlotsEnabled, isReflectEnabled } from "../functions/slots.js";
 import { renderViewerDocument } from "../viewer/document.js";
 import { getBoundViewerPort, getViewerSkipped } from "../viewer/server.js";
 import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
+import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import {
   isGraphExtractionEnabled,
@@ -612,7 +613,7 @@ export function registerApiTriggers(
           },
         };
       }
-      const title = typeof body.title === "string" ? body.title.trim() : undefined;
+      const title = typeof body.title === "string" ? stripPrivateData(body.title.trim()) : undefined;
       // allow session/start to override AGENT_ID from request body
       // (multi-agent runtimes that route many roles through one server
       // process). Falls back to the AGENT_ID env on the server.
@@ -731,7 +732,8 @@ export function registerApiTriggers(
       const sessionId = asNonEmptyString(body.sessionId) ?? undefined;
       const branch = asNonEmptyString(body.branch) ?? undefined;
       const repo = asNonEmptyString(body.repo) ?? undefined;
-      const message = asNonEmptyString(body.message) ?? undefined;
+      const rawMessage = asNonEmptyString(body.message);
+      const message = rawMessage ? stripPrivateData(rawMessage) : undefined;
       const author = asNonEmptyString(body.author) ?? undefined;
       const authoredAt = asNonEmptyString(body.authoredAt) ?? undefined;
       const files = Array.isArray(body.files)

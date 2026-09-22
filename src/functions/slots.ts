@@ -6,6 +6,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { getEnvVar } from "../config.js";
 import { logger } from "../logger.js";
+import { scrubFields } from "./privacy.js";
 
 type SlotScope = "project" | "global";
 
@@ -235,6 +236,7 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
       pinned?: boolean;
       scope?: SlotScope;
     }) => {
+      data = scrubFields(data, "content", "description");
       const label = validateLabel(data?.label);
       if (!label) return { success: false, error: "label required (lowercase, starts with letter, [a-z0-9_])" };
       const scope = validateScope(data?.scope);
@@ -280,6 +282,7 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::slot-append",
     async (data: { label?: string; text?: string }) => {
+      data = scrubFields(data, "text");
       const label = validateLabel(data?.label);
       if (!label) return { success: false, error: "label required" };
       const text = typeof data?.text === "string" ? data.text : "";
@@ -313,6 +316,7 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::slot-replace",
     async (data: { label?: string; content?: string }) => {
+      data = scrubFields(data, "content");
       const label = validateLabel(data?.label);
       if (!label) return { success: false, error: "label required" };
       if (typeof data?.content !== "string") return { success: false, error: "content required (string)" };

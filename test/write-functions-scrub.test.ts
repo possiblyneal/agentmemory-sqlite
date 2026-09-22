@@ -18,6 +18,10 @@ import { registerFacetsFunction } from "../src/functions/facets.js";
 import { registerWorkingMemoryFunctions } from "../src/functions/working-memory.js";
 import { registerSketchesFunction } from "../src/functions/sketches.js";
 import { registerRoutinesFunction } from "../src/functions/routines.js";
+import { registerRelationsFunction } from "../src/functions/relations.js";
+import { registerSlotsFunctions } from "../src/functions/slots.js";
+import { registerApiTriggers } from "../src/triggers/api.js";
+import { KV } from "../src/state/schema.js";
 
 const SECRET = "ghp_" + "A".repeat(36);
 const REDACTED = "[REDACTED_SECRET]";
@@ -64,7 +68,10 @@ function everythingStored(kv: ReturnType<typeof mockKV>): string {
 type Case = {
   name: string;
   register: (sdk: any, kv: any) => void;
-  run: (call: (id: string, payload: unknown) => Promise<any>) => Promise<void>;
+  run: (
+    call: (id: string, payload: unknown) => Promise<any>,
+    kv: ReturnType<typeof mockKV>,
+  ) => Promise<void>;
 };
 
 const cases: Case[] = [
@@ -167,13 +174,60 @@ const cases: Case[] = [
     },
   },
   {
-    name: "mem::routine-create name and description",
+    name: "mem::routine-create name, description and step text",
     register: registerRoutinesFunction,
     run: async (call) => {
       await call("mem::routine-create", {
         name: `r ${SECRET}`,
         description: `d ${SECRET}`,
-        steps: [{ order: 1, title: "one", description: "x", actionTemplate: {}, dependsOn: [] }],
+        steps: [{ order: 1, title: `one ${SECRET}`, description: `x ${SECRET}`, actionTemplate: {}, dependsOn: [] }],
+      });
+    },
+  },
+  {
+    name: "mem::evolve newContent and newTitle",
+    register: registerRelationsFunction,
+    run: async (call, kv) => {
+      await kv.set(KV.memories, "mem_1", { id: "mem_1", title: "clean", content: "clean", version: 1 });
+      await call("mem::evolve", { memoryId: "mem_1", newContent: `c ${SECRET}`, newTitle: `t ${SECRET}` });
+    },
+  },
+  {
+    name: "mem::slot-create content and description",
+    register: registerSlotsFunctions,
+    run: async (call) => {
+      await call("mem::slot-create", { label: "notes", content: `c ${SECRET}`, description: `d ${SECRET}` });
+    },
+  },
+  {
+    name: "mem::slot-append text and mem::slot-replace content",
+    register: registerSlotsFunctions,
+    run: async (call) => {
+      await call("mem::slot-create", { label: "notes", content: "clean" });
+      await call("mem::slot-append", { label: "notes", text: `a ${SECRET}` });
+      await call("mem::slot-replace", { label: "notes", content: `r ${SECRET}` });
+    },
+  },
+  {
+    name: "api::session::start title",
+    register: (sdk, kv) => {
+      registerApiTriggers(sdk, kv, "secret");
+      sdk.registerFunction("mem::context", async () => ({ context: "" }));
+    },
+    run: async (call) => {
+      await call("api::session::start", {
+        headers: {},
+        body: { sessionId: "ses_1", project: "p", cwd: "/p", title: `title ${SECRET}` },
+      });
+    },
+  },
+  {
+    name: "api::session::commit message",
+    register: (sdk, kv) => registerApiTriggers(sdk, kv, "secret"),
+    run: async (call) => {
+      await call("api::session::commit", {
+        headers: {},
+        body: { sha: "abc1234", message: `fix ${SECRET}` },
       });
     },
   },
@@ -190,7 +244,7 @@ describe("write functions scrub secrets before storing", () => {
         if (!handler) throw new Error(`no handler ${id}`);
         return handler(payload);
       };
-      await c.run(call);
+      await c.run(call, kv);
       const stored = everythingStored(kv);
       expect(stored).not.toContain(SECRET);
       expect(stored).toContain(REDACTED);
