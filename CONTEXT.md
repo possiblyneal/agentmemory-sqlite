@@ -33,6 +33,13 @@ A durable distilled record derived from Observations, intended to be recalled la
 are content-addressed, so the same content captured twice is one Memory.
 _Avoid_: note, fact, item
 
+**Session Summary**:
+The distilled account of one Session, produced from its Observations each time the Session
+stops.
+A Session Summary is current until an Observation arrives after it was written, and a
+current one is reused rather than reproduced.
+_Avoid_: session digest, recap
+
 **Entity**:
 A named thing the Agent worked with — a file, a symbol, a service, a concept — held as a node
 in the graph.

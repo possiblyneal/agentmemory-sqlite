@@ -1,5 +1,30 @@
 # agentmemory — Agent Instructions
 
+## Goal
+
+Put the right Memory in front of an Agent at the moment it needs it, and pay as little as
+possible to be able to do that. Every feature here is judged against that sentence.
+
+- **Right content** — Recall returns what bears on the work in hand, not everything that
+  matched the query. A near-miss that costs the Agent a read is worse than one fewer result.
+- **Right moment** — context arrives at hook boundaries (session start, pre-tool-use,
+  pre-compact) without the Agent having to know to ask. Memory the Agent must remember to
+  query is memory that goes unused.
+- **Right scope** — results are bounded by project, branch, and Session
+  (`scope: "project" | "global"`, `src/types.ts:277`). One repo's work never surfaces in
+  another's.
+- **Least record that restates** — store the smallest durable claim that reconstructs a
+  decision later: the conclusion and why, not the transcript that produced it. Observations
+  are raw and cheap; a Memory earns its place by being worth re-reading.
+- **Durable beats recent** — a correction that changes future behaviour outranks a log of
+  what happened. Volume is a cost, not a measure of success; Eviction is expected, not a
+  failure mode.
+- **Never on the critical path** — memory accelerates a Session and is never a dependency of
+  one. A dead daemon, a missed hook, or a slow Recall degrades the work; it does not block
+  it.
+- **The Operator's attention is the scarce resource** — disk growth, restarts, and noisy
+  recall are the real costs, and they land on one person.
+
 ## Architecture
 
 agentmemory is a persistent memory system for AI coding agents. It runs as a single process on one in-process Engine ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)) — importing `src/index.ts` *is* starting the daemon. There is no separate runtime to install, spawn, adopt or stop.
@@ -125,6 +150,11 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - REST endpoints must whitelist fields — never pass raw request body to `sdk.trigger()`
 - Use `recordAudit()` for state-changing operations
 - Timestamps: capture once with `new Date().toISOString()` and reuse
+- Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the caller's
+  timeout exactly (falling back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s; the OpenAI LLM
+  provider resolves `OPENAI_TIMEOUT_MS` first). The in-process Engine has no invocation
+  timeout, so never reintroduce a ceiling that clamps that bound
+  ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)).
 
 ## Testing
 
@@ -165,6 +195,25 @@ the `@agentmemory/mcp` shim wherever it is invoked as a proxy — `plugin/.mcp.j
 `plugin/.mcp.copilot.json` — because in proxy mode the tool surface comes from this fork's
 running server, not from the shim. The translated `READMEs/` were deleted rather than kept
 stale — do not re-add translations without a way to keep them current.
+
+`docs/upstream-issue-triage.yaml` scores every open upstream issue by severity and fix
+difficulty. It is a survey of defects in the shared code lineage, used to pick what is worth
+fixing *here* — it is not a backlog to merge from, and it is a dated snapshot, not a live
+mirror. Refresh the row set from `gh issue list`; the `disposition`, `status`, `fixed_by`
+and `wont_fix_reason` fields are hand-written verdicts, updated as fixes land here. Its rows
+cross-link the open upstream PRs that claim to fix them; `docs/upstream-pr-triage.yaml`
+covers the remaining PRs — the ones that reference no open issue — scored by whether they
+land in code this fork carries. Both are read for the defect and the diagnosis, never for
+the patch.
+
+Every row in both files carries a `disposition`: `already-fixed` (verified against this tree;
+`fixed_by`/`status` names the evidence), `wont-fix` (out of scope here — most often
+upstream-only housekeeping, or code this fork does not carry: the iii engine, npm publishing,
+Windows CI, the deploy tree, a host with no adapter in `src/cli/connect/`; `wont_fix_reason`
+says which), or `candidate` — the working set. A row that was opened against
+this tree also carries `status`, whose leading token says what the read found
+(`fixed-here`, `present-here`, `partly-present-here`, `unresolved`). No `status` means
+unchecked: the note is still upstream's claim, not a verified defect.
 
 ## Current Stats (v0.9.29)
 

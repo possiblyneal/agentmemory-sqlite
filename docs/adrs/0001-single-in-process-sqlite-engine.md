@@ -66,3 +66,8 @@ this fork does not execute. Rejected on cost against zero realised benefit.
   registration and `trigger()` become direct in-process calls.
 - Documentation describing agentmemory as built on iii-engine's three primitives becomes
   false for this fork and must be rewritten, not annotated.
+- Code that budgeted time against iii's 180s invocation timeout is now bounding itself
+  against a limit that no longer exists. `fetchWithTimeout`'s 170s `HARD_BUDGET_CAP_MS` was
+  one such residual: it clamped every configured LLM timeout above it while the error still
+  reported the unclamped value, so a slow local model looked like a provider failure. Treat
+  any remaining iii-derived ceiling as a defect, not a safety margin.

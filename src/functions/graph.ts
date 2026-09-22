@@ -641,7 +641,7 @@ export function extractGraphHeuristics(
   ): GraphNode | null => {
     const trimmed = name.trim();
     if (!trimmed) return null;
-    const key = `${type} ${trimmed.toLowerCase()}`;
+    const key = `${type}\u001f${trimmed.toLowerCase()}`;
     let node = nodeByKey.get(key);
     if (!node) {
       node = {

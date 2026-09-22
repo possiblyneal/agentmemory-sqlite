@@ -3,13 +3,10 @@ import { getEnvVar } from "../config.js";
 // Bounded retry for transient rate-limit / unavailable responses. Attempts is
 // total tries (initial + retries). Retries are bounded by a TOTAL elapsed
 // deadline — not per-attempt — so the worst case never blows past the caller's
-// timeout budget or the iii invocation timeout. A single retry delay is capped
-// low so a hostile Retry-After header can't dominate the budget.
+// timeout budget. A single retry delay is capped low so a hostile Retry-After
+// header can't dominate the budget.
 const MAX_ATTEMPTS = 3;
 const MAX_RETRY_DELAY_MS = 5000;
-// Absolute ceiling on the total budget, kept well under the iii 180s invocation
-// timeout so retries + sleeps + per-attempt timeouts can never overrun it.
-const HARD_BUDGET_CAP_MS = 170000;
 // A retry only makes sense if there's room for at least a token attempt after
 // the sleep; without this floor we'd sleep, fire, and get instantly cut off.
 const MIN_ATTEMPT_FLOOR_MS = 100;
@@ -65,15 +62,11 @@ export async function fetchWithTimeout(
     Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "60000", 10);
   const ms = Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
 
-  // The caller's timeout is the TOTAL budget for all attempts + sleeps, hard
-  // capped so we never approach the iii invocation timeout.
-  const budgetMs = Math.min(ms, HARD_BUDGET_CAP_MS);
+  // The caller's timeout is the TOTAL budget for all attempts + sleeps, honored
+  // exactly: nothing above this Engine imposes a shorter ceiling (ADR 0001).
   const start = Date.now();
 
-  // The first attempt must honor the capped budget too — passing raw `ms`
-  // here would let a large caller timeout hang past HARD_BUDGET_CAP_MS (and
-  // the iii 180s invocation timeout) before any retry logic runs.
-  let response: Response = await fetchOnce(url, init, budgetMs);
+  let response: Response = await fetchOnce(url, init, ms);
   for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
     if (!RETRY_STATUS.has(response.status)) return response;
 
@@ -86,7 +79,7 @@ export async function fetchWithTimeout(
     // budget — a hostile Retry-After that alone exceeds the remaining budget
     // returns the last response instead of stalling the caller.
     const elapsed = Date.now() - start;
-    const remaining = budgetMs - elapsed;
+    const remaining = ms - elapsed;
     if (delay + MIN_ATTEMPT_FLOOR_MS > remaining) return response;
 
     // This response is being discarded for a retry; release its body so the
@@ -98,7 +91,7 @@ export async function fetchWithTimeout(
     // can't push total elapsed past the deadline.
     const attemptMs = Math.max(
       MIN_ATTEMPT_FLOOR_MS,
-      Math.min(ms, budgetMs - (Date.now() - start)),
+      ms - (Date.now() - start),
     );
     response = await fetchOnce(url, init, attemptMs);
   }

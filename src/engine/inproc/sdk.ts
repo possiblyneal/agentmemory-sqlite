@@ -251,8 +251,10 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
   let streamBytes = 0;
   const subscriptions = new Set<Subscription>();
 
+  // Not NUL: a literal NUL byte makes git and grep treat the file as binary.
+  const GROUP_KEY_SEPARATOR = "\u001f";
   const groupKey = (streamName: string, groupId: string) =>
-    `${streamName} ${groupId}`;
+    `${streamName}${GROUP_KEY_SEPARATOR}${groupId}`;
 
   function broadcast(message: Record<string, unknown>): void {
     const streamName = message.streamName as string;
