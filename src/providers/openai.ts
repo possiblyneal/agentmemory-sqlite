@@ -55,6 +55,7 @@ export class OpenAIProvider implements MemoryProvider {
   private timeoutMs: number;
   private isAzure: boolean;
   private azureApiVersion: string;
+  private tokenizeUnavailable = false;
 
   constructor(apiKey: string, model: string, maxTokens: number, baseURL?: string) {
     this.apiKey = apiKey;
@@ -77,10 +78,14 @@ export class OpenAIProvider implements MemoryProvider {
   }
 
   // llama.cpp-style servers expose POST /tokenize at the server root, beside
-  // /v1. Anything without it answers non-2xx and the caller falls back to an
-  // estimate, so a count never blocks the work it measures.
+  // /v1. Anything without it answers 404 once and is never asked again for
+  // the life of this provider; the caller falls back to an estimate, so a
+  // count never blocks the work it measures.
   async countTokens(text: string): Promise<number> {
     const url = `${this.baseUrl.replace(/\/v1$/, "")}/tokenize`;
+    if (this.tokenizeUnavailable) {
+      throw new Error(`tokenize unavailable at ${url}`);
+    }
     const response = await fetchWithTimeout(
       url,
       {
@@ -90,6 +95,9 @@ export class OpenAIProvider implements MemoryProvider {
       },
       TOKENIZE_TIMEOUT_MS,
     );
+    if (response.status === 404) {
+      this.tokenizeUnavailable = true;
+    }
     if (!response.ok) {
       throw new Error(`tokenize error (${response.status}) at ${url}`);
     }

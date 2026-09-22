@@ -84,11 +84,14 @@ function makeObs(i: number, sessionId: string): CompressedObservation {
   };
 }
 
-// Fake count: every Observation is TOKENS_PER_OBS tokens, so a budget of
-// PROMPT_OVERHEAD + n * TOKENS_PER_OBS packs exactly n Observations per chunk.
+// Fake count: every Observation is TOKENS_PER_OBS tokens plus the separator
+// the prompt spends on it, so a budget of PROMPT_OVERHEAD + n * (TOKENS_PER_OBS
+// + SEPARATOR) packs exactly n Observations per chunk.
 const TOKENS_PER_OBS = 10;
+const SEPARATOR = 4;
 const PROMPT_OVERHEAD = 400;
-const budgetFor = (obsPerChunk: number) => String(PROMPT_OVERHEAD + obsPerChunk * TOKENS_PER_OBS);
+const budgetFor = (obsPerChunk: number) =>
+  String(PROMPT_OVERHEAD + obsPerChunk * (TOKENS_PER_OBS + SEPARATOR));
 
 function makeProvider(responses: string[]): MemoryProvider & {
   calls: Array<{ system: string; user: string }>;
@@ -540,6 +543,22 @@ describe("mem::summarize chunking", () => {
     expect((provider as any).calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("measures every Observation once, even across the summarize retry", async () => {
+    let counted = 0;
+    const provider = makeProvider(["garbage", summaryXml({ title: "second-attempt" })]);
+    provider.countTokens = async () => {
+      counted += 1;
+      return TOKENS_PER_OBS;
+    };
+    const { handler } = await setupHandler({ sessionId: "ses_once", obsCount: 5, provider });
+
+    const result: any = await handler({ sessionId: "ses_once" });
+
+    expect(result.success).toBe(true);
+    expect(provider.calls).toHaveLength(2);
+    expect(counted).toBe(5);
+  });
+
   it("returns parse_failed only after both attempts fail", async () => {
     const provider = makeProvider([
       "garbage one",
@@ -564,7 +583,12 @@ describe("mem::summarize Session Summary reuse", () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  async function withStoredSummary(sessionId: string, obsCount: number, storedCount: number) {
+  async function withStoredSummary(
+    sessionId: string,
+    obsCount: number,
+    storedCount: number,
+    storedLastId: string | null = `obs_${storedCount - 1}`,
+  ) {
     const provider = makeProvider([summaryXml({ title: "fresh" })]);
     const { handler, kv } = await setupHandler({ sessionId, obsCount, provider });
     await kv.set("summaries", sessionId, {
@@ -577,11 +601,12 @@ describe("mem::summarize Session Summary reuse", () => {
       filesModified: [],
       concepts: [],
       observationCount: storedCount,
+      ...(storedLastId === null ? {} : { lastObservationId: storedLastId }),
     });
     return { handler, kv, provider };
   }
 
-  it("returns the stored summary without calling the provider when its Observation count matches", async () => {
+  it("returns the stored summary without calling the provider when count and last Observation match", async () => {
     const { handler, provider } = await withStoredSummary("ses_cur", 10, 10);
 
     const result: any = await handler({ sessionId: "ses_cur" });
@@ -600,7 +625,28 @@ describe("mem::summarize Session Summary reuse", () => {
     expect(result.success).toBe(true);
     expect(result.summary.title).toBe("fresh");
     expect(provider.calls).toHaveLength(1);
-    expect((await kv.get("summaries", "ses_stale") as any).observationCount).toBe(12);
+    const stored: any = await kv.get("summaries", "ses_stale");
+    expect(stored.observationCount).toBe(12);
+    expect(stored.lastObservationId).toBe("obs_11");
+  });
+
+  it("reproduces the summary when the count matches but the last Observation changed", async () => {
+    const { handler, provider } = await withStoredSummary("ses_swap", 10, 10, "obs_deleted");
+
+    const result: any = await handler({ sessionId: "ses_swap" });
+
+    expect(result.summary.title).toBe("fresh");
+    expect(result.reused).toBeUndefined();
+    expect(provider.calls).toHaveLength(1);
+  });
+
+  it("reproduces a summary stored before the last Observation id was recorded", async () => {
+    const { handler, provider } = await withStoredSummary("ses_old", 10, 10, null);
+
+    const result: any = await handler({ sessionId: "ses_old" });
+
+    expect(result.summary.title).toBe("fresh");
+    expect(provider.calls).toHaveLength(1);
   });
 
   it("force: true calls the provider even when the summary is current", async () => {

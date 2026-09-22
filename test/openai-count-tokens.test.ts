@@ -35,6 +35,31 @@ describe("OpenAIProvider.countTokens", () => {
 
     await expect(provider.countTokens("hello")).rejects.toThrow(/404/);
   });
+
+  it("asks a server that answered 404 only once", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse(404, { error: "no such route" }));
+    const provider = new OpenAIProvider("key", "gpt-4o", 4096, "https://api.openai.com");
+
+    await expect(provider.countTokens("hello")).rejects.toThrow(/404/);
+    await expect(provider.countTokens("again")).rejects.toThrow(/unavailable/);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps asking after a non-404 failure", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(500, { error: "boom" }))
+      .mockResolvedValueOnce(jsonResponse(200, { tokens: [1, 2] }));
+    const provider = new OpenAIProvider("key", "general", 4096, "http://broker:4010/v1");
+
+    await expect(provider.countTokens("hello")).rejects.toThrow(/500/);
+    await expect(provider.countTokens("hello")).resolves.toBe(2);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("ResilientProvider.countTokens", () => {

@@ -30,6 +30,8 @@ const CHUNK_TOKENS_DEFAULT = 50_000;
 // Tokens the system prompt and chat template add on top of the rendered
 // Observations, measured on the Operator's broker.
 const PROMPT_OVERHEAD_TOKENS = 400;
+// Tokens buildSummaryPrompt spends joining one Observation to the next.
+const SEPARATOR_TOKENS = 4;
 // Concurrent in-flight chunk calls. The Operator's broker serialises chunks
 // on one GPU, and AGENTMEMORY_LLM_TIMEOUT_MS was measured at 2 — raise
 // SUMMARIZE_CHUNK_CONCURRENCY only with the timeout re-measured.
@@ -40,11 +42,14 @@ const COUNT_CONCURRENCY = 16;
 // to parse — a half-blind narrative is worse than a clean error.
 const MAX_SKIP_RATIO = 0.5;
 
+// A budget at or below the prompt overhead leaves no room for any
+// Observation, so it is floored to one payload token.
 function getChunkTokens(): number {
   const raw = process.env.SUMMARIZE_CHUNK_TOKENS;
   if (!raw) return CHUNK_TOKENS_DEFAULT;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : CHUNK_TOKENS_DEFAULT;
+  if (!Number.isFinite(n) || n <= 0) return CHUNK_TOKENS_DEFAULT;
+  return Math.max(n, PROMPT_OVERHEAD_TOKENS + 1);
 }
 
 function getChunkConcurrency(): number {
@@ -110,7 +115,7 @@ function packChunks(
   let current: CompressedObservation[] = [];
   let used = 0;
   compressed.forEach((obs, i) => {
-    const tokens = counts[i] ?? 0;
+    const tokens = (counts[i] ?? 0) + SEPARATOR_TOKENS;
     if (current.length > 0 && used + tokens > payloadBudget) {
       chunks.push(current);
       current = [];
@@ -171,14 +176,35 @@ async function summarizeChunkWithRetry(
   return null;
 }
 
-// Returns the final summary XML string. For sessions that fit the token
-// budget, this is a single LLM call. For larger sessions, observations
-// are packed into chunks processed in parallel batches, each chunk retried
-// once on parse failure, persistently-bad chunks skipped, and remaining
+// Measures every Observation once and packs them against the chunk budget.
+async function planChunks(
+  provider: MemoryProvider,
+  compressed: CompressedObservation[],
+  sessionId: string,
+): Promise<CompressedObservation[][]> {
+  const budget = getChunkTokens();
+  const texts = compressed.map(renderSummaryObservation);
+  const counts = await countObservationTokens(provider, texts, sessionId);
+  const chunks = packChunks(compressed, counts, budget, sessionId);
+  if (chunks.length > 1) {
+    logger.info("Summarize chunking session", {
+      sessionId,
+      chunks: chunks.length,
+      budget,
+      concurrency: getChunkConcurrency(),
+      totalObservations: compressed.length,
+    });
+  }
+  return chunks;
+}
+
+// Returns the final summary XML string. A single chunk is one LLM call.
+// Several are processed in parallel batches, each chunk retried once on
+// parse failure, persistently-bad chunks skipped, and the remaining
 // partials merged via a reduce call.
 async function produceSummaryXml(
   provider: MemoryProvider,
-  compressed: CompressedObservation[],
+  chunks: CompressedObservation[][],
   sessionId: string,
   project: string,
 ): Promise<{
@@ -187,57 +213,22 @@ async function produceSummaryXml(
   chunks: number;
   skipped?: number;
 }> {
-  const budget = getChunkTokens();
-  const texts = compressed.map(renderSummaryObservation);
-  // The estimate never undercounts, so a Session that fits by estimate is
-  // summarized in one call without a tokenize round trip.
-  const estimated = texts.reduce((n, t) => n + estimateTokens(t), 0);
-  const chunks =
-    estimated + PROMPT_OVERHEAD_TOKENS <= budget
-      ? [compressed]
-      : packChunks(
-          compressed,
-          await countObservationTokens(provider, texts, sessionId),
-          budget,
-          sessionId,
-        );
   if (chunks.length === 1) {
     const response = await provider.summarize(
       SUMMARY_SYSTEM,
-      buildSummaryPrompt(compressed),
+      buildSummaryPrompt(chunks[0]!),
     );
     return { response, mode: "single", chunks: 1 };
   }
 
-  const concurrency = getChunkConcurrency();
-  logger.info("Summarize chunking session", {
-    sessionId,
-    chunks: chunks.length,
-    budget,
-    concurrency,
-    totalObservations: compressed.length,
-  });
-
-  // Sparse array preserves chunk → index mapping after parallel resolution,
-  // so the reduce step sees partials in chronological order even when some
-  // were skipped.
-  const partialByIdx: Array<SessionSummary | null> = new Array(chunks.length).fill(null);
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += concurrency) {
-    const batch = chunks.slice(batchStart, batchStart + concurrency);
-    await Promise.all(
-      batch.map(async (chunk, j) => {
-        const idx = batchStart + j;
-        partialByIdx[idx] = await summarizeChunkWithRetry(
-          provider,
-          chunk,
-          sessionId,
-          project,
-          idx,
-          chunks.length,
-        );
-      }),
-    );
-  }
+  // Results keep chunk order, so the reduce step sees partials in
+  // chronological order even when some were skipped.
+  const partialByIdx = await mapWithConcurrency(
+    chunks.map((chunk, idx) => ({ chunk, idx })),
+    getChunkConcurrency(),
+    ({ chunk, idx }) =>
+      summarizeChunkWithRetry(provider, chunk, sessionId, project, idx, chunks.length),
+  );
 
   const skipped = partialByIdx.filter((p) => p === null).length;
   const partials = partialByIdx.filter((p): p is SessionSummary => p !== null);
@@ -256,10 +247,10 @@ async function produceSummaryXml(
   }
 
   const chunkStarts: number[] = [];
-  chunks.reduce((offset, chunk) => {
+  for (let offset = 0, i = 0; i < chunks.length; i++) {
     chunkStarts.push(offset);
-    return offset + chunk.length;
-  }, 0);
+    offset += chunks[i]!.length;
+  }
   const reduceInput = partials.map((p) => {
     const originalIdx = partialByIdx.indexOf(p);
     const start = chunkStarts[originalIdx] ?? 0;
@@ -356,11 +347,17 @@ export function registerSummarizeFunction(
         return { success: false, error: "no_observations" };
       }
 
-      // Observations are append-only within a Session, so a stored summary
-      // whose count matches is current and is reused rather than reproduced.
+      // A stored summary is current when both the Observation count and the
+      // last Observation id still match: a delete followed by a new
+      // Observation keeps the count but moves the id.
+      const lastObservationId = compressed[compressed.length - 1]!.id;
       if (!data.force) {
         const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
-        if (existing && existing.observationCount === compressed.length) {
+        if (
+          existing &&
+          existing.observationCount === compressed.length &&
+          existing.lastObservationId === lastObservationId
+        ) {
           logger.info("Session Summary current, reused", {
             sessionId,
             observationCount: compressed.length,
@@ -391,10 +388,11 @@ export function registerSummarizeFunction(
         let response = "";
         let mode = "single";
         let chunks = 1;
+        const planned = await planChunks(provider, compressed, sessionId);
         for (let attempt = 1; attempt <= 2; attempt++) {
           const produced = await produceSummaryXml(
             provider,
-            compressed,
+            planned,
             sessionId,
             session.project,
           );
@@ -418,7 +416,10 @@ export function registerSummarizeFunction(
             session.project,
             compressed.length,
           );
-          if (summary) break;
+          if (summary) {
+            summary.lastObservationId = lastObservationId;
+            break;
+          }
           logger.warn("Failed to parse summary XML", { sessionId, attempt });
         }
 
