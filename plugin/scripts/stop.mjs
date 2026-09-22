@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 //#region src/hooks/_env.ts
@@ -25,11 +25,9 @@ function parseEnvFile(content) {
 	return vars;
 }
 function hydrateHookEnv() {
-	const envFile = join(homedir(), ".agentmemory", ".env");
-	if (!existsSync(envFile)) return;
 	let content;
 	try {
-		content = readFileSync(envFile, "utf-8");
+		content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
 	} catch {
 		return;
 	}

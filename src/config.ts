@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { refreshBootVerbose } from "./logger.js";
+import { parseEnvFile } from "./hooks/_env.js";
 import pc from "picocolors";
 import type {
   AgentMemoryConfig,
@@ -37,26 +38,7 @@ function loadEnvFile(): Record<string, string> {
     envFileCache = {};
     return envFileCache;
   }
-  const content = readFileSync(ENV_FILE, "utf-8");
-  const vars: Record<string, string> = {};
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eqIdx = trimmed.indexOf("=");
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    let val = trimmed.slice(eqIdx + 1).trim();
-    const quoteChar = val[0] === '"' || val[0] === "'" ? val[0] : "";
-    if (quoteChar) {
-      const closeIdx = val.indexOf(quoteChar, 1);
-      if (closeIdx !== -1) val = val.slice(1, closeIdx);
-    } else {
-      const hashIdx = val.indexOf(" #");
-      if (hashIdx !== -1) val = val.slice(0, hashIdx).trim();
-    }
-    vars[key] = val;
-  }
-  envFileCache = vars;
+  envFileCache = parseEnvFile(readFileSync(ENV_FILE, "utf-8"));
   return envFileCache;
 }
 

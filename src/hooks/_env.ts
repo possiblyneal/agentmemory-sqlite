@@ -1,11 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 // Hook scripts run as fresh Node processes that never import the Engine, so
 // a setting the Operator placed in ~/.agentmemory/.env reaches them only
 // through this loader. Same parse rules as the daemon's env file reader; a
-// key already present in process.env wins.
+// key already present in process.env wins. The daemon's loader imports this
+// parser, so both read the file by the same rules.
 export function parseEnvFile(content: string): Record<string, string> {
   const vars: Record<string, string> = {};
   for (const line of content.split("\n")) {
@@ -29,11 +30,9 @@ export function parseEnvFile(content: string): Record<string, string> {
 }
 
 export function hydrateHookEnv(): void {
-  const envFile = join(homedir(), ".agentmemory", ".env");
-  if (!existsSync(envFile)) return;
   let content: string;
   try {
-    content = readFileSync(envFile, "utf-8");
+    content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
   } catch {
     return;
   }
