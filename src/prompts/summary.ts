@@ -22,18 +22,22 @@ Rules:
 - List all files that were created or modified
 - Concepts should be searchable terms for future context retrieval`
 
-export function buildSummaryPrompt(observations: Array<{
+export interface SummaryObservation {
   type: string
   title: string
   facts: string[]
   narrative: string
   files: string[]
   concepts: string[]
-}>): string {
-  const lines = observations.map((obs, i) => {
-    const facts = obs.facts.map((f) => `  - ${f}`).join('\n')
-    return `[${i + 1}] ${obs.type}: ${obs.title}\n${obs.narrative}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
-  })
+}
+
+export function renderSummaryObservation(obs: SummaryObservation, index: number): string {
+  const facts = obs.facts.map((f) => `  - ${f}`).join('\n')
+  return `[${index + 1}] ${obs.type}: ${obs.title}\n${obs.narrative}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
+}
+
+export function buildSummaryPrompt(observations: SummaryObservation[]): string {
+  const lines = observations.map(renderSummaryObservation)
   return `Session observations (${observations.length} total):\n\n${lines.join('\n\n---\n\n')}`
 }
 

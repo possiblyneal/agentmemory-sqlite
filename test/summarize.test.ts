@@ -84,6 +84,12 @@ function makeObs(i: number, sessionId: string): CompressedObservation {
   };
 }
 
+// Fake count: every Observation is TOKENS_PER_OBS tokens, so a budget of
+// PROMPT_OVERHEAD + n * TOKENS_PER_OBS packs exactly n Observations per chunk.
+const TOKENS_PER_OBS = 10;
+const PROMPT_OVERHEAD = 400;
+const budgetFor = (obsPerChunk: number) => String(PROMPT_OVERHEAD + obsPerChunk * TOKENS_PER_OBS);
+
 function makeProvider(responses: string[]): MemoryProvider & {
   calls: Array<{ system: string; user: string }>;
 } {
@@ -93,6 +99,7 @@ function makeProvider(responses: string[]): MemoryProvider & {
     name: "test",
     calls,
     compress: async () => "",
+    countTokens: async () => TOKENS_PER_OBS,
     summarize: async (system: string, user: string) => {
       calls.push({ system, user });
       const r = responses[i] ?? responses[responses.length - 1];
@@ -150,7 +157,7 @@ describe("mem::summarize chunking", () => {
   const ORIGINAL_ENV = { ...process.env };
 
   beforeEach(() => {
-    delete process.env.SUMMARIZE_CHUNK_SIZE;
+    delete process.env.SUMMARIZE_CHUNK_TOKENS;
     delete process.env.SUMMARIZE_CHUNK_CONCURRENCY;
   });
 
@@ -183,7 +190,7 @@ describe("mem::summarize chunking", () => {
   });
 
   it("large session map-reduces: N chunk calls + 1 reduce call", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1"; // serial keeps call ordering deterministic
     const provider = makeProvider([
       summaryXml({ title: "Chunk 1", decisions: ["dA"], files: ["src/a.ts"], concepts: ["ca"] }),
@@ -222,8 +229,8 @@ describe("mem::summarize chunking", () => {
     expect(stored?.keyDecisions).toEqual(["dA", "dB", "dC"]);
   });
 
-  it("SUMMARIZE_CHUNK_SIZE env override is respected", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "50";
+  it("SUMMARIZE_CHUNK_TOKENS env override is respected", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(50);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     const provider = makeProvider([
       summaryXml({ title: "chunk" }),
@@ -246,7 +253,7 @@ describe("mem::summarize chunking", () => {
   });
 
   it("flaky chunk: parse fails once, retried, then succeeds — no skip", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     const provider = makeProvider([
       summaryXml({ title: "ok1" }),
@@ -271,7 +278,7 @@ describe("mem::summarize chunking", () => {
   });
 
   it("persistently-broken chunk is skipped, reduce still runs on remaining partials", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     const provider = makeProvider([
       summaryXml({ title: "ok1" }),
@@ -303,7 +310,7 @@ describe("mem::summarize chunking", () => {
   });
 
   it("too many skipped chunks bails out with a clear error", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     // 3 chunks, 2 fully broken → >50% skipped → bail.
     const provider = makeProvider([
@@ -324,13 +331,14 @@ describe("mem::summarize chunking", () => {
   });
 
   it("provider error on one chunk after retry is skipped, not propagated", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     let i = 0;
     const provider: MemoryProvider & { calls: any[] } = {
       name: "test",
       calls: [],
       compress: async () => "",
+      countTokens: async () => TOKENS_PER_OBS,
       summarize: async (system: string, user: string) => {
         (provider as any).calls.push({ system, user });
         i += 1;
@@ -357,13 +365,14 @@ describe("mem::summarize chunking", () => {
   });
 
   it("every chunk failing on provider error trips too_many_chunks_skipped", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     // 3 chunks, all chunk calls throw → 3/3 skipped → bail.
     const provider: MemoryProvider & { calls: any[] } = {
       name: "test",
       calls: [],
       compress: async () => "",
+      countTokens: async () => TOKENS_PER_OBS,
       summarize: async (system: string, user: string) => {
         (provider as any).calls.push({ system, user });
         throw new Error("OpenAI API error (400): invalid request");
@@ -382,7 +391,7 @@ describe("mem::summarize chunking", () => {
   });
 
   it("chunks run in parallel batches according to SUMMARIZE_CHUNK_CONCURRENCY", async () => {
-    process.env.SUMMARIZE_CHUNK_SIZE = "100";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "2";
     let inflight = 0;
     let maxInflight = 0;
@@ -403,7 +412,7 @@ describe("mem::summarize chunking", () => {
     };
     const { handler } = await setupHandler({
       sessionId: "ses_par",
-      obsCount: 400, // 4 chunks at chunkSize=100
+      obsCount: 400, // 4 chunks of 100 Observations
       provider,
     });
 
@@ -413,6 +422,74 @@ describe("mem::summarize chunking", () => {
     // 4 chunks at concurrency 2 → max 2 in flight at once during the chunk phase.
     // Reduce is a single call so doesn't bump it.
     expect(maxInflight).toBe(2);
+  });
+
+  it("packs Observations by measured tokens: every chunk fits the budget, order kept", async () => {
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + 250);
+    const calls: string[] = [];
+    // One token per character makes the prompt text its own measure.
+    const provider: MemoryProvider = {
+      name: "test",
+      compress: async () => "",
+      countTokens: async (text: string) => text.length,
+      summarize: async (system: string, user: string) => {
+        calls.push(user);
+        return summaryXml({ title: system.includes("merging") ? "merged" : "chunk" });
+      },
+    };
+    const { handler } = await setupHandler({ sessionId: "ses_tok", obsCount: 12, provider });
+
+    const result: any = await handler({ sessionId: "ses_tok" });
+
+    expect(result.success).toBe(true);
+    const chunkPrompts = calls.slice(0, -1);
+    expect(chunkPrompts.length).toBeGreaterThan(1);
+    const seen: number[] = [];
+    for (const prompt of chunkPrompts) {
+      const bodies = prompt.split("\n\n---\n\n");
+      const measured = bodies.reduce((n, b) => n + b.length, 0);
+      expect(measured).toBeLessThanOrEqual(250 + bodies.length * 40);
+      for (const m of prompt.matchAll(/conversation: obs (\d+)/g)) seen.push(Number(m[1]));
+    }
+    expect(seen).toEqual(Array.from({ length: 12 }, (_, i) => i));
+  });
+
+  it("falls back to the chars/3 estimate when the count operation throws", async () => {
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    process.env.SUMMARIZE_CHUNK_TOKENS = "500";
+    const provider = makeProvider([summaryXml({ title: "chunk" }), summaryXml({ title: "merged" })]);
+    provider.countTokens = async () => {
+      throw new Error("tokenize down");
+    };
+    const { handler, kv } = await setupHandler({ sessionId: "ses_fb", obsCount: 40, provider });
+
+    const result: any = await handler({ sessionId: "ses_fb" });
+
+    expect(result.success).toBe(true);
+    // ~80 chars per Observation ≈ 27 estimated tokens; 40 of them exceed a
+    // 100-token payload budget, so the session chunked and reduced.
+    expect(provider.calls.length).toBeGreaterThan(2);
+    expect(provider.calls.at(-1)!.system).toContain("merging");
+    expect((await kv.get("summaries", "ses_fb") as any).title).toBe("merged");
+  });
+
+  it("an Observation larger than the budget forms its own chunk", async () => {
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(3);
+    const provider = makeProvider([summaryXml({ title: "chunk" }), summaryXml({ title: "merged" })]);
+    provider.countTokens = async (text: string) => (text.includes("obs 2\n") ? 100 : TOKENS_PER_OBS);
+    const { handler } = await setupHandler({ sessionId: "ses_big", obsCount: 5, provider });
+
+    const result: any = await handler({ sessionId: "ses_big" });
+
+    expect(result.success).toBe(true);
+    const chunkPrompts = provider.calls.slice(0, -1).map((c) => c.user);
+    // [0,1] fit, [2] alone, [3,4] fit → 3 chunks + reduce.
+    expect(chunkPrompts).toHaveLength(3);
+    expect(chunkPrompts[1]).toContain("obs 2");
+    expect(chunkPrompts[1]).not.toContain("obs 1");
+    expect(chunkPrompts[1]).not.toContain("obs 3");
   });
 
   // #783: markdown-wrapped XML used to silently fail parsing because

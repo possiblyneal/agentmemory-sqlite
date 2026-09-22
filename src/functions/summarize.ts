@@ -10,6 +10,7 @@ import { StateKV } from "../state/kv.js";
 import {
   SUMMARY_SYSTEM,
   buildSummaryPrompt,
+  renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
 } from "../prompts/summary.js";
@@ -22,26 +23,28 @@ import { safeAudit } from "./audit.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { logger } from "../logger.js";
 
-// Per-chunk observation budget when a session is too large to fit in one
-// LLM call. Default ≈ 50k input tokens per chunk at ~110 tok/obs — fits
-// comfortably in 128k-window models. Override via SUMMARIZE_CHUNK_SIZE.
-const CHUNK_SIZE_DEFAULT = 400;
-// Concurrent in-flight chunk calls. 6 keeps a 100-chunk session under
-// iii's 180s function-invocation timeout at ~8s/call while staying
-// inside generous-but-not-unlimited provider rate limits (well below
-// OpenAI free tier's 500 RPM). High-throughput providers
-// (Novita / DeepInfra / DeepSeek) typically allow 100+ concurrent — set
-// SUMMARIZE_CHUNK_CONCURRENCY higher to cover ~1000+ chunk sessions.
-const CHUNK_CONCURRENCY_DEFAULT = 6;
+// Per-chunk prompt budget in tokens when a Session is too large to fit in
+// one LLM call. Measured on the Operator's broker: a 50k-token chunk
+// summarizes cold in 60–89s solo. Override via SUMMARIZE_CHUNK_TOKENS.
+const CHUNK_TOKENS_DEFAULT = 50_000;
+// Tokens the system prompt and chat template add on top of the rendered
+// Observations, measured on the Operator's broker.
+const PROMPT_OVERHEAD_TOKENS = 400;
+// Concurrent in-flight chunk calls. The Operator's broker serialises chunks
+// on one GPU, and AGENTMEMORY_LLM_TIMEOUT_MS was measured at 2 — raise
+// SUMMARIZE_CHUNK_CONCURRENCY only with the timeout re-measured.
+const CHUNK_CONCURRENCY_DEFAULT = 2;
+// Parallel tokenize calls while measuring a Session's Observations.
+const COUNT_CONCURRENCY = 16;
 // Bail on the merged summary if more than this fraction of chunks fail
 // to parse — a half-blind narrative is worse than a clean error.
 const MAX_SKIP_RATIO = 0.5;
 
-function getChunkSize(): number {
-  const raw = process.env.SUMMARIZE_CHUNK_SIZE;
-  if (!raw) return CHUNK_SIZE_DEFAULT;
+function getChunkTokens(): number {
+  const raw = process.env.SUMMARIZE_CHUNK_TOKENS;
+  if (!raw) return CHUNK_TOKENS_DEFAULT;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : CHUNK_SIZE_DEFAULT;
+  return Number.isFinite(n) && n > 0 ? n : CHUNK_TOKENS_DEFAULT;
 }
 
 function getChunkConcurrency(): number {
@@ -49,6 +52,83 @@ function getChunkConcurrency(): number {
   if (!raw) return CHUNK_CONCURRENCY_DEFAULT;
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : CHUNK_CONCURRENCY_DEFAULT;
+}
+
+// The estimate idiom this tree already uses; it overcounts measured
+// content by ~17%, the safe direction for a budget.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  for (let start = 0; start < items.length; start += concurrency) {
+    const batch = items.slice(start, start + concurrency);
+    const results = await Promise.all(batch.map(fn));
+    results.forEach((r, j) => {
+      out[start + j] = r;
+    });
+  }
+  return out;
+}
+
+async function countObservationTokens(
+  provider: MemoryProvider,
+  texts: string[],
+  sessionId: string,
+): Promise<number[]> {
+  if (provider.countTokens) {
+    try {
+      return await mapWithConcurrency(texts, COUNT_CONCURRENCY, (t) =>
+        provider.countTokens!(t),
+      );
+    } catch (err) {
+      logger.warn("Token count failed, packing chunks by estimate", {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return texts.map(estimateTokens);
+}
+
+// Greedy in-order packing. An Observation that alone exceeds the budget
+// becomes its own chunk: dropping it would lose Session history, and the
+// provider's own context error is the right failure for that chunk.
+function packChunks(
+  compressed: CompressedObservation[],
+  counts: number[],
+  budget: number,
+  sessionId: string,
+): CompressedObservation[][] {
+  const payloadBudget = budget - PROMPT_OVERHEAD_TOKENS;
+  const chunks: CompressedObservation[][] = [];
+  let current: CompressedObservation[] = [];
+  let used = 0;
+  compressed.forEach((obs, i) => {
+    const tokens = counts[i] ?? 0;
+    if (current.length > 0 && used + tokens > payloadBudget) {
+      chunks.push(current);
+      current = [];
+      used = 0;
+    }
+    if (tokens > payloadBudget) {
+      logger.warn("Observation exceeds the chunk budget on its own", {
+        sessionId,
+        observationId: obs.id,
+        tokens,
+        budget,
+      });
+    }
+    current.push(obs);
+    used += tokens;
+  });
+  if (current.length > 0) chunks.push(current);
+  return chunks;
 }
 
 // One chunk call with retry-once. Returns null when both attempts fail —
@@ -91,9 +171,9 @@ async function summarizeChunkWithRetry(
   return null;
 }
 
-// Returns the final summary XML string. For sessions ≤ chunk size, this is
-// a single LLM call (legacy behavior). For larger sessions, observations
-// are split into chunks processed in parallel batches, each chunk retried
+// Returns the final summary XML string. For sessions that fit the token
+// budget, this is a single LLM call. For larger sessions, observations
+// are packed into chunks processed in parallel batches, each chunk retried
 // once on parse failure, persistently-bad chunks skipped, and remaining
 // partials merged via a reduce call.
 async function produceSummaryXml(
@@ -107,8 +187,21 @@ async function produceSummaryXml(
   chunks: number;
   skipped?: number;
 }> {
-  const chunkSize = getChunkSize();
-  if (compressed.length <= chunkSize) {
+  const budget = getChunkTokens();
+  const texts = compressed.map(renderSummaryObservation);
+  // The estimate never undercounts, so a Session that fits by estimate is
+  // summarized in one call without a tokenize round trip.
+  const estimated = texts.reduce((n, t) => n + estimateTokens(t), 0);
+  const chunks =
+    estimated + PROMPT_OVERHEAD_TOKENS <= budget
+      ? [compressed]
+      : packChunks(
+          compressed,
+          await countObservationTokens(provider, texts, sessionId),
+          budget,
+          sessionId,
+        );
+  if (chunks.length === 1) {
     const response = await provider.summarize(
       SUMMARY_SYSTEM,
       buildSummaryPrompt(compressed),
@@ -116,15 +209,11 @@ async function produceSummaryXml(
     return { response, mode: "single", chunks: 1 };
   }
 
-  const chunks: CompressedObservation[][] = [];
-  for (let i = 0; i < compressed.length; i += chunkSize) {
-    chunks.push(compressed.slice(i, i + chunkSize));
-  }
   const concurrency = getChunkConcurrency();
   logger.info("Summarize chunking session", {
     sessionId,
     chunks: chunks.length,
-    chunkSize,
+    budget,
     concurrency,
     totalObservations: compressed.length,
   });
@@ -166,16 +255,22 @@ async function produceSummaryXml(
     });
   }
 
+  const chunkStarts: number[] = [];
+  chunks.reduce((offset, chunk) => {
+    chunkStarts.push(offset);
+    return offset + chunk.length;
+  }, 0);
   const reduceInput = partials.map((p) => {
     const originalIdx = partialByIdx.indexOf(p);
+    const start = chunkStarts[originalIdx] ?? 0;
     return {
       title: p.title,
       narrative: p.narrative,
       keyDecisions: p.keyDecisions,
       filesModified: p.filesModified,
       concepts: p.concepts,
-      obsRangeStart: originalIdx * chunkSize + 1,
-      obsRangeEnd: Math.min((originalIdx + 1) * chunkSize, compressed.length),
+      obsRangeStart: start + 1,
+      obsRangeEnd: start + chunks[originalIdx]!.length,
     };
   });
   const response = await provider.summarize(

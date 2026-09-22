@@ -11,6 +11,7 @@ import {
 
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const DEFAULT_TIMEOUT_MS = 60_000;
+const TOKENIZE_TIMEOUT_MS = 10_000;
 
 /**
  * OpenAI-compatible LLM provider.
@@ -73,6 +74,30 @@ export class OpenAIProvider implements MemoryProvider {
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {
     return this.call(systemPrompt, userPrompt);
+  }
+
+  // llama.cpp-style servers expose POST /tokenize at the server root, beside
+  // /v1. Anything without it answers non-2xx and the caller falls back to an
+  // estimate, so a count never blocks the work it measures.
+  async countTokens(text: string): Promise<number> {
+    const url = `${this.baseUrl.replace(/\/v1$/, "")}/tokenize`;
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: buildAuthHeaders(this.apiKey, this.isAzure),
+        body: JSON.stringify({ model: this.model, content: text }),
+      },
+      TOKENIZE_TIMEOUT_MS,
+    );
+    if (!response.ok) {
+      throw new Error(`tokenize error (${response.status}) at ${url}`);
+    }
+    const data = (await response.json()) as { tokens?: unknown[] };
+    if (!Array.isArray(data.tokens)) {
+      throw new Error(`tokenize returned no token array from ${url}`);
+    }
+    return data.tokens.length;
   }
 
   private async call(systemPrompt: string, userPrompt: string): Promise<string> {

@@ -4,9 +4,15 @@ import { CircuitBreaker } from "./circuit-breaker.js";
 export class ResilientProvider implements MemoryProvider {
   private breaker = new CircuitBreaker();
   name: string;
+  // A failed count is a fallback for the caller, not a provider failure,
+  // so it is forwarded outside the breaker.
+  countTokens?: (text: string) => Promise<number>;
 
   constructor(private inner: MemoryProvider) {
     this.name = `resilient(${inner.name})`;
+    if (inner.countTokens) {
+      this.countTokens = (text) => inner.countTokens!(text);
+    }
   }
 
   private async call(fn: () => Promise<string>): Promise<string> {

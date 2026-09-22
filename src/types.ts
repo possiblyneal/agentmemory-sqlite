@@ -187,6 +187,7 @@ export interface MemoryProvider {
   compress(systemPrompt: string, userPrompt: string): Promise<string>;
   summarize(systemPrompt: string, userPrompt: string): Promise<string>;
   describeImage?(imageData: string, mimeType: string, prompt: string): Promise<string>;
+  countTokens?(text: string): Promise<number>;
 }
 
 export interface AgentMemoryConfig {

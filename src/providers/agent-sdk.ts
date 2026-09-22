@@ -40,7 +40,7 @@ let sdkOriginalEnv: string | undefined
 // observation into a child, and children that wedge ignore SIGTERM. Cap
 // the number that may exist at a time. Callers over the cap wait for a
 // slot rather than being refused, because legitimate concurrency here is
-// the chunked summarize fan-out (SUMMARIZE_CHUNK_CONCURRENCY, default 6)
+// the chunked summarize fan-out (SUMMARIZE_CHUNK_CONCURRENCY, default 2)
 // and refusing those chunks would trip the skip-ratio bailout and lose
 // the whole summary.
 const MAX_CONCURRENT_DEFAULT = 2
