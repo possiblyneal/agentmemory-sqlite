@@ -19,6 +19,7 @@ import { validateOutput } from "../eval/validator.js";
 import { scoreSummary } from "../eval/quality.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { safeAudit } from "./audit.js";
+import { isNoopProvider } from "../providers/noop.js";
 import { logger } from "../logger.js";
 
 // Per-chunk observation budget when a session is too large to fit in one
@@ -260,7 +261,7 @@ export function registerSummarizeFunction(
         return { success: false, error: "no_observations" };
       }
 
-      if (provider.name === "noop") {
+      if (isNoopProvider(provider)) {
         logger.info("Summarize skipped — no LLM provider configured", {
           sessionId,
         });

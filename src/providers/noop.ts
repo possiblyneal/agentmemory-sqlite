@@ -18,3 +18,11 @@ export class NoopProvider implements MemoryProvider {
     return "";
   }
 }
+
+/**
+ * Every provider is wrapped as `resilient(<inner>)`, so callers must look
+ * through the wrapper rather than compare against "noop" directly.
+ */
+export function isNoopProvider(provider: Pick<MemoryProvider, "name">): boolean {
+  return /^(?:resilient\()*noop\)*$/.test(provider.name);
+}
