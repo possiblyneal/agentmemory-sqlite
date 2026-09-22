@@ -5,6 +5,7 @@ import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { logger } from "../logger.js";
+import { scrubFields } from "./privacy.js";
 
 const CORE_SCOPE = "mem:core-memory";
 
@@ -42,6 +43,7 @@ export function registerWorkingMemoryFunctions(
       importance?: number;
       pinned?: boolean;
     }) => {
+      data = scrubFields(data, "content");
       if (!data?.content?.trim()) {
         return { success: false, error: "content is required" };
       }

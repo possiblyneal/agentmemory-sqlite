@@ -2,6 +2,7 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Facet } from "../types.js";
+import { scrubFields } from "./privacy.js";
 
 export function registerFacetsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::facet-tag", 
@@ -11,6 +12,7 @@ export function registerFacetsFunction(sdk: ISdk, kv: StateKV): void {
       dimension: string;
       value: string;
     }) => {
+      data = scrubFields(data, "value");
       if (!data.targetId || typeof data.targetId !== "string") {
         return { success: false, error: "targetId is required" };
       }

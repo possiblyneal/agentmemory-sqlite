@@ -13,6 +13,7 @@ import { recordAudit } from "./audit.js";
 import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorIndexRemove, deleteIndexed } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
+import { scrubFields } from "./privacy.js";
 
 // Slicing by UTF-16 code unit can cut an astral character (emoji, some CJK
 // extensions) mid surrogate pair, leaving a lone high surrogate that renders
@@ -35,6 +36,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       agentId?: string;
       project?: string;
     }) => {
+      data = scrubFields(data, "content");
       if (
         !data.content ||
         typeof data.content !== "string" ||
