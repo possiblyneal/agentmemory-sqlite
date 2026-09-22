@@ -132,8 +132,8 @@ prs:
     paths:
       - src/functions/summarize.ts
     note: "Stop hooks fire mem::summarize every turn and stack full LLM passes; skips when a fresh summary exists."
-    disposition: candidate
-    status: "present-here — Same evidence as issue #1062: mem::summarize never checks for an existing fresh summary (src/functions/summarize.ts:235-360)."
+    disposition: already-fixed
+    status: "fixed-here — PR #45 (possiblyneal/agentmemory-sqlite): mem::summarize returns the existing Session Summary when it is current for the Session's Observations."
     url: https://github.com/rohitg00/agentmemory/pull/572
   - number: 615
     title: "feat(context,smart-search): inject insights into session context and smart search results (#457)"
@@ -207,8 +207,8 @@ prs:
       - src/prompts/xml.ts
       - test/context-lessons.test.ts
     note: "Stored memory content is interpolated raw into <agentmemory-context>, so a memory can close the wrapper and inject instructions."
-    disposition: candidate
-    status: "present-here — src/functions/context.ts escapes only the project attribute (line 26); stored fields are still interpolated raw."
+    disposition: already-fixed
+    status: "fixed-here — PR #46 (possiblyneal/agentmemory-sqlite): mem::context fences its output as recalled data and neutralizes a stored closing tag."
     url: https://github.com/rohitg00/agentmemory/pull/878
   - number: 898
     title: "fix(viewer): prevent path-traversal SSRF in proxy (CWE-918)"
@@ -219,8 +219,8 @@ prs:
     paths:
       - src/viewer/server.ts
     note: "Path-traversal SSRF (CWE-918) in the viewer proxy: local callers escape the /agentmemory/ prefix with the auth header attached."
-    disposition: candidate
-    status: "present-here — pathname is a raw slice of req.url with no normalization (src/viewer/server.ts:253) and the proxy concatenates it straight into the upstream URL (src/viewer/server.ts:399-403) while attaching Authorization: Bearer <secret>. A ../ segment resolves during fetch, so the secret rides a request outside the /agentmemory/ prefix. Local-only reach."
+    disposition: already-fixed
+    status: "fixed-here — PR #46 (possiblyneal/agentmemory-sqlite): the viewer proxy forwards only paths unchanged by percent-decoding and dot-segment normalization that start with /agentmemory/."
     url: https://github.com/rohitg00/agentmemory/pull/898
   - number: 922
     title: "fix(security): close secret-scrubbing bypass paths in all MCP write routes"
@@ -238,8 +238,8 @@ prs:
       - src/functions/slots.ts
       - src/functions/team.ts
     note: "stripPrivateData runs only in the observe pipeline; seven MCP write tools store secrets in plaintext."
-    disposition: candidate
-    status: "present-here — stripPrivateData is called only from src/functions/observe.ts."
+    disposition: already-fixed
+    status: "fixed-here — PR #46 (possiblyneal/agentmemory-sqlite): scrubFields runs at the top of every function that persists Agent-supplied free text, below every surface."
     url: https://github.com/rohitg00/agentmemory/pull/922
   - number: 928
     title: "feat(search): add temporal decay to recall ranking"
@@ -275,8 +275,8 @@ prs:
       - plugin/scripts/stop.mjs
       # +8 more
     note: "Every hook script reads AGENTMEMORY_* at module level, so config living only in ~/.agentmemory/.env is silently ignored; touches 18 hook scripts this fork carries."
-    disposition: candidate
-    status: "present-here — No hook imports ../config.js; pre-tool-use.ts has no imports at all and reads process.env at module load (src/hooks/pre-tool-use.ts:23-26) while its own comment tells you to set the value in ~/.agentmemory/.env (line 20). Only the daemon hydrates that file (src/config.ts:75-83), so hook-only config set there is silently ignored."
+    disposition: already-fixed
+    status: "fixed-here — PR #47 (possiblyneal/agentmemory-sqlite): every hook entry hydrates ~/.agentmemory/.env through hydrateHookEnv before its first env read."
     url: https://github.com/rohitg00/agentmemory/pull/975
   - number: 1005
     title: "fix: evicted observations leave ghost entries in search indexes"
@@ -511,8 +511,8 @@ prs:
       - src/triggers/api.ts
       - src/viewer/index.html
     note: "api::semantic-list and siblings run unbounded kv.list over a ~17MB scope, overflowing the invocation and blanking the dashboard."
-    disposition: candidate
-    status: "present-here — api::semantic-list and api::procedural-list run unbounded kv.list with no limit and return the whole scope (src/triggers/api.ts:2235, 2249)."
+    disposition: already-fixed
+    status: "fixed-here — PR #48 (possiblyneal/agentmemory-sqlite): api::semantic-list and api::procedural-list page through parsePage with a total."
     url: https://github.com/rohitg00/agentmemory/pull/1324
   - number: 1344
     title: "feat(reflect): project-level namespace isolation for reflection and consolidation"
@@ -543,8 +543,8 @@ prs:
       - src/providers/resilient.ts
       - test/circuit-breaker.test.ts
     note: "recordSuccess() does not reset the failure count in the closed state, so unrelated failures accumulate until the breaker trips."
-    disposition: candidate
-    status: "partly-present-here — recordSuccess only resets in half-open (src/providers/circuit-breaker.ts:47-54), but recordFailure already zeroes the count when the previous failure is older than the 60s window (src/providers/circuit-breaker.ts:63-65). Failures do not accumulate forever; the real gap is that successes never reduce the count inside a window."
+    disposition: already-fixed
+    status: "fixed-here — PR #45 (possiblyneal/agentmemory-sqlite): the circuit breaker is per provider operation and a success clears its failure count."
     url: https://github.com/rohitg00/agentmemory/pull/1350
   - number: 1351
     title: "perf(search): reuse one graph view per store and bound traversal"
@@ -569,8 +569,8 @@ prs:
       - src/functions/summarize.ts
       - test/summarize.test.ts
     note: "The noop provider is wrapped, so the no_provider early return never fires and keyless installs run the whole summarize pipeline on every Stop hook."
-    disposition: candidate
-    status: "present-here — Every provider is wrapped: createProvider returns ResilientProvider (src/providers/index.ts:55) whose name is `resilient(<inner>)` (src/providers/resilient.ts:9). summarize.ts:263 compares name === \"noop\", which can never match, so keyless installs run the whole summarize pipeline. graph.ts:926 already uses .includes(\"noop\") — the fix has a precedent in this tree."
+    disposition: already-fixed
+    status: "fixed-here — PR #45 (possiblyneal/agentmemory-sqlite): mem::summarize detects the wrapped noop provider by name and skips the pipeline."
     url: https://github.com/rohitg00/agentmemory/pull/1367
   - number: 1368
     title: "fix(reflect): read bounded graph snapshot and cap cluster prompt"

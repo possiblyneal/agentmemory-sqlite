@@ -1512,8 +1512,9 @@ issues:
     difficulty: low
     kind: bug
     note: "GET /agentmemory/sessions ignores limit and returned 5.38M characters into the caller's context."
-    disposition: candidate
-    status: "present-here — api::sessions reads no limit query param (src/triggers/api.ts:849-887): it lists every session, fetches every summary in batches of 10, and returns the lot. The standalone MCP client does send ?limit= (src/mcp/standalone.ts:230) — the server ignores it."
+    disposition: already-fixed
+    fixed_by: "PR #48 (possiblyneal/agentmemory-sqlite): api::sessions pages through parsePage: default first page, limit/offset, and total in the body."
+    status: "fixed-here — PR #48 (possiblyneal/agentmemory-sqlite): api::sessions pages through parsePage: default first page, limit/offset, and total in the body."
     url: https://github.com/rohitg00/agentmemory/issues/1022
     mentioned_by_prs: [1034, 1352]
   - number: 1024
@@ -2295,8 +2296,9 @@ issues:
     difficulty: low
     kind: bug
     note: "token_budget fills with short high-scoring observations, excluding saved memories entirely."
-    disposition: candidate
-    status: "present-here — applyTokenBudget returns at the first item that overflows instead of skipping it (src/functions/search.ts:756-773), so one oversized record truncates everything ranked below it."
+    disposition: already-fixed
+    fixed_by: "PR #48 (possiblyneal/agentmemory-sqlite): applyTokenBudget skips a record that does not fit and keeps filling the budget from the rest."
+    status: "fixed-here — PR #48 (possiblyneal/agentmemory-sqlite): applyTokenBudget skips a record that does not fit and keeps filling the budget from the rest."
     url: https://github.com/rohitg00/agentmemory/issues/1232
     fix_prs: [1242]
   - number: 1235
@@ -2367,8 +2369,9 @@ issues:
     difficulty: low
     kind: bug
     note: "session/end upserts a malformed row for unknown sessions, later breaking GET /sessions."
-    disposition: candidate
-    status: "present-here — api::session::end calls kv.update on the session id with no existence check (src/triggers/api.ts:667-670), and update on a missing key auto-creates it as {} (src/engine/inproc/state.ts:11). An unknown id yields a row with only endedAt and status — which api::sessions then returns."
+    disposition: already-fixed
+    fixed_by: "PR #48 (possiblyneal/agentmemory-sqlite): api::session::end answers 404 for a Session id that never started instead of creating a malformed row."
+    status: "fixed-here — PR #48 (possiblyneal/agentmemory-sqlite): api::session::end answers 404 for a Session id that never started instead of creating a malformed row."
     url: https://github.com/rohitg00/agentmemory/issues/1251
     fix_prs: [1252]
   - number: 1254
