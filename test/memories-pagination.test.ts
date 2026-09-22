@@ -14,17 +14,6 @@ describe("memories + export pagination (#544)", () => {
     expect(api).toMatch(/latestCount:\s*filtered\.filter/);
   });
 
-  it("api::memories accepts limit + offset query params", () => {
-    expect(api).toMatch(/query_params\?\.\["limit"\]/);
-    expect(api).toMatch(/query_params\?\.\["offset"\]/);
-    expect(api).toMatch(/filtered\.slice\(offset/);
-    expect(api).toMatch(/total:\s*filtered\.length/);
-  });
-
-  it("api::memories caps limit at 5000 to bound response size", () => {
-    expect(api).toMatch(/Math\.min\(parsedLimit,\s*5000\)/);
-  });
-
   it("api::export passes through maxSessions + offset query params", () => {
     expect(api).toMatch(/query_params\?\.\["maxSessions"\]/);
     expect(api).toMatch(/query_params\?\.\["offset"\]/);

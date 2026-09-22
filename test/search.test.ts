@@ -150,6 +150,63 @@ describe("mem::search", () => {
     expect(result.truncated).toBe(true);
   });
 
+  it("skips an oversized record and keeps the smaller ones that fit under the budget", async () => {
+    const oversized: CompressedObservation = {
+      id: "obs_big",
+      sessionId: "ses_1",
+      timestamp: "2026-01-03T00:00:00Z",
+      type: "decision",
+      title: "Auth middleware decision revisited",
+      facts: ["Auth middleware keeps JWT"],
+      narrative: "auth middleware ".repeat(400),
+      concepts: ["auth", "jwt"],
+      files: ["src/auth.ts"],
+      importance: 9,
+    };
+    const small: CompressedObservation = {
+      id: "obs_small",
+      sessionId: "ses_1",
+      timestamp: "2026-01-04T00:00:00Z",
+      type: "decision",
+      title: "Auth middleware follow-up",
+      facts: ["Auth middleware logs"],
+      narrative: "Added auth middleware logging.",
+      concepts: ["auth"],
+      files: ["src/auth.ts"],
+      importance: 8,
+    };
+    await kv.set(KV.observations("ses_1"), oversized.id, oversized);
+    await kv.set(KV.observations("ses_1"), small.id, small);
+    getSearchIndex().clear();
+    await rebuildIndex(kv as never);
+
+    const result = (await sdk.trigger("mem::search", {
+      query: "auth middleware",
+      token_budget: 600,
+    })) as {
+      results: Array<{ observation: CompressedObservation }>;
+      truncated: boolean;
+      tokens_used: number;
+    };
+
+    const ids = result.results.map((r) => r.observation.id);
+    expect(ids).not.toContain("obs_big");
+    expect(ids).toEqual(expect.arrayContaining(["obs_a", "obs_small"]));
+    expect(result.tokens_used).toBeLessThanOrEqual(600);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("reports truncated only when a record was skipped", async () => {
+    const result = (await sdk.trigger("mem::search", {
+      query: "auth middleware",
+      format: "compact",
+      token_budget: 10_000,
+    })) as { results: Array<{ obsId: string }>; truncated: boolean };
+
+    expect(result.results.map((r) => r.obsId)).toEqual(["obs_a"]);
+    expect(result.truncated).toBe(false);
+  });
+
   it("rejects invalid format values", async () => {
     await expect(
       sdk.trigger("mem::search", { query: "auth", format: "verbose" }),
