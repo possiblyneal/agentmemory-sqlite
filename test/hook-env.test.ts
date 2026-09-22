@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hydrateHookEnv, parseEnvFile } from "../src/hooks/_env.js";
 
-const ORIGINAL_HOME = process.env["HOME"];
-const ORIGINAL_USERPROFILE = process.env["USERPROFILE"];
 const KEYS = ["AGENTMEMORY_INJECT_CONTEXT", "AGENTMEMORY_URL", "AGENTMEMORY_SECRET"] as const;
+const ORIGINAL_ENV = Object.fromEntries(
+  [...KEYS, "HOME", "USERPROFILE"].map((key) => [key, process.env[key]]),
+);
 
 let sandboxHome: string;
 
@@ -25,11 +26,10 @@ describe("hydrateHookEnv", () => {
   });
 
   afterEach(() => {
-    if (ORIGINAL_HOME === undefined) delete process.env["HOME"];
-    else process.env["HOME"] = ORIGINAL_HOME;
-    if (ORIGINAL_USERPROFILE === undefined) delete process.env["USERPROFILE"];
-    else process.env["USERPROFILE"] = ORIGINAL_USERPROFILE;
-    for (const key of KEYS) delete process.env[key];
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     rmSync(sandboxHome, { recursive: true, force: true });
   });
 
