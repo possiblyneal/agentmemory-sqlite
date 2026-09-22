@@ -1,6 +1,41 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+//#region src/hooks/_env.ts
+function parseEnvFile(content) {
+	const vars = {};
+	for (const line of content.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const eqIdx = trimmed.indexOf("=");
+		if (eqIdx === -1) continue;
+		const key = trimmed.slice(0, eqIdx).trim();
+		let val = trimmed.slice(eqIdx + 1).trim();
+		const quoteChar = val[0] === "\"" || val[0] === "'" ? val[0] : "";
+		if (quoteChar) {
+			const closeIdx = val.indexOf(quoteChar, 1);
+			if (closeIdx !== -1) val = val.slice(1, closeIdx);
+		} else {
+			const hashIdx = val.indexOf(" #");
+			if (hashIdx !== -1) val = val.slice(0, hashIdx).trim();
+		}
+		vars[key] = val;
+	}
+	return vars;
+}
+function hydrateHookEnv() {
+	let content;
+	try {
+		content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
+	} catch {
+		return;
+	}
+	for (const [key, value] of Object.entries(parseEnvFile(content))) if (process.env[key] === void 0) process.env[key] = value;
+}
+//#endregion
 //#region src/hooks/_project.ts
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
@@ -14,6 +49,7 @@ function hookCwd(data) {
 }
 //#endregion
 //#region src/hooks/post-commit.ts
+hydrateHookEnv();
 const exec = promisify(execFile);
 function isSdkChildContext(payload) {
 	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;

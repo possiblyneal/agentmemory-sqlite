@@ -1,8 +1,43 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+//#region src/hooks/_env.ts
+function parseEnvFile(content) {
+	const vars = {};
+	for (const line of content.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const eqIdx = trimmed.indexOf("=");
+		if (eqIdx === -1) continue;
+		const key = trimmed.slice(0, eqIdx).trim();
+		let val = trimmed.slice(eqIdx + 1).trim();
+		const quoteChar = val[0] === "\"" || val[0] === "'" ? val[0] : "";
+		if (quoteChar) {
+			const closeIdx = val.indexOf(quoteChar, 1);
+			if (closeIdx !== -1) val = val.slice(1, closeIdx);
+		} else {
+			const hashIdx = val.indexOf(" #");
+			if (hashIdx !== -1) val = val.slice(0, hashIdx).trim();
+		}
+		vars[key] = val;
+	}
+	return vars;
+}
+function hydrateHookEnv() {
+	let content;
+	try {
+		content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
+	} catch {
+		return;
+	}
+	for (const [key, value] of Object.entries(parseEnvFile(content))) if (process.env[key] === void 0) process.env[key] = value;
+}
+//#endregion
 //#region src/hooks/antigravity-bridge.ts
+hydrateHookEnv();
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const TOOL_NAME_MAP = {
 	view_file: "read",

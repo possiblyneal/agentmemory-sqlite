@@ -1,7 +1,10 @@
 #!/usr/bin/env node
+import { hydrateHookEnv } from "./_env.js";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+hydrateHookEnv();
 
 // Antigravity CLI (`agy`) bridge — sits in front of the canonical hooks
 // because three parts of agy's contract make them unusable as direct
