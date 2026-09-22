@@ -329,7 +329,7 @@ export function registerSummarizeFunction(
   metricsStore?: MetricsStore,
 ): void {
   sdk.registerFunction("mem::summarize", 
-    async (data: { sessionId: string } | undefined) => {
+    async (data: { sessionId: string; force?: boolean } | undefined) => {
       const startMs = Date.now();
       if (!data || typeof data.sessionId !== "string" || !data.sessionId.trim()) {
         return { success: false, error: "sessionId is required" };
@@ -354,6 +354,19 @@ export function registerSummarizeFunction(
           sessionId,
         });
         return { success: false, error: "no_observations" };
+      }
+
+      // Observations are append-only within a Session, so a stored summary
+      // whose count matches is current and is reused rather than reproduced.
+      if (!data.force) {
+        const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
+        if (existing && existing.observationCount === compressed.length) {
+          logger.info("Session Summary current, reused", {
+            sessionId,
+            observationCount: compressed.length,
+          });
+          return { success: true, summary: existing, reused: true };
+        }
       }
 
       if (isNoopProvider(provider)) {

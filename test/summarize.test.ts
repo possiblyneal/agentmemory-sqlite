@@ -557,3 +557,59 @@ describe("mem::summarize chunking", () => {
     expect(result.error).toBe("parse_failed");
   });
 });
+
+describe("mem::summarize Session Summary reuse", () => {
+  const ORIGINAL_ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  async function withStoredSummary(sessionId: string, obsCount: number, storedCount: number) {
+    const provider = makeProvider([summaryXml({ title: "fresh" })]);
+    const { handler, kv } = await setupHandler({ sessionId, obsCount, provider });
+    await kv.set("summaries", sessionId, {
+      sessionId,
+      project: "test-project",
+      createdAt: new Date().toISOString(),
+      title: "stored",
+      narrative: "n",
+      keyDecisions: [],
+      filesModified: [],
+      concepts: [],
+      observationCount: storedCount,
+    });
+    return { handler, kv, provider };
+  }
+
+  it("returns the stored summary without calling the provider when its Observation count matches", async () => {
+    const { handler, provider } = await withStoredSummary("ses_cur", 10, 10);
+
+    const result: any = await handler({ sessionId: "ses_cur" });
+
+    expect(result.success).toBe(true);
+    expect(result.summary.title).toBe("stored");
+    expect(result.reused).toBe(true);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("reproduces the summary when Observations arrived since it was written", async () => {
+    const { handler, kv, provider } = await withStoredSummary("ses_stale", 12, 10);
+
+    const result: any = await handler({ sessionId: "ses_stale" });
+
+    expect(result.success).toBe(true);
+    expect(result.summary.title).toBe("fresh");
+    expect(provider.calls).toHaveLength(1);
+    expect((await kv.get("summaries", "ses_stale") as any).observationCount).toBe(12);
+  });
+
+  it("force: true calls the provider even when the summary is current", async () => {
+    const { handler, provider } = await withStoredSummary("ses_force", 10, 10);
+
+    const result: any = await handler({ sessionId: "ses_force", force: true });
+
+    expect(result.success).toBe(true);
+    expect(result.summary.title).toBe("fresh");
+    expect(provider.calls).toHaveLength(1);
+  });
+});
