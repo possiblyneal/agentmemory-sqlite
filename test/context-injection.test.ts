@@ -27,8 +27,8 @@ function runHook(
       {
         env: {
           // Start from a clean slate — don't leak test-runner env into
-          // the hook. Only pass PATH and anything explicitly set by the
-          // test case.
+          // the hook. Only pass PATH, the sandbox below, and anything
+          // explicitly set by the test case.
           PATH: process.env["PATH"] ?? "",
           // Hooks read ~/.agentmemory/.env; vitest.config's throwaway HOME keeps
           // the Operator's file out, and a dead URL keeps the live daemon out.
