@@ -75,7 +75,7 @@ function rawFromCompressed(obs: CompressedObservation): RawObservation {
 // A lesson is a whole sentence that opens with a trigger. A trigger found
 // mid-sentence would drop the subject and can invert the meaning (#1292).
 const LESSON_START =
-  /^(always|never|don'?t|do not|make sure|remember to|prefer|avoid|note:|caveat:|warning:)\s/i;
+  /^(always|never|don['’]?t|do not|make sure|remember to|prefer|avoid|note:|caveat:|warning:)\s/i;
 const LIST_MARKER = /^(?:[-*+>]|\d+[.)])\s+/;
 const SENTENCE_BREAK = /\n+|(?<=[.!?])\s+/;
 const MIN_LESSON_CHARS = 20;

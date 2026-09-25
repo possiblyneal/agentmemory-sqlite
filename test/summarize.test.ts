@@ -562,6 +562,21 @@ describe("mem::summarize chunking", () => {
     expect(counted).toBe(5);
   });
 
+  it("still measures when chars/3 fits but the characters do not (dense text)", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + 200);
+    let counted = 0;
+    const provider = makeProvider([summaryXml({ title: "dense" })]);
+    provider.countTokens = async () => {
+      counted += 1;
+      return TOKENS_PER_OBS;
+    };
+    const { handler } = await setupHandler({ sessionId: "ses_dense", obsCount: 5, provider });
+
+    await handler({ sessionId: "ses_dense" });
+
+    expect(counted).toBe(5);
+  });
+
   it("skips measuring when the estimate already fits one chunk", async () => {
     let counted = 0;
     const provider = makeProvider([summaryXml({ title: "small" })]);

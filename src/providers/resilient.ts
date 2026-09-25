@@ -48,8 +48,9 @@ export class ResilientProvider implements MemoryProvider {
     }
   }
 
-  // One cap across every operation: a busy provider is busy for all of them,
-  // and fanning out past it only turns queued work into 429s.
+  // One cap across every generating operation: a busy provider is busy for all
+  // of them, and fanning out past it only turns queued work into 429s.
+  // countTokens stays outside it; summarize bounds those with COUNT_CONCURRENCY.
   private async acquireSlot(): Promise<void> {
     if (this.inFlight < maxConcurrency()) {
       this.inFlight++;

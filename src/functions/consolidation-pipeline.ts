@@ -72,8 +72,10 @@ export function registerConsolidationPipelineFunction(
 
   // Summaries and insights from one project must never feed another's
   // consolidation (#1344): an unscoped run consolidates each project that has
-  // new summaries since the last unscoped run, one project at a time.
+  // new summaries since the last unscoped run, one project at a time. A project
+  // whose merge or reflect failed is retried on the next unscoped run.
   let lastUnscopedRunAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const retryProjects = new Set<string>();
 
   async function consolidateSemantic(summaries: SessionSummary[]) {
     if (summaries.length < 5) {
@@ -120,6 +122,9 @@ export function registerConsolidationPipelineFunction(
           existing.lastAccessedAt = now;
           existing.updatedAt = now;
           existing.confidence = Math.max(existing.confidence, confidence);
+          existing.sourceSessionIds = [
+            ...new Set([...existing.sourceSessionIds, ...recentSummaries.map((s) => s.sessionId)]),
+          ];
           await kv.set(KV.semantic, existing.id, existing);
         } else {
           const sem: SemanticMemory = {
@@ -171,11 +176,12 @@ export function registerConsolidationPipelineFunction(
       const summaries = await kv.list<SessionSummary>(KV.summaries);
       const projects = data?.project
         ? [data.project]
-        : [...new Set(
-            summaries
+        : [...new Set([
+            ...retryProjects,
+            ...summaries
               .filter((s) => s.project && s.createdAt > lastUnscopedRunAt)
               .map((s) => s.project),
-          )];
+          ])];
       const semanticByProject: Record<string, unknown> = {};
       const reflectByProject: Record<string, unknown> = {};
       for (const project of projects) {
@@ -185,6 +191,12 @@ export function registerConsolidationPipelineFunction(
           );
         }
         if (runsReflect) reflectByProject[project] = await reflect(project);
+        const failed = [semanticByProject[project], reflectByProject[project]].some(
+          (r) => r !== undefined && r !== null && typeof r === "object" && "error" in r,
+        );
+        if (data?.project) continue;
+        if (failed) retryProjects.add(project);
+        else retryProjects.delete(project);
       }
       if (runsSemantic) results.semantic = semanticByProject;
       if (runsReflect) results.reflect = reflectByProject;

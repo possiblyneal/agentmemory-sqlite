@@ -193,7 +193,7 @@ export function registerReflectFunctions(
       // concepts: an insight is stamped with the project it was built for (#1344).
       if (data?.project) {
         const project = data.project;
-        const sessions = await kv.list<Session>(KV.sessions).catch(() => []);
+        const sessions = await kv.list<Session>(KV.sessions);
         const projectSessionIds = new Set(
           sessions.filter((s) => s.project === project).map((s) => s.id),
         );

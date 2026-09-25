@@ -46,6 +46,12 @@ describe("extractLessons (#1292)", () => {
     ).toEqual(["Always run the migration before seeding the db."]);
   });
 
+  it("accepts a curly apostrophe in the trigger", () => {
+    expect(extractLessons(["Don’t commit the generated bundle by hand."])).toEqual([
+      "Don’t commit the generated bundle by hand.",
+    ]);
+  });
+
   it("drops a trigger that sits mid-sentence and would lose its subject", () => {
     expect(
       extractLessons(["The watchdog must never restart on ROUTE_MISSING_404."]),

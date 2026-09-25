@@ -13,7 +13,7 @@ function isSdkChildContext(payload: unknown): boolean {
 //
 // THIS HOOK IS A NO-OP BY DEFAULT AS OF 0.8.10 (#143). Previously it
 // fired /agentmemory/enrich on every Edit/Write/Read/Glob/Grep tool call
-// and wrote up to 4000 chars of context to the model's next turn, which meant
+// and wrote up to 4000 chars of context to stdout for the model's next turn, which meant
 // agentmemory was silently injecting ~1000 tokens into every tool turn
 // via the user's Claude Code session. On Claude Pro that burned entire
 // allocations in a handful of messages (@adrianricardo, #143).

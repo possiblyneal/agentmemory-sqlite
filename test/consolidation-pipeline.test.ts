@@ -391,4 +391,53 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(second.results.reflect).toEqual({});
     expect(provider.summarize).toHaveBeenCalledTimes(1);
   });
+
+  it("retries a project whose reflect failed on the next unscoped run", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    let calls = 0;
+    sdk.registerFunction("mem::reflect", async () => {
+      calls++;
+      if (calls === 1) throw new Error("provider busy");
+      return { success: true };
+    });
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+
+    await sdk.trigger("mem::consolidate-pipeline", { tier: "reflect" });
+    const second = (await sdk.trigger("mem::consolidate-pipeline", { tier: "reflect" })) as {
+      results: { reflect: Record<string, unknown> };
+    };
+    const third = (await sdk.trigger("mem::consolidate-pipeline", { tier: "reflect" })) as {
+      results: { reflect: Record<string, unknown> };
+    };
+
+    expect(second.results.reflect).toEqual({ alpha: { success: true } });
+    expect(third.results.reflect).toEqual({});
+  });
+
+  it("credits a fact another project already holds to this project's Sessions too", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = {
+      name: "test",
+      compress: vi.fn(),
+      summarize: vi.fn().mockResolvedValue(`<fact confidence="0.8">Use node:sqlite</fact>`),
+    };
+    sdk.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    for (let i = 0; i < 5; i++) {
+      await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+      await kv.set("mem:summaries", `beta_${i}`, summaryFor("beta", i));
+    }
+
+    await sdk.trigger("mem::consolidate-pipeline", { tier: "semantic" });
+
+    const facts = await kv.list<SemanticMemory>("mem:semantic");
+    expect(facts).toHaveLength(1);
+    expect(facts[0].sourceSessionIds).toEqual(
+      expect.arrayContaining(["alpha_0", "beta_0"]),
+    );
+  });
 });

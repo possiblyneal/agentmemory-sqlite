@@ -4,7 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { recordAudit, queryAudit, pruneAudit } from "../src/functions/audit.js";
+import { recordAudit, queryAudit, evictOldestAudit } from "../src/functions/audit.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -104,7 +104,7 @@ describe("Audit Functions", () => {
     expect(entries.length).toBe(3);
   });
 
-  it("pruneAudit keeps the newest AGENTMEMORY_AUDIT_MAX entries", async () => {
+  it("evictOldestAudit keeps the newest AGENTMEMORY_AUDIT_MAX entries", async () => {
     process.env.AGENTMEMORY_AUDIT_MAX = "2";
     try {
       for (let i = 0; i < 4; i++) {
@@ -118,7 +118,7 @@ describe("Audit Functions", () => {
         });
       }
 
-      expect(await pruneAudit(kv as never)).toBe(2);
+      expect(await evictOldestAudit(kv as never)).toBe(2);
 
       const kept = (await kv.list<{ id: string }>("mem:audit")).map((e) => e.id).sort();
       expect(kept).toEqual(["aud_2", "aud_3"]);

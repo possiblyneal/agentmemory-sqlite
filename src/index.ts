@@ -59,7 +59,7 @@ import { registerConsolidateFunction } from "./functions/consolidate.js";
 import { registerPatternsFunction } from "./functions/patterns.js";
 import { registerRememberFunction } from "./functions/remember.js";
 import { registerEvictFunction } from "./functions/evict.js";
-import { pruneAudit } from "./functions/audit.js";
+import { evictOldestAudit } from "./functions/audit.js";
 import { registerRelationsFunction } from "./functions/relations.js";
 import { registerTimelineFunction } from "./functions/timeline.js";
 import { registerSmartSearchFunction } from "./functions/smart-search.js";
@@ -119,6 +119,8 @@ import { bootLog } from "./logger.js";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+
+const FIRST_SWEEP_DELAY_MS = 5 * 60_000;
 
 // #640 + #474: record this process's pid so `agentmemory stop` and
 // `agentmemory doctor` can identify the daemon. Without it they can only
@@ -610,21 +612,25 @@ async function main() {
   }
 
   if (process.env.EVICTION_ENABLED !== "false") {
-    const evictionTimer = setInterval(async () => {
+    // First sweep shortly after boot: a daemon restarted more often than daily
+    // would otherwise never reach its first 24h tick.
+    const runEviction = async () => {
       try {
         await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: false } });
       } catch {}
-    }, 86400000);
-    evictionTimer.unref();
-    bootLog(`Eviction sweep: enabled (every 24h)`);
+    };
+    setTimeout(runEviction, FIRST_SWEEP_DELAY_MS).unref();
+    setInterval(runEviction, 86400000).unref();
+    bootLog(`Eviction sweep: enabled (5 min after boot, then every 24h)`);
   }
 
-  const auditPruneTimer = setInterval(async () => {
+  const runAuditEviction = async () => {
     try {
-      await pruneAudit(kv);
+      await evictOldestAudit(kv);
     } catch {}
-  }, 86400000);
-  auditPruneTimer.unref();
+  };
+  setTimeout(runAuditEviction, FIRST_SWEEP_DELAY_MS).unref();
+  setInterval(runAuditEviction, 86400000).unref();
 
   if (process.env.INSIGHT_DECAY_ENABLED !== "false") {
     const insightDecayTimer = setInterval(async () => {

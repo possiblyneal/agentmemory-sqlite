@@ -1328,9 +1328,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Observations containing CJK text hang import and live ingestion indefinitely."
-    disposition: wont-fix
+    disposition: already-fixed
     status: "unresolved — no hang found: the CJK tokenizer makes one forward-only pass (src/state/cjk-segmenter.ts) and truncation cuts by string length; no loop over text can stall."
-    wont_fix_reason: "not reproducible in this tree"
+    fixed_by: "src/state/cjk-segmenter.ts makes one forward-only pass; no loop over text can stall."
     url: https://github.com/rohitg00/agentmemory/issues/969
   - number: 972
     title: "Add an optional HVTracker trust badge to the README"
@@ -2468,7 +2468,7 @@ issues:
     kind: bug
     note: "PreToolUse injection uses raw stdout instead of the hook envelope, against a 2s budget on a 6-29s endpoint."
     disposition: already-fixed
-    status: "fixed-here — 895d01c: pre-tool-use emits {hookSpecificOutput:{hookEventName: PreToolUse,additionalContext}} when the payload names PreToolUse, plain text otherwise; live /enrich answers in under 0.2s, so the 2s bound stays."
+    status: "fixed-here — 895d01c: pre-tool-use emits {hookSpecificOutput:{hookEventName: PreToolUse, additionalContext}} when the payload names PreToolUse, plain text otherwise; live /enrich answers in under 0.2s, so the 2s bound stays. Part 3 is not addressed: the hook still reads project only from the payload, so its enrich calls stay unscoped; upstream warns that scoping them must be measured first."
     fixed_by: "895d01c"
     url: https://github.com/rohitg00/agentmemory/issues/1278
   - number: 1279

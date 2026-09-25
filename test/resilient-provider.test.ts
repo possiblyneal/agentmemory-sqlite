@@ -91,6 +91,20 @@ describe("ResilientProvider per-operation breakers", () => {
     expect(provider.circuitStates.summarize.state).toBe("closed");
   });
 
+  it("opens the breaker on a 429 that reports an exhausted quota", async () => {
+    const provider = new ResilientProvider(
+      fakeProvider({
+        summarize: async () => {
+          throw new ProviderHttpError('OpenAI API error (429): {"error":{"code":"insufficient_quota"}}', 429);
+        },
+      }),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("open");
+  });
+
   it("treats an SDK error carrying status 503 as busy", async () => {
     const provider = new ResilientProvider(
       fakeProvider({

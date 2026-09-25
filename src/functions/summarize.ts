@@ -86,9 +86,10 @@ function fitsOneChunk(counts: number[], budget: number): boolean {
   return payload <= budget - PROMPT_OVERHEAD_TOKENS;
 }
 
-// The estimate overcounts, so a Session it already fits in one chunk needs no
-// measuring: on a broker that queues tokenize behind generation, one request
-// per Observation is load the summary itself has to wait behind.
+// A token is never shorter than one character, so a Session whose character
+// count already fits one chunk needs no measuring: on a broker that queues
+// tokenize behind generation, one request per Observation is load the summary
+// itself has to wait behind.
 async function countObservationTokens(
   provider: MemoryProvider,
   texts: string[],
@@ -96,7 +97,7 @@ async function countObservationTokens(
   sessionId: string,
 ): Promise<number[]> {
   const estimates = texts.map(estimateTokens);
-  if (fitsOneChunk(estimates, budget)) return estimates;
+  if (fitsOneChunk(texts.map((t) => t.length), budget)) return estimates;
   if (provider.countTokens) {
     try {
       return await mapWithConcurrency(texts, COUNT_CONCURRENCY, (t) =>

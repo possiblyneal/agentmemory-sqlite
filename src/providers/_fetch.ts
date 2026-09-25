@@ -23,9 +23,12 @@ export class ProviderHttpError extends Error {
   }
 }
 
+// OpenAI answers an exhausted quota with 429 too; that never clears by waiting,
+// so it counts as broken and opens the breaker.
 export function isProviderBusy(err: unknown): boolean {
   const status = (err as { status?: unknown } | null)?.status;
-  return typeof status === "number" && RETRY_STATUS.has(status);
+  if (typeof status !== "number" || !RETRY_STATUS.has(status)) return false;
+  return !/insufficient_quota/.test(err instanceof Error ? err.message : "");
 }
 
 const sleep = (ms: number): Promise<void> =>

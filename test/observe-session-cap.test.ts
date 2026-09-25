@@ -68,12 +68,12 @@ async function setup(rows: ReturnType<typeof stored>[], cap: number) {
     },
   })) as { observationId?: string; success?: boolean };
   const ids = (await kv.list<{ id: string }>(KV.observations(SESSION))).map((o) => o.id);
-  return { result, ids };
+  return { result, ids, kv };
 }
 
 describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
   it("admits the new observation by evicting the least important one", async () => {
-    const { result, ids } = await setup(
+    const { result, ids, kv } = await setup(
       [
         stored("keep", 8, "2026-01-01T00:00:00Z"),
         stored("drop", 2, "2026-01-02T00:00:00Z"),
@@ -86,6 +86,10 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect(ids).toContain("keep");
     expect(ids).toContain("raw");
     expect(ids).not.toContain("drop");
+    const audits = await kv.list<{ operation: string; functionId: string; targetIds: string[] }>(KV.audit);
+    expect(audits).toContainEqual(
+      expect.objectContaining({ operation: "delete", functionId: "mem::observe", targetIds: ["drop"] }),
+    );
   });
 
   it("evicts the older row on an importance tie and drops it from search", async () => {
