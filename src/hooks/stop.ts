@@ -43,11 +43,13 @@ async function main() {
 
   const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
 
-  // session/end already fans out the summary server-side (#1203).
+  // session/end already fans out the summary server-side (#1203). Stop
+  // fires after every turn, so the daemon holds the end until the Session
+  // goes idle (#1131).
   fetch(`${REST_URL}/agentmemory/session/end`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, turnEnd: true }),
     signal: AbortSignal.timeout(5000),
   }).catch(() => {});
 

@@ -140,6 +140,8 @@ function parseOptionalPositiveInt(value: unknown): number | undefined | null {
 }
 
 const DEFAULT_PAGE_LIMIT = 100;
+// How long a Session must go without a turn before a turn end becomes its end.
+const SESSION_IDLE_END_MS = 5 * 60_000;
 
 type Page = { limit: number | "all"; offset: number };
 
@@ -686,37 +688,66 @@ export function registerApiTriggers(
     },
   });
 
+  // A turn end (the Stop hook) is not a Session end: Claude Code fires Stop
+  // after every assistant turn, and ending the Session there re-summarizes
+  // the whole Session once per turn (#1131). A turn end waits out
+  // SESSION_IDLE_END_MS instead, restarted by each later turn; a real end
+  // (SessionEnd) runs at once and drops the wait. Hosts that only send Stop
+  // are still ended, once they go idle.
+  const pendingSessionEnds = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const finishSession = async (sessionId: string): Promise<void> => {
+    pendingSessionEnds.delete(sessionId);
+    // kv.update creates a missing key, so a stop for a Session that never
+    // started, or was deleted while its turn end waited, would invent a row.
+    if (!(await kv.get<Session>(KV.sessions, sessionId))) return;
+    await kv.update(KV.sessions, sessionId, [
+      { type: "set", path: "endedAt", value: new Date().toISOString() },
+      { type: "set", path: "status", value: "completed" },
+    ]);
+    // Fan out session-stopped lifecycle (non-blocking).
+    try {
+      sdk.trigger({
+        function_id: "event::session::stopped",
+        payload: { sessionId },
+        action: TriggerAction.Void(),
+      });
+    } catch (err) {
+      logger.warn("event::session::stopped trigger failed", {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   sdk.registerFunction("api::session::end",
-    async (req: ApiRequest<{ sessionId: string }>): Promise<Response> => {
-      const sessionId = asNonEmptyString((req.body as Record<string, unknown>)?.sessionId);
+    async (req: ApiRequest<{ sessionId: string; turnEnd?: boolean }>): Promise<Response> => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const sessionId = asNonEmptyString(body.sessionId);
       if (!sessionId) {
         return {
           status_code: 400,
           body: { error: "sessionId is required and must be a non-empty string" },
         };
       }
-      // kv.update creates a missing key, so a stop for a Session that never
-      // started would invent a row; refuse it instead.
       if (!(await kv.get<Session>(KV.sessions, sessionId))) {
         return { status_code: 404, body: { error: "session_not_found" } };
       }
-      await kv.update(KV.sessions, sessionId, [
-        { type: "set", path: "endedAt", value: new Date().toISOString() },
-        { type: "set", path: "status", value: "completed" },
-      ]);
-      // Fan out session-stopped lifecycle (non-blocking).
-      try {
-        sdk.trigger({
-          function_id: "event::session::stopped",
-          payload: { sessionId },
-          action: TriggerAction.Void(),
-        });
-      } catch (err) {
-        logger.warn("event::session::stopped trigger failed", {
-          sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      clearTimeout(pendingSessionEnds.get(sessionId));
+      if (body.turnEnd === true) {
+        const timer = setTimeout(() => {
+          finishSession(sessionId).catch((err) =>
+            logger.warn("Idle session end failed", {
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }, SESSION_IDLE_END_MS);
+        timer.unref?.();
+        pendingSessionEnds.set(sessionId, timer);
+        return { status_code: 200, body: { success: true, deferred: true } };
       }
+      await finishSession(sessionId);
       return { status_code: 200, body: { success: true } };
     },
   );

@@ -19,7 +19,7 @@ Watch observations land live at `http://localhost:3113`.
 
 ## What the hooks do
 
-- Session start and end frame each unit of work and let `handoff` resume it.
+- Session start and end frame each unit of work and let `handoff` resume it. `Stop` fires after every turn, so it only marks a turn end: the Session ends, and is summarized, once it has been idle for five minutes, or at once on `SessionEnd`.
 - Tool-use hooks capture what changed and why, the raw material for `recall` and `recap`.
 - Prompt-submit captures intent. Pre-compact preserves context before the host trims it.
 - A post-commit hook links commits to sessions, which powers `commit-context` and `commit-history`.

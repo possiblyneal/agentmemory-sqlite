@@ -110,7 +110,7 @@ function targetsFor(event, raw) {
 		}
 		case "PreToolUse": return ["pre-tool-use.mjs"];
 		case "PostToolUse": return ["post-tool-use.mjs"];
-		case "Stop": return ["stop.mjs", "session-end.mjs"];
+		case "Stop": return ["stop.mjs"];
 		default: return [];
 	}
 }
