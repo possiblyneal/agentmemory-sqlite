@@ -2,7 +2,7 @@
 
 import { InMemoryKV } from "./in-memory-kv.js";
 import { createStdioTransport } from "./transport.js";
-import { getAllTools } from "./tools-registry.js";
+import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
@@ -338,7 +338,7 @@ async function handleLocal(
         deleted,
         requested: (v.memoryIds || []).length,
         reason: v.reason,
-        ...(notFound.length > 0 && { notFound }),
+        ...(notFound.length > 0 && { notFound, hint: NOT_A_MEMORY_HINT }),
       });
     }
 

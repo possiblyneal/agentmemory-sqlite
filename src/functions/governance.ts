@@ -5,11 +5,7 @@ import type { StateKV } from "../state/kv.js";
 import { recordAudit, safeAudit, queryAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { logger } from "../logger.js";
-
-// #833/#1273: observation ids handed to this memories-only delete used to
-// come back as a silent deleted: 0.
-const NOT_A_MEMORY_HINT =
-  "These ids are not saved memories. Observations are deleted with memory_forget (sessionId + observationIds).";
+import { NOT_A_MEMORY_HINT } from "../mcp/tools-registry.js";
 
 export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::governance-delete", 

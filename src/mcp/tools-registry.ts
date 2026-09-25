@@ -1,3 +1,8 @@
+// #833/#1273: observation ids handed to memory_governance_delete, which only
+// deletes saved memories, used to come back as a silent deleted: 0.
+export const NOT_A_MEMORY_HINT =
+  "These ids are not saved memories. Observations are deleted with memory_forget (sessionId + observationIds).";
+
 export type McpToolDef = {
   name: string;
   description: string;
