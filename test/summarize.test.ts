@@ -544,6 +544,9 @@ describe("mem::summarize chunking", () => {
   });
 
   it("measures every Observation once, even across the summarize retry", async () => {
+    // The chars/3 estimate (~31 per Observation with separator) overruns this
+    // budget, so the Session is measured; the measured 14 each fits exactly.
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(5);
     let counted = 0;
     const provider = makeProvider(["garbage", summaryXml({ title: "second-attempt" })]);
     provider.countTokens = async () => {
@@ -557,6 +560,21 @@ describe("mem::summarize chunking", () => {
     expect(result.success).toBe(true);
     expect(provider.calls).toHaveLength(2);
     expect(counted).toBe(5);
+  });
+
+  it("skips measuring when the estimate already fits one chunk", async () => {
+    let counted = 0;
+    const provider = makeProvider([summaryXml({ title: "small" })]);
+    provider.countTokens = async () => {
+      counted += 1;
+      return TOKENS_PER_OBS;
+    };
+    const { handler } = await setupHandler({ sessionId: "ses_fits", obsCount: 5, provider });
+
+    const result: any = await handler({ sessionId: "ses_fits" });
+
+    expect(result.success).toBe(true);
+    expect(counted).toBe(0);
   });
 
   it("returns parse_failed only after both attempts fail", async () => {
