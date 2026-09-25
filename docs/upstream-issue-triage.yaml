@@ -841,8 +841,9 @@ issues:
     difficulty: low
     kind: bug
     note: "MCP search tools and /smart-search ignore project, so reads are unscoped."
-    disposition: candidate
-    status: "present-here — mem::search accepts project (src/functions/search.ts:514) and mem::smart-search accepts it too (src/functions/smart-search.ts:88), but neither MCP handler forwards args.project — memory_recall sends only query/limit/format/token_budget/agentId (src/mcp/server.ts:145) and memory_smart_search only query/expandIds/limit (src/mcp/server.ts:346). Every MCP read is cross-project."
+    disposition: already-fixed
+    fixed_by: "memory_recall and memory_smart_search advertise and forward project on both MCP surfaces (src/mcp/server.ts, src/mcp/standalone.ts), and mem::smart-search filters its hybrid results through createProjectMatcher, the rule mem::search uses (src/functions/search.ts)."
+    status: "fixed-here — memory_recall and memory_smart_search advertise and forward project on both MCP surfaces (src/mcp/server.ts, src/mcp/standalone.ts), and mem::smart-search filters its hybrid results through createProjectMatcher, the rule mem::search uses (src/functions/search.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/787
     fix_prs: [869]
     mentioned_by_prs: [1195]
@@ -898,7 +899,9 @@ issues:
     difficulty: med
     kind: bug
     note: "memory_governance_delete returns deleted:0 for valid memory_save ids."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "memory_save stores through mem::remember into KV.memories, the scope governance delete reads; test/forget-by-id-surfaces.test.ts deletes a memory_save id with deleted:1."
+    status: "fixed-here — memory_save stores through mem::remember into KV.memories, the scope governance delete reads; test/forget-by-id-surfaces.test.ts deletes a memory_save id with deleted:1."
     url: https://github.com/rohitg00/agentmemory/issues/820
   - number: 825
     title: "Bug: no path to rebuild or reset a >25K legacy graph — snapshot-rebuild + graph-reset both heartbeat-crash on state::list (follow-up to #816)"
@@ -931,7 +934,9 @@ issues:
     difficulty: med
     kind: bug
     note: "forget reports success while deleting nothing; governance delete never targets observations."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
+    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
     url: https://github.com/rohitg00/agentmemory/issues/833
   - number: 834
     title: "on_memory_write hook: smarter sync — skip add/update, archive on remove"
@@ -2415,7 +2420,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Governance delete finds a captured observation and deletes nothing."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
+    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
     url: https://github.com/rohitg00/agentmemory/issues/1273
   - number: 1274
     title: "Feature: deprecate / supersede observations (invalidate bad captures) with audit trail"
