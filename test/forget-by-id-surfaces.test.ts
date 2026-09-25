@@ -330,9 +330,11 @@ describe("memory_governance_delete on a memory_save id (#820)", () => {
     const saved = toolResult(
       (await callTool("memory_save", { content: "the deploy key lives in vault" })).body,
     ) as { memory: { id: string } };
+    expect(getSearchIndex().has(saved.memory.id)).toBe(true);
     const res = await callTool("memory_governance_delete", { memoryIds: saved.memory.id });
 
     expect(toolResult(res.body)).toMatchObject({ success: true, deleted: 1 });
     expect(await kv.get(KV.memories, saved.memory.id)).toBeNull();
+    expect(getSearchIndex().has(saved.memory.id)).toBe(false);
   });
 });

@@ -6,6 +6,11 @@ import { recordAudit, safeAudit, queryAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { logger } from "../logger.js";
 
+// #833/#1273: observation ids handed to this memories-only delete used to
+// come back as a silent deleted: 0.
+const NOT_A_MEMORY_HINT =
+  "These ids are not saved memories. Observations are deleted with memory_forget (sessionId + observationIds).";
+
 export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::governance-delete", 
     async (data: { memoryIds: string[]; reason?: string }) => {
@@ -20,9 +25,12 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
       const { decrementImageRef } = await import("./image-refs.js");
 
       let deleted = 0;
+      const notFound: string[] = [];
       for (const id of data.memoryIds) {
         const mem = await kv.get<Memory>(KV.memories, id);
-        if (mem) {
+        if (!mem) {
+          notFound.push(id);
+        } else {
           await deleteIndexed(kv, KV.memories, id);
           // The same teardown mem::forget does, so the two single-item
           // delete paths cannot diverge in what they release.
@@ -48,7 +56,12 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
         requested: data.memoryIds.length,
         deleted,
       });
-      return { success: true, deleted, total: data.memoryIds.length };
+      return {
+        success: true,
+        deleted,
+        total: data.memoryIds.length,
+        ...(notFound.length > 0 && { notFound, hint: NOT_A_MEMORY_HINT }),
+      };
     },
   );
 

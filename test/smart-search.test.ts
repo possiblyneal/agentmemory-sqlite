@@ -256,7 +256,7 @@ describe("Smart Search Function", () => {
         limit: 2,
       })) as { results: CompactSearchResult[] };
 
-      expect(requested).toBeGreaterThan(2);
+      expect(requested).toBe(100);
       expect(result.results.map((r) => r.obsId)).toEqual(["mem_here", "obs_orphan"]);
     });
   });

@@ -24,7 +24,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_file_history` |  | `files`*: string, `sessionId`: string | Get past observations about specific files. |
 | `memory_forget` |  | `memoryId`: string, `sessionId`: string, `observationIds`: string | Permanently remove one saved memory, or one or more observations from a session, by id. Removes them from search as well as from the store and records an audit entry. Ids that do not exist are skipped, and the reply says how many records were actually removed. There is no undo, restore from a snapshot if you need one back. |
 | `memory_frontier` |  | `project`: string, `agentId`: string, `limit`: number | Get all unblocked actions ranked by priority and urgency. Returns the frontier of actionable work with no unsatisfied dependencies. |
-| `memory_governance_delete` |  | `memoryIds`*: string, `reason`: string | Delete specific memories with audit trail. |
+| `memory_governance_delete` |  | `memoryIds`*: string, `reason`: string | Delete specific saved memories with audit trail. Ids that are not saved memories come back in notFound; delete observations with memory_forget. |
 | `memory_graph_query` |  | `startNodeId`: string, `nodeType`: string, `maxDepth`: number, `query`: string | Query the knowledge graph for entities and relationships. |
 | `memory_heal` |  | `categories`: string, `dryRun`: string | Auto-fix all fixable issues found by diagnostics. Unblocks stuck actions, expires stale leases, cleans up orphaned data. |
 | `memory_insight_list` |  | `project`: string, `minConfidence`: number, `limit`: number | List synthesized insights, higher-order observations derived from patterns across memories, lessons, and crystals. |

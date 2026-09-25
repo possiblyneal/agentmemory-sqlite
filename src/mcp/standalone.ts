@@ -323,11 +323,14 @@ async function handleLocal(
 
     case "memory_governance_delete": {
       let deleted = 0;
+      const notFound: string[] = [];
       for (const id of v.memoryIds || []) {
         const existing = await kvInstance.get("mem:memories", id);
         if (existing) {
           await kvInstance.delete("mem:memories", id);
           deleted++;
+        } else {
+          notFound.push(id);
         }
       }
       kvInstance.persist();
@@ -335,6 +338,7 @@ async function handleLocal(
         deleted,
         requested: (v.memoryIds || []).length,
         reason: v.reason,
+        ...(notFound.length > 0 && { notFound }),
       });
     }
 

@@ -369,7 +369,9 @@ export const V040_TOOLS: McpToolDef[] = [
   },
   {
     name: "memory_governance_delete",
-    description: "Delete specific memories with audit trail.",
+    description:
+      "Delete specific saved memories with audit trail. Ids that are not saved memories come back in notFound; " +
+      "delete observations with memory_forget.",
     inputSchema: {
       type: "object",
       properties: {

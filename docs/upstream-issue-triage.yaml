@@ -935,8 +935,8 @@ issues:
     kind: bug
     note: "forget reports success while deleting nothing; governance delete never targets observations."
     disposition: already-fixed
-    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
-    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
+    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
+    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
     url: https://github.com/rohitg00/agentmemory/issues/833
   - number: 834
     title: "on_memory_write hook: smarter sync — skip add/update, archive on remove"
@@ -2421,8 +2421,8 @@ issues:
     kind: bug
     note: "Governance delete finds a captured observation and deletes nothing."
     disposition: already-fixed
-    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
-    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and counts only records it removed."
+    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
+    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
     url: https://github.com/rohitg00/agentmemory/issues/1273
   - number: 1274
     title: "Feature: deprecate / supersede observations (invalidate bad captures) with audit trail"

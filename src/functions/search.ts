@@ -505,6 +505,18 @@ export async function rebuildIndex(kv: StateKV): Promise<number> {
   return indexed
 }
 
+export function createSessionLoader(
+  kv: StateKV,
+): (sessionId: string) => Promise<Session | null> {
+  const sessions = new Map<string, Session | null>()
+  return async (sessionId) => {
+    if (!sessions.has(sessionId)) {
+      sessions.set(sessionId, (await kv.get<Session>(KV.sessions, sessionId)) ?? null)
+    }
+    return sessions.get(sessionId)!
+  }
+}
+
 // A result's project is its session's. Results with no session entry fall
 // back to KV.memories, and pass through when that also has no project.
 // Two cases arrive without a session:
@@ -518,16 +530,12 @@ export async function rebuildIndex(kv: StateKV): Promise<number> {
 export function createProjectMatcher(
   kv: StateKV,
   project: string,
+  loadSession = createSessionLoader(kv),
 ): (sessionId: string, obsId: string) => Promise<boolean> {
-  const sessionProjects = new Map<string, string | null>()
   const memoryProjects = new Map<string, string | null>()
   return async (sessionId, obsId) => {
-    if (!sessionProjects.has(sessionId)) {
-      const s = await kv.get<Session>(KV.sessions, sessionId)
-      sessionProjects.set(sessionId, s ? s.project : null)
-    }
-    const sessionProject = sessionProjects.get(sessionId)!
-    if (sessionProject !== null) return sessionProject === project
+    const session = await loadSession(sessionId)
+    if (session) return session.project === project
     if (!memoryProjects.has(obsId)) {
       const mem = await kv.get<Memory>(KV.memories, obsId).catch(() => null)
       memoryProjects.set(obsId, mem?.project ?? null)
@@ -657,15 +665,10 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         : Math.max(effectiveLimit * 3, 30)
       const results = idx.search(query, fetchLimit)
 
-      // Resolve session -> cwd once per sessionId we touch.
-      const sessionCache = new Map<string, Session | null>()
-      const loadSession = async (sessionId: string): Promise<Session | null> => {
-        if (sessionCache.has(sessionId)) return sessionCache.get(sessionId)!
-        const s = await kv.get<Session>(KV.sessions, sessionId)
-        sessionCache.set(sessionId, s ?? null)
-        return s ?? null
-      }
-      const inProject = projectFilter ? createProjectMatcher(kv, projectFilter) : null
+      const loadSession = createSessionLoader(kv)
+      const inProject = projectFilter
+        ? createProjectMatcher(kv, projectFilter, loadSession)
+        : null
 
       // First pass: filter by session (sequential — benefits from session cache).
       //

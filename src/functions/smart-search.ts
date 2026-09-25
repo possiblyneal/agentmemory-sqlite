@@ -198,11 +198,11 @@ export function registerSmartSearchFunction(
       // Over-fetch when filtering. Hybrid search can't filter on
       // agentId or project (BM25/vector indexes don't carry them), so we
       // ask the searcher for more hits than we need and trim post-filter.
-      // 3× is a defensible middle ground: enough headroom for a small
-      // workload, capped at 300 so a 100-limit request never asks for
-      // thousands of hits.
+      // Same headroom as mem::search: hybrid search's per-session
+      // diversity cap runs before this filter, so a small multiple
+      // underfills scoped pages on a multi-project store.
       const overFetchLimit = filterAgentId || project
-        ? Math.min(limit * 3, 300)
+        ? Math.max(limit * 10, 100)
         : limit;
 
       const [hybridResults, lessons] = await Promise.all([

@@ -53,9 +53,12 @@ describe("MCP search tools forward project (#787)", () => {
     expect(payloads.get("mem::smart-search")).toMatchObject({ project: "my-project" });
   });
 
-  it("an omitted or blank project stays unscoped", async () => {
+  it.each([
+    ["omitted", {}],
+    ["blank", { project: "  " }],
+  ])("an %s project stays unscoped", async (_, extra) => {
     const { callTool, payloads } = surfaces();
-    await callTool("memory_smart_search", { query: "auth", project: "  " });
+    await callTool("memory_smart_search", { query: "auth", ...extra });
     expect(payloads.get("mem::smart-search")?.project).toBeUndefined();
   });
 });
