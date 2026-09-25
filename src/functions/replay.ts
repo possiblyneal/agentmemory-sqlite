@@ -63,10 +63,45 @@ function rawFromCompressed(obs: CompressedObservation): RawObservation {
   };
 }
 
-const LESSON_PATTERNS: RegExp[] = [
-  /\b(always|never|don'?t|do not|make sure|remember to|note:|caveat:|warning:)\b[^.\n]{10,200}[.!\n]/gi,
-  /\b(prefer|avoid)\s[^.\n]{10,200}[.!\n]/gi,
-];
+// A lesson is a whole sentence that opens with a trigger. A trigger found
+// mid-sentence would drop the subject and can invert the meaning (#1292).
+const LESSON_START =
+  /^(always|never|don'?t|do not|make sure|remember to|prefer|avoid|note:|caveat:|warning:)\s/i;
+const LIST_MARKER = /^(?:[-*+>]|\d+[.)])\s+/;
+const SENTENCE_BREAK = /\n+|(?<=[.!?])\s+/;
+const MIN_LESSON_CHARS = 20;
+const MAX_LESSON_CHARS = 220;
+const MAX_LESSONS = 20;
+
+function isBalanced(sentence: string): boolean {
+  const count = (token: string) => sentence.split(token).length - 1;
+  return (
+    count("**") % 2 === 0 &&
+    count("`") % 2 === 0 &&
+    count("[[") === count("]]")
+  );
+}
+
+export function extractLessons(texts: string[]): string[] {
+  const lessons = new Map<string, string>();
+  for (const text of texts) {
+    for (const raw of text.split(SENTENCE_BREAK)) {
+      const sentence = raw.trim().replace(LIST_MARKER, "").replace(/\s+/g, " ");
+      if (
+        sentence.length < MIN_LESSON_CHARS ||
+        sentence.length > MAX_LESSON_CHARS ||
+        !LESSON_START.test(sentence) ||
+        !isBalanced(sentence)
+      ) {
+        continue;
+      }
+      const key = sentence.toLowerCase();
+      if (!lessons.has(key)) lessons.set(key, sentence);
+      if (lessons.size >= MAX_LESSONS) return Array.from(lessons.values());
+    }
+  }
+  return Array.from(lessons.values());
+}
 
 async function deriveCrystalAndLessons(
   kv: StateKV,
@@ -97,22 +132,9 @@ async function deriveCrystalAndLessons(
     }
   }
 
-  const lessonMatches = new Map<string, string>();
-  for (const text of assistantTexts.concat(userPrompts).slice(0, 200)) {
-    for (const pat of LESSON_PATTERNS) {
-      pat.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = pat.exec(text)) !== null && lessonMatches.size < 40) {
-        const snippet = m[0].replace(/\s+/g, " ").trim();
-        if (snippet.length >= 20 && snippet.length <= 220) {
-          const key = snippet.toLowerCase();
-          if (!lessonMatches.has(key)) lessonMatches.set(key, snippet);
-        }
-      }
-    }
-  }
-
-  const lessonEntries = Array.from(lessonMatches.values()).slice(0, 20);
+  const lessonEntries = extractLessons(
+    assistantTexts.concat(userPrompts).slice(0, 200),
+  );
   const lessonIds: string[] = [];
   for (const content of lessonEntries) {
     // Content-addressed ID so re-importing the same JSONL does not
@@ -134,9 +156,7 @@ async function deriveCrystalAndLessons(
           ...existing,
           sourceIds: mergedSources,
           tags: mergedTags,
-          reinforcements: (existing.reinforcements || 0) + 1,
           updatedAt: createdAt,
-          lastReinforcedAt: createdAt,
         };
         await kv.set(KV.lessons, lessonId, merged);
       } else {
