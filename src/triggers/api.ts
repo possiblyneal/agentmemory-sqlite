@@ -724,6 +724,8 @@ export function registerApiTriggers(
     const timer = setTimeout(async () => {
       try {
         const session = await kv.get<Session>(KV.sessions, sessionId);
+        // A turn end or SessionEnd that landed during the read owns the Session now.
+        if (pendingSessionEnds.get(sessionId) !== timer) return;
         if (session && session.observationCount > observationCount) {
           endWhenIdle(sessionId, session.observationCount);
           return;
