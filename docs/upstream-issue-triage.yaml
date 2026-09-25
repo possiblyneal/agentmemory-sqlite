@@ -1650,8 +1650,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Session stop dispatches mem::summarize twice, each re-summarizing from scratch."
-    disposition: candidate
-    status: "partly-present-here — The double dispatch is fixed: the Stop hook posts only /session/end and cites this class of bug (src/hooks/stop.ts:43). The re-summarize half is live — mem::summarize never reads KV.summaries before running (src/functions/summarize.ts:235-360), so every stop is a full LLM pass over every compressed observation."
+    disposition: already-fixed
+    fixed_by: "The Stop hook posts only /session/end (src/hooks/stop.ts), and mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
+    status: "fixed-here — The Stop hook posts only /session/end (src/hooks/stop.ts), and mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
     url: https://github.com/rohitg00/agentmemory/issues/1062
     fix_prs: [1061]
   - number: 1063
@@ -1892,7 +1893,9 @@ issues:
     difficulty: med
     kind: bug
     note: "The Stop hook re-summarizes the whole session every assistant turn; cost is quadratic."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Stop posts a turn end, and api::session::end holds it until the Session has gone 30 minutes with no turn and no new Observation; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
+    status: "fixed-here — Stop posts a turn end, and api::session::end holds it until the Session has gone 30 minutes with no turn and no new Observation; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1131
     fix_prs: [1269]
   - number: 1133
@@ -2347,7 +2350,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Summarisation re-runs on already-summarised sessions, 954x on one session, each a paid call."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
+    status: "fixed-here — mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
     url: https://github.com/rohitg00/agentmemory/issues/1244
   - number: 1245
     title: "--instance / --port never reach the generated engine config, so a second daemon always binds instance-0 ports"

@@ -130,8 +130,11 @@ export function normalizePayload(event: string, raw: Json): Json {
 // Map an Antigravity event to the bundled scripts it should drive.
 // PreInvocation stands in for both SessionStart and UserPromptSubmit: the
 // first invocation of a conversation opens the session, every later one is a
-// fresh user turn. PostInvocation is deliberately unmapped — PostToolUse
-// already captures the work, and firing again would double-record it.
+// fresh user turn. Stop ends one execution loop, not the conversation, so it
+// drives only stop.mjs, whose turn end the daemon turns into a Session end
+// once the conversation goes idle (#1131). PostInvocation is deliberately
+// unmapped — PostToolUse already captures the work, and firing again would
+// double-record it.
 export function targetsFor(event: string, raw: Json): string[] {
   switch (event) {
     case "PreInvocation": {
@@ -146,7 +149,7 @@ export function targetsFor(event: string, raw: Json): string[] {
     case "PostToolUse":
       return ["post-tool-use.mjs"];
     case "Stop":
-      return ["stop.mjs", "session-end.mjs"];
+      return ["stop.mjs"];
     default:
       return [];
   }

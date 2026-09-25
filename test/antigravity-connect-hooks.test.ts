@@ -365,8 +365,8 @@ describe("antigravity bridge event routing", () => {
     expect(targetsFor("PreInvocation", {})).toContain("session-start.mjs");
   });
 
-  it("closes the session on Stop", () => {
-    expect(targetsFor("Stop", {})).toEqual(["stop.mjs", "session-end.mjs"]);
+  it("reports a turn end on Stop and leaves the Session end to the daemon's idle wait", () => {
+    expect(targetsFor("Stop", {})).toEqual(["stop.mjs"]);
   });
 
   it("ignores PostInvocation to avoid double-capturing a turn", () => {
