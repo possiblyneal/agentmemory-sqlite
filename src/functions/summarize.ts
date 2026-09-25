@@ -86,8 +86,8 @@ function fitsOneChunk(counts: number[], budget: number): boolean {
   return payload <= budget - PROMPT_OVERHEAD_TOKENS;
 }
 
-// A token is never shorter than one character, so a Session whose character
-// count already fits one chunk needs no measuring: on a broker that queues
+// A token is rarely shorter than one character, so a Session whose character
+// count already fits one chunk is safe to skip measuring: on a broker that queues
 // tokenize behind generation, one request per Observation is load the summary
 // itself has to wait behind.
 async function countObservationTokens(

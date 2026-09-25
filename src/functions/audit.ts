@@ -138,7 +138,7 @@ function auditMax(): number {
 }
 
 // Retention for the audit store: keeps the newest AGENTMEMORY_AUDIT_MAX
-// entries. Pruning the log is not itself audited - that would write the
+// entries. Evicting from the log is not itself audited - that would write the
 // rows it exists to bound - so it leaves one log line instead.
 export async function evictOldestAudit(kv: StateKV): Promise<number> {
   if (auditStoreOff()) return 0;

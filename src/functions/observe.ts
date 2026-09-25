@@ -10,7 +10,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
-import { recordAudit } from "./audit.js";
+import { safeAudit } from "./audit.js";
 import { decrementImageRef } from "./image-refs.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
@@ -84,7 +84,7 @@ async function evictToAdmitOne(
     }
     if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
     if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
-    await recordAudit(kv, "delete", "mem::observe", [obs.id], {
+    await safeAudit(kv, "delete", "mem::observe", [obs.id], {
       resource: "observation",
       reason: "session_observation_cap",
       sessionId,

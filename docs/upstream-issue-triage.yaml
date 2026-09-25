@@ -1329,7 +1329,7 @@ issues:
     kind: bug
     note: "Observations containing CJK text hang import and live ingestion indefinitely."
     disposition: already-fixed
-    status: "unresolved — no hang found: the CJK tokenizer makes one forward-only pass (src/state/cjk-segmenter.ts) and truncation cuts by string length; no loop over text can stall."
+    status: "fixed-here — no hang found: the CJK tokenizer makes one forward-only pass (src/state/cjk-segmenter.ts) and truncation cuts by string length; no loop over text can stall."
     fixed_by: "src/state/cjk-segmenter.ts makes one forward-only pass; no loop over text can stall."
     url: https://github.com/rohitg00/agentmemory/issues/969
   - number: 972
