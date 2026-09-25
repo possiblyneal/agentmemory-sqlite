@@ -836,7 +836,7 @@ export const V070_TOOLS: McpToolDef[] = [
         project: { type: "string", description: "Filter by project" },
         minConfidence: {
           type: "number",
-          description: "Minimum confidence threshold (default 0.1)",
+          description: "Minimum confidence threshold (default 0)",
         },
         limit: { type: "number", description: "Max results (default 10)" },
       },

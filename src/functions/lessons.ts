@@ -158,11 +158,13 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "query is required" };
       }
 
-      const minConfidence = data.minConfidence ?? 0.1;
+      // Soft-delete is the only default gate: a reinforced lesson decays to
+      // the 0.05 floor and stays live, and confidence already ranks it low.
+      const minConfidence = data.minConfidence ?? 0;
       const limit = data.limit ?? 10;
 
       const idx = await ensureLessonIndex(kv);
-      const filtering = !!data.project || minConfidence > 0.1;
+      const filtering = !!data.project || minConfidence > 0;
       const fetchLimit = filtering
         ? Math.max(limit * 10, 100)
         : Math.max(limit * 5, 50);
