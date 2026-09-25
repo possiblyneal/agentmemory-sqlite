@@ -1,8 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const HOOKS_DIR = join(import.meta.dirname, "..", "plugin", "scripts");
+// Hooks read ~/.agentmemory/.env; an empty HOME keeps the Operator's file,
+// and with it the live daemon, out of reach.
+const SANDBOX_HOME = mkdtempSync(join(tmpdir(), "agentmemory-hook-home-"));
+afterAll(() => rmSync(SANDBOX_HOME, { recursive: true, force: true }));
 
 // Spawns a compiled plugin hook as a subprocess, feeds it JSON on stdin,
 // and returns { stdout, stderr, exitCode, tookMs }. The test is about
@@ -30,6 +36,7 @@ function runHook(
           // the hook. Only pass PATH and anything explicitly set by the
           // test case.
           PATH: process.env["PATH"] ?? "",
+          HOME: SANDBOX_HOME,
           ...env,
         },
         stdio: ["pipe", "pipe", "pipe"],
