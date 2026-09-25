@@ -35,6 +35,15 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /(^|[\\/])api[_-]?token([\\/_.-]|$)/i,
 ];
 
+// Claude Code writes its own background jobs to ~/.claude/projects beside
+// real work: a Warmup probe and the conversation-list summary job (#1064).
+function isHarnessPrompt(firstPrompt: string): boolean {
+  return (
+    firstPrompt === "Warmup" ||
+    firstPrompt.startsWith("Context: This summary will be shown in a list")
+  );
+}
+
 export function isSensitive(path: string): boolean {
   return SENSITIVE_PATH_PATTERNS.some((re) => re.test(path));
 }
@@ -413,6 +422,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
         const firstPrompt = firstPromptObs?.userPrompt
           ? firstPromptObs.userPrompt.replace(/\s+/g, " ").trim().slice(0, 200)
           : undefined;
+        if (firstPrompt && isHarnessPrompt(firstPrompt)) continue;
 
         const existing = await kv.get<Session>(KV.sessions, parsed.sessionId);
         if (existing) {

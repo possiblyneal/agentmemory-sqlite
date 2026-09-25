@@ -246,3 +246,43 @@ describe("import-jsonl indexes observations into BM25 AND vector", () => {
     expect(getSearchIndex().size).toBeGreaterThan(0);
   });
 });
+
+describe("import-jsonl skips Claude Code's own background transcripts (#1064)", () => {
+  function writeTranscript(root: string, sessionId: string, prompt: string) {
+    const dir = join(root, "proj");
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    const ts = "2026-04-17T10:00:00.000Z";
+    writeFileSync(
+      join(dir, `${sessionId}.jsonl`),
+      [
+        { type: "user", uuid: "u1", sessionId, timestamp: ts, cwd: root,
+          message: { role: "user", content: [{ type: "text", text: prompt }] } },
+        { type: "assistant", uuid: "a1", sessionId, timestamp: ts,
+          message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+      ].map((l) => JSON.stringify(l)).join("\n") + "\n",
+    );
+  }
+
+  it("imports the real session and neither the Warmup probe nor the summary job", async () => {
+    const root = mkdtempSync(join(tmpdir(), "replay-harness-"));
+    writeTranscript(root, "sess-real", "Fix the login bug");
+    writeTranscript(root, "sess-warmup", "Warmup");
+    writeTranscript(
+      root,
+      "sess-summary",
+      "Context: This summary will be shown in a list to help users and Claude choose which conversations are relevant.",
+    );
+    const kv = mockKV();
+    const sdk = mockSdk(kv);
+    registerReplayFunctions(sdk, kv as never);
+
+    const result = (await sdk.trigger("mem::replay::import-jsonl", {
+      path: root,
+    })) as { sessionIds: string[] };
+
+    expect(result.sessionIds).toEqual(["sess-real"]);
+    expect(await kv.get(KV.sessions, "sess-warmup")).toBeNull();
+    expect(await kv.get(KV.sessions, "sess-summary")).toBeNull();
+    rmSync(root, { recursive: true, force: true });
+  });
+});
