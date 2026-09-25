@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createServer, type Server } from "node:http";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
@@ -110,6 +111,55 @@ describe("pre-tool-use hook — context injection gate (#143)", () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
+  });
+});
+
+describe("pre-tool-use hook — context envelope (#1278)", () => {
+  let server: Server;
+  let url = "";
+
+  beforeAll(async () => {
+    server = createServer((_req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ context: "remembered about foo.ts" }));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+  });
+
+  afterAll(() => new Promise<void>((r) => server.close(() => r())));
+
+  it("wraps context in the hookSpecificOutput envelope for Claude Code", async () => {
+    const payload = JSON.stringify({
+      session_id: "ses_test",
+      hook_event_name: "PreToolUse",
+      tool_name: "Read",
+      tool_input: { file_path: "src/foo.ts" },
+    });
+    const result = await runHook("pre-tool-use.mjs", payload, {
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_URL: url,
+    });
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: "remembered about foo.ts",
+      },
+    });
+  });
+
+  it("keeps plain text for hosts that send no hook_event_name", async () => {
+    const payload = JSON.stringify({
+      conversation_id: "ses_test",
+      toolName: "read",
+      toolArgs: { path: "src/foo.ts" },
+    });
+    const result = await runHook("pre-tool-use.mjs", payload, {
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_URL: url,
+    });
+    expect(result.stdout).toBe("remembered about foo.ts");
   });
 });
 

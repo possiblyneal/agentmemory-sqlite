@@ -13,8 +13,7 @@ function isSdkChildContext(payload: unknown): boolean {
 //
 // THIS HOOK IS A NO-OP BY DEFAULT AS OF 0.8.10 (#143). Previously it
 // fired /agentmemory/enrich on every Edit/Write/Read/Glob/Grep tool call
-// and wrote up to 4000 chars of context to stdout. Claude Code reads
-// PreToolUse stdout and prepends it to the model's next turn, which meant
+// and wrote up to 4000 chars of context to the model's next turn, which meant
 // agentmemory was silently injecting ~1000 tokens into every tool turn
 // via the user's Claude Code session. On Claude Pro that burned entire
 // allocations in a handful of messages (@adrianricardo, #143).
@@ -28,6 +27,21 @@ const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
+
+// Claude Code drops plain PreToolUse stdout into the debug log; only the
+// hookSpecificOutput envelope reaches the model. Hosts that send no
+// hook_event_name keep the plain text they have always read.
+function contextPayload(data: Record<string, unknown>, context: string): string {
+  if (data.hook_event_name === "PreToolUse") {
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: context,
+      },
+    });
+  }
+  return context;
+}
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -120,7 +134,7 @@ async function main() {
     if (res.ok) {
       const result = (await res.json()) as { context?: string };
       if (result.context) {
-        process.stdout.write(result.context);
+        process.stdout.write(contextPayload(data, result.context));
       }
     }
   } catch {
