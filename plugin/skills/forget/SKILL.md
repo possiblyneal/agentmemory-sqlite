@@ -51,7 +51,9 @@ an explicit yes before calling delete. Name the ids you are removing; a bare
 5. Lessons are separate: delete one with `memory_lesson_delete` and its
    `lessonId`; neither delete tool touches lessons.
 6. Report the deletion count back. A count of 0 means the ids did not exist;
-   say so instead of claiming a delete.
+   say so instead of claiming a delete. `memory_governance_delete` lists the ids
+   it skipped in `notFound`; those are usually observation ids, so retry them
+   with `memory_forget` and their `sessionId`.
 
 ## Anti-patterns
 
