@@ -699,7 +699,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Hook resolveProject is not worktree-aware, so each worktree is its own memory silo."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 1dc4d43: resolveProject names a linked worktree after its main checkout (parent of --git-common-dir when it is a .git folder), falling back to the toplevel basename. Sessions already filed under a worktree name are not migrated."
+    fixed_by: "1dc4d43"
     url: https://github.com/rohitg00/agentmemory/issues/728
   - number: 730
     title: "feat: add Nix flake support for one-command installation"

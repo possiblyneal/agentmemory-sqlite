@@ -532,8 +532,9 @@ prs:
       - test/consolidation-pipeline.test.ts
       - test/reflect.test.ts
     note: "Reflection and consolidation are not project-scoped, so concept clusters and insights cross-contaminate between repos."
-    disposition: candidate
-    status: "partly-present-here — mem::reflect accepts and filters on project (src/functions/reflect.ts:187,354,385), so the capability is present; it is opt-in, and the scheduled run passes no project."
+    disposition: already-fixed
+    status: "fixed-here — 6575de0: an unscoped consolidation run merges and reflects each project with new summaries separately, and mem::reflect with a project reads only that project's facts, crystals, lessons and graph concepts. Existing unscoped insights are left as they are."
+    fixed_by: "6575de0"
     url: https://github.com/rohitg00/agentmemory/pull/1344
   - number: 1350
     title: "fix(providers): clear the circuit breaker failure count on success"
