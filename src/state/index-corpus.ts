@@ -60,10 +60,16 @@ export function embedInputHash(text: string): string {
 // timeline, session history, the viewer and expandIds — they just stop
 // competing in search. That is how "observations are kept" is satisfied
 // structurally rather than by promise.
+// Unset means agentmemory's own MCP tools, under both the plugin and the
+// standalone server name; set it empty to index everything.
+const DEFAULT_EXCLUDED_TOOL_PREFIXES =
+  "mcp__plugin_agentmemory_agentmemory__,mcp__agentmemory__";
 let excludeCache: { raw: string; prefixes: string[] } | null = null;
 
 function excludedToolPrefixes(): string[] {
-  const raw = process.env.AGENTMEMORY_INDEX_EXCLUDE_TOOL_PREFIXES ?? "";
+  const raw =
+    process.env.AGENTMEMORY_INDEX_EXCLUDE_TOOL_PREFIXES ??
+    DEFAULT_EXCLUDED_TOOL_PREFIXES;
   if (!excludeCache || excludeCache.raw !== raw) {
     excludeCache = {
       raw,
