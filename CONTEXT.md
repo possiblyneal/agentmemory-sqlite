@@ -18,8 +18,9 @@ An AI coding assistant whose activity is being remembered. The Agent is a source
 Observations and a consumer of Recall, never a decision-maker about the store itself.
 
 **Session**:
-One continuous stretch of an Agent's work, bounded by a start and an end hook. The unit that
-Observations are attributed to and that Recall is scoped by.
+One continuous stretch of an Agent's work, bounded by a start hook and either an end hook or
+going idle after a turn end. The unit that Observations are attributed to and that Recall is
+scoped by.
 
 ### What is stored
 

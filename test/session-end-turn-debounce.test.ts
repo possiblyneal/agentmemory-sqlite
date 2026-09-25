@@ -8,7 +8,7 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
   withKeyedLock: <T>(_key: string, fn: () => Promise<T>) => fn(),
 }));
 
-import { registerApiTriggers } from "../src/triggers/api.js";
+import { registerApiTriggers, SESSION_IDLE_END_MS as IDLE_MS } from "../src/triggers/api.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
 
@@ -91,8 +91,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const IDLE_MS = 5 * 60_000;
-
 describe("POST /agentmemory/session/end with turnEnd (#1131)", () => {
   it("defers the end of the Session until it has been idle", async () => {
     const res = await endSession({ sessionId: "ses_1", turnEnd: true });
@@ -117,6 +115,20 @@ describe("POST /agentmemory/session/end with turnEnd (#1131)", () => {
     expect(stopped).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(1_000);
+    expect(stopped).toEqual(["ses_1"]);
+  });
+
+  it("waits again while Observations keep arriving, so a long turn is not ended midway", async () => {
+    await endSession({ sessionId: "ses_1", turnEnd: true });
+    await kv.update(KV.sessions, "ses_1", [
+      { type: "set", path: "observationCount", value: 9 },
+    ]);
+
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect((await kv.get<Session>(KV.sessions, "ses_1"))?.status).toBe("active");
+    expect(stopped).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(stopped).toEqual(["ses_1"]);
   });
 

@@ -1894,8 +1894,8 @@ issues:
     kind: bug
     note: "The Stop hook re-summarizes the whole session every assistant turn; cost is quadratic."
     disposition: already-fixed
-    fixed_by: "Stop posts a turn end, and api::session::end holds it until the Session has been idle for five minutes, restarting the wait on every turn; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
-    status: "fixed-here — Stop posts a turn end, and api::session::end holds it until the Session has been idle for five minutes, restarting the wait on every turn; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
+    fixed_by: "Stop posts a turn end, and api::session::end holds it until the Session has gone 30 minutes with no turn and no new Observation; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
+    status: "fixed-here — Stop posts a turn end, and api::session::end holds it until the Session has gone 30 minutes with no turn and no new Observation; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1131
     fix_prs: [1269]
   - number: 1133

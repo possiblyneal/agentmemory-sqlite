@@ -140,8 +140,7 @@ function parseOptionalPositiveInt(value: unknown): number | undefined | null {
 }
 
 const DEFAULT_PAGE_LIMIT = 100;
-// How long a Session must go without a turn before a turn end becomes its end.
-const SESSION_IDLE_END_MS = 5 * 60_000;
+export const SESSION_IDLE_END_MS = 30 * 60_000;
 
 type Page = { limit: number | "all"; offset: number };
 
@@ -691,9 +690,10 @@ export function registerApiTriggers(
   // A turn end (the Stop hook) is not a Session end: Claude Code fires Stop
   // after every assistant turn, and ending the Session there re-summarizes
   // the whole Session once per turn (#1131). A turn end waits out
-  // SESSION_IDLE_END_MS instead, restarted by each later turn; a real end
-  // (SessionEnd) runs at once and drops the wait. Hosts that only send Stop
-  // are still ended, once they go idle.
+  // SESSION_IDLE_END_MS instead, restarted by each later turn and by any
+  // Observation recorded meanwhile, so a long turn is not summarized midway;
+  // a real end (SessionEnd) runs at once and drops the wait. Hosts that only
+  // send Stop are still ended, once they go idle.
   const pendingSessionEnds = new Map<string, ReturnType<typeof setTimeout>>();
 
   const finishSession = async (sessionId: string): Promise<void> => {
@@ -720,6 +720,26 @@ export function registerApiTriggers(
     }
   };
 
+  const endWhenIdle = (sessionId: string, observationCount: number): void => {
+    const timer = setTimeout(async () => {
+      try {
+        const session = await kv.get<Session>(KV.sessions, sessionId);
+        if (session && session.observationCount > observationCount) {
+          endWhenIdle(sessionId, session.observationCount);
+          return;
+        }
+        await finishSession(sessionId);
+      } catch (err) {
+        logger.warn("Idle session end failed", {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }, SESSION_IDLE_END_MS);
+    timer.unref?.();
+    pendingSessionEnds.set(sessionId, timer);
+  };
+
   sdk.registerFunction("api::session::end",
     async (req: ApiRequest<{ sessionId: string; turnEnd?: boolean }>): Promise<Response> => {
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -730,21 +750,13 @@ export function registerApiTriggers(
           body: { error: "sessionId is required and must be a non-empty string" },
         };
       }
-      if (!(await kv.get<Session>(KV.sessions, sessionId))) {
+      const session = await kv.get<Session>(KV.sessions, sessionId);
+      if (!session) {
         return { status_code: 404, body: { error: "session_not_found" } };
       }
       clearTimeout(pendingSessionEnds.get(sessionId));
       if (body.turnEnd === true) {
-        const timer = setTimeout(() => {
-          finishSession(sessionId).catch((err) =>
-            logger.warn("Idle session end failed", {
-              sessionId,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
-        }, SESSION_IDLE_END_MS);
-        timer.unref?.();
-        pendingSessionEnds.set(sessionId, timer);
+        endWhenIdle(sessionId, session.observationCount);
         return { status_code: 200, body: { success: true, deferred: true } };
       }
       await finishSession(sessionId);
