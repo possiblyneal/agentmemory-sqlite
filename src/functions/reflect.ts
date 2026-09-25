@@ -9,6 +9,7 @@ import type {
   Lesson,
   Crystal,
   MemoryProvider,
+  Session,
 } from "../types.js";
 import { recordAudit } from "./audit.js";
 import { REFLECT_SYSTEM, buildReflectPrompt } from "../prompts/reflect.js";
@@ -184,20 +185,42 @@ export function registerReflectFunctions(
         ]);
 
       let activeLessons = lessons.filter((l) => !l.deleted);
+      let scopedSemantic = semanticMemories;
+      let scopedCrystals = crystals;
+      let scopedNodes = graphNodes;
+      let scopedEdges = graphEdges;
+      // One project's clusters must never borrow another's facts, crystals or
+      // concepts: an insight is stamped with the project it was built for (#1344).
       if (data?.project) {
-        activeLessons = activeLessons.filter((l) => l.project === data.project);
+        const project = data.project;
+        const sessions = await kv.list<Session>(KV.sessions).catch(() => []);
+        const projectSessionIds = new Set(
+          sessions.filter((s) => s.project === project).map((s) => s.id),
+        );
+        activeLessons = activeLessons.filter((l) => l.project === project);
+        scopedSemantic = semanticMemories.filter((m) =>
+          m.sourceSessionIds.some((id) => projectSessionIds.has(id)),
+        );
+        scopedCrystals = crystals.filter((c) => c.project === project);
+        scopedNodes = graphNodes.filter(
+          (n) => n.sessionId !== undefined && projectSessionIds.has(n.sessionId),
+        );
+        const nodeIds = new Set(scopedNodes.map((n) => n.id));
+        scopedEdges = graphEdges.filter(
+          (e) => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId),
+        );
       }
 
       let conceptClusters = buildGraphClusters(
-        graphNodes,
-        graphEdges,
+        scopedNodes,
+        scopedEdges,
         maxClusters,
       );
 
       const usedFallback = conceptClusters.length === 0;
       if (usedFallback) {
         conceptClusters = buildJaccardClusters(
-          semanticMemories,
+          scopedSemantic,
           activeLessons,
           maxClusters,
         );
@@ -213,7 +236,7 @@ export function registerReflectFunctions(
 
         const conceptSet = new Set(conceptNames.map((c) => c.toLowerCase()));
 
-        const clusterFacts = semanticMemories.filter((s) => {
+        const clusterFacts = scopedSemantic.filter((s) => {
           const factTerms = s.fact.toLowerCase().split(/\s+/);
           return factTerms.some((t) => conceptSet.has(t));
         });
@@ -225,7 +248,7 @@ export function registerReflectFunctions(
           ),
         );
 
-        const clusterCrystals = crystals.filter((c) =>
+        const clusterCrystals = scopedCrystals.filter((c) =>
           (c.lessons || []).some((l) =>
             conceptNames.some((cn) =>
               l.toLowerCase().includes(cn.toLowerCase()),

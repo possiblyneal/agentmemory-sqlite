@@ -70,100 +70,125 @@ export function registerConsolidationPipelineFunction(
     },
   );
 
+  // Summaries and insights from one project must never feed another's
+  // consolidation (#1344): an unscoped run consolidates each project that has
+  // new summaries since the last unscoped run, one project at a time.
+  let lastUnscopedRunAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  async function consolidateSemantic(summaries: SessionSummary[]) {
+    if (summaries.length < 5) {
+      return { skipped: true, reason: "fewer than 5 summaries" };
+    }
+    const existingSemantic = await kv.list<SemanticMemory>(KV.semantic);
+    const recentSummaries = summaries
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() -
+          new Date(a.createdAt).getTime(),
+      )
+      .slice(0, 20);
+
+    const prompt = buildSemanticMergePrompt(
+      recentSummaries.map((s) => ({
+        title: s.title,
+        narrative: s.narrative,
+        concepts: s.concepts,
+      })),
+    );
+
+    try {
+      const response = await provider.summarize(
+        SEMANTIC_MERGE_SYSTEM,
+        prompt,
+      );
+
+      const factRegex = /<fact\s+confidence="([^"]+)">([^<]+)<\/fact>/g;
+      let match;
+      let newFacts = 0;
+      const now = new Date().toISOString();
+
+      while ((match = factRegex.exec(response)) !== null) {
+        const parsedConf = parseFloat(match[1]);
+        const confidence = Number.isNaN(parsedConf) ? 0.5 : parsedConf;
+        const fact = match[2].trim();
+
+        const existing = existingSemantic.find(
+          (s) => s.fact.toLowerCase() === fact.toLowerCase(),
+        );
+        if (existing) {
+          existing.accessCount++;
+          existing.lastAccessedAt = now;
+          existing.updatedAt = now;
+          existing.confidence = Math.max(existing.confidence, confidence);
+          await kv.set(KV.semantic, existing.id, existing);
+        } else {
+          const sem: SemanticMemory = {
+            id: generateId("sem"),
+            fact,
+            confidence,
+            sourceSessionIds: recentSummaries.map((s) => s.sessionId),
+            sourceMemoryIds: [],
+            accessCount: 1,
+            lastAccessedAt: now,
+            strength: confidence,
+            createdAt: now,
+            updatedAt: now,
+          };
+          await kv.set(KV.semantic, sem.id, sem);
+          newFacts++;
+        }
+      }
+      return { newFacts, totalSummaries: summaries.length };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("Semantic consolidation failed", { error: msg });
+      return { error: msg };
+    }
+  }
+
+  async function reflect(project: string) {
+    try {
+      return await sdk.trigger({ function_id: "mem::reflect", payload: {
+        maxClusters: 10,
+        project,
+      } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("Reflect tier failed", { error: msg, project });
+      return { error: msg };
+    }
+  }
+
   async function run(data?: { tier?: string; project?: string }) {
     const tier = data?.tier || "all";
     const decayDays = getConsolidationDecayDays();
     const results: Record<string, unknown> = {};
 
-    if (tier === "all" || tier === "semantic") {
+    const runsSemantic = tier === "all" || tier === "semantic";
+    const runsReflect = tier === "all" || tier === "reflect";
+    if (runsSemantic || runsReflect) {
+      const startedAt = new Date().toISOString();
       const summaries = await kv.list<SessionSummary>(KV.summaries);
-      const existingSemantic = await kv.list<SemanticMemory>(KV.semantic);
-
-      if (summaries.length >= 5) {
-        const recentSummaries = summaries
-          .sort(
-            (a, b) =>
-              new Date(b.createdAt).getTime() -
-              new Date(a.createdAt).getTime(),
-          )
-          .slice(0, 20);
-
-        const prompt = buildSemanticMergePrompt(
-          recentSummaries.map((s) => ({
-            title: s.title,
-            narrative: s.narrative,
-            concepts: s.concepts,
-          })),
-        );
-
-        try {
-          const response = await provider.summarize(
-            SEMANTIC_MERGE_SYSTEM,
-            prompt,
+      const projects = data?.project
+        ? [data.project]
+        : [...new Set(
+            summaries
+              .filter((s) => s.project && s.createdAt > lastUnscopedRunAt)
+              .map((s) => s.project),
+          )];
+      const semanticByProject: Record<string, unknown> = {};
+      const reflectByProject: Record<string, unknown> = {};
+      for (const project of projects) {
+        if (runsSemantic) {
+          semanticByProject[project] = await consolidateSemantic(
+            summaries.filter((s) => s.project === project),
           );
-
-          const factRegex = /<fact\s+confidence="([^"]+)">([^<]+)<\/fact>/g;
-          let match;
-          let newFacts = 0;
-          const now = new Date().toISOString();
-
-          while ((match = factRegex.exec(response)) !== null) {
-            const parsedConf = parseFloat(match[1]);
-            const confidence = Number.isNaN(parsedConf) ? 0.5 : parsedConf;
-            const fact = match[2].trim();
-
-            const existing = existingSemantic.find(
-              (s) => s.fact.toLowerCase() === fact.toLowerCase(),
-            );
-            if (existing) {
-              existing.accessCount++;
-              existing.lastAccessedAt = now;
-              existing.updatedAt = now;
-              existing.confidence = Math.max(existing.confidence, confidence);
-              await kv.set(KV.semantic, existing.id, existing);
-            } else {
-              const sem: SemanticMemory = {
-                id: generateId("sem"),
-                fact,
-                confidence,
-                sourceSessionIds: recentSummaries.map((s) => s.sessionId),
-                sourceMemoryIds: [],
-                accessCount: 1,
-                lastAccessedAt: now,
-                strength: confidence,
-                createdAt: now,
-                updatedAt: now,
-              };
-              await kv.set(KV.semantic, sem.id, sem);
-              newFacts++;
-            }
-          }
-          results.semantic = { newFacts, totalSummaries: summaries.length };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.error("Semantic consolidation failed", { error: msg });
-          results.semantic = { error: msg };
         }
-      } else {
-        results.semantic = {
-          skipped: true,
-          reason: "fewer than 5 summaries",
-        };
+        if (runsReflect) reflectByProject[project] = await reflect(project);
       }
-    }
-
-    if (tier === "all" || tier === "reflect") {
-      try {
-        const reflectResult = await sdk.trigger({ function_id: "mem::reflect", payload: {
-          maxClusters: 10,
-          project: data?.project,
-        } });
-        results.reflect = reflectResult;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn("Reflect tier failed", { error: msg });
-        results.reflect = { error: msg };
-      }
+      if (runsSemantic) results.semantic = semanticByProject;
+      if (runsReflect) results.reflect = reflectByProject;
+      if (!data?.project) lastUnscopedRunAt = startedAt;
     }
 
     if (tier === "all" || tier === "procedural") {
