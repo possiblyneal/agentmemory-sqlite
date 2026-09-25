@@ -9,6 +9,7 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
 }));
 
 import { registerRememberFunction } from "../src/functions/remember.js";
+import { registerGovernanceFunction } from "../src/functions/governance.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { registerMcpEndpoints } from "../src/mcp/server.js";
 import { getSearchIndex } from "../src/functions/search.js";
@@ -92,6 +93,7 @@ function surfaces(): Surfaces {
   const kv = mockKV();
   const sdk = mockSdk();
   registerRememberFunction(sdk as never, kv as never);
+  registerGovernanceFunction(sdk as never, kv as never);
   registerApiTriggers(sdk as never, kv as never, SECRET);
   registerMcpEndpoints(sdk as never, kv as never, SECRET);
   return {
@@ -314,5 +316,23 @@ describe("DELETE /agentmemory/memories/:id", () => {
     });
 
     expect(res.status_code).toBe(401);
+  });
+});
+
+describe("memory_governance_delete on a memory_save id (#820)", () => {
+  beforeEach(() => {
+    getSearchIndex().clear();
+  });
+
+  it("deletes the memory memory_save returned", async () => {
+    const { kv, callTool } = surfaces();
+
+    const saved = toolResult(
+      (await callTool("memory_save", { content: "the deploy key lives in vault" })).body,
+    ) as { memory: { id: string } };
+    const res = await callTool("memory_governance_delete", { memoryIds: saved.memory.id });
+
+    expect(toolResult(res.body)).toMatchObject({ success: true, deleted: 1 });
+    expect(await kv.get(KV.memories, saved.memory.id)).toBeNull();
   });
 });

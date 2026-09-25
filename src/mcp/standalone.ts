@@ -160,6 +160,9 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
         const n = Number(budget);
         if (Number.isFinite(n) && n > 0) v.tokenBudget = Math.floor(n);
       }
+      if (typeof args["project"] === "string" && args["project"].trim()) {
+        v.project = args["project"].trim();
+      }
       return v;
     }
     case "memory_sessions": {
@@ -210,6 +213,7 @@ async function handleProxy(
         format: v.format ?? "full",
       };
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
+      if (v.project != null) body["project"] = v.project;
       const result = await handle.call("/agentmemory/search", {
         method: "POST",
         body: JSON.stringify(body),
@@ -220,6 +224,7 @@ async function handleProxy(
       const body: Record<string, unknown> = { query: v.query, limit: v.limit };
       if (v.format != null) body["format"] = v.format;
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
+      if (v.project != null) body["project"] = v.project;
       const result = await handle.call("/agentmemory/smart-search", {
         method: "POST",
         body: JSON.stringify(body),
@@ -277,6 +282,7 @@ async function handleLocal(
         version: 1,
         isLatest: true,
         sessionIds: [],
+        ...(v.project !== undefined && { project: v.project }),
       });
       kvInstance.persist();
       return textResponse({ saved: id });
@@ -300,7 +306,9 @@ async function handleLocal(
           ]
             .join(" ")
             .toLowerCase();
-          return query.split(/\s+/).every((word) => text.includes(word));
+          const inProject =
+            v.project == null || m["project"] == null || m["project"] === v.project;
+          return inProject && query.split(/\s+/).every((word) => text.includes(word));
         })
         .slice(0, limit);
       return textResponse({ mode: "compact", results }, true);

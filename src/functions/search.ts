@@ -505,6 +505,38 @@ export async function rebuildIndex(kv: StateKV): Promise<number> {
   return indexed
 }
 
+// A result's project is its session's. Results with no session entry fall
+// back to KV.memories, and pass through when that also has no project.
+// Two cases arrive without a session:
+//   1. Synthetic sessionId: memories indexed via mem::remember use
+//      sessionIds[0] ?? 'memory'. The string 'memory' has no session entry;
+//      neither does a real sessionId from a different lifecycle.
+//   2. Deleted session: the session was evicted after the entry was
+//      indexed. The KV.memories probe returns null for these (they are
+//      observations), so the entry passes through as unscoped. We lose the
+//      ability to filter but never block a result we can no longer verify.
+export function createProjectMatcher(
+  kv: StateKV,
+  project: string,
+): (sessionId: string, obsId: string) => Promise<boolean> {
+  const sessionProjects = new Map<string, string | null>()
+  const memoryProjects = new Map<string, string | null>()
+  return async (sessionId, obsId) => {
+    if (!sessionProjects.has(sessionId)) {
+      const s = await kv.get<Session>(KV.sessions, sessionId)
+      sessionProjects.set(sessionId, s ? s.project : null)
+    }
+    const sessionProject = sessionProjects.get(sessionId)!
+    if (sessionProject !== null) return sessionProject === project
+    if (!memoryProjects.has(obsId)) {
+      const mem = await kv.get<Memory>(KV.memories, obsId).catch(() => null)
+      memoryProjects.set(obsId, mem?.project ?? null)
+    }
+    const memProject = memoryProjects.get(obsId)!
+    return memProject === null || memProject === project
+  }
+}
+
 export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     'mem::search',
@@ -625,7 +657,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         : Math.max(effectiveLimit * 3, 30)
       const results = idx.search(query, fetchLimit)
 
-      // Resolve session -> project/cwd once per sessionId we touch.
+      // Resolve session -> cwd once per sessionId we touch.
       const sessionCache = new Map<string, Session | null>()
       const loadSession = async (sessionId: string): Promise<Session | null> => {
         if (sessionCache.has(sessionId)) return sessionCache.get(sessionId)!
@@ -633,24 +665,9 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         sessionCache.set(sessionId, s ?? null)
         return s ?? null
       }
-
-      // Cache for memory project lookups. Memories indexed via mem::remember
-      // use a synthetic sessionId ('memory' or the first real sessionId) that
-      // either has no KV.sessions entry or belongs to a different project.
-      // When loadSession returns null we fall through to a KV.memories probe
-      // so project-filtered search can include or exclude them correctly.
-      const memoryProjectCache = new Map<string, string | null>()
-      const loadMemoryProject = async (obsId: string): Promise<string | null> => {
-        if (memoryProjectCache.has(obsId)) return memoryProjectCache.get(obsId)!
-        const mem = await kv.get<Memory>(KV.memories, obsId).catch(() => null)
-        const proj = mem?.project ?? null
-        memoryProjectCache.set(obsId, proj)
-        return proj
-      }
+      const inProject = projectFilter ? createProjectMatcher(kv, projectFilter) : null
 
       // First pass: filter by session (sequential — benefits from session cache).
-      // Memory entries with a synthetic sessionId take a secondary KV.memories
-      // path so project filtering works correctly for them too.
       //
       // When agentId filtering is active we can't cap at effectiveLimit
       // here — the second pass (post-load) is what drops cross-agent
@@ -665,32 +682,11 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const candidates: typeof results = []
       for (const r of results) {
         if (candidates.length >= earlyCap) break
-        if (filtering) {
+        if (inProject && !(await inProject(r.sessionId, r.obsId))) continue
+        if (cwdFilter) {
           const s = await loadSession(r.sessionId)
-          if (s) {
-            if (projectFilter && s.project !== projectFilter) continue
-            if (cwdFilter && s.cwd !== cwdFilter) continue
-          } else {
-            // Session not found. Two cases arrive here:
-            //   1. Synthetic sessionId — memories indexed via mem::remember use
-            //      sessionIds[0] ?? 'memory'. The string 'memory' has no session
-            //      entry; neither does a real sessionId when sessionIds[0] happens
-            //      to be a session from a different lifecycle. Probe KV.memories
-            //      directly to get the memory's own project field.
-            //   2. Deleted session — the session existed when the entry was indexed
-            //      but was since evicted. The KV.memories probe returns null for
-            //      these (they are observations, not memories), so memProject is
-            //      null and the entry passes through as unscoped. This is the safe
-            //      fallback: we lose the ability to filter but never incorrectly
-            //      block a result whose session we can no longer verify.
-            // In both cases, a null memProject means "project unknown — treat as
-            // unscoped and let it through" to preserve backward-compatibility.
-            if (projectFilter) {
-              const memProject = await loadMemoryProject(r.obsId)
-              if (memProject !== null && memProject !== projectFilter) continue
-            }
-            // cwd filter does not apply to unbound entries.
-          }
+          // cwd filter does not apply to entries without a session.
+          if (s && s.cwd !== cwdFilter) continue
         }
         candidates.push(r)
       }
