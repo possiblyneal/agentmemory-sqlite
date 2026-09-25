@@ -608,6 +608,16 @@ async function main() {
     bootLog(`Lesson decay sweep: enabled (every 24h)`);
   }
 
+  if (process.env.EVICTION_ENABLED !== "false") {
+    const evictionTimer = setInterval(async () => {
+      try {
+        await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: false } });
+      } catch {}
+    }, 86400000);
+    evictionTimer.unref();
+    bootLog(`Eviction sweep: enabled (every 24h)`);
+  }
+
   if (process.env.INSIGHT_DECAY_ENABLED !== "false") {
     const insightDecayTimer = setInterval(async () => {
       try {
