@@ -59,6 +59,7 @@ import { registerConsolidateFunction } from "./functions/consolidate.js";
 import { registerPatternsFunction } from "./functions/patterns.js";
 import { registerRememberFunction } from "./functions/remember.js";
 import { registerEvictFunction } from "./functions/evict.js";
+import { pruneAudit } from "./functions/audit.js";
 import { registerRelationsFunction } from "./functions/relations.js";
 import { registerTimelineFunction } from "./functions/timeline.js";
 import { registerSmartSearchFunction } from "./functions/smart-search.js";
@@ -617,6 +618,13 @@ async function main() {
     evictionTimer.unref();
     bootLog(`Eviction sweep: enabled (every 24h)`);
   }
+
+  const auditPruneTimer = setInterval(async () => {
+    try {
+      await pruneAudit(kv);
+    } catch {}
+  }, 86400000);
+  auditPruneTimer.unref();
 
   if (process.env.INSIGHT_DECAY_ENABLED !== "false") {
     const insightDecayTimer = setInterval(async () => {
