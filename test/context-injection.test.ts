@@ -1,14 +1,8 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const HOOKS_DIR = join(import.meta.dirname, "..", "plugin", "scripts");
-// Hooks read ~/.agentmemory/.env; an empty HOME keeps the Operator's file,
-// and with it the live daemon, out of reach.
-const SANDBOX_HOME = mkdtempSync(join(tmpdir(), "agentmemory-hook-home-"));
-afterAll(() => rmSync(SANDBOX_HOME, { recursive: true, force: true }));
 
 // Spawns a compiled plugin hook as a subprocess, feeds it JSON on stdin,
 // and returns { stdout, stderr, exitCode, tookMs }. The test is about
@@ -36,7 +30,10 @@ function runHook(
           // the hook. Only pass PATH and anything explicitly set by the
           // test case.
           PATH: process.env["PATH"] ?? "",
-          HOME: SANDBOX_HOME,
+          // Hooks read ~/.agentmemory/.env; vitest.config's throwaway HOME keeps
+          // the Operator's file out, and a dead URL keeps the live daemon out.
+          HOME: process.env["HOME"],
+          AGENTMEMORY_URL: "http://127.0.0.1:1",
           ...env,
         },
         stdio: ["pipe", "pipe", "pipe"],
@@ -110,7 +107,6 @@ describe("pre-tool-use hook — context injection gate (#143)", () => {
     });
     const result = await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
-      AGENTMEMORY_URL: "http://127.0.0.1:1",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
@@ -126,9 +122,7 @@ describe("session-start hook — context injection gate (#143)", () => {
       session_id: "ses_test",
       cwd: "/tmp/fake-project",
     });
-    const result = await runHook("session-start.mjs", payload, {
-      AGENTMEMORY_URL: "http://127.0.0.1:1",
-    });
+    const result = await runHook("session-start.mjs", payload, {});
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
   });
