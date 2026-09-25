@@ -98,11 +98,13 @@ describe("Governance Functions", () => {
   it("governance-delete handles non-existent IDs gracefully", async () => {
     const result = (await sdk.trigger("mem::governance-delete", {
       memoryIds: ["nonexistent_1", "nonexistent_2"],
-    })) as { success: boolean; deleted: number; total: number };
+    })) as { success: boolean; deleted: number; total: number; notFound?: string[]; hint?: string };
 
     expect(result.success).toBe(true);
     expect(result.deleted).toBe(0);
     expect(result.total).toBe(2);
+    expect(result.notFound).toEqual(["nonexistent_1", "nonexistent_2"]);
+    expect(result.hint).toMatch(/memory_forget/);
 
     const remaining = await kv.list("mem:memories");
     expect(remaining.length).toBe(3);

@@ -115,6 +115,19 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(calls.find((c) => c.url.endsWith("/agentmemory/smart-search"))).toBeUndefined();
   });
 
+  it("forwards project on memory_recall and memory_smart_search (#787)", async () => {
+    const bodies = new Map<string, Record<string, unknown>>();
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      bodies.set(new URL(url).pathname, JSON.parse((init?.body as string) || "{}"));
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    });
+    await handleToolCall("memory_recall", { query: "x", project: "my-project" });
+    await handleToolCall("memory_smart_search", { query: "x", project: "my-project" });
+    expect(bodies.get("/agentmemory/search")?.["project"]).toBe("my-project");
+    expect(bodies.get("/agentmemory/smart-search")?.["project"]).toBe("my-project");
+  });
+
   it("memory_recall defaults format to 'full' when omitted (#507)", async () => {
     let recallBody: Record<string, unknown> | undefined;
     installFetch((url, init) => {
@@ -178,6 +191,25 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(body).toHaveProperty("mode", "compact");
     expect(Array.isArray(body.results)).toBe(true);
     expect(body.results[0].content).toBe("shape-check entry");
+  });
+
+  it("local fallback drops memories saved to another project (#787)", async () => {
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const localKv = new InMemoryKV(undefined);
+    await handleToolCall("memory_save", { content: "scoped here", project: "here" }, localKv);
+    await handleToolCall("memory_save", { content: "scoped there", project: "there" }, localKv);
+    await handleToolCall("memory_save", { content: "scoped nowhere" }, localKv);
+    const res = await handleToolCall(
+      "memory_smart_search",
+      { query: "scoped", project: "here" },
+      localKv,
+    );
+    const contents = JSON.parse(res.content[0].text).results.map(
+      (r: { content: string }) => r.content,
+    );
+    expect(contents.sort()).toEqual(["scoped here", "scoped nowhere"]);
   });
 
   it("attaches Bearer token on the proxied tool request, not just the probe", async () => {

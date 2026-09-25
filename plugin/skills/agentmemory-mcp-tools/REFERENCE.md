@@ -24,7 +24,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_file_history` |  | `files`*: string, `sessionId`: string | Get past observations about specific files. |
 | `memory_forget` |  | `memoryId`: string, `sessionId`: string, `observationIds`: string | Permanently remove one saved memory, or one or more observations from a session, by id. Removes them from search as well as from the store and records an audit entry. Ids that do not exist are skipped, and the reply says how many records were actually removed. There is no undo, restore from a snapshot if you need one back. |
 | `memory_frontier` |  | `project`: string, `agentId`: string, `limit`: number | Get all unblocked actions ranked by priority and urgency. Returns the frontier of actionable work with no unsatisfied dependencies. |
-| `memory_governance_delete` |  | `memoryIds`*: string, `reason`: string | Delete specific memories with audit trail. |
+| `memory_governance_delete` |  | `memoryIds`*: string, `reason`: string | Delete specific saved memories with audit trail. Ids that are not saved memories come back in notFound; delete observations with memory_forget. |
 | `memory_graph_query` |  | `startNodeId`: string, `nodeType`: string, `maxDepth`: number, `query`: string | Query the knowledge graph for entities and relationships. |
 | `memory_heal` |  | `categories`: string, `dryRun`: string | Auto-fix all fixable issues found by diagnostics. Unblocks stuck actions, expires stale leases, cleans up orphaned data. |
 | `memory_insight_list` |  | `project`: string, `minConfidence`: number, `limit`: number | List synthesized insights, higher-order observations derived from patterns across memories, lessons, and crystals. |
@@ -37,7 +37,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_obsidian_export` |  | `vaultDir`: string, `types`: string | Export memories, lessons, and crystals as Obsidian-compatible Markdown files with YAML frontmatter and wikilinks for graph view. |
 | `memory_patterns` |  | `project`: string | Detect recurring patterns across sessions. |
 | `memory_profile` |  | `project`*: string, `refresh`: string | User/project profile with top concepts and file patterns. |
-| `memory_recall` | yes | `query`*: string, `limit`: number, `format`: string, `token_budget`: number | Search past session observations for relevant context. Use when you need to recall what happened in previous sessions, find past decisions, or look up how a file was modified before. |
+| `memory_recall` | yes | `query`*: string, `limit`: number, `format`: string, `token_budget`: number, `project`: string | Search past session observations for relevant context. Use when you need to recall what happened in previous sessions, find past decisions, or look up how a file was modified before. |
 | `memory_reflect` | yes | `project`: string, `maxClusters`: number | Traverse the knowledge graph, group related memories by concept clusters, and synthesize higher-order insights via LLM. Returns new and reinforced insights. |
 | `memory_relations` |  | `memoryId`*: string, `maxHops`: number, `minConfidence`: number | Query the memory relationship graph. |
 | `memory_routine_run` |  | `routineId`*: string, `project`: string, `initiatedBy`: string | Instantiate a frozen workflow routine, creating actions for each step with proper dependencies. |
@@ -55,7 +55,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_slot_get` |  | `label`*: string | Read a single slot by label. |
 | `memory_slot_list` |  | none | List all memory slots (pinned + project + global). Slots are editable, size-limited memory units the agent can read and modify across sessions. |
 | `memory_slot_replace` |  | `label`*: string, `content`*: string | Replace slot content in place. Fails if content exceeds sizeLimit. |
-| `memory_smart_search` | yes | `query`*: string, `expandIds`: string, `limit`: number | Hybrid semantic+keyword search with progressive disclosure. |
+| `memory_smart_search` | yes | `query`*: string, `expandIds`: string, `limit`: number, `project`: string | Hybrid semantic+keyword search with progressive disclosure. |
 | `memory_snapshot_create` |  | `message`: string | Create a git-versioned snapshot of current memory state. |
 | `memory_team_feed` |  | `limit`: number | Get recent shared items from all team members. |
 | `memory_team_share` |  | `itemId`*: string, `itemType`*: string | Share a memory or observation with team members. |

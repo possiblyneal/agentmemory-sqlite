@@ -435,7 +435,7 @@ describe("handleToolCall", () => {
     ).rejects.toThrow("memoryIds is required");
   });
 
-  it("memory_governance_delete silently skips unknown ids", async () => {
+  it("memory_governance_delete reports unknown ids in notFound", async () => {
     const kv = new InMemoryKV();
     const saved = JSON.parse(
       (await handleToolCall("memory_save", { content: "real" }, kv)).content[0]
@@ -449,6 +449,8 @@ describe("handleToolCall", () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.deleted).toBe(1);
     expect(parsed.requested).toBe(2);
+    expect(parsed.notFound).toEqual(["mem_does_not_exist"]);
+    expect(parsed.hint).toMatch(/memory_forget/);
   });
 });
 

@@ -1,3 +1,8 @@
+// #833/#1273: observation ids handed to memory_governance_delete, which only
+// deletes saved memories, used to come back as a silent deleted: 0.
+export const NOT_A_MEMORY_HINT =
+  "These ids are not saved memories. Observations are deleted with memory_forget (sessionId + observationIds).";
+
 export type McpToolDef = {
   name: string;
   description: string;
@@ -32,6 +37,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "number",
           description: "Optional token budget to trim returned results",
         },
+        project: { type: "string", description: "Filter by project" },
       },
       required: ["query"],
     },
@@ -165,6 +171,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           description: "Comma-separated observation IDs to expand",
         },
         limit: { type: "number", description: "Max results (default 10)" },
+        project: { type: "string", description: "Filter by project" },
       },
       required: ["query"],
     },
@@ -367,7 +374,9 @@ export const V040_TOOLS: McpToolDef[] = [
   },
   {
     name: "memory_governance_delete",
-    description: "Delete specific memories with audit trail.",
+    description:
+      "Delete specific saved memories with audit trail. Ids that are not saved memories come back in notFound; " +
+      "delete observations with memory_forget.",
     inputSchema: {
       type: "object",
       properties: {

@@ -194,6 +194,73 @@ describe("Smart Search Function", () => {
     expect(log?.count).toBe(1);
   });
 
+  describe("project scoping (#787)", () => {
+    beforeEach(async () => {
+      const other = makeObs({ id: "obs_other", sessionId: "ses_other", title: "Auth in other repo" });
+      const savedHere = makeObs({ id: "mem_here", sessionId: "memory", title: "Saved here" });
+      const savedElsewhere = makeObs({ id: "mem_elsewhere", sessionId: "memory", title: "Saved elsewhere" });
+      const unknownSession = makeObs({ id: "obs_orphan", sessionId: "ses_evicted", title: "Orphan" });
+      await kv.set("mem:sessions", "ses_other", {
+        id: "ses_other",
+        project: "other-project",
+        cwd: "/other",
+        startedAt: "2026-02-01T00:00:00Z",
+        status: "completed",
+        observationCount: 1,
+      });
+      await kv.set("mem:memories", "mem_here", { id: "mem_here", project: "my-project" });
+      await kv.set("mem:memories", "mem_elsewhere", { id: "mem_elsewhere", project: "other-project" });
+      searchResults.unshift(
+        ...[other, savedHere, savedElsewhere, unknownSession].map((observation) => ({
+          observation,
+          bm25Score: 0.9,
+          vectorScore: 0,
+          combinedScore: 0.9,
+          sessionId: observation.sessionId,
+        })),
+      );
+    });
+
+    it("drops results whose session or saved memory belongs to another project", async () => {
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "my-project",
+      })) as { results: CompactSearchResult[] };
+
+      expect(result.results.map((r) => r.obsId)).toEqual([
+        "mem_here",
+        "obs_orphan",
+        "obs_1",
+        "obs_2",
+      ]);
+    });
+
+    it("returns every project when none is given", async () => {
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+      })) as { results: CompactSearchResult[] };
+
+      expect(result.results).toHaveLength(6);
+    });
+
+    it("over-fetches so filtered-out rows do not underfill the page", async () => {
+      let requested = 0;
+      registerSmartSearchFunction(sdk as never, kv as never, async (_q, limit) => {
+        requested = limit;
+        return searchResults;
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "my-project",
+        limit: 2,
+      })) as { results: CompactSearchResult[] };
+
+      expect(requested).toBe(100);
+      expect(result.results.map((r) => r.obsId)).toEqual(["mem_here", "obs_orphan"]);
+    });
+  });
+
   describe("lesson inclusion (#lesson-visibility)", () => {
     it("compact mode returns lessons array alongside observation results", async () => {
       sdk.registerFunction("mem::lesson-recall", async (payload: any) => ({

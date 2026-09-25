@@ -148,6 +148,7 @@ export function registerMcpEndpoints(
               format,
               token_budget: tokenBudget,
               agentId: recallAgentId,
+              project: asNonEmptyString(args.project),
             } });
             const text =
               format === "narrative" &&
@@ -349,6 +350,7 @@ export function registerMcpEndpoints(
                 query: args.query,
                 expandIds,
                 limit,
+                project: asNonEmptyString(args.project),
               },
             });
             return {

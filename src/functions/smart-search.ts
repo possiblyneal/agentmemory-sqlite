@@ -20,6 +20,7 @@ import {
 import { logger } from "../logger.js";
 import { getCounters } from "../telemetry/setup.js";
 import { graphReadable } from "../state/graph-indexes.js";
+import { createProjectMatcher } from "./search.js";
 
 // #771: smart-search followup-rate diagnostic. Stored per session as
 // the most recent search payload, used to detect whether the next
@@ -189,28 +190,36 @@ export function registerSmartSearchFunction(
       const lessonLimit = Math.min(limit, 10);
       const includeLessons = data.includeLessons !== false;
 
+      const project =
+        typeof data.project === "string" && data.project.trim().length > 0
+          ? data.project.trim()
+          : undefined;
+
       // Over-fetch when filtering. Hybrid search can't filter on
-      // agentId (BM25/vector indexes don't carry it), so we ask the
-      // searcher for more hits than we need and trim post-filter. 3×
-      // is a defensible middle ground: enough headroom for a small
-      // workload, capped at 300 so a 100-limit request never asks for
-      // thousands of hits.
-      const overFetchLimit = filterAgentId
-        ? Math.min(limit * 3, 300)
+      // agentId or project (BM25/vector indexes don't carry them), so we
+      // ask the searcher for more hits than we need and trim post-filter.
+      // Same headroom as mem::search: hybrid search's per-session
+      // diversity cap runs before this filter, so a small multiple
+      // underfills scoped pages on a multi-project store.
+      const overFetchLimit = filterAgentId || project
+        ? Math.max(limit * 10, 100)
         : limit;
 
       const [hybridResults, lessons] = await Promise.all([
         searchFn(data.query, overFetchLimit),
         includeLessons
-          ? recallLessons(sdk, data.query, lessonLimit, data.project)
+          ? recallLessons(sdk, data.query, lessonLimit, project)
           : Promise.resolve([]),
       ]);
 
-      const filteredHybrid = filterAgentId
-        ? hybridResults
-            .filter((r) => r.observation.agentId === filterAgentId)
-            .slice(0, limit)
-        : hybridResults.slice(0, limit);
+      const inProject = project ? createProjectMatcher(kv, project) : null;
+      const filteredHybrid: HybridSearchResult[] = [];
+      for (const r of hybridResults) {
+        if (filteredHybrid.length >= limit) break;
+        if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
+        if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
+        filteredHybrid.push(r);
+      }
 
       const compact: CompactSearchResult[] = filteredHybrid.map((r) => ({
         obsId: r.observation.id,
