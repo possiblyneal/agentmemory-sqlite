@@ -1,6 +1,6 @@
 import type { MemoryProvider } from "../types.js";
 import { getEnvVar } from "../config.js";
-import { fetchWithTimeout } from "./_fetch.js";
+import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
 import {
   DEFAULT_AZURE_API_VERSION,
   buildAuthHeaders,
@@ -158,7 +158,7 @@ export class OpenAIProvider implements MemoryProvider {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`OpenAI API error (${response.status}): ${text}`);
+      throw new ProviderHttpError(`OpenAI API error (${response.status}): ${text}`, response.status);
     }
 
     const data = (await response.json()) as {

@@ -3,14 +3,30 @@ import { getEnvVar } from "../config.js";
 // Bounded retry for transient rate-limit / unavailable responses. Attempts is
 // total tries (initial + retries). Retries are bounded by a TOTAL elapsed
 // deadline — not per-attempt — so the worst case never blows past the caller's
-// timeout budget. A single retry delay is capped low so a hostile Retry-After
-// header can't dominate the budget.
+// timeout budget. A Retry-After is honored in full when it fits that budget:
+// every LLM call is background work, and retrying a busy server sooner than it
+// asked only earns another 429.
 const MAX_ATTEMPTS = 3;
-const MAX_RETRY_DELAY_MS = 5000;
 // A retry only makes sense if there's room for at least a token attempt after
 // the sleep; without this floor we'd sleep, fire, and get instantly cut off.
 const MIN_ATTEMPT_FLOOR_MS = 100;
 const RETRY_STATUS = new Set([429, 503]);
+
+// A non-2xx provider response, carrying its status so callers can tell a busy
+// provider from a broken one. SDK errors (Anthropic) carry `status` the same way.
+export class ProviderHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+export function isProviderBusy(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" && RETRY_STATUS.has(status);
+}
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,11 +89,11 @@ export async function fetchWithTimeout(
     const retryAfter = parseRetryAfter(response.headers.get("Retry-After"));
     // Exponential backoff fallback when no Retry-After: 500ms, 1000ms, ...
     const backoff = 500 * 2 ** (attempt - 1);
-    const delay = Math.min(retryAfter ?? backoff, MAX_RETRY_DELAY_MS);
+    const delay = retryAfter ?? backoff;
 
     // Stop retrying if the sleep plus a minimal attempt would overrun the total
-    // budget — a hostile Retry-After that alone exceeds the remaining budget
-    // returns the last response instead of stalling the caller.
+    // budget — a Retry-After that alone exceeds the remaining budget returns
+    // the last response instead of stalling the caller.
     const elapsed = Date.now() - start;
     const remaining = ms - elapsed;
     if (delay + MIN_ATTEMPT_FLOOR_MS > remaining) return response;

@@ -1,9 +1,19 @@
 import type { MemoryProvider, CircuitBreakerState } from "../types.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
+import { isProviderBusy } from "./_fetch.js";
+import { getEnvVar } from "../config.js";
 
 export type ProviderOperation = "compress" | "summarize" | "describeImage";
 
 const OPERATIONS: ProviderOperation[] = ["compress", "summarize", "describeImage"];
+
+const MAX_CONCURRENCY_DEFAULT = 4;
+
+function maxConcurrency(): number {
+  const raw = getEnvVar("AGENTMEMORY_LLM_MAX_CONCURRENCY")?.trim();
+  const n = raw && /^\d+$/.test(raw) ? Number(raw) : 0;
+  return n > 0 ? n : MAX_CONCURRENCY_DEFAULT;
+}
 
 const SEVERITY: Record<CircuitBreakerState["state"], number> = {
   closed: 0,
@@ -17,6 +27,8 @@ export class ResilientProvider implements MemoryProvider {
   private breakers = Object.fromEntries(
     OPERATIONS.map((op) => [op, new CircuitBreaker()]),
   ) as Record<ProviderOperation, CircuitBreaker>;
+  private inFlight = 0;
+  private waiters: Array<() => void> = [];
   name: string;
   // A failed count is a fallback for the caller, not a provider failure,
   // so it is forwarded outside the breaker.
@@ -36,6 +48,22 @@ export class ResilientProvider implements MemoryProvider {
     }
   }
 
+  // One cap across every operation: a busy provider is busy for all of them,
+  // and fanning out past it only turns queued work into 429s.
+  private async acquireSlot(): Promise<void> {
+    if (this.inFlight < maxConcurrency()) {
+      this.inFlight++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+  }
+
+  private releaseSlot(): void {
+    const next = this.waiters.shift();
+    if (next) next();
+    else this.inFlight--;
+  }
+
   private async call(
     operation: ProviderOperation,
     fn: () => Promise<string>,
@@ -44,13 +72,18 @@ export class ResilientProvider implements MemoryProvider {
     if (!breaker.isAllowed) {
       throw new Error("circuit_breaker_open");
     }
+    await this.acquireSlot();
     try {
       const result = await fn();
       breaker.recordSuccess();
       return result;
     } catch (err) {
-      breaker.recordFailure();
+      // A provider that says "busy" is healthy; opening the breaker on it
+      // would fail unrelated work for the whole cooldown.
+      if (!isProviderBusy(err)) breaker.recordFailure();
       throw err;
+    } finally {
+      this.releaseSlot();
     }
   }
 
