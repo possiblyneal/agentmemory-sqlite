@@ -1247,7 +1247,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Replace-import wipes KV but leaves the search indices stale until restart."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Replace-import deletes through deleteIndexed and merge/replace index what they write via indexRecords (src/functions/export-import.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/938
   - number: 944
     title: "[viewer] Agentmemory Token Savings always 0% — estInjected counts all sessions, not just active"
@@ -1325,7 +1326,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Observations containing CJK text hang import and live ingestion indefinitely."
-    disposition: candidate
+    disposition: wont-fix
+    status: "unresolved — no hang found: the CJK tokenizer makes one forward-only pass (src/state/cjk-segmenter.ts) and truncation cuts by string length; no loop over text can stall."
+    wont_fix_reason: "not reproducible in this tree"
     url: https://github.com/rohitg00/agentmemory/issues/969
   - number: 972
     title: "Add an optional HVTracker trust badge to the README"
@@ -1421,7 +1424,9 @@ issues:
     difficulty: low
     kind: bug
     note: "post-tool-use records agentmemory's own MCP calls, polluting recall."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — b082b94: AGENTMEMORY_INDEX_EXCLUDE_TOOL_PREFIXES defaults to mcp__plugin_agentmemory_agentmemory__,mcp__agentmemory__, so agentmemory's own MCP calls are stored but not indexed; set it empty to index everything."
+    fixed_by: "b082b94"
     url: https://github.com/rohitg00/agentmemory/issues/993
     fix_prs: [994, 1044]
   - number: 996
@@ -1508,7 +1513,8 @@ issues:
     difficulty: low
     kind: bug
     note: "ResilientProvider renames noop, so the summarize short-circuit can never fire."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "isNoopProvider unwraps resilient(...) names (src/providers/noop.ts:22-34), and the summarize and graph gates use it."
     url: https://github.com/rohitg00/agentmemory/issues/1020
     fix_prs: [1040]
   - number: 1022
@@ -1600,7 +1606,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Hooks crash with exit 1 when the payload JSON is literal null (unguarded data access)."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Every hook returns on a null or non-object payload right after parsing (e.g. src/hooks/post-tool-use.ts:35, src/hooks/pre-tool-use.ts:55)."
     url: https://github.com/rohitg00/agentmemory/issues/1047
   - number: 1048
     title: "feat: add support for gemini-embedding-2 and make Gemini embedding model configurable"
@@ -1670,7 +1677,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Claude Code summarizer and Warmup transcripts ingested as real phantom sessions."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 2f99c65: import-jsonl skips a transcript whose first prompt is Warmup or the conversation-list summary instruction. Live store had 0 such sessions; hooks already drop SDK child runs via isSdkChildContext."
+    fixed_by: "2f99c65"
     url: https://github.com/rohitg00/agentmemory/issues/1064
   - number: 1065
     title: "lesson-recall default minConfidence (0.1) + decay + auto-prune make most auto-consolidated lessons invisible, with no config override"
@@ -1678,8 +1687,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Default minConfidence plus decay hides 438 of 439 lessons from recall, with no override."
-    disposition: candidate
-    status: "present-here — mem::lesson-recall defaults minConfidence to 0.1 and drops anything below it (src/functions/lessons.ts:159,173). The decay sweep floors confidence at 0.05 (src/functions/lessons.ts:320), so a decayed lesson lands in 0.05-0.1 and is invisible at the default. Upstream's \"no override\" is wrong — the param is exposed."
+    disposition: already-fixed
+    status: "fixed-here — 98d246c: mem::lesson-recall defaults minConfidence to 0, so a lesson decayed to the 0.05 floor is still recalled."
+    fixed_by: "98d246c"
     url: https://github.com/rohitg00/agentmemory/issues/1065
   - number: 1066
     title: "memory_heal claims \"fixable\": true for project-scope backfill but the heal step does nothing ({\"fixed\":0,\"skipped\":0})"
@@ -2015,7 +2025,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Imported observations are never added to the BM25 index and have no reindex path."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Imports index what they write via indexRecords (src/functions/export-import.ts, src/functions/replay.ts); BM25 is rebuilt from content rows on every boot."
     url: https://github.com/rohitg00/agentmemory/issues/1163
     mentioned_by_prs: [1187]
   - number: 1165
@@ -2103,7 +2114,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Nothing schedules an index save after boot, so runtime indexing is lost unless the process exits cleanly."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Vectors are SQLite rows written in the store transaction, and BM25 is rebuilt from content rows at boot (src/index.ts), so no index save is needed (ADR 0001)."
     url: https://github.com/rohitg00/agentmemory/issues/1180
   - number: 1181
     title: "mem:audit is 71% index_persist rows the audit policy does not cover"
@@ -2242,8 +2254,9 @@ issues:
     difficulty: low
     kind: bug
     note: "0.9.29's default OpenAI model is a reasoning model but the provider still sends max_tokens; every compress and summarize 400s."
-    disposition: candidate
-    status: "present-here — Default model is gpt-5.6-luna (src/providers/openai.ts:12, src/config.ts:95) and the chat body always sends max_tokens (src/providers/openai.ts:82) while also sending reasoning_effort (src/providers/openai.ts:95) — the two are mutually exclusive on OpenAI's chat-completions API. Nothing maps to max_completion_tokens."
+    disposition: already-fixed
+    status: "fixed-here — b0b25f9: OpenAIProvider sends max_completion_tokens when the base URL is api.openai.com and max_tokens to compatible servers."
+    fixed_by: "b0b25f9"
     url: https://github.com/rohitg00/agentmemory/issues/1219
     fix_prs: [1275]
   - number: 1221
@@ -2452,7 +2465,9 @@ issues:
     difficulty: med
     kind: bug
     note: "PreToolUse injection uses raw stdout instead of the hook envelope, against a 2s budget on a 6-29s endpoint."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 895d01c: pre-tool-use emits {hookSpecificOutput:{hookEventName: PreToolUse,additionalContext}} when the payload names PreToolUse, plain text otherwise; live /enrich answers in under 0.2s, so the 2s bound stays."
+    fixed_by: "895d01c"
     url: https://github.com/rohitg00/agentmemory/issues/1278
   - number: 1279
     title: "[viewer] Dashboard \"Memories\" stat card caps at 500 — uses .length of a limited fetch instead of the total field"
@@ -2469,7 +2484,9 @@ issues:
     difficulty: med
     kind: bug
     note: "deriveCrystalAndLessons slices lessons mid-sentence; 775 of 981 unusable and some invert meaning."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 0a4874a: lessons are whole sentences that open with a trigger, have balanced markup and fit 220 chars; a re-import no longer bumps reinforcements or lastReinforcedAt, so a re-derived lesson can still decay out."
+    fixed_by: "0a4874a"
     url: https://github.com/rohitg00/agentmemory/issues/1292
   - number: 1297
     title: "Feature request: signal deletion / TTL for signals"
@@ -2588,7 +2605,8 @@ issues:
     difficulty: med
     kind: bug
     note: "The shutdown index save is lost to a teardown race and boot only reconciles a fully empty index."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "No shutdown index save exists to lose: vectors persist per write and BM25 is rebuilt at boot; a boot and hourly fill pass repairs a partial vector index (src/index.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1335
   - number: 1338
     title: "fix(providers): createFallbackProvider drops baseURL — custom-endpoint fallbacks (DeepSeek/Kimi/etc.) hit the wrong API host"
@@ -2623,7 +2641,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Dead noop gate causes a summarize failure storm when no LLM key is set."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "isNoopProvider unwraps resilient(...) names (src/providers/noop.ts:22-34), and the summarize and graph gates use it."
     url: https://github.com/rohitg00/agentmemory/issues/1341
     mentioned_by_prs: [1342]
   - number: 1360
