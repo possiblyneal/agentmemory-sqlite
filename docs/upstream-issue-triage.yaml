@@ -1191,8 +1191,8 @@ issues:
     difficulty: low
     kind: bug
     note: "GET /agentmemory/memories ignores the project query param."
-    disposition: candidate
-    status: "present-here — api::memories filters only latest and agentId; project is never read (src/triggers/api.ts:2194-2220)."
+    disposition: already-fixed
+    fixed_by: "api::memories filters on the project query param before counting and paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/918
     fix_prs: [988]
   - number: 919
@@ -1415,8 +1415,8 @@ issues:
     difficulty: low
     kind: bug
     note: "memories?latest=true returns the oldest rows, so the viewer shows stale data."
-    disposition: candidate
-    status: "present-here — latest=true filters isLatest then takePage slices storage order, no newest-first sort (src/triggers/api.ts:2213, 163-167); only the viewer sorts."
+    disposition: already-fixed
+    fixed_by: "api::memories sorts newest first on createdAt (fallback updatedAt) before paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/990
   - number: 991
     title: "SessionEnd hook reports \"Hook cancelled\" on exit (1.5s deferred exit outlives shutdown grace)"
@@ -1659,8 +1659,8 @@ issues:
     difficulty: low
     kind: bug
     note: "getVisibleTools reads process.env directly, ignoring ~/.agentmemory/.env."
-    disposition: candidate
-    status: "present-here — getVisibleTools reads process.env directly instead of getEnvVar (src/mcp/tools-registry.ts:1014)."
+    disposition: already-fixed
+    fixed_by: "The daemon hydrates ~/.agentmemory/.env into process.env at boot (src/index.ts:169, src/config.ts:63-68) before getVisibleTools runs (src/mcp/server.ts:78); the proxy shim takes its list from the daemon."
     url: https://github.com/rohitg00/agentmemory/issues/1060
   - number: 1062
     title: "Session stop triggers mem::summarize twice; unchanged sessions are fully re-summarized on every stop"
@@ -1838,8 +1838,8 @@ issues:
     difficulty: low
     kind: bug
     note: "AGENTMEMORY_TOOLS in ~/.agentmemory/.env ignored; duplicate of 1060."
-    disposition: candidate
-    status: "present-here — duplicate of #1060 (src/mcp/tools-registry.ts:1014)."
+    disposition: already-fixed
+    fixed_by: "Duplicate of #1060. The daemon hydrates ~/.agentmemory/.env into process.env at boot (src/index.ts:169, src/config.ts:63-68) before getVisibleTools runs (src/mcp/server.ts:78); the proxy shim takes its list from the daemon."
     url: https://github.com/rohitg00/agentmemory/issues/1106
   - number: 1108
     title: "\"project\"-scoped memory slots (project_context, pending_items, self_notes, session_patterns) are actually global, not per-project"

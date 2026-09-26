@@ -2210,7 +2210,11 @@ export function registerApiTriggers(
       const filterAgentId = wildcardAgent
         ? undefined
         : explicitAgentId ?? (isAgentScopeIsolated() ? getAgentId() : undefined);
+      const project = req.query_params?.["project"];
       let filtered = latest ? memories.filter((m) => m.isLatest) : memories;
+      if (typeof project === "string" && project) {
+        filtered = filtered.filter((m) => m.project === project);
+      }
       if (filterAgentId) {
         filtered = filtered.filter(
           (m) =>
@@ -2235,10 +2239,13 @@ export function registerApiTriggers(
       }
 
       const page = parsePage(req.query_params);
+      const newestFirst = [...filtered].sort((a, b) =>
+        (b.createdAt || b.updatedAt || "").localeCompare(a.createdAt || a.updatedAt || ""),
+      );
       return {
         status_code: 200,
         body: {
-          memories: takePage(filtered, page),
+          memories: takePage(newestFirst, page),
           total: filtered.length,
           ...page,
         },
