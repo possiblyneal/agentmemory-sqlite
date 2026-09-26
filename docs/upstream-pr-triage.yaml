@@ -145,8 +145,9 @@ prs:
       - src/functions/context.ts
       - src/functions/smart-search.ts
     note: "mem::context and smart-search load lessons but skip insights, so mem::reflect output is reachable only by explicit tool call."
-    disposition: candidate
-    status: "partly-present-here — 9f6b46c, 8ee9946: mem::context injects the top 5 Insights of the Session's own project at session start (src/functions/context.ts); smart-search still returns only lessons (smart-search.ts), which is an additive response-shape change not taken yet."
+    disposition: already-fixed
+    fixed_by: "9f6b46c, 8ee9946, e1b16c4"
+    status: "fixed-here — 9f6b46c, 8ee9946, e1b16c4: mem::context injects the top 5 Insights of the Session's own project at session start (src/functions/context.ts), and smart-search returns matching Insights beside Lessons, capped and project-filtered the same way, with includeInsights:false to opt out (src/functions/smart-search.ts recallInsights)."
     url: https://github.com/rohitg00/agentmemory/pull/615
   - number: 667
     title: "fix(cli): status uses /memories?count=true instead of /export"
