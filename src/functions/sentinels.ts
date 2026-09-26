@@ -15,6 +15,16 @@ const VALID_TYPES: Sentinel["type"][] = [
   "custom",
 ];
 
+const MAX_PATTERN_LENGTH = 500;
+
+function compilePattern(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern, "i");
+  } catch {
+    return null;
+  }
+}
+
 export function registerSentinelsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::sentinel-create", 
     async (data: {
@@ -59,6 +69,18 @@ export function registerSentinelsFunction(sdk: ISdk, kv: StateKV): void {
           return {
             success: false,
             error: "pattern config requires a pattern string",
+          };
+        }
+        if (cfg.pattern.length > MAX_PATTERN_LENGTH) {
+          return {
+            success: false,
+            error: `pattern must be at most ${MAX_PATTERN_LENGTH} characters`,
+          };
+        }
+        if (!compilePattern(cfg.pattern)) {
+          return {
+            success: false,
+            error: "pattern is not a valid regular expression",
           };
         }
       }
@@ -263,7 +285,8 @@ export function registerSentinelsFunction(sdk: ISdk, kv: StateKV): void {
 
         if (sentinel.type === "pattern") {
           const cfg = sentinel.config as { pattern: string };
-          const regex = new RegExp(cfg.pattern, "i");
+          const regex = compilePattern(cfg.pattern);
+          if (!regex) continue;
           const sessions = await kv.list<Session>(KV.sessions);
           let matchedObs: CompressedObservation | null = null;
 

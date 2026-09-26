@@ -70,7 +70,7 @@ issues:
     kind: bug
     note: "Sentinel patterns compile user regex directly; ReDoS on the observation path."
     disposition: candidate
-    status: "partly-present-here — new RegExp(cfg.pattern) on unvalidated input and an invalid pattern aborts the check loop (src/functions/sentinels.ts:56-63, 266); not on the observation path, only POST /sentinels/check."
+    status: "partly-present-here — create now rejects an invalid or >500-char pattern and sentinel-check skips a stored bad pattern instead of aborting the loop (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible; closing that needs a linear-time engine such as re2, a new dependency."
     url: https://github.com/rohitg00/agentmemory/issues/263
     fix_prs: [297]
   - number: 274
