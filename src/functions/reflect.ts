@@ -71,7 +71,8 @@ function buildGraphClusters(
   const conceptNodeIds = new Set(conceptNodes.map((n) => n.id));
 
   for (const seed of sorted) {
-    if (visited.has(seed.id) || clusters.length >= maxClusters) break;
+    if (clusters.length >= maxClusters) break;
+    if (visited.has(seed.id)) continue;
 
     const cluster: string[] = [];
     const queue = [seed.id];

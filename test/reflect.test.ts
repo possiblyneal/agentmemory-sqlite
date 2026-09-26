@@ -187,6 +187,27 @@ describe("Reflect", () => {
       expect(insights[0].sourceConceptCluster.length).toBeGreaterThan(0);
     });
 
+    it("keeps seeding clusters past a seed an earlier cluster already absorbed (#1133)", async () => {
+      for (const name of ["auth", "token", "session", "cookie", "expiry", "deploy", "docker", "helm"]) {
+        await kv.set("mem:graph:nodes", `node_${name}`, makeConceptNode(name));
+      }
+      const edges: Array<[string, string]> = [
+        ["auth", "token"], ["auth", "session"], ["auth", "cookie"],
+        ["token", "expiry"], ["token", "session"],
+        ["deploy", "docker"], ["deploy", "helm"],
+      ];
+      for (const [src, tgt] of edges) {
+        await kv.set("mem:graph:edges", `edge_${src}_${tgt}`, makeEdge(src, tgt));
+      }
+
+      const result = (await sdk.trigger("mem::reflect", {})) as {
+        clustersProcessed: number;
+        clustersSkipped: number;
+      };
+
+      expect(result.clustersProcessed + result.clustersSkipped).toBe(2);
+    });
+
     it("skips clusters with fewer than 3 supporting items", async () => {
       await kv.set("mem:graph:nodes", "node_sparse", makeConceptNode("sparse"));
       await kv.set("mem:graph:nodes", "node_topic", makeConceptNode("topic"));
