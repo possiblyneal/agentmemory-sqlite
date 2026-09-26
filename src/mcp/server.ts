@@ -12,6 +12,7 @@ import { getVisibleTools } from "./tools-registry.js";
 import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import { logger } from "../logger.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
 
 type McpResponse = {
@@ -1349,6 +1350,10 @@ export function registerMcpEndpoints(
             };
         }
       } catch (err) {
+        logger.error("MCP tool call failed", {
+          tool: name,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return {
           status_code: 500,
           body: {

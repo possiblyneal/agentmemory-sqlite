@@ -149,8 +149,11 @@ export async function resolveHandle(): Promise<Handle> {
           if (!res.ok) {
             // Carry the status: the caller treats "the server answered 503"
             // differently from "the server could not be reached".
+            const detail = (await res.text().catch(() => "")).slice(0, 500);
             throw Object.assign(
-              new Error(`${init?.method || "GET"} ${path} -> ${res.status} ${res.statusText}`),
+              new Error(
+                `${init?.method || "GET"} ${path} -> ${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`,
+              ),
               { status: res.status },
             );
           }

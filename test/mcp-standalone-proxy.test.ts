@@ -275,13 +275,28 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       return new Response("boom", { status: 500, statusText: "Internal Server Error" });
     });
     const localKv = new InMemoryKV(undefined);
-    await expect(handleToolCall("memory_save", { content: "must not land locally" }, localKv)).rejects.toThrow(/500/);
+    await expect(handleToolCall("memory_save", { content: "must not land locally" }, localKv)).rejects.toThrow(/500.*boom/);
     installFetch(() => {
       throw new Error("ECONNREFUSED");
     });
     resetHandleForTests();
     const recall = await handleToolCall("memory_recall", { query: "locally" }, localKv);
     expect(JSON.parse(recall.content[0].text).results).toHaveLength(0);
+  });
+
+  it("a gateway 502 counts as the daemon being down, so the call falls back to local", async () => {
+    let probeCount = 0;
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) {
+        probeCount++;
+        return new Response("ok", { status: 200 });
+      }
+      return new Response("upstream down", { status: 502, statusText: "Bad Gateway" });
+    });
+    const localKv = new InMemoryKV(undefined);
+    await handleToolCall("memory_save", { content: "gateway fallback" }, localKv);
+    await handleToolCall("memory_save", { content: "second gateway fallback" }, localKv);
+    expect(probeCount).toBe(2);
   });
 
   it("invalidates the handle when the server stops answering, so the next call re-probes", async () => {

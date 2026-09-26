@@ -383,8 +383,12 @@ async function handleProxyGeneric(
   return textResponse(result, true);
 }
 
+// A gateway 502/504 is a proxy reporting the daemon behind it is down.
+const GATEWAY_DOWN = new Set([502, 504]);
+
 function serverAnswered(err: unknown): boolean {
-  return typeof (err as { status?: unknown }).status === "number";
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" && !GATEWAY_DOWN.has(status);
 }
 
 export async function handleToolCall(
