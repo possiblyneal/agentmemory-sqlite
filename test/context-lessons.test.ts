@@ -248,3 +248,48 @@ describe("mem::context — lessons auto-injection (#457)", () => {
     expect(bullet!.startsWith("- (0.90)")).toBe(true);
   });
 });
+
+describe("mem::context — insights auto-injection (upstream PR #615)", () => {
+  let kv: ReturnType<typeof mockKV>;
+  let handler: ContextHandler;
+
+  beforeEach(() => {
+    kv = mockKV();
+    handler = wireContext(kv);
+  });
+
+  async function seedInsight(id: string, over: Record<string, unknown> = {}) {
+    const now = new Date().toISOString();
+    await kv.set(KV.insights, id, {
+      id,
+      title: `title-${id}`,
+      content: `content-${id}`,
+      confidence: 0.6,
+      reinforcements: 0,
+      sourceConceptCluster: [],
+      sourceMemoryIds: [],
+      sourceLessonIds: [],
+      sourceCrystalIds: [],
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+      decayRate: 0.05,
+      ...over,
+    });
+  }
+
+  it("injects this project's and global Insights, not another project's or deleted ones", async () => {
+    await seedInsight("ours", { project: "/proj" });
+    await seedInsight("global");
+    await seedInsight("theirs", { project: "/other" });
+    await seedInsight("gone", { project: "/proj", deleted: true });
+
+    const result = await handler({ sessionId: "ses_i", project: "/proj" });
+
+    expect(result.context).toContain("## Insights");
+    expect(result.context).toContain("title-ours: content-ours");
+    expect(result.context).toContain("content-global");
+    expect(result.context).not.toContain("content-theirs");
+    expect(result.context).not.toContain("content-gone");
+  });
+});

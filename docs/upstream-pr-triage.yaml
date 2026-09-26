@@ -146,7 +146,7 @@ prs:
       - src/functions/smart-search.ts
     note: "mem::context and smart-search load lessons but skip insights, so mem::reflect output is reachable only by explicit tool call."
     disposition: candidate
-    status: "present-here — mem::context loads slots, profile and lessons but never KV.insights (src/functions/context.ts:84-91); smart-search only calls recallLessons (smart-search.ts:208-211)."
+    status: "partly-present-here — mem::context now injects the top 5 project/global Insights at session start (src/functions/context.ts); smart-search still returns only lessons (smart-search.ts), which is an additive response-shape change not taken yet."
     url: https://github.com/rohitg00/agentmemory/pull/615
   - number: 667
     title: "fix(cli): status uses /memories?count=true instead of /export"
