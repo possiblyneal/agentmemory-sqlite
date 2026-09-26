@@ -1207,12 +1207,18 @@ export function registerApiTriggers(
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const body = (req.body ?? {}) as Record<string, unknown>;
+      const minObservations = parseOptionalPositiveInt(body.minObservations);
+      if (minObservations === null) {
+        return {
+          status_code: 400,
+          body: { error: "minObservations must be a positive integer" },
+        };
+      }
       const result = await sdk.trigger({
         function_id: "mem::consolidate",
         payload: {
           project: typeof body.project === "string" ? body.project : undefined,
-          minObservations:
-            typeof body.minObservations === "number" ? body.minObservations : undefined,
+          minObservations,
         },
       });
       return { status_code: 200, body: result };

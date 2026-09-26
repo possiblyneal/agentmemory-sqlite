@@ -70,4 +70,13 @@ describe("api::consolidate field whitelist", () => {
     });
     expect(received.get("mem::consolidate")).toEqual({ project: "/p", minObservations: 3 });
   });
+
+  it("rejects a minObservations that is not a positive integer", async () => {
+    const res = await sdk._fns.get("api::consolidate")!({
+      headers: { authorization: `Bearer ${SECRET}` },
+      body: { minObservations: -2 },
+    });
+    expect(res.status_code).toBe(400);
+    expect(received.has("mem::consolidate")).toBe(false);
+  });
 });
