@@ -659,7 +659,6 @@ export function registerApiTriggers(
         startedAt: new Date().toISOString(),
         status: "active",
         observationCount: 0,
-        ...(title ? { summary: title.slice(0, 200) } : {}),
         ...(title ? { firstPrompt: title.slice(0, 200) } : {}),
         ...(agentId ? { agentId } : {}),
       };
@@ -1207,7 +1206,21 @@ export function registerApiTriggers(
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::consolidate", payload: req.body });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const minObservations = parseOptionalPositiveInt(body.minObservations);
+      if (minObservations === null) {
+        return {
+          status_code: 400,
+          body: { error: "minObservations must be a positive integer" },
+        };
+      }
+      const result = await sdk.trigger({
+        function_id: "mem::consolidate",
+        payload: {
+          project: typeof body.project === "string" ? body.project : undefined,
+          minObservations,
+        },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -1221,7 +1234,11 @@ export function registerApiTriggers(
     async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::patterns", payload: req.body });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await sdk.trigger({
+        function_id: "mem::patterns",
+        payload: { project: typeof body.project === "string" ? body.project : undefined },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -1235,7 +1252,11 @@ export function registerApiTriggers(
     async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::generate-rules", payload: req.body });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await sdk.trigger({
+        function_id: "mem::generate-rules",
+        payload: { project: typeof body.project === "string" ? body.project : undefined },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -2210,7 +2231,11 @@ export function registerApiTriggers(
       const filterAgentId = wildcardAgent
         ? undefined
         : explicitAgentId ?? (isAgentScopeIsolated() ? getAgentId() : undefined);
+      const project = req.query_params?.["project"];
       let filtered = latest ? memories.filter((m) => m.isLatest) : memories;
+      if (typeof project === "string" && project) {
+        filtered = filtered.filter((m) => m.project === project);
+      }
       if (filterAgentId) {
         filtered = filtered.filter(
           (m) =>
@@ -2235,10 +2260,13 @@ export function registerApiTriggers(
       }
 
       const page = parsePage(req.query_params);
+      const newestFirst = [...filtered].sort((a, b) =>
+        (b.createdAt || b.updatedAt || "").localeCompare(a.createdAt || a.updatedAt || ""),
+      );
       return {
         status_code: 200,
         body: {
-          memories: takePage(filtered, page),
+          memories: takePage(newestFirst, page),
           total: filtered.length,
           ...page,
         },

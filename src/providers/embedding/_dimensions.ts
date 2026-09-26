@@ -16,14 +16,18 @@ const MODEL_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
   "text-embedding-ada-002": 1536,
+  "nomic-embed-text-v1.5": 768,
+  "qwen3-embedding-0.6b": 1024,
+  "qwen3-embedding-4b": 2560,
+  "qwen3-embedding-8b": 4096,
 };
 
 function lookupModelDimensions(model: string): number | undefined {
-  if (model in MODEL_DIMENSIONS) return MODEL_DIMENSIONS[model];
-  const slash = model.indexOf("/");
+  const id = model.toLowerCase();
+  if (id in MODEL_DIMENSIONS) return MODEL_DIMENSIONS[id];
+  const slash = id.indexOf("/");
   if (slash === -1) return undefined;
-  const bare = model.slice(slash + 1);
-  return MODEL_DIMENSIONS[bare];
+  return MODEL_DIMENSIONS[id.slice(slash + 1)];
 }
 
 export function resolveDimensions(
@@ -42,8 +46,8 @@ export function resolveDimensions(
   }
   const known = lookupModelDimensions(model);
   if (known !== undefined) return known;
-  // The table holds OpenAI's three models and nothing else, so a self-hosted
-  // or brokered model is always unknown here. Guessing 1536 produces a
+  // The table holds only OpenAI's models and a few Matryoshka families, so most
+  // self-hosted or brokered models are unknown here. Guessing 1536 produces a
   // provider that claims one width while the model returns another: every
   // vector is written at the real width, cross-dimension cosine returns 0,
   // and the mismatch only surfaces as a refusal to start on some later boot -
@@ -54,6 +58,15 @@ export function resolveDimensions(
       `the width the model actually returns (known models: ` +
       `${Object.keys(MODEL_DIMENSIONS).join(", ")}).`,
   );
+}
+
+// The `dimensions` field to send, if any. Only a known model with a width
+// other than its native one is a request to shorten; for an unknown model the
+// env var declares the width it returns, and servers that cannot shorten
+// (vLLM on a non-Matryoshka model) reject the field outright.
+export function requestedDimensions(model: string, dimensions: number): number | undefined {
+  const native = lookupModelDimensions(model);
+  return native !== undefined && native !== dimensions ? dimensions : undefined;
 }
 
 export { MODEL_DIMENSIONS };

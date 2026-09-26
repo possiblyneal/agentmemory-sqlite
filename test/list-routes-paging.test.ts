@@ -195,6 +195,27 @@ describe("GET /agentmemory/memories paging", () => {
     expect(res.body.total).toBe(3);
   });
 
+  it("pages newest first, so a limited latest=true read holds the recent rows (#990)", async () => {
+    for (let n = 0; n < 5; n++) {
+      await kv.set(KV.memories, `mem_${n}`, {
+        id: `mem_${n}`,
+        isLatest: true,
+        createdAt: new Date(Date.UTC(2026, 0, 1 + n)).toISOString(),
+      });
+    }
+    const res = await get("api::memories", { latest: "true", limit: "2" });
+    expect((res.body.memories as Array<{ id: string }>).map((m) => m.id)).toEqual(["mem_4", "mem_3"]);
+  });
+
+  it("filters by project, including the count (#918)", async () => {
+    await kv.set(KV.memories, "mem_a", { id: "mem_a", project: "/alpha", isLatest: true });
+    await kv.set(KV.memories, "mem_b", { id: "mem_b", project: "/beta", isLatest: true });
+    const res = await get("api::memories", { project: "/alpha" });
+    expect((res.body.memories as Array<{ id: string }>).map((m) => m.id)).toEqual(["mem_a"]);
+    const count = await get("api::memories", { project: "/alpha", count: "true" });
+    expect(count.body).toEqual({ total: 1, latestCount: 1 });
+  });
+
   it("still answers count=true with totals only", async () => {
     await seedRows(KV.memories, 3);
     const res = await get("api::memories", { count: "true" });

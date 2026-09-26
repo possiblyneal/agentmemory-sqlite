@@ -8,7 +8,7 @@ import {
   detectAzure,
   normalizeBaseUrl,
 } from "../_openai-shared.js";
-import { resolveDimensions } from "./_dimensions.js";
+import { requestedDimensions, resolveDimensions } from "./_dimensions.js";
 
 const DEFAULT_MODEL = "text-embedding-3-small";
 
@@ -106,6 +106,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       body: JSON.stringify({
         model: this.model,
         input: texts,
+        dimensions: requestedDimensions(this.model, this.dimensions),
       }),
     });
 

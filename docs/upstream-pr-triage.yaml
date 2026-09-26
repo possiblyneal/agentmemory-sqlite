@@ -146,7 +146,7 @@ prs:
       - src/functions/smart-search.ts
     note: "mem::context and smart-search load lessons but skip insights, so mem::reflect output is reachable only by explicit tool call."
     disposition: candidate
-    status: "present-here — KV.insights (src/state/schema.ts:88) is written by reflect.ts and read only by diagnostics.ts and export-import.ts. mem::context loads slots, profile and lessons and never insights (src/functions/context.ts:73-161); smart-search has no reference either."
+    status: "partly-present-here — 9f6b46c, 8ee9946: mem::context injects the top 5 Insights of the Session's own project at session start (src/functions/context.ts); smart-search still returns only lessons (smart-search.ts), which is an additive response-shape change not taken yet."
     url: https://github.com/rohitg00/agentmemory/pull/615
   - number: 667
     title: "fix(cli): status uses /memories?count=true instead of /export"
@@ -157,7 +157,8 @@ prs:
     paths:
       - src/cli.ts
     note: "agentmemory status calls unbounded /export to get two counts and times out on any grown install."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — status reads memories?count=true, never /export (src/cli.ts:516)."
     url: https://github.com/rohitg00/agentmemory/pull/667
   - number: 757
     title: "fix(compression): fallback to synthetic compression when memory provider is noop"
@@ -646,7 +647,8 @@ prs:
     paths:
       - src/state/keyed-mutex.ts
     note: "Floating promise in withKeyedLock can raise unhandled-rejection warnings."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — cleanup swallows both outcomes, so the unawaited chain cannot reject (src/state/keyed-mutex.ts:9-16)."
     url: https://github.com/rohitg00/agentmemory/pull/266
   - number: 273
     title: "feat: opt-in fail-loud when AGENTMEMORY_URL is unreachable"
@@ -1051,7 +1053,9 @@ prs:
     paths:
       - src/eval/metrics-store.ts
     note: "MetricsStore.record() loses updates: concurrent callers meet in the kv.get() gap."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "c075a0e"
+    status: "fixed-here — c075a0e: MetricsStore.record runs under withKeyedLock(metrics:<functionId>), so concurrent first records no longer each load a fresh zero row and overwrite one another (src/eval/metrics-store.ts); test/metrics-store.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/pull/1291
   - number: 1293
     title: "fix(hooks): retry a failed observe POST instead of dropping it"
@@ -1138,7 +1142,9 @@ prs:
       - src/mcp/standalone.ts
       - test/mcp-standalone-proxy.test.ts
     note: "Any non-ok proxy response is treated as unreachable, hiding real tool errors behind an unknown-tool fallback."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "778f81d, 2b2f838"
+    status: "fixed-here — 778f81d, 2b2f838: the standalone MCP falls back to local KV and invalidates the handle only when the daemon could not be reached (a thrown fetch or a gateway 502/504); any other HTTP error is rethrown with the server's response text (src/mcp/standalone.ts serverAnswered, src/mcp/rest-proxy.ts), and the daemon logs the real cause behind its generic 500 (src/mcp/server.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/1323
   - number: 1327
     title: "fix(clip): encode text with CLIP text tower so text→image vision-search works"
@@ -1205,7 +1211,9 @@ prs:
       - src/providers/embedding/openai.ts
       - test/embedding-provider.test.ts
     note: "OPENAI_EMBEDDING_DIMENSIONS is read into the provider but never sent in the request body, breaking matryoshka models."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "fca353f, 4c65822"
+    status: "fixed-here — fca353f, 4c65822: OpenAI and OpenRouter send dimensions when the configured width shortens a known model, including the nomic-embed-text-v1.5 and Qwen3-Embedding Matryoshka families matched case-insensitively across provider/ prefixes (requestedDimensions, src/providers/embedding/_dimensions.ts); an unknown model keeps the field off, since there the env var declares the native width and non-Matryoshka servers reject it."
     url: https://github.com/rohitg00/agentmemory/pull/1369
   - number: 194
     title: "feat: add --host flag and AGENTMEMORY_HOST for configurable bind address"

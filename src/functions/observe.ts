@@ -97,6 +97,16 @@ async function evictToAdmitOne(
   });
 }
 
+function hasCompressibleContent(raw: RawObservation): boolean {
+  return [raw.toolInput, raw.toolOutput, raw.userPrompt, raw.imageData].some(
+    (v) =>
+      v !== undefined &&
+      v !== null &&
+      v !== "" &&
+      !(typeof v === "object" && Object.keys(v).length === 0),
+  );
+}
+
 export function registerObserveFunction(
   sdk: ISdk,
   kv: StateKV,
@@ -357,7 +367,8 @@ export function registerObserveFunction(
         // Default path: build a zero-LLM synthetic compression so recall
         // and BM25 search still work without burning the user's Claude
         // token allocation on every tool invocation.
-        if (isAutoCompressEnabled()) {
+        const llmCompress = isAutoCompressEnabled() && hasCompressibleContent(raw);
+        if (llmCompress) {
           await sdk.trigger({
             function_id: "mem::compress",
             payload: {
@@ -413,7 +424,7 @@ export function registerObserveFunction(
           obsId,
           sessionId: payload.sessionId,
           hook: payload.hookType,
-          compress: isAutoCompressEnabled() ? "llm" : "synthetic",
+          compress: llmCompress ? "llm" : "synthetic",
         });
         return { observationId: obsId };
       });

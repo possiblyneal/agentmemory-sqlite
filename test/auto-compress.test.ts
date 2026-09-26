@@ -146,6 +146,25 @@ describe("mem::observe auto-compress gate (#138)", () => {
     expect(compressCalls).toHaveLength(1);
   });
 
+  it("AGENTMEMORY_AUTO_COMPRESS=true: a hook with no tool payload stays synthetic (#1270)", async () => {
+    process.env["AGENTMEMORY_AUTO_COMPRESS"] = "true";
+    const { registerObserveFunction } = await import(
+      "../src/functions/observe.js"
+    );
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    const { observationId } = (await sdk.trigger(
+      "mem::observe",
+      validPayload({ hookType: "post_tool_use", data: { tool_name: "Stop", tool_input: {} } }),
+    )) as { observationId: string };
+
+    expect(sdk.triggered.filter((t) => t.id === "mem::compress")).toHaveLength(0);
+    const obs = await kv.get<{ narrative?: string }>(`mem:obs:ses_test`, observationId);
+    expect(typeof obs?.narrative).toBe("string");
+  });
+
   it("AGENTMEMORY_AUTO_COMPRESS=false explicitly: does NOT fire mem::compress", async () => {
     process.env["AGENTMEMORY_AUTO_COMPRESS"] = "false";
     const { registerObserveFunction } = await import(

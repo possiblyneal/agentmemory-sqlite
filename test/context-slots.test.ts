@@ -95,6 +95,20 @@ describe("mem::context — pinned slot injection", () => {
       expect(result.blocks).toBeGreaterThan(0);
     });
 
+    it("truncates pinned slots that exceed the budget instead of dropping them (#1333)", async () => {
+      await seedPinnedSlot(kv, "tool_guidelines", "rule-alpha " + "x".repeat(3000), "global");
+
+      const result = await handler({
+        sessionId: "ses_big",
+        project: "/tmp/proj",
+        budget: 300,
+      });
+
+      expect(result.context).toContain("rule-alpha");
+      expect(result.context).toContain("[pinned slots truncated to fit the context budget]");
+      expect(result.tokens).toBeLessThanOrEqual(300);
+    });
+
     it("renders multiple pinned slots, sorted by label", async () => {
       await seedPinnedSlot(kv, "user_preferences", "pref-alpha", "global");
       await seedPinnedSlot(kv, "tool_guidelines", "rule-alpha", "global");

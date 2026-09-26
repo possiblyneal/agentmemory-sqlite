@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { ResilientProvider } from "../src/providers/resilient.js";
 import type { MemoryProvider } from "../src/types.js";
 import { ProviderHttpError } from "../src/providers/_fetch.js";
+import { OpenAIProvider } from "../src/providers/openai.js";
 
 function fakeProvider(overrides: Partial<MemoryProvider> = {}): MemoryProvider {
   return {
@@ -103,6 +104,40 @@ describe("ResilientProvider per-operation breakers", () => {
     await failTimes(() => provider.summarize("s", "u"), 5);
 
     expect(provider.circuitStates.summarize.state).toBe("open");
+  });
+
+  it("does not open the breaker when a content filter rejects one prompt (#1276)", async () => {
+    const provider = new ResilientProvider(
+      fakeProvider({
+        summarize: async () => {
+          throw new ProviderHttpError(
+            'OpenAI API error (400): {"error":{"code":"content_filter","message":"The response was filtered"}}',
+            400,
+          );
+        },
+      }),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("closed");
+  });
+
+  it("does not open the breaker when a content filter blocks the completion (#1276)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: "content_filter", message: { content: null } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const provider = new ResilientProvider(
+      new OpenAIProvider("key", "gpt-4o", 1024, "https://example.openai.azure.com"),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("closed");
+    vi.restoreAllMocks();
   });
 
   it("treats an SDK error carrying status 503 as busy", async () => {
