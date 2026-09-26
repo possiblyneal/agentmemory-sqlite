@@ -165,6 +165,14 @@ describe("requested dimensions reach the request body (PR #1369)", () => {
     expect(sentBody(spy)).not.toHaveProperty("dimensions");
   });
 
+  it("sends a width that shortens a Matryoshka model named with a provider prefix (upstream PR #1369)", async () => {
+    process.env["OPENAI_EMBEDDING_MODEL"] = "Qwen/Qwen3-Embedding-8B";
+    process.env["OPENAI_EMBEDDING_DIMENSIONS"] = "1024";
+    const spy = stubFetch(1024);
+    await new OpenAIEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy).dimensions).toBe(1024);
+  });
+
   it("omits the field at a known model's native width", async () => {
     const spy = stubFetch(1536);
     await new OpenAIEmbeddingProvider("test-key").embed("x");
