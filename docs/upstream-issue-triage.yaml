@@ -1478,8 +1478,8 @@ issues:
     difficulty: low
     kind: bug
     note: "POST /agentmemory/consolidate 500s with an unhandled [object Object] error."
-    disposition: candidate
-    status: "partly-present-here — engine now surfaces err.message (src/engine/inproc/sdk.ts:209-214); an empty POST body is null and api.ts:1210 passes it to mem::consolidate, which throws on data.minObservations (consolidate.ts:72)."
+    disposition: already-fixed
+    fixed_by: "api::consolidate, api::patterns and api::generate-rules whitelist their fields from req.body ?? {}, so a bodyless POST reaches the function as {} (src/triggers/api.ts); test/api-bodyless-post.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1008
     fix_prs: [1041]
   - number: 1009

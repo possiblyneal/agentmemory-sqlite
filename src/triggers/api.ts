@@ -1207,7 +1207,15 @@ export function registerApiTriggers(
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::consolidate", payload: req.body });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await sdk.trigger({
+        function_id: "mem::consolidate",
+        payload: {
+          project: typeof body.project === "string" ? body.project : undefined,
+          minObservations:
+            typeof body.minObservations === "number" ? body.minObservations : undefined,
+        },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -1221,7 +1229,11 @@ export function registerApiTriggers(
     async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::patterns", payload: req.body });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await sdk.trigger({
+        function_id: "mem::patterns",
+        payload: { project: typeof body.project === "string" ? body.project : undefined },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -1235,7 +1247,11 @@ export function registerApiTriggers(
     async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::generate-rules", payload: req.body });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await sdk.trigger({
+        function_id: "mem::generate-rules",
+        payload: { project: typeof body.project === "string" ? body.project : undefined },
+      });
       return { status_code: 200, body: result };
     },
   );
