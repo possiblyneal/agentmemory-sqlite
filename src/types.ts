@@ -652,7 +652,6 @@ export interface AuditEntry {
     | "crystallize"
     | "diagnose"
     | "heal"
-    | "index_persist"
     | "facet_tag"
     | "lesson_save"
     | "lesson_recall"
