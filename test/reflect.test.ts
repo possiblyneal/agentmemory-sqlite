@@ -208,6 +208,27 @@ describe("Reflect", () => {
       expect(result.clustersProcessed + result.clustersSkipped).toBe(2);
     });
 
+    it("never puts a concept in two clusters (#1133)", async () => {
+      const chain = ["c1", "c2", "c3", "c4", "c5", "c6"];
+      for (const name of chain) {
+        await kv.set("mem:graph:nodes", `node_${name}`, makeConceptNode(name));
+      }
+      for (let i = 0; i < chain.length - 1; i++) {
+        await kv.set("mem:graph:edges", `edge_${i}`, makeEdge(chain[i]!, chain[i + 1]!));
+      }
+      for (let i = 0; i < 3; i++) {
+        await kv.set("mem:semantic", `sem_${i}`, makeSemantic(`c3 and c4 fact ${i}`));
+      }
+
+      const result = (await sdk.trigger("mem::reflect", {})) as {
+        clustersProcessed: number;
+        clustersSkipped: number;
+      };
+
+      expect(result.clustersProcessed).toBe(1);
+      expect(result.clustersSkipped).toBe(1);
+    });
+
     it("skips clusters with fewer than 3 supporting items", async () => {
       await kv.set("mem:graph:nodes", "node_sparse", makeConceptNode("sparse"));
       await kv.set("mem:graph:nodes", "node_topic", makeConceptNode("topic"));

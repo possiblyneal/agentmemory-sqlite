@@ -68,7 +68,7 @@ function buildGraphClusters(
 
   const visited = new Set<string>();
   const clusters: string[][] = [];
-  const conceptNodeIds = new Set(conceptNodes.map((n) => n.id));
+  const conceptById = new Map(conceptNodes.map((n) => [n.id, n]));
 
   for (const seed of sorted) {
     if (clusters.length >= maxClusters) break;
@@ -83,12 +83,12 @@ function buildGraphClusters(
       const levelCount = queue.length;
       for (let i = 0; i < levelCount; i++) {
         const current = queue.shift()!;
-        if (seen.has(current)) continue;
+        if (seen.has(current) || visited.has(current)) continue;
         seen.add(current);
 
-        if (conceptNodeIds.has(current)) {
-          const node = conceptNodes.find((n) => n.id === current);
-          if (node) cluster.push(node.name);
+        const node = conceptById.get(current);
+        if (node) {
+          cluster.push(node.name);
           visited.add(current);
         }
 
