@@ -66,6 +66,16 @@ describe("resolveProject — hook project basename resolver", () => {
     expect(resolveProject(nestedDir)).toBe(REPO_NAME);
   });
 
+  it("names a linked worktree after its main checkout (#728)", () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: repoDir, stdio: "ignore" });
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "--quiet", "-m", "init");
+    const worktree = join(tmpRoot, "goosefish");
+    git("worktree", "add", "--quiet", worktree);
+    mkdirSync(join(worktree, "src"), { recursive: true });
+    expect(resolveProject(worktree)).toBe(REPO_NAME);
+    expect(resolveProject(join(worktree, "src"))).toBe(REPO_NAME);
+  });
+
   it("falls back to basename(cwd) when not in a git repo", () => {
     // mkdtemp lands under os.tmpdir(), which is not always outside a repository —
     // TMPDIR pointed at a working directory makes git walk up and find one, and the

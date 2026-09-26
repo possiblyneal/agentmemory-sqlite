@@ -61,6 +61,29 @@ describe("lesson recall through the lesson index", () => {
     expect(res.lessons[0].score).toBeGreaterThan(res.lessons[1].score);
   });
 
+  it("recalls a reinforced lesson that decayed to the confidence floor", async () => {
+    const { sdk, kv } = await setup();
+    await kv.set("mem:lessons", "lsn_floor", {
+      id: "lsn_floor",
+      content: "never force-push a shared branch",
+      context: "",
+      confidence: 0.05,
+      reinforcements: 1,
+      source: "manual",
+      sourceIds: [],
+      tags: ["git"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      decayRate: 0.05,
+    });
+
+    const res = (await sdk.trigger("mem::lesson-recall", {
+      query: "force-push shared branch",
+    })) as { lessons: Array<{ id: string }> };
+
+    expect(res.lessons.map((l) => l.id)).toEqual(["lsn_floor"]);
+  });
+
   it("recalls lessons that existed before the index was built (lazy rebuild)", async () => {
     const { sdk, kv } = await setup();
     await kv.set("mem:lessons", "lsn_pre", {

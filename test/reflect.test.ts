@@ -360,3 +360,34 @@ describe("Reflect", () => {
     });
   });
 });
+
+describe("mem::reflect project scope (#1344)", () => {
+  it("builds a project's insights only from that project's facts, crystals and concepts", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue(XML_RESPONSE) };
+    registerReflectFunctions(sdk as never, kv as never, provider as never);
+    await kv.set("mem:sessions", "ses_a", { id: "ses_a", project: "alpha" });
+    await kv.set("mem:sessions", "ses_b", { id: "ses_b", project: "beta" });
+    for (const [name, sessionId] of [["security", "ses_a"], ["validation", "ses_a"], ["beta", "ses_b"]]) {
+      await kv.set("mem:graph:nodes", `node_${name}`, { ...makeConceptNode(name), sessionId });
+    }
+    await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+    await kv.set("mem:graph:edges", "edge_2", makeEdge("security", "beta"));
+    const alphaFacts = ["Always validate security inputs", "Testing improves security coverage", "Validation prevents injection"];
+    for (const [i, fact] of alphaFacts.entries()) {
+      await kv.set("mem:semantic", `sem_a${i}`, { ...makeSemantic(fact, `sem_a${i}`), sourceSessionIds: ["ses_a"] });
+    }
+    await kv.set("mem:semantic", "sem_b", { ...makeSemantic("Beta security keys live in vault", "sem_b"), sourceSessionIds: ["ses_b"] });
+    await kv.set("mem:crystals", "crys_b", { ...makeCrystal("beta work", ["Beta security rotates weekly"]), project: "beta" });
+
+    await sdk.trigger("mem::reflect", { project: "alpha" });
+
+    expect(provider.summarize).toHaveBeenCalled();
+    for (const [, prompt] of provider.summarize.mock.calls) {
+      expect(String(prompt)).not.toMatch(/beta/i);
+    }
+    const insights = await kv.list<Insight>("mem:insights");
+    expect(insights.every((i) => i.project === "alpha")).toBe(true);
+  });
+});

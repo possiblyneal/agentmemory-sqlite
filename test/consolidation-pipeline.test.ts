@@ -119,7 +119,7 @@ describe("Consolidation Pipeline", () => {
     })) as { success: boolean; results: Record<string, unknown> };
 
     expect(result.success).toBe(true);
-    const semantic = result.results.semantic as { skipped: boolean; reason: string };
+    const semantic = (result.results.semantic as Record<string, { skipped: boolean; reason: string }>)["test-project"];
     expect(semantic.skipped).toBe(true);
     expect(semantic.reason).toContain("fewer than 5");
     expect(provider.summarize).not.toHaveBeenCalled();
@@ -168,7 +168,7 @@ describe("Consolidation Pipeline", () => {
     })) as { success: boolean; results: Record<string, unknown> };
 
     expect(result.success).toBe(true);
-    const semantic = result.results.semantic as { newFacts: number };
+    const semantic = (result.results.semantic as Record<string, { newFacts: number }>)["test-project"];
     expect(semantic.newFacts).toBe(1);
 
     const stored = await kv.list<SemanticMemory>("mem:semantic");
@@ -335,5 +335,109 @@ describe("Consolidation Pipeline: decay writes and single flight", () => {
     expect((await first).success).toBe(true);
     const third = (await sdk.trigger("mem::consolidate-pipeline", { tier: "decay" })) as { success: boolean };
     expect(third.success).toBe(true);
+  });
+});
+
+describe("Consolidation Pipeline: per-project scope (#1344)", () => {
+  function summaryFor(project: string, i: number): SessionSummary {
+    return { ...makeSummary(i), sessionId: `${project}_${i}`, project, narrative: `${project} work ${i}` };
+  }
+
+  it("an unscoped run consolidates each project with new summaries on its own", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    const reflected: unknown[] = [];
+    sdk.registerFunction("mem::reflect", async (payload: unknown) => {
+      reflected.push(payload);
+      return { success: true };
+    });
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    for (let i = 0; i < 5; i++) {
+      await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+      await kv.set("mem:summaries", `beta_${i}`, summaryFor("beta", i));
+    }
+
+    const result = (await sdk.trigger("mem::consolidate-pipeline", {})) as {
+      results: { semantic: Record<string, unknown> };
+    };
+
+    expect(Object.keys(result.results.semantic).sort()).toEqual(["alpha", "beta"]);
+    expect(reflected).toEqual([
+      { maxClusters: 10, project: "alpha" },
+      { maxClusters: 10, project: "beta" },
+    ]);
+    for (const [, prompt] of provider.summarize.mock.calls) {
+      const mentionsAlpha = String(prompt).includes("alpha work");
+      const mentionsBeta = String(prompt).includes("beta work");
+      expect(mentionsAlpha !== mentionsBeta).toBe(true);
+    }
+  });
+
+  it("a later unscoped run skips projects with no new summaries since the last one", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    sdk.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+
+    await sdk.trigger("mem::consolidate-pipeline", {});
+    const second = (await sdk.trigger("mem::consolidate-pipeline", {})) as {
+      results: { semantic: Record<string, unknown>; reflect: Record<string, unknown> };
+    };
+
+    expect(second.results.semantic).toEqual({});
+    expect(second.results.reflect).toEqual({});
+    expect(provider.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a project whose reflect failed on the next unscoped run", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    let calls = 0;
+    sdk.registerFunction("mem::reflect", async () => {
+      calls++;
+      if (calls === 1) throw new Error("provider busy");
+      return { success: true };
+    });
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+
+    await sdk.trigger("mem::consolidate-pipeline", { tier: "reflect" });
+    const second = (await sdk.trigger("mem::consolidate-pipeline", { tier: "reflect" })) as {
+      results: { reflect: Record<string, unknown> };
+    };
+    const third = (await sdk.trigger("mem::consolidate-pipeline", { tier: "reflect" })) as {
+      results: { reflect: Record<string, unknown> };
+    };
+
+    expect(second.results.reflect).toEqual({ alpha: { success: true } });
+    expect(third.results.reflect).toEqual({});
+  });
+
+  it("credits a fact another project already holds to this project's Sessions too", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = {
+      name: "test",
+      compress: vi.fn(),
+      summarize: vi.fn().mockResolvedValue(`<fact confidence="0.8">Use node:sqlite</fact>`),
+    };
+    sdk.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    for (let i = 0; i < 5; i++) {
+      await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+      await kv.set("mem:summaries", `beta_${i}`, summaryFor("beta", i));
+    }
+
+    await sdk.trigger("mem::consolidate-pipeline", { tier: "semantic" });
+
+    const facts = await kv.list<SemanticMemory>("mem:semantic");
+    expect(facts).toHaveLength(1);
+    expect(facts[0].sourceSessionIds).toEqual(
+      expect.arrayContaining(["alpha_0", "beta_0"]),
+    );
   });
 });

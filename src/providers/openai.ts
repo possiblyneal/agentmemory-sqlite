@@ -1,6 +1,6 @@
 import type { MemoryProvider } from "../types.js";
 import { getEnvVar } from "../config.js";
-import { fetchWithTimeout } from "./_fetch.js";
+import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
 import {
   DEFAULT_AZURE_API_VERSION,
   buildAuthHeaders,
@@ -56,6 +56,10 @@ export class OpenAIProvider implements MemoryProvider {
   private isAzure: boolean;
   private azureApiVersion: string;
   private tokenizeUnavailable = false;
+  // api.openai.com rejects max_tokens on reasoning models and accepts
+  // max_completion_tokens on every model; compatible servers may only know
+  // max_tokens (#1219).
+  private outputTokenParam: "max_tokens" | "max_completion_tokens";
 
   constructor(apiKey: string, model: string, maxTokens: number, baseURL?: string) {
     this.apiKey = apiKey;
@@ -67,6 +71,9 @@ export class OpenAIProvider implements MemoryProvider {
     this.azureApiVersion =
       getEnvVar("OPENAI_API_VERSION") || DEFAULT_AZURE_API_VERSION;
     this.isAzure = detectAzure(this.baseUrl);
+    this.outputTokenParam = /^https:\/\/api\.openai\.com(\/|$)/.test(this.baseUrl)
+      ? "max_completion_tokens"
+      : "max_tokens";
   }
 
   async compress(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -112,7 +119,7 @@ export class OpenAIProvider implements MemoryProvider {
     const url = buildChatUrl(this.baseUrl, this.isAzure, this.azureApiVersion);
     const body: Record<string, unknown> = {
       model: this.model,
-      max_tokens: this.maxTokens,
+      [this.outputTokenParam]: this.maxTokens,
       // OpenAI API spec defines `stream` as defaulting to false, so omitting
       // it should yield a JSON response. Some OpenAI-compatible proxies
       // (notably 9Router < 0.4.56 — see decolua/9router#1260) default to
@@ -158,7 +165,7 @@ export class OpenAIProvider implements MemoryProvider {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`OpenAI API error (${response.status}): ${text}`);
+      throw new ProviderHttpError(`OpenAI API error (${response.status}): ${text}`, response.status);
     }
 
     const data = (await response.json()) as {

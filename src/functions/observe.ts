@@ -9,7 +9,9 @@ import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
-import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded } from "./search.js";
+import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
+import { safeAudit } from "./audit.js";
+import { decrementImageRef } from "./image-refs.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { saveImageToDisk } from "../utils/image-store.js";
@@ -35,6 +37,64 @@ export function extractImage(d: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+// Uncompressed rows carry no importance yet; rank them just below the
+// default so a scored row of average value outlives an unscored one.
+const UNSCORED_IMPORTANCE = 3;
+
+// A session at its cap still admits the newest observation: the work at the
+// end of a long session is what a later one most often needs. The least
+// important rows go first, oldest breaking ties (PR#1174).
+async function evictToAdmitOne(
+  sdk: ISdk,
+  kv: StateKV,
+  sessionId: string,
+  cap: number,
+): Promise<void> {
+  const scope = KV.observations(sessionId);
+  const existing = await kv.list<{
+    id: string;
+    timestamp?: string;
+    importance?: number;
+    imageData?: string;
+    imageRef?: string;
+  }>(scope);
+  const excess = existing.length - cap + 1;
+  if (excess <= 0) return;
+  const victims = existing
+    .sort(
+      (a, b) =>
+        (a.importance ?? UNSCORED_IMPORTANCE) - (b.importance ?? UNSCORED_IMPORTANCE) ||
+        (a.timestamp ?? "").localeCompare(b.timestamp ?? ""),
+    )
+    .slice(0, excess);
+  let evicted = 0;
+  for (const obs of victims) {
+    try {
+      await deleteIndexed(kv, scope, obs.id);
+      evicted++;
+    } catch (err) {
+      logger.warn("Session cap eviction failed", {
+        sessionId,
+        obsId: obs.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
+    if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
+    await safeAudit(kv, "delete", "mem::observe", [obs.id], {
+      resource: "observation",
+      reason: "session_observation_cap",
+      sessionId,
+    });
+  }
+  logger.warn("Session observation cap reached; evicted least important", {
+    sessionId,
+    cap,
+    evicted,
+  });
 }
 
 export function registerObserveFunction(
@@ -145,13 +205,7 @@ export function registerObserveFunction(
 
       return withKeyedLock(`obs:${payload.sessionId}`, async () => {
         if (maxObservationsPerSession && maxObservationsPerSession > 0) {
-          const existing = await kv.list(KV.observations(payload.sessionId));
-          if (existing.length >= maxObservationsPerSession) {
-            return {
-              success: false,
-              error: `Session observation limit reached (${maxObservationsPerSession})`,
-            };
-          }
+          await evictToAdmitOne(sdk, kv, payload.sessionId, maxObservationsPerSession);
         }
 
         // Existing session is the source of truth for agentId (even

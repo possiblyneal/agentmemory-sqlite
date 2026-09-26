@@ -81,11 +81,23 @@ async function mapWithConcurrency<T, R>(
   return out;
 }
 
+function fitsOneChunk(counts: number[], budget: number): boolean {
+  const payload = counts.reduce((sum, n) => sum + n + SEPARATOR_TOKENS, 0);
+  return payload <= budget - PROMPT_OVERHEAD_TOKENS;
+}
+
+// A token is rarely shorter than one character, so a Session whose character
+// count already fits one chunk is safe to skip measuring: on a broker that queues
+// tokenize behind generation, one request per Observation is load the summary
+// itself has to wait behind.
 async function countObservationTokens(
   provider: MemoryProvider,
   texts: string[],
+  budget: number,
   sessionId: string,
 ): Promise<number[]> {
+  const estimates = texts.map(estimateTokens);
+  if (fitsOneChunk(texts.map((t) => t.length), budget)) return estimates;
   if (provider.countTokens) {
     try {
       return await mapWithConcurrency(texts, COUNT_CONCURRENCY, (t) =>
@@ -98,7 +110,7 @@ async function countObservationTokens(
       });
     }
   }
-  return texts.map(estimateTokens);
+  return estimates;
 }
 
 // Greedy in-order packing. An Observation that alone exceeds the budget
@@ -184,7 +196,7 @@ async function planChunks(
 ): Promise<CompressedObservation[][]> {
   const budget = getChunkTokens();
   const texts = compressed.map(renderSummaryObservation);
-  const counts = await countObservationTokens(provider, texts, sessionId);
+  const counts = await countObservationTokens(provider, texts, budget, sessionId);
   const chunks = packChunks(compressed, counts, budget, sessionId);
   if (chunks.length > 1) {
     logger.info("Summarize chunking session", {

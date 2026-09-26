@@ -287,8 +287,8 @@ prs:
     paths:
       - src/functions/evict.ts
     note: "Evicted observations are never removed from the BM25 or vector index, so search returns ids whose KV lookup is null and silently under-fills pages."
-    disposition: candidate
-    status: "present-here — src/functions/evict.ts deletes from KV without touching the BM25 or vector index."
+    disposition: already-fixed
+    fixed_by: "Every evict.ts delete goes through deleteIndexed, which removes the row, its vector and its BM25 entry (src/functions/search.ts:153-174)."
     url: https://github.com/rohitg00/agentmemory/pull/1005
   - number: 1039
     title: "fix: schedule periodic snapshot timer (#1006)"
@@ -311,8 +311,9 @@ prs:
     paths:
       - src/functions/observe.ts
     note: "At MAX_OBS_PER_SESSION every further observation is discarded; evicts the lowest-value one instead of dropping the newest."
-    disposition: candidate
-    status: "present-here — At MAX_OBS_PER_SESSION mem::observe refuses every further observation outright (src/functions/observe.ts:147-154). The newest work is dropped rather than the least valuable one evicted."
+    disposition: already-fixed
+    status: "fixed-here — db9f5db: at the cap mem::observe evicts the lowest-importance observation, oldest first on a tie, from KV and both indexes, and admits the new one."
+    fixed_by: "db9f5db"
     url: https://github.com/rohitg00/agentmemory/pull/1174
   - number: 1175
     title: "feat(slots): reject stale slot overwrites, keep an undo copy, report headroom"
@@ -338,8 +339,9 @@ prs:
     paths:
       - src/functions/audit.ts
     note: "recordAudit has no retention and the KV adapter rewrites the whole scope per write, so audit cost compounds on long-lived installs."
-    disposition: candidate
-    status: "present-here — recordAudit has no retention bound."
+    disposition: already-fixed
+    status: "fixed-here — cc30b8e: pruneAudit keeps the newest AGENTMEMORY_AUDIT_MAX rows (default 50000), run daily."
+    fixed_by: "cc30b8e"
     url: https://github.com/rohitg00/agentmemory/pull/1176
   - number: 1210
     title: "fix(providers): replace retired Anthropic default model identifiers"
@@ -389,8 +391,9 @@ prs:
     paths:
       - src/providers/resilient.ts
     note: "No concurrency bound on the provider path and 429s count as circuit-breaker failures, so load trips the breaker."
-    disposition: candidate
-    status: "partly-present-here — 429 and 503 are already retried with Retry-After before reaching the breaker (src/providers/_fetch.ts:13,76-82). A concurrency cap exists, but only on the agent-sdk provider (src/providers/agent-sdk.ts:99) — the HTTP providers have none."
+    disposition: already-fixed
+    status: "fixed-here — 042f3a1: a 429/503 that exhausts its retries no longer opens the breaker, Retry-After is honoured uncapped within the timeout budget, and AGENTMEMORY_LLM_MAX_CONCURRENCY (default 4) bounds in-flight LLM calls."
+    fixed_by: "042f3a1"
     url: https://github.com/rohitg00/agentmemory/pull/1259
   - number: 1260
     title: "fix(mcp): read graph stats from the snapshot instead of enumerating the graph"
@@ -418,8 +421,9 @@ prs:
       - src/index.ts
       - test/evict.test.ts
     note: "mem::evict is fully implemented but nothing schedules it — Eviction never runs."
-    disposition: candidate
-    status: "present-here — mem::evict is registered (src/functions/evict.ts:109) but src/index.ts schedules only auto-forget and consolidate-pipeline."
+    disposition: already-fixed
+    status: "fixed-here — 3b2545e: src/index.ts runs mem::evict every 24h unless EVICTION_ENABLED=false."
+    fixed_by: "3b2545e"
     url: https://github.com/rohitg00/agentmemory/pull/1287
   - number: 1307
     title: "fix(sessions): close idle sessions no client ever ended"
@@ -528,8 +532,9 @@ prs:
       - test/consolidation-pipeline.test.ts
       - test/reflect.test.ts
     note: "Reflection and consolidation are not project-scoped, so concept clusters and insights cross-contaminate between repos."
-    disposition: candidate
-    status: "partly-present-here — mem::reflect accepts and filters on project (src/functions/reflect.ts:187,354,385), so the capability is present; it is opt-in, and the scheduled run passes no project."
+    disposition: already-fixed
+    status: "fixed-here — 6575de0: an unscoped consolidation run merges and reflects each project with new summaries separately, and mem::reflect with a project reads only that project's facts, crystals, lessons and graph concepts. Existing unscoped insights are left as they are."
+    fixed_by: "6575de0"
     url: https://github.com/rohitg00/agentmemory/pull/1344
   - number: 1350
     title: "fix(providers): clear the circuit breaker failure count on success"

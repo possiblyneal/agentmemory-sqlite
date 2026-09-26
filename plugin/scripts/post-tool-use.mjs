@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
@@ -41,7 +41,7 @@ function resolveProject(cwd) {
 	if (explicit && explicit.trim()) return explicit.trim();
 	const dir = cwd && cwd.trim() ? cwd : process.cwd();
 	try {
-		const top = execSync("git rev-parse --show-toplevel", {
+		const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
 			cwd: dir,
 			stdio: [
 				"ignore",
@@ -49,7 +49,8 @@ function resolveProject(cwd) {
 				"ignore"
 			],
 			timeout: 500
-		}).toString().trim();
+		}).toString().trim().split("\n");
+		if (commonDir && basename(commonDir) === ".git") return basename(dirname(resolve(dir, commonDir)));
 		if (top) return basename(top);
 	} catch {}
 	return basename(dir);
