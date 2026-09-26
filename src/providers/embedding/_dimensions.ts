@@ -56,4 +56,13 @@ export function resolveDimensions(
   );
 }
 
+// The `dimensions` field to send, if any. Only a known model with a width
+// other than its native one is a request to shorten; for an unknown model the
+// env var declares the width it returns, and servers that cannot shorten
+// (vLLM on a non-Matryoshka model) reject the field outright.
+export function requestedDimensions(model: string, dimensions: number): number | undefined {
+  const native = lookupModelDimensions(model);
+  return native !== undefined && native !== dimensions ? dimensions : undefined;
+}
+
 export { MODEL_DIMENSIONS };

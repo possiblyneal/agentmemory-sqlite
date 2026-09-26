@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resolveDimensions } from "../src/providers/embedding/_dimensions.js";
 import { OpenRouterEmbeddingProvider } from "../src/providers/embedding/openrouter.js";
 import { OpenAIEmbeddingProvider } from "../src/providers/embedding/openai.js";
@@ -108,5 +108,66 @@ describe("OpenAIEmbeddingProvider defaults unchanged", () => {
     process.env["OPENAI_EMBEDDING_MODEL"] = "text-embedding-3-large";
     const provider = new OpenAIEmbeddingProvider("test-key");
     expect(provider.dimensions).toBe(3072);
+  });
+});
+
+describe("requested dimensions reach the request body (PR #1369)", () => {
+  const originalEnv = { ...process.env };
+
+  function stubFetch(width: number) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ data: [{ embedding: new Array(width).fill(0) }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  }
+
+  function sentBody(spy: ReturnType<typeof stubFetch>): Record<string, unknown> {
+    const [, init] = spy.mock.calls[0] as [string, RequestInit];
+    return JSON.parse(init.body as string);
+  }
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    for (const k of [
+      "OPENAI_EMBEDDING_MODEL", "OPENAI_EMBEDDING_DIMENSIONS", "OPENAI_EMBEDDING_BASE_URL", "OPENAI_BASE_URL",
+      "OPENROUTER_EMBEDDING_MODEL", "OPENROUTER_EMBEDDING_DIMENSIONS",
+    ]) delete process.env[k];
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it("OpenAI sends a width that shortens a known model", async () => {
+    process.env["OPENAI_EMBEDDING_MODEL"] = "text-embedding-3-large";
+    process.env["OPENAI_EMBEDDING_DIMENSIONS"] = "1024";
+    const spy = stubFetch(1024);
+    await new OpenAIEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy).dimensions).toBe(1024);
+  });
+
+  it("OpenRouter sends a width that shortens a known model", async () => {
+    process.env["OPENROUTER_EMBEDDING_MODEL"] = "openai/text-embedding-3-large";
+    process.env["OPENROUTER_EMBEDDING_DIMENSIONS"] = "1024";
+    const spy = stubFetch(1024);
+    await new OpenRouterEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy).dimensions).toBe(1024);
+  });
+
+  it("omits the field when the width only declares an unknown model's native size", async () => {
+    process.env["OPENAI_EMBEDDING_MODEL"] = "nomic-embed-text";
+    process.env["OPENAI_EMBEDDING_DIMENSIONS"] = "768";
+    const spy = stubFetch(768);
+    await new OpenAIEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy)).not.toHaveProperty("dimensions");
+  });
+
+  it("omits the field at a known model's native width", async () => {
+    const spy = stubFetch(1536);
+    await new OpenAIEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy)).not.toHaveProperty("dimensions");
   });
 });

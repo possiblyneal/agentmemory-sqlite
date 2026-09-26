@@ -1209,8 +1209,8 @@ prs:
       - src/providers/embedding/openai.ts
       - test/embedding-provider.test.ts
     note: "OPENAI_EMBEDDING_DIMENSIONS is read into the provider but never sent in the request body, breaking matryoshka models."
-    disposition: candidate
-    status: "present-here — OPENAI_EMBEDDING_DIMENSIONS read at src/providers/embedding/openai.ts:82-85 but the body sends only model and input (:106-109); openrouter.ts:39-42 has the same gap."
+    disposition: already-fixed
+    status: "fixed-here — OpenAI and OpenRouter send dimensions when the configured width shortens a known model (requestedDimensions, src/providers/embedding/_dimensions.ts); an unknown model keeps the field off, since there the env var declares the native width and non-Matryoshka servers reject it."
     url: https://github.com/rohitg00/agentmemory/pull/1369
   - number: 194
     title: "feat: add --host flag and AGENTMEMORY_HOST for configurable bind address"
