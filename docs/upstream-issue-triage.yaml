@@ -2148,7 +2148,7 @@ issues:
     kind: bug
     note: "index_persist rows are 71% of the audit store, slowing memory_audit and every startup read."
     disposition: already-fixed
-    fixed_by: "No recordAudit call emits index_persist (only the union member at src/types.ts:655 remains); import skips old rows (ops/import-state-store.ts:761); audit capped by AGENTMEMORY_AUDIT_MAX (audit.ts:132-153)."
+    fixed_by: "No recordAudit call emits index_persist, and 5311cb4 drops the dead union member; import skips old rows (ops/import-state-store.ts:761); audit capped by AGENTMEMORY_AUDIT_MAX (audit.ts:132-153)."
     url: https://github.com/rohitg00/agentmemory/issues/1181
     fix_prs: [1182]
   - number: 1183
