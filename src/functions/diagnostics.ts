@@ -289,6 +289,22 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("sessions")) {
+        const probe = { ts: now };
+        const writable = await kv
+          .set(KV.health, "_probe", probe)
+          .then(() => kv.get<{ ts?: number }>(KV.health, "_probe"))
+          .then((back) => back?.ts === probe.ts)
+          .catch(() => false);
+        checks.push({
+          name: writable ? "store-writable" : "store-unwritable",
+          category: "sessions",
+          status: writable ? "pass" : "fail",
+          message: writable
+            ? "The store accepts writes"
+            : "The store rejected a write or did not return it, so no new data is being saved.",
+          fixable: false,
+        });
+
         const sessions = await kv.list<Session>(KV.sessions);
         let sessionIssues = 0;
 

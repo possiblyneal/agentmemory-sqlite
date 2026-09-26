@@ -195,18 +195,30 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 16 checks = 8 original (actions, leases, sentinels, sketches, signals,
+      // 17 checks = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
-      // 1 for observations, the last record type that had no check.
-      expect(result.summary.pass).toBe(15);
+      // 1 for observations, the last record type that had no check +
+      // 1 store write probe (#1166).
+      expect(result.summary.pass).toBe(16);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
       expect(result.checks.filter((c) => c.status === "warn").map((c) => c.name)).toEqual([
         "sessions-empty",
       ]);
+    });
+
+    it("fails when the store rejects a write (#1166)", async () => {
+      kv.set = async () => {
+        throw new Error("SQLITE_READONLY");
+      };
+      const result = (await sdk.trigger("mem::diagnose", { categories: ["sessions"] })) as {
+        checks: DiagnosticCheck[];
+      };
+      const probe = result.checks.find((c) => c.name === "store-unwritable");
+      expect(probe?.status).toBe("fail");
     });
 
     // Guards the detection gap that let the v0.1.0 compression-orphan defect
