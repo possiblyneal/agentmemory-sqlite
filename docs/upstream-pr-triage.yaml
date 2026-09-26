@@ -1053,8 +1053,8 @@ prs:
     paths:
       - src/eval/metrics-store.ts
     note: "MetricsStore.record() loses updates: concurrent callers meet in the kv.get() gap."
-    disposition: candidate
-    status: "present-here — cache-miss path awaits kv.get with no lock, so concurrent first records lose an increment (src/eval/metrics-store.ts:17-19, 45)."
+    disposition: already-fixed
+    fixed_by: "fixed-here — MetricsStore.record runs under withKeyedLock(metrics:<functionId>), so concurrent first records no longer each load a fresh zero row and overwrite one another (src/eval/metrics-store.ts, test/metrics-store.test.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/1291
   - number: 1293
     title: "fix(hooks): retry a failed observe POST instead of dropping it"
