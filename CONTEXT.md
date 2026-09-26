@@ -41,6 +41,21 @@ A Session Summary is current until an Observation arrives after it was written, 
 current one is reused rather than reproduced.
 _Avoid_: session digest, recap
 
+**Lesson**:
+A short, reusable rule learned from experience — a correction or practice worth applying in
+later Sessions. Its confidence rises when reinforced and decays when unused.
+_Avoid_: rule, tip, learning
+
+**Crystal**:
+A narrative digest of a finished piece of tracked work: what was done, its key outcomes, the
+files it touched and the Lessons it yielded.
+_Avoid_: digest, recap
+
+**Insight**:
+A higher-order conclusion synthesized from a cluster of related Memories, Lessons and Crystals
+that share concepts in the graph. Its confidence rises when reinforced and decays when unused.
+_Avoid_: reflection, takeaway, pattern
+
 **Entity**:
 A named thing the Agent worked with — a file, a symbol, a service, a concept — held as a node
 in the graph.
