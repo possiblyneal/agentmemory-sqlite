@@ -2058,8 +2058,8 @@ issues:
     difficulty: low
     kind: bug
     note: "memory_diagnose reports 15/15 PASS on an empty store, so data loss looks healthy."
-    disposition: candidate
-    status: "present-here — each diagnostics category pushes pass when it finds no issues and nothing checks for an empty store (src/functions/diagnostics.ts:125-134, 665-672)."
+    disposition: already-fixed
+    fixed_by: "fixed-here — the sessions check warns sessions-empty when no Session is recorded, so an empty store no longer reports all PASS (src/functions/diagnostics.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1166
   - number: 1167
     title: "The \"backups\" feature never backs up memory — ~/.agentmemory/backups/ holds only connect config snapshots; no memory backup/restore command exists"

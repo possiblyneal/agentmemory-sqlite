@@ -308,7 +308,17 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           }
         }
 
-        if (sessionIssues === 0) {
+        if (sessions.length === 0) {
+          checks.push({
+            name: "sessions-empty",
+            category: "sessions",
+            status: "warn",
+            message:
+              "No sessions are recorded. A new install starts this way; otherwise the store " +
+              "is pointed at the wrong file or its data was lost.",
+            fixable: false,
+          });
+        } else if (sessionIssues === 0) {
           checks.push({
             name: "sessions-ok",
             category: "sessions",

@@ -187,7 +187,7 @@ describe("Diagnostics Functions", () => {
   });
 
   describe("mem::diagnose", () => {
-    it("empty system passes all checks", async () => {
+    it("empty system warns that no sessions exist and passes the rest (#1166)", async () => {
       const result = (await sdk.trigger("mem::diagnose", {})) as {
         success: boolean;
         checks: DiagnosticCheck[];
@@ -195,16 +195,18 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 16 = 8 original (actions, leases, sentinels, sketches, signals,
+      // 16 checks = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
       // 1 for observations, the last record type that had no check.
-      expect(result.summary.pass).toBe(16);
-      expect(result.summary.warn).toBe(0);
+      expect(result.summary.pass).toBe(15);
+      expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
-      expect(result.checks.every((c) => c.status === "pass")).toBe(true);
+      expect(result.checks.filter((c) => c.status === "warn").map((c) => c.name)).toEqual([
+        "sessions-empty",
+      ]);
     });
 
     // Guards the detection gap that let the v0.1.0 compression-orphan defect
