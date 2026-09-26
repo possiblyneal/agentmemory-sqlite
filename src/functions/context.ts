@@ -20,8 +20,10 @@ import {
 } from "./slots.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
 
+const CHARS_PER_TOKEN = 3;
+
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3);
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
 function oneLine(s: string): string {
@@ -35,7 +37,7 @@ function projectWeighted(item: { project?: string; confidence: number }, project
 const PINNED_TRUNCATION_MARKER = "\n[pinned slots truncated to fit the context budget]";
 
 function truncatePinned(content: string, tokens: number): string {
-  const chars = tokens * 3 - PINNED_TRUNCATION_MARKER.length;
+  const chars = tokens * CHARS_PER_TOKEN - PINNED_TRUNCATION_MARKER.length;
   return chars > 0 ? content.slice(0, chars) + PINNED_TRUNCATION_MARKER : "";
 }
 
@@ -189,7 +191,7 @@ export function registerContextFunction(
       }
 
       const relevantInsights = insights
-        .filter((i) => !i.deleted && (!i.project || i.project === data.project))
+        .filter((i) => !i.deleted && i.project === data.project)
         .sort((a, b) => projectWeighted(b, data.project) - projectWeighted(a, data.project))
         .slice(0, 5);
 

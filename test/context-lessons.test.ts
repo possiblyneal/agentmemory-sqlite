@@ -278,7 +278,7 @@ describe("mem::context — insights auto-injection (upstream PR #615)", () => {
     });
   }
 
-  it("injects this project's and global Insights, not another project's or deleted ones", async () => {
+  it("injects only this project's Insights, not global, another project's or deleted ones", async () => {
     await seedInsight("ours", { project: "/proj" });
     await seedInsight("global");
     await seedInsight("theirs", { project: "/other" });
@@ -288,7 +288,7 @@ describe("mem::context — insights auto-injection (upstream PR #615)", () => {
 
     expect(result.context).toContain("## Insights");
     expect(result.context).toContain("title-ours: content-ours");
-    expect(result.context).toContain("content-global");
+    expect(result.context).not.toContain("content-global");
     expect(result.context).not.toContain("content-theirs");
     expect(result.context).not.toContain("content-gone");
   });
