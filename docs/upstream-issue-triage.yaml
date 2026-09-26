@@ -69,8 +69,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Sentinel patterns compile user regex directly; ReDoS on the observation path."
-    disposition: candidate
-    status: "partly-present-here — 7a61eaa, d2af32a: create rejects an invalid or >500-char pattern and sentinel-check logs and skips a stored bad pattern instead of aborting the loop (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible; closing that needs a linear-time engine such as re2, a new dependency."
+    disposition: wont-fix
+    status: "partly-present-here — 7a61eaa, d2af32a: create rejects an invalid or >500-char pattern and sentinel-check logs and skips a stored bad pattern (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible."
+    wont_fix_reason: "mem::sentinel-check runs only through an authenticated POST /agentmemory/sentinels/check that nothing in this tree calls — no MCP tool, hook or timer — so a slow pattern stalls only the caller who wrote it; a linear-time engine is a new dependency for no reachable path."
     url: https://github.com/rohitg00/agentmemory/issues/263
     fix_prs: [297]
   - number: 274
