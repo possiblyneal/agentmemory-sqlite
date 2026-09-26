@@ -269,7 +269,22 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     await expect(handleToolsList()).rejects.toThrow(/not ready \(503\)/);
   });
 
-  it("invalidates the handle on proxy failure, so the next call re-probes", async () => {
+  it("an error the server answers with is surfaced, never a local save (upstream PR #1323)", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      return new Response("boom", { status: 500, statusText: "Internal Server Error" });
+    });
+    const localKv = new InMemoryKV(undefined);
+    await expect(handleToolCall("memory_save", { content: "must not land locally" }, localKv)).rejects.toThrow(/500/);
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    resetHandleForTests();
+    const recall = await handleToolCall("memory_recall", { query: "locally" }, localKv);
+    expect(JSON.parse(recall.content[0].text).results).toHaveLength(0);
+  });
+
+  it("invalidates the handle when the server stops answering, so the next call re-probes", async () => {
     let probeCount = 0;
     let serverUp = true;
     installFetch((url) => {
@@ -277,7 +292,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
         probeCount++;
         return serverUp ? new Response("ok", { status: 200 }) : new Response("", { status: 500 });
       }
-      return new Response("boom", { status: 500, statusText: "Internal Server Error" });
+      throw new Error("ECONNRESET");
     });
     const localKv = new InMemoryKV(undefined);
     await handleToolCall("memory_save", { content: "first fallback" }, localKv);
@@ -432,7 +447,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
         probeStarted++;
         return new Response("ok", { status: 200 });
       }
-      return new Response("not found", { status: 404 });
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
     });
     try {
       const localKv = new InMemoryKV(undefined);

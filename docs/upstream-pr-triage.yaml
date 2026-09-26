@@ -1141,8 +1141,8 @@ prs:
       - src/mcp/standalone.ts
       - test/mcp-standalone-proxy.test.ts
     note: "Any non-ok proxy response is treated as unreachable, hiding real tool errors behind an unknown-tool fallback."
-    disposition: candidate
-    status: "partly-present-here — unimplemented tools rethrow the real error, but implemented tools fall back to local KV on any non-503 failure and invalidate the handle (src/mcp/standalone.ts:397-432)."
+    disposition: already-fixed
+    fixed_by: "fixed-here — the standalone MCP falls back to local KV and invalidates the handle only when the server could not be reached; an error the server answered with (any HTTP status) is rethrown (src/mcp/standalone.ts serverAnswered)."
     url: https://github.com/rohitg00/agentmemory/pull/1323
   - number: 1327
     title: "fix(clip): encode text with CLIP text tower so text→image vision-search works"

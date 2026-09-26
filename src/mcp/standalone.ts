@@ -383,6 +383,10 @@ async function handleProxyGeneric(
   return textResponse(result, true);
 }
 
+function serverAnswered(err: unknown): boolean {
+  return typeof (err as { status?: unknown }).status === "number";
+}
+
 export async function handleToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -402,7 +406,7 @@ export async function handleToolCall(
         process.stderr.write(
           `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`,
         );
-        invalidateHandle();
+        if (!serverAnswered(err)) invalidateHandle();
         throw err;
       }
     }
@@ -425,6 +429,9 @@ export async function handleToolCall(
           `agentmemory server is not ready (503) for ${toolName}; retry shortly. Not falling back to the local store.`,
         );
       }
+      // Any other answer is the tool's real error; the local store is only
+      // for a server that could not be reached.
+      if (serverAnswered(err)) throw err;
       process.stderr.write(
         `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}; invalidating handle and falling back to local KV\n`,
       );
