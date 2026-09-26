@@ -2636,8 +2636,8 @@ issues:
     difficulty: low
     kind: bug
     note: "createFallbackProvider drops baseURL, so custom-endpoint fallbacks hit the vendor's host."
-    disposition: candidate
-    status: "partly-present-here — fbConfig carries no baseURL (src/providers/index.ts:77-81); OpenAI fallback recovers via OPENAI_BASE_URL (openai.ts:68), Anthropic fallback has no env fallback (anthropic.ts:15) and hits the vendor host."
+    disposition: already-fixed
+    fixed_by: "A fallback built without baseURL still reaches the configured endpoint: OpenAIProvider falls back to OPENAI_BASE_URL (src/providers/openai.ts:68) and the Anthropic SDK reads ANTHROPIC_BASE_URL itself; the daemon hydrates .env into process.env at boot. test/anthropic-base-url.test.ts guards it."
     url: https://github.com/rohitg00/agentmemory/issues/1338
     fix_prs: [1345]
   - number: 1339
