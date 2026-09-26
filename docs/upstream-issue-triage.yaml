@@ -88,8 +88,8 @@ issues:
     difficulty: low
     kind: bug
     note: "summary and firstPrompt written to the same truncated title (api.ts:542)."
-    disposition: candidate
-    status: "present-here — session/start sets summary and firstPrompt both to title.slice(0,200) (src/triggers/api.ts:662-663)."
+    disposition: already-fixed
+    fixed_by: "session/start records the title as firstPrompt only; summary is left to the summarizer (src/triggers/api.ts api::session::start). test/session-start-title.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/276
   - number: 299
     title: "Viewer UI shows empty state when fronted by a reverse proxy on standard ports (80/443) — JS hardcodes :3113"
