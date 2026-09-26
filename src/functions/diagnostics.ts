@@ -3,6 +3,7 @@ import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
+import { storeAcceptsWrite } from "../health/store-probe.js";
 import type {
   Action,
   ActionEdge,
@@ -289,12 +290,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("sessions")) {
-        const probe = { ts: now };
-        const writable = await kv
-          .set(KV.health, "_diagnose_probe", probe)
-          .then(() => kv.get<{ ts?: number }>(KV.health, "_diagnose_probe"))
-          .then((back) => back?.ts === probe.ts)
-          .catch(() => false);
+        const writable = await storeAcceptsWrite(kv, "_diagnose_probe");
         checks.push({
           name: writable ? "store-writable" : "store-unwritable",
           category: "sessions",
