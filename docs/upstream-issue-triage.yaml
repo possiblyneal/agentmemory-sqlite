@@ -2610,8 +2610,8 @@ issues:
     difficulty: low
     kind: bug
     note: "The pinned-slot block is dropped whole and silently when it exceeds the token budget."
-    disposition: candidate
-    status: "present-here — pinned slots are one block that the budget loop skips whole with continue, no truncation or warning (src/functions/context.ts:94-101, 257)."
+    disposition: already-fixed
+    fixed_by: "fixed-here — an over-budget pinned-slot block is truncated to the remaining budget with a marker and a warn log instead of skipped whole (src/functions/context.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1333
   - number: 1334
     title: "/agentmemory/export returns the oversized refusal under HTTP 200, and materialises the payload before refusing it (18.5 GB RSS)"
