@@ -291,8 +291,8 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       if (categories.includes("sessions")) {
         const probe = { ts: now };
         const writable = await kv
-          .set(KV.health, "_probe", probe)
-          .then(() => kv.get<{ ts?: number }>(KV.health, "_probe"))
+          .set(KV.health, "_diagnose_probe", probe)
+          .then(() => kv.get<{ ts?: number }>(KV.health, "_diagnose_probe"))
           .then((back) => back?.ts === probe.ts)
           .catch(() => false);
         checks.push({
