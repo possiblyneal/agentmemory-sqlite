@@ -5,6 +5,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { Action, ActionEdge, Checkpoint, CompressedObservation, FunctionMetrics, Sentinel, Session } from "../types.js";
 import { recordAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
+import { logger } from "../logger.js";
 
 const VALID_TYPES: Sentinel["type"][] = [
   "webhook",
@@ -286,7 +287,10 @@ export function registerSentinelsFunction(sdk: ISdk, kv: StateKV): void {
         if (sentinel.type === "pattern") {
           const cfg = sentinel.config as { pattern: string };
           const regex = compilePattern(cfg.pattern);
-          if (!regex) continue;
+          if (!regex) {
+            logger.warn("Skipping sentinel with an invalid pattern", { sentinelId: sentinel.id });
+            continue;
+          }
           const sessions = await kv.list<Session>(KV.sessions);
           let matchedObs: CompressedObservation | null = null;
 
