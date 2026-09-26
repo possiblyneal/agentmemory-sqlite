@@ -2243,7 +2243,7 @@ issues:
     kind: bug
     note: "Two concurrent mem::summarize runs per Stop hook with no lease; duplicate of 1062."
     disposition: already-fixed
-    fixed_by: "The Stop hook makes one call — /session/end — and session/end fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
+    status: "fixed-here — the Stop hook makes one call, /session/end, which fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
     url: https://github.com/rohitg00/agentmemory/issues/1203
     mentioned_by_prs: [1269]
   - number: 1204
@@ -2709,9 +2709,9 @@ issues:
     difficulty: low
     kind: bug
     note: "extractTranscriptPrompts matches no Claude Code transcript shape, so prompt backfill posts nothing."
-    disposition: wont-fix
-    status: "present-here — the backfill only matches Cursor-shaped transcripts (src/hooks/session-end.ts:44)."
-    wont_fix_reason: "Cursor is not supported here, and every wired host already sends prompts via prompt-submit; teaching the backfill Claude Code transcripts would double-record every prompt."
+    disposition: already-fixed
+    fixed_by: "52b6aec"
+    status: "fixed-here — 52b6aec: the Cursor-only backfill is deleted; Cursor is unsupported and every wired host records prompts via prompt-submit, so nothing is lost."
     url: https://github.com/rohitg00/agentmemory/issues/1365
     fix_prs: [1366]
   - number: 1370
