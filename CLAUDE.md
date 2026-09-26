@@ -147,7 +147,8 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - Use `fingerprintId()` for content-addressable dedup, `generateId()` for unique IDs
 - Parallel operations where possible (`Promise.all` for independent kv writes/reads)
 - Input validation at system boundaries (MCP handlers, REST endpoints)
-- REST endpoints must whitelist fields — never pass raw request body to `sdk.trigger()`
+- REST endpoints must whitelist fields — never pass raw request body to `sdk.trigger()`;
+  `pickFields(req.body, [...])` in `src/triggers/api.ts` forwards a route's fields unchanged
 - Use `recordAudit()` for state-changing operations
 - Timestamps: capture once with `new Date().toISOString()` and reuse
 - Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the caller's
