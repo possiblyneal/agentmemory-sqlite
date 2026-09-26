@@ -70,7 +70,7 @@ issues:
     kind: bug
     note: "Sentinel patterns compile user regex directly; ReDoS on the observation path."
     disposition: candidate
-    status: "partly-present-here — create now rejects an invalid or >500-char pattern and sentinel-check skips a stored bad pattern instead of aborting the loop (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible; closing that needs a linear-time engine such as re2, a new dependency."
+    status: "partly-present-here — 7a61eaa, d2af32a: create rejects an invalid or >500-char pattern and sentinel-check logs and skips a stored bad pattern instead of aborting the loop (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible; closing that needs a linear-time engine such as re2, a new dependency."
     url: https://github.com/rohitg00/agentmemory/issues/263
     fix_prs: [297]
   - number: 274
@@ -89,7 +89,8 @@ issues:
     kind: bug
     note: "summary and firstPrompt written to the same truncated title (api.ts:542)."
     disposition: already-fixed
-    fixed_by: "session/start records the title as firstPrompt only; summary is left to the summarizer (src/triggers/api.ts api::session::start). test/session-start-title.test.ts covers it."
+    fixed_by: "4b995fa"
+    status: "fixed-here — 4b995fa: session/start records the title as firstPrompt only; summary is left to the summarizer (src/triggers/api.ts api::session::start). test/session-start-title.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/276
   - number: 299
     title: "Viewer UI shows empty state when fronted by a reverse proxy on standard ports (80/443) — JS hardcodes :3113"
@@ -1192,7 +1193,8 @@ issues:
     kind: bug
     note: "GET /agentmemory/memories ignores the project query param."
     disposition: already-fixed
-    fixed_by: "api::memories filters on the project query param before counting and paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
+    fixed_by: "b6e756f"
+    status: "fixed-here — b6e756f: api::memories filters on the project query param, matching it exactly, before counting and paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/918
     fix_prs: [988]
   - number: 919
@@ -1416,7 +1418,8 @@ issues:
     kind: bug
     note: "memories?latest=true returns the oldest rows, so the viewer shows stale data."
     disposition: already-fixed
-    fixed_by: "api::memories sorts newest first on createdAt (fallback updatedAt) before paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
+    fixed_by: "b6e756f"
+    status: "fixed-here — b6e756f: api::memories sorts newest first on createdAt (fallback updatedAt for rows without one) before paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/990
   - number: 991
     title: "SessionEnd hook reports \"Hook cancelled\" on exit (1.5s deferred exit outlives shutdown grace)"
@@ -1479,7 +1482,8 @@ issues:
     kind: bug
     note: "POST /agentmemory/consolidate 500s with an unhandled [object Object] error."
     disposition: already-fixed
-    fixed_by: "api::consolidate, api::patterns and api::generate-rules whitelist their fields from req.body ?? {}, so a bodyless POST reaches the function as {} (src/triggers/api.ts); test/api-bodyless-post.test.ts covers it."
+    fixed_by: "3c2660c, 804d01d"
+    status: "fixed-here — 3c2660c, 804d01d: api::consolidate, api::patterns and api::generate-rules whitelist their fields from req.body ?? {}, so a bodyless POST reaches the function as {}, and /consolidate answers 400 to a minObservations that is not a positive integer (src/triggers/api.ts); test/api-bodyless-post.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1008
     fix_prs: [1041]
   - number: 1009
@@ -1929,7 +1933,8 @@ issues:
     kind: bug
     note: "buildGraphClusters breaks instead of continuing on a visited seed, collapsing insights into mega-clusters."
     disposition: already-fixed
-    fixed_by: "A visited seed now continues and only the cap breaks (src/functions/reflect.ts:74-75); test/reflect.test.ts covers it."
+    fixed_by: "b77978f, f7b3d5f"
+    status: "fixed-here — b77978f, f7b3d5f: a visited seed now continues and only the cap breaks, the BFS skips concepts an earlier cluster took so no concept lands in two clusters, and nodes are looked up by id instead of a linear find (src/functions/reflect.ts buildGraphClusters); test/reflect.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1133
     fix_prs: [1243, 1343]
   - number: 1140
@@ -2059,7 +2064,8 @@ issues:
     kind: bug
     note: "memory_diagnose reports 15/15 PASS on an empty store, so data loss looks healthy."
     disposition: already-fixed
-    fixed_by: "fixed-here — the sessions check warns sessions-empty when no Session is recorded, so an empty store no longer reports all PASS (src/functions/diagnostics.ts)."
+    fixed_by: "6b5c13e, c7d0c66"
+    status: "fixed-here — 6b5c13e, c7d0c66: mem::diagnose FAILs store-unwritable when a write to the store is rejected or not read back, and warns sessions-empty when no Session is recorded, so a broken or empty store no longer reports all PASS (src/functions/diagnostics.ts); test/diagnostics.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1166
   - number: 1167
     title: "The \"backups\" feature never backs up memory — ~/.agentmemory/backups/ holds only connect config snapshots; no memory backup/restore command exists"
@@ -2442,7 +2448,8 @@ issues:
     kind: bug
     note: "Payload-free hooks build empty compression prompts, burning LLM calls on nothing."
     disposition: already-fixed
-    fixed_by: "fixed-here — with auto-compress on, an Observation with no tool input, output, prompt or image takes the LLM-free synthetic path instead of mem::compress (src/functions/observe.ts hasCompressibleContent). Re-summarize on unchanged count was already fixed (summarize.ts:366-377)."
+    fixed_by: "4a88066"
+    status: "fixed-here — 4a88066: with auto-compress on, an Observation with no tool input, output, prompt or image takes the LLM-free synthetic path instead of mem::compress (src/functions/observe.ts hasCompressibleContent). Re-summarize on unchanged count was already fixed (summarize.ts:366-377)."
     url: https://github.com/rohitg00/agentmemory/issues/1270
   - number: 1271
     title: "`getXmlTag` is a first-match unanchored regex, so any text before the payload can be parsed as the payload -- and `compressWithRetry` commits a response its own validator rejected"
@@ -2477,7 +2484,8 @@ issues:
     kind: bug
     note: "Content-filter rejections count as provider failures and open the circuit breaker for unrelated work."
     disposition: already-fixed
-    fixed_by: "isContentFilterRejection (src/providers/_fetch.ts) keeps a content_filter rejection from counting toward the breaker (src/providers/resilient.ts); OpenAI names a filtered empty completion instead of reporting an unexpected response. test/resilient-provider.test.ts covers both."
+    fixed_by: "87a1b99"
+    status: "fixed-here — 87a1b99: isContentFilterRejection (src/providers/_fetch.ts) keeps a content_filter rejection from counting toward the breaker (src/providers/resilient.ts); OpenAI names a filtered empty completion instead of reporting an unexpected response. test/resilient-provider.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1276
     fix_prs: [1277]
   - number: 1278
@@ -2611,7 +2619,8 @@ issues:
     kind: bug
     note: "The pinned-slot block is dropped whole and silently when it exceeds the token budget."
     disposition: already-fixed
-    fixed_by: "fixed-here — an over-budget pinned-slot block is truncated to the remaining budget with a marker and a warn log instead of skipped whole (src/functions/context.ts)."
+    fixed_by: "bb4b6fd"
+    status: "fixed-here — bb4b6fd: an over-budget pinned-slot block is truncated to the remaining budget with a marker and a warn log instead of skipped whole (src/functions/context.ts truncatePinned); test/context-slots.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1333
   - number: 1334
     title: "/agentmemory/export returns the oversized refusal under HTTP 200, and materialises the payload before refusing it (18.5 GB RSS)"
