@@ -70,6 +70,7 @@ issues:
     kind: bug
     note: "Sentinel patterns compile user regex directly; ReDoS on the observation path."
     disposition: candidate
+    status: "partly-present-here \u2014 new RegExp(cfg.pattern) on unvalidated input and an invalid pattern aborts the check loop (src/functions/sentinels.ts:56-63, 266); not on the observation path, only POST /sentinels/check."
     url: https://github.com/rohitg00/agentmemory/issues/263
     fix_prs: [297]
   - number: 274
@@ -88,6 +89,7 @@ issues:
     kind: bug
     note: "summary and firstPrompt written to the same truncated title (api.ts:542)."
     disposition: candidate
+    status: "present-here \u2014 session/start sets summary and firstPrompt both to title.slice(0,200) (src/triggers/api.ts:662-663)."
     url: https://github.com/rohitg00/agentmemory/issues/276
   - number: 299
     title: "Viewer UI shows empty state when fronted by a reverse proxy on standard ports (80/443) — JS hardcodes :3113"
@@ -293,7 +295,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Eviction timer plus env toggle for mem::evict, matching mem::auto-forget."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "EVICTION_ENABLED gates a sweep 5 min after boot, then every 24h (src/index.ts:614-624)."
     url: https://github.com/rohitg00/agentmemory/issues/480
     fix_prs: [490]
   - number: 483
@@ -759,7 +762,8 @@ issues:
     difficulty: low
     kind: bug
     note: "stop hook ends the session on every assistant pause, marking live sessions completed."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "stop hook sends turnEnd (src/hooks/stop.ts:49-53); api.ts:723-762 defers end via endWhenIdle (30 min, re-armed on new observations)."
     url: https://github.com/rohitg00/agentmemory/issues/745
     fix_prs: [1288]
   - number: 747
@@ -873,7 +877,8 @@ issues:
     difficulty: low
     kind: bug
     note: "OpenRouterEmbeddingProvider hardcodes 1536 dimensions."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "resolveDimensions with OPENROUTER_EMBEDDING_DIMENSIONS, unknown models throw (src/providers/embedding/openrouter.ts:20-23, _dimensions.ts:46-55)."
     url: https://github.com/rohitg00/agentmemory/issues/809
     fix_prs: [811, 856]
   - number: 817
@@ -1187,6 +1192,7 @@ issues:
     kind: bug
     note: "GET /agentmemory/memories ignores the project query param."
     disposition: candidate
+    status: "present-here \u2014 api::memories filters only latest and agentId; project is never read (src/triggers/api.ts:2194-2220)."
     url: https://github.com/rohitg00/agentmemory/issues/918
     fix_prs: [988]
   - number: 919
@@ -1410,6 +1416,7 @@ issues:
     kind: bug
     note: "memories?latest=true returns the oldest rows, so the viewer shows stale data."
     disposition: candidate
+    status: "present-here \u2014 latest=true filters isLatest then takePage slices storage order, no newest-first sort (src/triggers/api.ts:2213, 163-167); only the viewer sorts."
     url: https://github.com/rohitg00/agentmemory/issues/990
   - number: 991
     title: "SessionEnd hook reports \"Hook cancelled\" on exit (1.5s deferred exit outlives shutdown grace)"
@@ -1472,6 +1479,7 @@ issues:
     kind: bug
     note: "POST /agentmemory/consolidate 500s with an unhandled [object Object] error."
     disposition: candidate
+    status: "partly-present-here \u2014 engine now surfaces err.message (src/engine/inproc/sdk.ts:209-214); an empty POST body is null and api.ts:1210 passes it to mem::consolidate, which throws on data.minObservations (consolidate.ts:72)."
     url: https://github.com/rohitg00/agentmemory/issues/1008
     fix_prs: [1041]
   - number: 1009
@@ -1652,6 +1660,7 @@ issues:
     kind: bug
     note: "getVisibleTools reads process.env directly, ignoring ~/.agentmemory/.env."
     disposition: candidate
+    status: "present-here \u2014 getVisibleTools reads process.env directly instead of getEnvVar (src/mcp/tools-registry.ts:1014)."
     url: https://github.com/rohitg00/agentmemory/issues/1060
   - number: 1062
     title: "Session stop triggers mem::summarize twice; unchanged sessions are fully re-summarized on every stop"
@@ -1671,6 +1680,7 @@ issues:
     kind: bug
     note: "Session stop re-extracts the full observation set with no change detection."
     disposition: candidate
+    status: "present-here \u2014 event::session::stopped sends every session observation to mem::graph-extract with no watermark (src/triggers/events.ts:116-124, src/functions/graph.ts:898-958); gated off by default."
     url: https://github.com/rohitg00/agentmemory/issues/1063
     fix_prs: [1061, 1280]
   - number: 1064
@@ -1829,6 +1839,7 @@ issues:
     kind: bug
     note: "AGENTMEMORY_TOOLS in ~/.agentmemory/.env ignored; duplicate of 1060."
     disposition: candidate
+    status: "present-here \u2014 duplicate of #1060 (src/mcp/tools-registry.ts:1014)."
     url: https://github.com/rohitg00/agentmemory/issues/1106
   - number: 1108
     title: "\"project\"-scoped memory slots (project_context, pending_items, self_notes, session_patterns) are actually global, not per-project"
@@ -1845,7 +1856,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Summary concepts are concatenated without dedupe and silently emitted empty when chunks fail."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Chunks merge via an LLM reduce told to dedupe concepts (src/functions/summarize.ts:278-282, prompts/summary.ts); >50% skipped chunks throws, fewer logs a warning (summarize.ts:248-258)."
     url: https://github.com/rohitg00/agentmemory/issues/1114
   - number: 1115
     title: "Orphaned index generations accumulate when the previous manifest read fails — store grows until the server pegs a core while idle"
@@ -1917,6 +1929,7 @@ issues:
     kind: bug
     note: "buildGraphClusters breaks instead of continuing on a visited seed, collapsing insights into mega-clusters."
     disposition: candidate
+    status: "present-here \u2014 visited-seed check shares the cap condition and breaks instead of continuing (src/functions/reflect.ts:74)."
     url: https://github.com/rohitg00/agentmemory/issues/1133
     fix_prs: [1243, 1343]
   - number: 1140
@@ -2046,6 +2059,7 @@ issues:
     kind: bug
     note: "memory_diagnose reports 15/15 PASS on an empty store, so data loss looks healthy."
     disposition: candidate
+    status: "present-here \u2014 each diagnostics category pushes pass when it finds no issues and nothing checks for an empty store (src/functions/diagnostics.ts:125-134, 665-672)."
     url: https://github.com/rohitg00/agentmemory/issues/1166
   - number: 1167
     title: "The \"backups\" feature never backs up memory — ~/.agentmemory/backups/ holds only connect config snapshots; no memory backup/restore command exists"
@@ -2100,7 +2114,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Tests read the developer's real ~/.agentmemory/.env; 14 fail on any machine with an install."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "vitest.config.ts points HOME/USERPROFILE at a mkdtemp dir; config.ts:22-23 resolves .env via homedir()."
     url: https://github.com/rohitg00/agentmemory/issues/1178
   - number: 1179
     title: "No way to rebuild the search index without restarting: rebuildIndex only runs when the index is empty"
@@ -2125,7 +2140,8 @@ issues:
     difficulty: low
     kind: bug
     note: "index_persist rows are 71% of the audit store, slowing memory_audit and every startup read."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "No recordAudit call emits index_persist (only the union member at src/types.ts:655 remains); import skips old rows (ops/import-state-store.ts:761); audit capped by AGENTMEMORY_AUDIT_MAX (audit.ts:132-153)."
     url: https://github.com/rohitg00/agentmemory/issues/1181
     fix_prs: [1182]
   - number: 1183
@@ -2340,7 +2356,8 @@ issues:
     difficulty: low
     kind: bug
     note: "GRAPH_EXTRACTION_ENABLED=false still runs structural extraction and writes graph rows."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "graphWritesDisabled() includes !isGraphExtractionEnabled() and persistGraphDelta returns early on it (src/functions/graph.ts:737-747); the boot log at src/index.ts:280 still says structural extraction is on."
     url: https://github.com/rohitg00/agentmemory/issues/1238
   - number: 1239
     title: "`POST /agentmemory/graph/reset` reports success while leaving nodes and edges untouched"
@@ -2425,6 +2442,7 @@ issues:
     kind: bug
     note: "Payload-free hooks build empty compression prompts, burning LLM calls on nothing."
     disposition: candidate
+    status: "partly-present-here \u2014 with auto-compress on, compress.ts:177-210 calls the LLM with no empty-payload guard (observe.ts:360-369); default synthetic path is LLM-free. Re-summarize on unchanged count is fixed (summarize.ts:366-377)."
     url: https://github.com/rohitg00/agentmemory/issues/1270
   - number: 1271
     title: "`getXmlTag` is a first-match unanchored regex, so any text before the payload can be parsed as the payload -- and `compressWithRetry` commits a response its own validator rejected"
@@ -2459,6 +2477,7 @@ issues:
     kind: bug
     note: "Content-filter rejections count as provider failures and open the circuit breaker for unrelated work."
     disposition: candidate
+    status: "present-here \u2014 breaker exempts only 429/503 (src/providers/resilient.ts:84, _fetch.ts:28-32); a 400 content_filter rejection counts as a failure."
     url: https://github.com/rohitg00/agentmemory/issues/1276
     fix_prs: [1277]
   - number: 1278
@@ -2592,6 +2611,7 @@ issues:
     kind: bug
     note: "The pinned-slot block is dropped whole and silently when it exceeds the token budget."
     disposition: candidate
+    status: "present-here \u2014 pinned slots are one block that the budget loop skips whole with continue, no truncation or warning (src/functions/context.ts:94-101, 257)."
     url: https://github.com/rohitg00/agentmemory/issues/1333
   - number: 1334
     title: "/agentmemory/export returns the oversized refusal under HTTP 200, and materialises the payload before refusing it (18.5 GB RSS)"
@@ -2617,6 +2637,7 @@ issues:
     kind: bug
     note: "createFallbackProvider drops baseURL, so custom-endpoint fallbacks hit the vendor's host."
     disposition: candidate
+    status: "partly-present-here \u2014 fbConfig carries no baseURL (src/providers/index.ts:77-81); OpenAI fallback recovers via OPENAI_BASE_URL (openai.ts:68), Anthropic fallback has no env fallback (anthropic.ts:15) and hits the vendor host."
     url: https://github.com/rohitg00/agentmemory/issues/1338
     fix_prs: [1345]
   - number: 1339
@@ -2680,6 +2701,7 @@ issues:
     kind: bug
     note: "extractTranscriptPrompts matches no Claude Code transcript shape, so prompt backfill posts nothing."
     disposition: candidate
+    status: "present-here \u2014 requires top-level msg.role === \"user\" but Claude Code JSONL uses type/message.role, and string content is skipped (src/hooks/session-end.ts:44-45)."
     url: https://github.com/rohitg00/agentmemory/issues/1365
     fix_prs: [1366]
   - number: 1370
