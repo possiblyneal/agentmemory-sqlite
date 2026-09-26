@@ -2441,8 +2441,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Payload-free hooks build empty compression prompts, burning LLM calls on nothing."
-    disposition: candidate
-    status: "partly-present-here — with auto-compress on, compress.ts:177-210 calls the LLM with no empty-payload guard (observe.ts:360-369); default synthetic path is LLM-free. Re-summarize on unchanged count is fixed (summarize.ts:366-377)."
+    disposition: already-fixed
+    fixed_by: "fixed-here — with auto-compress on, an Observation with no tool input, output, prompt or image takes the LLM-free synthetic path instead of mem::compress (src/functions/observe.ts hasCompressibleContent). Re-summarize on unchanged count was already fixed (summarize.ts:366-377)."
     url: https://github.com/rohitg00/agentmemory/issues/1270
   - number: 1271
     title: "`getXmlTag` is a first-match unanchored regex, so any text before the payload can be parsed as the payload -- and `compressWithRetry` commits a response its own validator rejected"
