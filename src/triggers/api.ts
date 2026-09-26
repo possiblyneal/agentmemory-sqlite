@@ -1323,6 +1323,7 @@ export function registerApiTriggers(
         limit?: number;
         project?: string;
         includeLessons?: boolean;
+        includeInsights?: boolean;
         agentId?: string;
         sessionId?: string;
         source?: string;
@@ -1355,6 +1356,7 @@ export function registerApiTriggers(
         limit: req.body?.limit,
         project: req.body?.project,
         includeLessons: req.body?.includeLessons,
+        includeInsights: req.body?.includeInsights,
         agentId: req.body?.agentId,
         sessionId: req.body?.sessionId,
         source: req.body?.source ?? sourceFromHeader,
