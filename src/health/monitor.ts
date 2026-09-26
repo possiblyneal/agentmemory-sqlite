@@ -4,6 +4,7 @@ import type { HealthSnapshot } from "../types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { evaluateHealth } from "./thresholds.js";
+import { storeAcceptsWrite } from "./store-probe.js";
 import type { HealthHysteresis } from "./thresholds.js";
 
 export function registerHealthMonitor(
@@ -54,15 +55,13 @@ export function registerHealthMonitor(
     let kvConnectivity: { status: string; latencyMs?: number; error?: string };
     const kvStart = performance.now();
     try {
-      await Promise.race([
-        (async () => {
-          await kv.set(KV.health, "_probe", { ts: Date.now() });
-          await kv.get(KV.health, "_probe");
-        })(),
+      const writable = await Promise.race([
+        storeAcceptsWrite(kv, "_probe"),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("timeout")), KV_PROBE_TIMEOUT),
         ),
       ]);
+      if (!writable) throw new Error("kv_probe_failed");
       kvConnectivity = { status: "ok", latencyMs: Math.round((performance.now() - kvStart) * 100) / 100 };
     } catch {
       kvConnectivity = { status: "error", error: "kv_probe_failed", latencyMs: Math.round((performance.now() - kvStart) * 100) / 100 };

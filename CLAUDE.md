@@ -98,11 +98,12 @@ sdk.registerFunction(
   async (req: ApiRequest<YourBody>): Promise<Response> => {
     const authErr = checkAuth(req, secret);
     if (authErr) return authErr;
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    // validate + whitelist fields (never pass raw body to sdk.trigger)
+    if (!req.body?.requiredField) {
+      return { status_code: 400, body: { error: "requiredField is required" } };
+    }
     const result = await sdk.trigger({
       function_id: "mem::your-function",
-      payload: { ... },
+      payload: pickFields(req.body, ["requiredField", "optionalField"]),
     });
     return { status_code: 200, body: result };
   },
@@ -116,6 +117,8 @@ sdk.registerTrigger({
   },
 });
 ```
+`pickFields` forwards the named fields unchanged and never the raw body; when a field needs
+parsing or a 400 on a bad value, build the payload literal instead (see `api::consolidate`).
 Auth is the inline `checkAuth(req, secret)` above, which is what nearly every endpoint in
 `src/triggers/api.ts` does. A `middleware_function_ids: ["middleware::api-auth"]` on the
 trigger is the minority form — follow whichever the endpoints around yours use, and do not

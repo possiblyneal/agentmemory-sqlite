@@ -358,6 +358,69 @@ describe("Smart Search Function", () => {
       expect(result.lessons).toEqual([]);
     });
   });
+
+  describe("insight inclusion (PR 615)", () => {
+    it("returns Insights for the query and project, trimmed for preview", async () => {
+      let receivedPayload: any = null;
+      sdk.registerFunction("mem::insight-search", async (payload: any) => {
+        receivedPayload = payload;
+        return {
+          success: true,
+          insights: [
+            { id: "ins_a", title: "Auth retries", content: "x".repeat(1000), confidence: 0.7, score: 0.5, createdAt: "2026-01-01", project: "p", tags: ["auth"] },
+          ],
+        };
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "p",
+        limit: 50,
+      })) as { insights?: any[] };
+
+      expect(receivedPayload).toMatchObject({ query: "auth", project: "p", limit: 10 });
+      expect(result.insights).toHaveLength(1);
+      expect(result.insights![0]).toMatchObject({
+        insightId: "ins_a",
+        title: "Auth retries",
+        confidence: 0.7,
+        score: 0.5,
+        project: "p",
+        tags: ["auth"],
+      });
+      expect(result.insights![0].content).toMatch(/…$/);
+      expect(result.insights![0].content.length).toBeLessThan(1000);
+    });
+
+    it("includeInsights:false omits the insights array", async () => {
+      let called = false;
+      sdk.registerFunction("mem::insight-search", async () => {
+        called = true;
+        return { success: true, insights: [] };
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        includeInsights: false,
+      })) as { insights?: unknown };
+
+      expect(called).toBe(false);
+      expect(result.insights).toBeUndefined();
+    });
+
+    it("tolerates mem::insight-search failure", async () => {
+      sdk.registerFunction("mem::insight-search", async () => {
+        throw new Error("insights unavailable");
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+      })) as { results: CompactSearchResult[]; insights: any[] };
+
+      expect(result.results.length).toBe(2);
+      expect(result.insights).toEqual([]);
+    });
+  });
 });
 
 // Regression: expandIds returned nothing against the real daemon while every

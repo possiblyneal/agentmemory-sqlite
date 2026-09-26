@@ -69,7 +69,8 @@ import { registerAutoForgetFunction } from "./functions/auto-forget.js";
 import { registerExportImportFunction } from "./functions/export-import.js";
 import { registerEnrichFunction } from "./functions/enrich.js";
 import { registerClaudeBridgeFunction } from "./functions/claude-bridge.js";
-import { registerGraphFunction } from "./functions/graph.js";
+import { registerGraphFunction, graphWritesDisabled } from "./functions/graph.js";
+import { isNoopProvider } from "./providers/noop.js";
 import { registerGraphImportFunction } from "./functions/graph-import.js";
 import { registerConsolidationPipelineFunction } from "./functions/consolidation-pipeline.js";
 import { registerTeamFunction } from "./functions/team.js";
@@ -277,11 +278,13 @@ async function main() {
   registerGraphFunction(sdk, kv, provider);
   registerGraphImportFunction(sdk, kv);
   bootLog(
-    `Knowledge graph: structural extraction on (LLM relations ${isGraphExtractionEnabled() ? "enabled" : "off"})`,
+    graphWritesDisabled()
+      ? `Knowledge graph: writes off (${isGraphExtractionEnabled() ? "AGENTMEMORY_GRAPH_LEG=off" : "set GRAPH_EXTRACTION_ENABLED=true to enable"})`
+      : `Knowledge graph: writes on (LLM relations ${isNoopProvider(provider) ? "off, no LLM provider" : "on"})`,
   );
 
   registerConsolidationPipelineFunction(sdk, kv, provider);
-  bootLog(`Consolidation pipeline: registered (CONSOLIDATION_ENABLED=${isConsolidationEnabled() ? "true" : "false"})`);
+  bootLog(`Consolidation pipeline: ${isConsolidationEnabled() ? "enabled" : "disabled"}`);
 
   if (isAutoCompressEnabled()) {
     bootLog(

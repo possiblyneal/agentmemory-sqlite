@@ -69,8 +69,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Sentinel patterns compile user regex directly; ReDoS on the observation path."
-    disposition: candidate
-    status: "partly-present-here — 7a61eaa, d2af32a: create rejects an invalid or >500-char pattern and sentinel-check logs and skips a stored bad pattern instead of aborting the loop (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible; closing that needs a linear-time engine such as re2, a new dependency."
+    disposition: wont-fix
+    status: "partly-present-here — 7a61eaa, d2af32a: create rejects an invalid or >500-char pattern and sentinel-check logs and skips a stored bad pattern (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible."
+    wont_fix_reason: "mem::sentinel-check runs only through an authenticated POST /agentmemory/sentinels/check that nothing in this tree calls — no MCP tool, hook or timer — so a slow pattern stalls only the caller who wrote it; a linear-time engine is a new dependency for no reachable path."
     url: https://github.com/rohitg00/agentmemory/issues/263
     fix_prs: [297]
   - number: 274
@@ -2147,7 +2148,7 @@ issues:
     kind: bug
     note: "index_persist rows are 71% of the audit store, slowing memory_audit and every startup read."
     disposition: already-fixed
-    fixed_by: "No recordAudit call emits index_persist (only the union member at src/types.ts:655 remains); import skips old rows (ops/import-state-store.ts:761); audit capped by AGENTMEMORY_AUDIT_MAX (audit.ts:132-153)."
+    fixed_by: "No recordAudit call emits index_persist, and 5311cb4 drops the dead union member; import skips old rows (ops/import-state-store.ts:761); audit capped by AGENTMEMORY_AUDIT_MAX (audit.ts:132-153)."
     url: https://github.com/rohitg00/agentmemory/issues/1181
     fix_prs: [1182]
   - number: 1183
@@ -2243,7 +2244,7 @@ issues:
     kind: bug
     note: "Two concurrent mem::summarize runs per Stop hook with no lease; duplicate of 1062."
     disposition: already-fixed
-    fixed_by: "The Stop hook makes one call — /session/end — and session/end fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
+    status: "fixed-here — the Stop hook makes one call, /session/end, which fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
     url: https://github.com/rohitg00/agentmemory/issues/1203
     mentioned_by_prs: [1269]
   - number: 1204
@@ -2709,9 +2710,9 @@ issues:
     difficulty: low
     kind: bug
     note: "extractTranscriptPrompts matches no Claude Code transcript shape, so prompt backfill posts nothing."
-    disposition: wont-fix
-    status: "present-here — the backfill only matches Cursor-shaped transcripts (src/hooks/session-end.ts:44)."
-    wont_fix_reason: "Cursor is not supported here, and every wired host already sends prompts via prompt-submit; teaching the backfill Claude Code transcripts would double-record every prompt."
+    disposition: already-fixed
+    fixed_by: "52b6aec"
+    status: "fixed-here — 52b6aec: the Cursor-only backfill is deleted; Cursor is unsupported and every wired host records prompts via prompt-submit, so nothing is lost."
     url: https://github.com/rohitg00/agentmemory/issues/1365
     fix_prs: [1366]
   - number: 1370
