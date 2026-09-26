@@ -1,6 +1,6 @@
 import type { MemoryProvider, CircuitBreakerState } from "../types.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
-import { isProviderBusy } from "./_fetch.js";
+import { isContentFilterRejection, isProviderBusy } from "./_fetch.js";
 import { getEnvVar } from "../config.js";
 
 export type ProviderOperation = "compress" | "summarize" | "describeImage";
@@ -79,9 +79,9 @@ export class ResilientProvider implements MemoryProvider {
       breaker.recordSuccess();
       return result;
     } catch (err) {
-      // A provider that says "busy" is healthy; opening the breaker on it
-      // would fail unrelated work for the whole cooldown.
-      if (!isProviderBusy(err)) breaker.recordFailure();
+      // A provider that says "busy" or filtered one prompt is healthy; opening
+      // the breaker on it would fail unrelated work for the whole cooldown.
+      if (!isProviderBusy(err) && !isContentFilterRejection(err)) breaker.recordFailure();
       throw err;
     } finally {
       this.releaseSlot();

@@ -170,6 +170,7 @@ export class OpenAIProvider implements MemoryProvider {
 
     const data = (await response.json()) as {
       choices?: Array<{
+        finish_reason?: string;
         message?: { content?: string; reasoning?: string; reasoning_content?: string };
       }>;
     };
@@ -184,6 +185,9 @@ export class OpenAIProvider implements MemoryProvider {
     const reasoning = message?.reasoning ?? message?.reasoning_content;
     if (reasoning) {
       return reasoning;
+    }
+    if (data.choices?.[0]?.finish_reason === "content_filter") {
+      throw new Error("OpenAI finish_reason content_filter: completion blocked by the provider's content filter");
     }
     throw new Error(
       `OpenAI returned unexpected response: ${JSON.stringify(data).slice(0, 200)}`,

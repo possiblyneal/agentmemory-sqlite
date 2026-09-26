@@ -2476,8 +2476,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Content-filter rejections count as provider failures and open the circuit breaker for unrelated work."
-    disposition: candidate
-    status: "present-here — breaker exempts only 429/503 (src/providers/resilient.ts:84, _fetch.ts:28-32); a 400 content_filter rejection counts as a failure."
+    disposition: already-fixed
+    fixed_by: "isContentFilterRejection (src/providers/_fetch.ts) keeps a content_filter rejection from counting toward the breaker (src/providers/resilient.ts); OpenAI names a filtered empty completion instead of reporting an unexpected response. test/resilient-provider.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1276
     fix_prs: [1277]
   - number: 1278

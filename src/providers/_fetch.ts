@@ -31,6 +31,14 @@ export function isProviderBusy(err: unknown): boolean {
   return !/insufficient_quota/.test(err instanceof Error ? err.message : "");
 }
 
+// A content filter rejects one prompt, not the provider: every other prompt
+// still goes through, so it must not open the breaker (#1276).
+export function isContentFilterRejection(err: unknown): boolean {
+  return /\bcontent_filter\b|content_policy_violation/.test(
+    err instanceof Error ? err.message : "",
+  );
+}
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
