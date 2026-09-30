@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
+import { resolveProject, hookCwd } from "./_project.js";
 
 hydrateHookEnv();
 
@@ -110,7 +111,7 @@ async function main() {
   const project =
     typeof data.project === "string" && data.project.trim().length > 0
       ? data.project.trim()
-      : undefined;
+      : resolveProject(hookCwd(data));
 
   try {
     const res = await fetch(`${REST_URL}/agentmemory/enrich`, {
@@ -121,7 +122,7 @@ async function main() {
         files,
         terms,
         toolName,
-        ...(project !== undefined && { project }),
+        project,
       }),
       signal: AbortSignal.timeout(2000),
     });

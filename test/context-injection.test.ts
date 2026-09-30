@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const HOOKS_DIR = join(import.meta.dirname, "..", "plugin", "scripts");
@@ -160,6 +162,71 @@ describe("pre-tool-use hook — context envelope (#1278)", () => {
       AGENTMEMORY_URL: url,
     });
     expect(result.stdout).toBe("remembered about foo.ts");
+  });
+});
+
+describe("pre-tool-use hook — project scope (#71)", () => {
+  let server: Server;
+  let url = "";
+  let tmpRoot = "";
+  let repoDir = "";
+  const bodies: Array<Record<string, unknown>> = [];
+
+  beforeAll(async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "amem-ptu-"));
+    repoDir = join(tmpRoot, "scoped-fixture");
+    mkdirSync(join(repoDir, "src"), { recursive: true });
+    execFileSync("git", ["init", "--quiet"], { cwd: repoDir, stdio: "ignore" });
+    server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        bodies.push(JSON.parse(raw));
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ context: "" }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+  });
+
+  afterAll(async () => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  it("scopes enrich to the project of the hook's cwd", async () => {
+    bodies.length = 0;
+    const payload = JSON.stringify({
+      session_id: "ses_test",
+      hook_event_name: "PreToolUse",
+      cwd: join(repoDir, "src"),
+      tool_name: "Read",
+      tool_input: { file_path: "src/foo.ts" },
+    });
+    await runHook("pre-tool-use.mjs", payload, {
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_URL: url,
+    });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].project).toBe("scoped-fixture");
+  });
+
+  it("lets an explicit project in the payload win", async () => {
+    bodies.length = 0;
+    const payload = JSON.stringify({
+      session_id: "ses_test",
+      cwd: repoDir,
+      project: "named-project",
+      tool_name: "Read",
+      tool_input: { file_path: "src/foo.ts" },
+    });
+    await runHook("pre-tool-use.mjs", payload, {
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_URL: url,
+    });
+    expect(bodies[0].project).toBe("named-project");
   });
 });
 
