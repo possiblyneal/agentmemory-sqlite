@@ -16,6 +16,8 @@ import { getBoundViewerPort, getViewerSkipped } from "../viewer/server.js";
 import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
 import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
+import { getCounters, getCounterTotals } from "../telemetry/setup.js";
+import { getFollowupStats } from "../functions/smart-search.js";
 import {
   isGraphExtractionEnabled,
   isConsolidationEnabled,
@@ -173,6 +175,26 @@ function takePage<T>(rows: T[], page: Page): T[] {
     : rows.slice(page.offset, page.offset + page.limit);
 }
 
+function countInjection(context: string | undefined): void {
+  const counters = getCounters();
+  counters.injections.add(1);
+  if (!context?.trim()) counters.emptyInjections.add(1);
+}
+
+function recallCounts() {
+  const totals = getCounterTotals();
+  const followups = getFollowupStats();
+  return {
+    injections: totals.injections,
+    emptyInjections: totals.emptyInjections,
+    smartSearches: followups.agentInitiatedSearches,
+    smartSearchFollowups: followups.followupWithinWindow,
+    nonlatestLeaked: totals.nonlatestLeaked,
+    graphLegOmitted: totals.graphLegOmitted,
+    graphLegExpected: !graphLegDisabled(),
+  };
+}
+
 export function registerApiTriggers(
   sdk: ISdk,
   kv: StateKV,
@@ -320,6 +342,7 @@ export function registerApiTriggers(
           functionMetrics,
           circuitBreaker,
           circuitBreakers,
+          recall: recallCounts(),
           ...instanceInfo(),
         },
       };
@@ -424,7 +447,11 @@ export function registerApiTriggers(
       if (budget !== undefined) payload.budget = budget;
       const agentId = bodyAgentId ?? queryAgentId;
       if (agentId !== undefined) payload.agentId = agentId;
-      const result = await sdk.trigger({ function_id: "mem::context", payload });
+      const result = await sdk.trigger<typeof payload, { context: string }>({
+        function_id: "mem::context",
+        payload,
+      });
+      countInjection(result?.context);
       return { status_code: 200, body: result };
     },
   );
@@ -677,6 +704,7 @@ export function registerApiTriggers(
         function_id: "mem::context",
         payload: { sessionId, project, ...(agentId ? { agentId } : {}) },
       });
+      countInjection(contextResult.context);
       return {
         status_code: 200,
         body: { session, context: contextResult.context },
@@ -1081,7 +1109,7 @@ export function registerApiTriggers(
           body: { error: "project must be a non-empty string" },
         };
       }
-      const result = await sdk.trigger({
+      const result = await sdk.trigger<unknown, { context: string }>({
         function_id: "mem::enrich",
         payload: {
           sessionId: req.body.sessionId,
@@ -1091,6 +1119,7 @@ export function registerApiTriggers(
           ...(req.body.project !== undefined && { project: req.body.project }),
         },
       });
+      countInjection(result?.context);
       return { status_code: 200, body: result };
     },
   );
