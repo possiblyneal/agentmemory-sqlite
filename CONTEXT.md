@@ -95,6 +95,32 @@ Retrieving Memories relevant to an Agent's current work and returning them for i
 its context.
 _Avoid_: search, query, lookup, retrieval
 
+**Injection**:
+Recall delivered into an Agent's context at a hook boundary — session start, before a tool
+use, before compaction — without the Agent asking for it.
+_Avoid_: enrichment, context push
+
+**Missed Injection**:
+An Injection that never happened because the hook got no answer from the daemon — it was
+down, too slow, or refused. The daemon cannot see a Missed Injection; only the hook can.
+_Avoid_: hook failure, dropped context
+
+**Empty Injection**:
+An Injection the daemon answered with nothing to inject. The daemon was reachable; Recall
+found nothing that bore on the work.
+_Avoid_: miss, no-op
+
+**Unrecalled Memory**:
+A Memory older than its grace period that no Recall has ever returned. Evidence that the
+Memory was not worth storing, or that Recall cannot reach it.
+_Avoid_: dead memory, orphan, unused memory
+
+**Project Time**:
+Time that counts only while a project is being worked on — a week counts when the project had
+at least one Session in it. Decay and grace periods run on Project Time, so a project left
+alone for months comes back as it was left.
+_Avoid_: active time, wall-clock age
+
 **Eviction**:
 Deliberately removing Memories that have aged out or lost relevance, under a policy. Distinct
 from Reclaim.
