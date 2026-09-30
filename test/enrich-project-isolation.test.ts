@@ -108,6 +108,21 @@ describe("mem::enrich — project isolation for bug memories", () => {
     expect(result.context).toContain("express-jwt");
   });
 
+  it("records an injected bug memory as recalled", async () => {
+    await kv.set("mem:memories", "mem_bug_1", makeBugMemory({ project: "api" }));
+
+    await sdk.trigger("mem::enrich", {
+      sessionId: "sess-api-001",
+      files: ["src/middleware/auth.ts"],
+      project: "api",
+    });
+
+    await vi.waitFor(async () => {
+      const log = await kv.get<{ count: number }>("mem:access", "mem_bug_1");
+      expect(log?.count).toBe(1);
+    });
+  });
+
   it("surfaces an unscoped (legacy) bug memory regardless of caller project", async () => {
     await kv.set("mem:memories", "mem_bug_1", makeBugMemory({ project: undefined }));
 

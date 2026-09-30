@@ -297,11 +297,13 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
 
   sdk.registerFunction("mem::lesson-decay-sweep", 
     async () => {
-      const lessons = await kv.list<Lesson>(KV.lessons);
+      const [lessons, activeWeeksSince] = await Promise.all([
+        kv.list<Lesson>(KV.lessons),
+        loadProjectTime(kv),
+      ]);
       let decayed = 0;
       let softDeleted = 0;
       const timestamp = new Date().toISOString();
-      const activeWeeksSince = await loadProjectTime(kv);
       const dirty: Lesson[] = [];
       const auditEvents: Array<{
         id: string;

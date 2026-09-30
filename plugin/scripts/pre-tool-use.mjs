@@ -189,7 +189,7 @@ async function main() {
 				files,
 				terms,
 				toolName,
-				project
+				...project && { project }
 			}),
 			signal: AbortSignal.timeout(2e3)
 		});

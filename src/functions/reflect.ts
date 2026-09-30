@@ -452,9 +452,11 @@ export function registerReflectFunctions(
 
   sdk.registerFunction("mem::insight-decay-sweep", 
     async () => {
-      const items = await kv.list<Insight>(KV.insights);
+      const [items, activeWeeksSince] = await Promise.all([
+        kv.list<Insight>(KV.insights),
+        loadProjectTime(kv),
+      ]);
       const timestamp = new Date().toISOString();
-      const activeWeeksSince = await loadProjectTime(kv);
       const dirty: Insight[] = [];
       const expired: Array<{ key: string; updatedAt: string }> = [];
       const activeWeeksApplied: Record<string, number> = {};

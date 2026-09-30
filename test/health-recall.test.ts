@@ -6,18 +6,49 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { initMetrics, getCounters } from "../src/telemetry/setup.js";
-import { resetFollowupStatsForTests } from "../src/functions/smart-search.js";
+import {
+  registerSmartSearchFunction,
+  resetFollowupStatsForTests,
+  flushPendingFollowups,
+} from "../src/functions/smart-search.js";
+import type { HybridSearchResult } from "../src/types.js";
 
 const SECRET = "recall-test-secret";
 const auth = { authorization: `Bearer ${SECRET}` };
 
 function mockKV() {
+  const store = new Map<string, Map<string, unknown>>();
   return {
-    get: async () => null,
-    set: async <T>(_scope: string, _key: string, data: T) => data,
-    delete: async () => {},
-    list: async () => [],
+    get: async <T>(scope: string, key: string): Promise<T | null> =>
+      (store.get(scope)?.get(key) as T) ?? null,
+    set: async <T>(scope: string, key: string, data: T): Promise<T> => {
+      if (!store.has(scope)) store.set(scope, new Map());
+      store.get(scope)!.set(key, data);
+      return data;
+    },
+    delete: async (scope: string, key: string): Promise<void> => {
+      store.get(scope)?.delete(key);
+    },
+    list: async <T>(scope: string): Promise<T[]> =>
+      Array.from(store.get(scope)?.values() ?? []) as T[],
   };
+}
+
+function hit(id: string): HybridSearchResult {
+  return {
+    observation: {
+      id,
+      sessionId: "s1",
+      timestamp: new Date().toISOString(),
+      title: id,
+      narrative: "n",
+      type: "pattern",
+      concepts: [],
+      files: [],
+    },
+    sessionId: "s1",
+    combinedScore: 0.8,
+  } as unknown as HybridSearchResult;
 }
 
 function mockSdk() {
@@ -35,6 +66,7 @@ function mockSdk() {
 
 let sdk: ReturnType<typeof mockSdk>;
 let nextContext = "";
+let searchHits: HybridSearchResult[] = [];
 
 async function recall() {
   const res = await sdk._fns.get("api::health")!({ headers: auth });
@@ -45,7 +77,10 @@ beforeEach(() => {
   initMetrics();
   resetFollowupStatsForTests();
   sdk = mockSdk();
-  registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+  const kv = mockKV();
+  registerApiTriggers(sdk as never, kv as never, SECRET);
+  registerSmartSearchFunction(sdk as never, kv as never, async () => searchHits);
+  sdk._fns.set("mem::lesson-recall", () => ({ success: true, lessons: [] }));
   sdk._fns.set("mem::enrich", () => ({ context: nextContext, truncated: false }));
   sdk._fns.set("mem::context", () => ({ context: nextContext }));
 });
@@ -86,6 +121,20 @@ describe("/health recall counts", () => {
     const r = await recall();
     expect(r.injections).toBe(3);
     expect(r.emptyInjections).toBe(2);
+  });
+
+  it("counts smart-searches, zero-overlap follow-ups and graph-leg omissions", async () => {
+    searchHits = [hit("obs_a")];
+    await sdk.trigger({ function_id: "mem::smart-search", payload: { query: "auth flow", sessionId: "s1" } });
+    await flushPendingFollowups();
+    searchHits = [hit("obs_b")];
+    await sdk.trigger({ function_id: "mem::smart-search", payload: { query: "token expiry", sessionId: "s1" } });
+    await flushPendingFollowups();
+
+    const r = await recall();
+    expect(r.smartSearches).toBe(2);
+    expect(r.smartSearchFollowups).toBe(1);
+    expect(r.graphLegOmitted).toBe(2);
   });
 
   it("reports stale leaks and graph-leg omissions from their counters", async () => {

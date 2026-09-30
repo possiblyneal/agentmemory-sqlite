@@ -60,9 +60,9 @@ async function backfillOnce(kv: StateKV): Promise<void> {
     if (!weeksByProject.has(project)) weeksByProject.set(project, new Set());
     weeksByProject.get(project)!.add(week);
   }
-  for (const [project, weeks] of weeksByProject) {
-    await addActiveWeeks(kv, project, weeks);
-  }
+  await Promise.all(
+    [...weeksByProject].map(([project, weeks]) => addActiveWeeks(kv, project, weeks)),
+  );
   await kv.set<number>(KV.state, BACKFILLED_AT_KEY, Date.now());
 }
 

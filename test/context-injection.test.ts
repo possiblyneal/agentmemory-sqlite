@@ -228,6 +228,22 @@ describe("pre-tool-use hook — project scope (#71)", () => {
     });
     expect(bodies[0].project).toBe("named-project");
   });
+
+  it("sends no project when the cwd has no name, rather than an empty one /enrich rejects", async () => {
+    bodies.length = 0;
+    const payload = JSON.stringify({
+      session_id: "ses_test",
+      cwd: "/",
+      tool_name: "Read",
+      tool_input: { file_path: "etc/hosts" },
+    });
+    await runHook("pre-tool-use.mjs", payload, {
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_URL: url,
+    });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).not.toHaveProperty("project");
+  });
 });
 
 describe("session-start hook — context injection gate (#143)", () => {
