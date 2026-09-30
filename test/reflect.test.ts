@@ -5,6 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerReflectFunctions } from "../src/functions/reflect.js";
+import { recordProjectActivity } from "../src/state/project-time.js";
 import type { Insight, GraphNode, GraphEdge, SemanticMemory, Lesson, Crystal } from "../src/types.js";
 
 function mockKV() {
@@ -390,6 +391,10 @@ describe("Reflect", () => {
   });
 
   describe("mem::insight-decay-sweep", () => {
+    beforeEach(async () => {
+      await recordProjectActivity(kv as never, "/active", new Date().toISOString());
+    });
+
     it("decays old insights incrementally", async () => {
       await kv.set("mem:insights", "ins_old", {
         id: "ins_old", title: "Old", content: "Old insight", confidence: 0.8,

@@ -18,6 +18,7 @@ import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { getFollowupStats } from "../functions/smart-search.js";
+import { recordProjectActivity } from "../state/project-time.js";
 import {
   isGraphExtractionEnabled,
   isConsolidationEnabled,
@@ -697,6 +698,7 @@ export function registerApiTriggers(
         ...(agentId ? { agentId } : {}),
       };
       await kv.set(KV.sessions, sessionId, session);
+      await recordProjectActivity(kv, project, session.startedAt);
       const contextResult = await sdk.trigger<
         { sessionId: string; project: string; agentId?: string },
         { context: string }
