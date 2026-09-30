@@ -6,8 +6,9 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { registerLessonsFunctions } from "../src/functions/lessons.js";
+import { registerReflectFunctions } from "../src/functions/reflect.js";
 import { KV } from "../src/state/schema.js";
-import type { Lesson } from "../src/types.js";
+import type { Insight, Lesson } from "../src/types.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const WEEK = 7 * DAY;
@@ -50,6 +51,9 @@ function mockKV() {
       Array.from(store.get(scope)?.values() ?? []) as T[],
   };
 }
+
+const weeks = (from: number, to: number) =>
+  Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
 function mockSdk() {
   const functions = new Map<string, Function>();
@@ -109,8 +113,6 @@ describe("Lesson decay on Project Time", () => {
   }
 
   const lesson = (id: string) => kv.get<Lesson>(KV.lessons, id);
-  const weeks = (from: number, to: number) =>
-    Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
   it("keeps a dormant project's Lesson at the confidence it was left with", async () => {
     await startSessions("/repo", [0]);
@@ -195,5 +197,97 @@ describe("Lesson decay on Project Time", () => {
 
     expect((await lesson("lsn_recent"))!.confidence).toBe(0.4);
     expect((await lesson("lsn_behind"))!.confidence).toBeCloseTo(0.3, 3);
+  });
+});
+
+describe("Insight decay on Project Time", () => {
+  let sdk: ReturnType<typeof mockSdk>;
+  let kv: ReturnType<typeof mockKV>;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    sdk = mockSdk();
+    kv = mockKV();
+    registerApiTriggers(sdk as never, kv as never, undefined);
+    registerReflectFunctions(sdk as never, kv as never, {} as never);
+    sdk.functions.set("mem::context", () => ({ context: "" }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function startSessions(project: string, weeksIn: number[]) {
+    for (const w of weeksIn) {
+      vi.setSystemTime(at(w));
+      await sdk.trigger({
+        function_id: "api::session::start",
+        payload: { headers: {}, body: { sessionId: `ses_${project}_${w}`, project, cwd: project } },
+      });
+    }
+  }
+
+  async function saveInsight(id: string, project?: string) {
+    const created = iso(at(0, 1));
+    await kv.set<Insight>(KV.insights, id, {
+      id, title: id, content: id, confidence: 0.5, reinforcements: 0,
+      sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+      tags: [], createdAt: created, updatedAt: created, decayRate: 0.05, project,
+    });
+  }
+
+  async function sweepAt(weeksIn: number) {
+    vi.setSystemTime(at(weeksIn, 2));
+    return sdk.trigger({ function_id: "mem::insight-decay-sweep", payload: {} });
+  }
+
+  const insight = (id: string) => kv.get<Insight>(KV.insights, id);
+
+  it("keeps a dormant project's Insight at the confidence it was left with", async () => {
+    await startSessions("/repo", [0]);
+    await saveInsight("ins_dormant", "/repo");
+
+    await sweepAt(12);
+
+    expect((await insight("ins_dormant"))!.confidence).toBe(0.5);
+  });
+
+  it("deletes an unreinforced Insight after twelve active weeks", async () => {
+    await saveInsight("ins_active", "/repo");
+    await startSessions("/repo", weeks(1, 12));
+
+    await sweepAt(12);
+
+    expect(await insight("ins_active")).toBeNull();
+  });
+
+  it("does not decay one project's Insights for work in another", async () => {
+    await saveInsight("ins_isolated", "/repo");
+    await startSessions("/other", weeks(1, 12));
+
+    await sweepAt(12);
+
+    expect((await insight("ins_isolated"))!.confidence).toBe(0.5);
+  });
+
+  it("decays an Insight with no project in weeks when any project was active", async () => {
+    await saveInsight("ins_global");
+    await startSessions("/other", weeks(1, 12));
+
+    await sweepAt(12);
+
+    expect(await insight("ins_global")).toBeNull();
+  });
+
+  it("records the active weeks it applied in the audit", async () => {
+    await saveInsight("ins_resumed", "/repo");
+    await startSessions("/repo", [12]);
+
+    await sweepAt(12);
+
+    expect((await insight("ins_resumed"))!.confidence).toBeCloseTo(0.45, 3);
+    const audit = await kv.list<{ functionId: string; details: Record<string, unknown> }>(KV.audit);
+    const entry = audit.find((a) => a.functionId === "mem::insight-decay-sweep");
+    expect(entry!.details).toMatchObject({ activeWeeks: { ins_resumed: 1 } });
   });
 });

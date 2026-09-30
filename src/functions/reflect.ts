@@ -14,6 +14,7 @@ import type {
 import { recordAudit } from "./audit.js";
 import { REFLECT_SYSTEM, buildReflectPrompt } from "../prompts/reflect.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
+import { loadProjectTime } from "../state/project-time.js";
 
 interface ConceptCluster {
   concepts: string[];
@@ -452,10 +453,11 @@ export function registerReflectFunctions(
   sdk.registerFunction("mem::insight-decay-sweep", 
     async () => {
       const items = await kv.list<Insight>(KV.insights);
-      const now = Date.now();
       const timestamp = new Date().toISOString();
+      const activeWeeksSince = await loadProjectTime(kv);
       const dirty: Insight[] = [];
       const expired: Array<{ key: string; updatedAt: string }> = [];
+      const activeWeeksApplied: Record<string, number> = {};
 
       for (const insight of items) {
         if (insight.deleted) {
@@ -467,15 +469,15 @@ export function registerReflectFunctions(
           insight.lastDecayedAt ||
           insight.lastReinforcedAt ||
           insight.createdAt;
-        const weeksSince =
-          (now - new Date(baseline).getTime()) / (1000 * 60 * 60 * 24 * 7);
+        const activeWeeks = activeWeeksSince(insight.project, baseline, timestamp);
 
-        if (weeksSince < 1) continue;
+        if (activeWeeks < 1) continue;
 
-        const decay = insight.decayRate * weeksSince;
+        const decay = insight.decayRate * activeWeeks;
         const newConfidence = Math.max(0.05, insight.confidence - decay);
 
         if (newConfidence !== insight.confidence) {
+          activeWeeksApplied[insight.id] = activeWeeks;
           const confidence = Math.round(newConfidence * 1000) / 1000;
           if (confidence <= 0.1 && insight.reinforcements === 0) {
             expired.push({ key: insight.id, updatedAt: insight.updatedAt });
@@ -497,6 +499,7 @@ export function registerReflectFunctions(
         decayed: dirty.length,
         deleted: deletedIds.length,
         deletedIds,
+        activeWeeks: activeWeeksApplied,
         total: items.length,
         timestamp,
       });
