@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
+import { resolveProject, hookCwd } from "./_project.js";
+import { recordMissedInjection, missReason } from "./_missed-injection.js";
 
 hydrateHookEnv();
 
@@ -110,7 +112,7 @@ async function main() {
   const project =
     typeof data.project === "string" && data.project.trim().length > 0
       ? data.project.trim()
-      : undefined;
+      : resolveProject(hookCwd(data));
 
   try {
     const res = await fetch(`${REST_URL}/agentmemory/enrich`, {
@@ -121,7 +123,7 @@ async function main() {
         files,
         terms,
         toolName,
-        ...(project !== undefined && { project }),
+        ...(project && { project }),
       }),
       signal: AbortSignal.timeout(2000),
     });
@@ -131,8 +133,11 @@ async function main() {
       if (result.context) {
         process.stdout.write(contextPayload(data, result.context));
       }
+    } else {
+      recordMissedInjection("pre-tool-use", `http_${res.status}`);
     }
-  } catch {
+  } catch (err) {
+    recordMissedInjection("pre-tool-use", missReason(err));
     // don't block tool execution
   }
 }

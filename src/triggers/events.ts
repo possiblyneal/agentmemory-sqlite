@@ -10,6 +10,7 @@ import {
   isGraphExtractionEnabled,
 } from "../config.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
+import { recordProjectActivity } from "../state/project-time.js";
 import { logger } from "../logger.js";
 
 // Global marker recording when corpus consolidation last ran, used to debounce
@@ -70,6 +71,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
         ...(agentId ? { agentId } : {}),
       };
       await kv.set(KV.sessions, data.sessionId, session);
+      await recordProjectActivity(kv, data.project, session.startedAt);
       const contextResult = await sdk.trigger<
         { sessionId: string; project: string; agentId?: string },
         { context: string }

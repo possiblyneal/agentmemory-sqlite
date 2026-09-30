@@ -5,6 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerLessonsFunctions } from "../src/functions/lessons.js";
+import { recordProjectActivity } from "../src/state/project-time.js";
 import type { Lesson } from "../src/types.js";
 
 function mockKV() {
@@ -284,6 +285,10 @@ describe("Lessons", () => {
   });
 
   describe("mem::lesson-decay-sweep", () => {
+    beforeEach(async () => {
+      await recordProjectActivity(kv as never, "/active", new Date().toISOString());
+    });
+
     it("decays old lessons incrementally", async () => {
       const saved = (await sdk.trigger("mem::lesson-save", {
         content: "Old lesson",

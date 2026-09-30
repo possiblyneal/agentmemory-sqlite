@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -179,11 +182,20 @@ function makePeer(overrides: Partial<MeshPeer> = {}): MeshPeer {
 describe("Diagnostics Functions", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let kv: ReturnType<typeof mockKV>;
+  let home = "";
+  const originalHome = process.env["HOME"];
 
   beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "diagnostics-home-"));
+    process.env["HOME"] = home;
     sdk = mockSdk();
     kv = mockKV();
     registerDiagnosticsFunction(sdk as never, kv as never);
+  });
+
+  afterEach(() => {
+    process.env["HOME"] = originalHome;
+    rmSync(home, { recursive: true, force: true });
   });
 
   describe("mem::diagnose", () => {
@@ -195,13 +207,15 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 17 checks = 8 original (actions, leases, sentinels, sketches, signals,
+      // 19 checks = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
       // 1 for observations, the last record type that had no check +
-      // 1 store write probe (#1166).
-      expect(result.summary.pass).toBe(16);
+      // 1 store write probe (#1166) +
+      // 1 Missed Injection record (#73) +
+      // 1 Unrecalled Memory report (#76).
+      expect(result.summary.pass).toBe(18);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
@@ -572,6 +586,120 @@ describe("Diagnostics Functions", () => {
       expect(
         result.checks.some((c) => c.category === "actions"),
       ).toBe(false);
+    });
+  });
+
+  describe("mem::diagnose injections (#73)", () => {
+    function writeRecord(entries: Array<{ at: string; hook: string; reason: string }>) {
+      mkdirSync(join(home, ".agentmemory"), { recursive: true });
+      writeFileSync(
+        join(home, ".agentmemory", "missed-injections.jsonl"),
+        entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      );
+    }
+
+    async function injectionChecks() {
+      const result = (await sdk.trigger("mem::diagnose", { categories: ["injections"] })) as {
+        checks: DiagnosticCheck[];
+      };
+      return result.checks;
+    }
+
+    it("passes when no Missed Injection was recorded", async () => {
+      const [check] = await injectionChecks();
+      expect(check.name).toBe("injections-ok");
+      expect(check.status).toBe("pass");
+    });
+
+    it("warns with counts by hook and reason for the last 24h only", async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      const stale = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      writeRecord([
+        { at: recent, hook: "session-start", reason: "connection" },
+        { at: recent, hook: "session-start", reason: "connection" },
+        { at: recent, hook: "pre-tool-use", reason: "timeout" },
+        { at: stale, hook: "pre-compact", reason: "http_500" },
+      ]);
+      const [check] = await injectionChecks();
+      expect(check.name).toBe("missed-injections");
+      expect(check.status).toBe("warn");
+      expect(check.message).toBe(
+        "3 Missed Injections in the last 24h: session-start/connection 2, pre-tool-use/timeout 1",
+      );
+    });
+  });
+
+  describe("mem::diagnose recall-coverage (#76)", () => {
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+    function mondayWeeksAgo(n: number): string {
+      const t = new Date(Date.now() - n * WEEK_MS);
+      t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+      return t.toISOString().slice(0, 10);
+    }
+
+    async function activeWeeks(project: string, weeksAgo: number[]) {
+      await kv.set(KV.projectActivity, project, { project, weeks: weeksAgo.map(mondayWeeksAgo).sort() });
+    }
+
+    async function seedMemory(id: string, project: string, weeksOld: number, overrides: Partial<Memory> = {}) {
+      const createdAt = new Date(Date.now() - weeksOld * WEEK_MS).toISOString();
+      await kv.set(KV.memories, id, {
+        id, createdAt, updatedAt: createdAt, type: "fact", title: `title ${id}`, content: "c",
+        concepts: [], files: [], sessionIds: [], strength: 1, version: 1, isLatest: true, project,
+        ...overrides,
+      });
+    }
+
+    async function coverageCheck() {
+      const result = (await sdk.trigger("mem::diagnose", { categories: ["recall-coverage"] })) as {
+        checks: DiagnosticCheck[];
+      };
+      expect(result.checks).toHaveLength(1);
+      return result.checks[0];
+    }
+
+    it("warns on a Memory past 4 active weeks that no Recall returned", async () => {
+      await activeWeeks("p", [0, 1, 2, 3, 4, 5]);
+      await seedMemory("mem_old", "p", 8);
+      const check = await coverageCheck();
+      expect(check.name).toBe("unrecalled-memories");
+      expect(check.status).toBe("warn");
+      expect(check.message).toContain("1 Unrecalled Memory");
+      expect(check.message).toContain("mem_old");
+    });
+
+    it("does not count a Memory some Recall returned", async () => {
+      await activeWeeks("p", [0, 1, 2, 3, 4, 5]);
+      await seedMemory("mem_old", "p", 8);
+      await kv.set(KV.accessLog, "mem_old", { memoryId: "mem_old", count: 1, lastAt: "", recent: [] });
+      expect((await coverageCheck()).name).toBe("recall-coverage-ok");
+    });
+
+    it("measures the grace period in Project Time, so a paused project reports nothing", async () => {
+      await activeWeeks("p", [20, 21]);
+      await seedMemory("mem_paused", "p", 26);
+      expect((await coverageCheck()).name).toBe("recall-coverage-ok");
+    });
+
+    it("does not count a Memory still inside its grace period", async () => {
+      await activeWeeks("p", [0, 1, 2]);
+      await seedMemory("mem_young", "p", 8);
+      expect((await coverageCheck()).status).toBe("pass");
+    });
+
+    it("skips superseded Memories", async () => {
+      await activeWeeks("p", [0, 1, 2, 3, 4, 5]);
+      await seedMemory("mem_old", "p", 8, { isLatest: false });
+      expect((await coverageCheck()).status).toBe("pass");
+    });
+
+    it("names a bounded sample, not every Unrecalled Memory", async () => {
+      await activeWeeks("p", [0, 1, 2, 3, 4, 5]);
+      for (let i = 0; i < 12; i++) await seedMemory(`mem_${i}`, "p", 8);
+      const check = await coverageCheck();
+      expect(check.message).toContain("12 Unrecalled Memories");
+      expect(check.message.match(/mem_\d+ \(/g)).toHaveLength(5);
     });
   });
 

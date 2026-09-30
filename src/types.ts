@@ -910,6 +910,11 @@ export interface Insight {
   deleted?: boolean;
 }
 
+export interface ProjectActivity {
+  project: string;
+  weeks: string[];
+}
+
 export interface DiagnosticCheck {
   name: string;
   category: string;
@@ -1021,6 +1026,7 @@ export interface StateScope {
   "system:currentDiskSize": number;
   /** Highest startup-maintenance version this store has completed. */
   "system:startupMaintenanceVersion": number;
+  "system:projectActivityBackfilledAt": number;
 }
 
 export type StateScopeKey = keyof StateScope;

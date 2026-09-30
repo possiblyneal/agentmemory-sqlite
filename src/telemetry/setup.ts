@@ -71,6 +71,10 @@ interface Counters {
   // same call site either filters (nonlatestFiltered) or leaks
   // (nonlatestLeaked), never both.
   nonlatestLeaked: Counter;
+  // Injection: a context-injecting hook endpoint answered. emptyInjections
+  // is the subset that returned no context (CONTEXT.md, Empty Injection).
+  injections: Counter;
+  emptyInjections: Counter;
 }
 
 interface Histograms {
@@ -88,6 +92,7 @@ type Meter = {
 };
 
 let counters: Counters | null = null;
+let totals: Partial<Record<keyof Counters, number>> = {};
 let histograms: Histograms | null = null;
 
 const NOOP_COUNTER: Counter = { add: () => {} };
@@ -118,6 +123,8 @@ const COUNTER_NAMES: Array<[keyof Counters, string]> = [
   ["graphLegOmitted", "graph_leg_omitted_total"],
   ["nonlatestFiltered", "nonlatest_filtered_total"],
   ["nonlatestLeaked", "nonlatest_leaked_total"],
+  ["injections", "injections_total"],
+  ["emptyInjections", "empty_injections_total"],
 ];
 
 const HISTOGRAM_NAMES: Array<[keyof Histograms, string]> = [
@@ -140,6 +147,14 @@ export function getCounters(): Counters {
   ) as unknown as Counters;
 }
 
+// Running totals since initMetrics, kept whether or not a meter exports
+// them, so /agentmemory/health can report them with no OTEL collector.
+export function getCounterTotals(): Record<keyof Counters, number> {
+  return Object.fromEntries(
+    COUNTER_NAMES.map(([key]) => [key, totals[key] ?? 0]),
+  ) as Record<keyof Counters, number>;
+}
+
 export function getHistograms(): Histograms {
   if (histograms) return histograms;
   return Object.fromEntries(
@@ -153,11 +168,18 @@ export function initMetrics(getMeter?: (name: string) => Meter): {
 } {
   const meter = getMeter?.("agentmemory");
 
+  totals = {};
   counters = Object.fromEntries(
-    COUNTER_NAMES.map(([key, name]) => [
-      key,
-      meter ? meter.createCounter(name) : NOOP_COUNTER,
-    ]),
+    COUNTER_NAMES.map(([key, name]) => {
+      const exported = meter ? meter.createCounter(name) : NOOP_COUNTER;
+      const counter: Counter = {
+        add: (n) => {
+          totals[key] = (totals[key] ?? 0) + n;
+          exported.add(n);
+        },
+      };
+      return [key, counter];
+    }),
   ) as unknown as Counters;
 
   histograms = Object.fromEntries(

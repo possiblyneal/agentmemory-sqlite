@@ -4,6 +4,9 @@ import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
+import { readMissedInjections } from "../hooks/_missed-injection.js";
+import { loadProjectTime } from "../state/project-time.js";
+import type { AccessLog } from "./access-tracker.js";
 import type {
   Action,
   ActionEdge,
@@ -40,10 +43,14 @@ const ALL_CATEGORIES = [
   "crystals",
   "insights",
   "mesh",
+  "injections",
+  "recall-coverage",
 ];
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const UNRECALLED_GRACE_ACTIVE_WEEKS = 4;
+const UNRECALLED_SAMPLE_SIZE = 5;
 
 export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::diagnose", 
@@ -690,6 +697,75 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             category: "mesh",
             status: "pass",
             message: `All ${peers.length} mesh peers are healthy`,
+            fixable: false,
+          });
+        }
+      }
+
+      if (categories.includes("injections")) {
+        const recent = readMissedInjections().filter(
+          (m) => now - new Date(m.at).getTime() <= TWENTY_FOUR_HOURS_MS,
+        );
+        if (recent.length === 0) {
+          checks.push({
+            name: "injections-ok",
+            category: "injections",
+            status: "pass",
+            message: "No Missed Injections in the last 24h",
+            fixable: false,
+          });
+        } else {
+          const byHookAndReason = new Map<string, number>();
+          for (const m of recent) {
+            const key = `${m.hook}/${m.reason}`;
+            byHookAndReason.set(key, (byHookAndReason.get(key) ?? 0) + 1);
+          }
+          const breakdown = [...byHookAndReason]
+            .map(([key, count]) => `${key} ${count}`)
+            .join(", ");
+          checks.push({
+            name: "missed-injections",
+            category: "injections",
+            status: "warn",
+            message: `${recent.length} Missed Injections in the last 24h: ${breakdown}`,
+            fixable: false,
+          });
+        }
+      }
+
+      if (categories.includes("recall-coverage")) {
+        const [memories, accessLogs, activeWeeksSince] = await Promise.all([
+          kv.list<Memory>(KV.memories),
+          kv.list<AccessLog>(KV.accessLog),
+          loadProjectTime(kv),
+        ]);
+        const recalled = new Set(accessLogs.filter((a) => a.count > 0).map((a) => a.memoryId));
+        const nowIso = new Date(now).toISOString();
+        const unrecalled = memories.filter(
+          (m) =>
+            m.isLatest !== false &&
+            !recalled.has(m.id) &&
+            activeWeeksSince(m.project, m.createdAt, nowIso) >= UNRECALLED_GRACE_ACTIVE_WEEKS,
+        );
+        if (unrecalled.length === 0) {
+          checks.push({
+            name: "recall-coverage-ok",
+            category: "recall-coverage",
+            status: "pass",
+            message: "Every Memory past its grace period has been returned by a Recall",
+            fixable: false,
+          });
+        } else {
+          const noun = unrecalled.length === 1 ? "Unrecalled Memory" : "Unrecalled Memories";
+          const sample = unrecalled
+            .slice(0, UNRECALLED_SAMPLE_SIZE)
+            .map((m) => `${m.id} (${m.title})`)
+            .join(", ");
+          checks.push({
+            name: "unrecalled-memories",
+            category: "recall-coverage",
+            status: "warn",
+            message: `${unrecalled.length} ${noun} past ${UNRECALLED_GRACE_ACTIVE_WEEKS} active weeks, e.g. ${sample}`,
             fixable: false,
           });
         }

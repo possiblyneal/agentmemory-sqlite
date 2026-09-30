@@ -3,6 +3,7 @@ import type { Memory } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
+import { recordAccessBatch } from "./access-tracker.js";
 
 const MAX_CONTEXT_LENGTH = 4000;
 
@@ -109,8 +110,9 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (bugMemories.length > 0) {
-        const bugs = bugMemories
-          .slice(0, 3)
+        const injected = bugMemories.slice(0, 3);
+        void recordAccessBatch(kv, injected.map((m) => m.id));
+        const bugs = injected
           .map((m) => `- ${escapeXml(m.title)}: ${escapeXml(m.content)}`)
           .join("\n");
         parts.push(

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { execSync } from "node:child_process";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
 	const vars = {};
@@ -60,6 +61,60 @@ function shouldSkipSession() {
 	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
 	if (process.env["AGENTMEMORY_CAPTURE_HEADLESS"] === "1") return false;
 	return process.env["CLAUDE_CODE_ENTRYPOINT"]?.startsWith("sdk-") ?? false;
+}
+//#endregion
+//#region src/hooks/_project.ts
+function resolveProject(cwd) {
+	const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
+	if (explicit && explicit.trim()) return explicit.trim();
+	const dir = cwd && cwd.trim() ? cwd : process.cwd();
+	try {
+		const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
+			cwd: dir,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			],
+			timeout: 500
+		}).toString().trim().split("\n");
+		if (commonDir && basename(commonDir) === ".git") return basename(dirname(resolve(dir, commonDir)));
+		if (top) return basename(top);
+	} catch {}
+	return basename(dir);
+}
+function hookCwd(data) {
+	if (!data || typeof data !== "object") return void 0;
+	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
+	const roots = data.workspace_roots;
+	if (Array.isArray(roots)) {
+		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
+	}
+	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
+	if (projectDir && projectDir.trim()) return projectDir;
+}
+//#endregion
+//#region src/hooks/_missed-injection.ts
+const MAX_BYTES = 256 * 1024;
+const KEEP_ENTRIES = 1e3;
+function missedInjectionsPath() {
+	return join(homedir(), ".agentmemory", "missed-injections.jsonl");
+}
+function missReason(err) {
+	return err instanceof Error && err.name === "TimeoutError" ? "timeout" : "connection";
+}
+function recordMissedInjection(hook, reason) {
+	try {
+		const path = missedInjectionsPath();
+		mkdirSync(join(homedir(), ".agentmemory"), { recursive: true });
+		const entry = {
+			at: (/* @__PURE__ */ new Date()).toISOString(),
+			hook,
+			reason
+		};
+		appendFileSync(path, JSON.stringify(entry) + "\n");
+		if (statSync(path).size > MAX_BYTES) writeFileSync(path, readFileSync(path, "utf-8").trimEnd().split("\n").slice(-KEEP_ENTRIES).join("\n") + "\n");
+	} catch {}
 }
 //#endregion
 //#region src/hooks/pre-tool-use.ts
@@ -124,7 +179,7 @@ async function main() {
 	}
 	const rawSessionId = data.session_id || data.sessionId || data.conversation_id;
 	const sessionId = typeof rawSessionId === "string" && rawSessionId.length > 0 ? rawSessionId : "unknown";
-	const project = typeof data.project === "string" && data.project.trim().length > 0 ? data.project.trim() : void 0;
+	const project = typeof data.project === "string" && data.project.trim().length > 0 ? data.project.trim() : resolveProject(hookCwd(data));
 	try {
 		const res = await fetch(`${REST_URL}/agentmemory/enrich`, {
 			method: "POST",
@@ -134,15 +189,17 @@ async function main() {
 				files,
 				terms,
 				toolName,
-				...project !== void 0 && { project }
+				...project && { project }
 			}),
 			signal: AbortSignal.timeout(2e3)
 		});
 		if (res.ok) {
 			const result = await res.json();
 			if (result.context) process.stdout.write(contextPayload(data, result.context));
-		}
-	} catch {}
+		} else recordMissedInjection("pre-tool-use", `http_${res.status}`);
+	} catch (err) {
+		recordMissedInjection("pre-tool-use", missReason(err));
+	}
 }
 main().catch(() => process.exit(0));
 //#endregion
