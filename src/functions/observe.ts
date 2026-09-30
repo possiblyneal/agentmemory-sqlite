@@ -14,6 +14,7 @@ import { safeAudit } from "./audit.js";
 import { decrementImageRef } from "./image-refs.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
+import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
 
 export function extractImage(d: unknown): string | undefined {
@@ -374,11 +375,12 @@ export function registerObserveFunction(
               ? raw.userPrompt.replace(/\s+/g, " ").trim().slice(0, 200)
               : undefined;
           const ts = new Date().toISOString();
+          const startedAt = payload.timestamp ?? ts;
           await kv.set(KV.sessions, payload.sessionId, {
             id: payload.sessionId,
             project: payload.project,
             cwd: payload.cwd,
-            startedAt: payload.timestamp ?? ts,
+            startedAt,
             updatedAt: ts,
             status: "active",
             observationCount: 1,
@@ -387,6 +389,7 @@ export function registerObserveFunction(
               ? { firstPrompt: trimmedPrompt }
               : {}),
           });
+          await recordProjectActivity(kv, payload.project, startedAt);
         }
 
         // Per-observation LLM compression is opt-in as of 0.8.8.
