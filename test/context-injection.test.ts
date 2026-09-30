@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -240,6 +240,118 @@ describe("session-start hook — context injection gate (#143)", () => {
       cwd: "/tmp/fake-project",
     });
     const result = await runHook("session-start.mjs", payload, {});
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+});
+
+describe("context-injecting hooks — Missed Injection record (#73)", () => {
+  let server: Server;
+  let url = "";
+  let reply: (res: import("node:http").ServerResponse) => void = () => {};
+  let home = "";
+  const recordPath = () => join(home, ".agentmemory", "missed-injections.jsonl");
+  const records = () =>
+    readFileSync(recordPath(), "utf-8")
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { at: string; hook: string; reason: string });
+  const readPayload = JSON.stringify({
+    session_id: "ses_test",
+    tool_name: "Read",
+    tool_input: { file_path: "src/foo.ts" },
+  });
+
+  beforeAll(async () => {
+    server = createServer((_req, res) => reply(res));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+  });
+
+  afterAll(() => new Promise<void>((r) => server.close(() => r())));
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "missed-injection-home-"));
+  });
+
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it("records a connection error without writing stdout", async () => {
+    const result = await runHook("pre-tool-use.mjs", readPayload, {
+      HOME: home,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    const [entry, ...rest] = records();
+    expect(rest).toEqual([]);
+    expect(entry.hook).toBe("pre-tool-use");
+    expect(entry.reason).toBe("connection");
+    expect(Number.isNaN(Date.parse(entry.at))).toBe(false);
+  });
+
+  it("records a non-2xx reply by its status", async () => {
+    reply = (res) => {
+      res.statusCode = 500;
+      res.end("{}");
+    };
+    const result = await runHook(
+      "pre-compact.mjs",
+      JSON.stringify({ session_id: "ses_test", cwd: home }),
+      { HOME: home, AGENTMEMORY_URL: url },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(records().map((r) => [r.hook, r.reason])).toEqual([["pre-compact", "http_500"]]);
+  });
+
+  it("records a reply slower than the hook timeout as a timeout", async () => {
+    reply = () => {};
+    const result = await runHook(
+      "session-start.mjs",
+      JSON.stringify({ session_id: "ses_test", cwd: home }),
+      { HOME: home, AGENTMEMORY_URL: url, AGENTMEMORY_INJECT_CONTEXT: "true" },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(records().map((r) => [r.hook, r.reason])).toEqual([["session-start", "timeout"]]);
+  });
+
+  it("does not record an empty reply", async () => {
+    reply = (res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ context: "" }));
+    };
+    const result = await runHook("pre-tool-use.mjs", readPayload, {
+      HOME: home,
+      AGENTMEMORY_URL: url,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(recordPath())).toBe(false);
+  });
+
+  it("truncates the record to its newest entries past the size cap", async () => {
+    mkdirSync(join(home, ".agentmemory"));
+    const old = JSON.stringify({ at: "2026-01-01T00:00:00.000Z", hook: "pre-compact", reason: "timeout", pad: "x".repeat(200) });
+    writeFileSync(recordPath(), `${old}\n`.repeat(2000));
+    await runHook("pre-tool-use.mjs", readPayload, {
+      HOME: home,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    const kept = records();
+    expect(kept.length).toBe(1000);
+    expect(kept.at(-1)?.hook).toBe("pre-tool-use");
+  });
+
+  it("still exits 0 when the home directory is unwritable", async () => {
+    const fileAsHome = join(home, "not-a-dir");
+    writeFileSync(fileAsHome, "");
+    const result = await runHook("pre-tool-use.mjs", readPayload, {
+      HOME: fileAsHome,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
   });

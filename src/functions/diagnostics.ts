@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
+import { readMissedInjections } from "../hooks/_missed-injection.js";
 import type {
   Action,
   ActionEdge,
@@ -40,6 +41,7 @@ const ALL_CATEGORIES = [
   "crystals",
   "insights",
   "mesh",
+  "injections",
 ];
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
@@ -690,6 +692,37 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             category: "mesh",
             status: "pass",
             message: `All ${peers.length} mesh peers are healthy`,
+            fixable: false,
+          });
+        }
+      }
+
+      if (categories.includes("injections")) {
+        const recent = readMissedInjections().filter(
+          (m) => now - new Date(m.at).getTime() <= TWENTY_FOUR_HOURS_MS,
+        );
+        if (recent.length === 0) {
+          checks.push({
+            name: "injections-ok",
+            category: "injections",
+            status: "pass",
+            message: "No Missed Injections in the last 24h",
+            fixable: false,
+          });
+        } else {
+          const byHookAndReason = new Map<string, number>();
+          for (const m of recent) {
+            const key = `${m.hook}/${m.reason}`;
+            byHookAndReason.set(key, (byHookAndReason.get(key) ?? 0) + 1);
+          }
+          const breakdown = [...byHookAndReason]
+            .map(([key, count]) => `${key} ${count}`)
+            .join(", ");
+          checks.push({
+            name: "missed-injections",
+            category: "injections",
+            status: "warn",
+            message: `${recent.length} Missed Injections in the last 24h: ${breakdown}`,
             fixable: false,
           });
         }

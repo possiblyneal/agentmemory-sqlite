@@ -2,6 +2,7 @@
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
+import { recordMissedInjection, missReason } from "./_missed-injection.js";
 
 hydrateHookEnv();
 
@@ -98,8 +99,11 @@ async function main() {
       if (result.context) {
         process.stdout.write(contextPayload(data, result.context));
       }
+    } else {
+      recordMissedInjection("session-start", `http_${res.status}`);
     }
-  } catch {
+  } catch (err) {
+    recordMissedInjection("session-start", missReason(err));
     // silently fail -- don't block Claude Code startup
   }
 }

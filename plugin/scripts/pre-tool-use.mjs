@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
@@ -94,6 +94,29 @@ function hookCwd(data) {
 	if (projectDir && projectDir.trim()) return projectDir;
 }
 //#endregion
+//#region src/hooks/_missed-injection.ts
+const MAX_BYTES = 256 * 1024;
+const KEEP_ENTRIES = 1e3;
+function missedInjectionsPath() {
+	return join(homedir(), ".agentmemory", "missed-injections.jsonl");
+}
+function missReason(err) {
+	return err instanceof Error && err.name === "TimeoutError" ? "timeout" : "connection";
+}
+function recordMissedInjection(hook, reason) {
+	try {
+		const path = missedInjectionsPath();
+		mkdirSync(join(homedir(), ".agentmemory"), { recursive: true });
+		const entry = {
+			at: (/* @__PURE__ */ new Date()).toISOString(),
+			hook,
+			reason
+		};
+		appendFileSync(path, JSON.stringify(entry) + "\n");
+		if (statSync(path).size > MAX_BYTES) writeFileSync(path, readFileSync(path, "utf-8").trimEnd().split("\n").slice(-KEEP_ENTRIES).join("\n") + "\n");
+	} catch {}
+}
+//#endregion
 //#region src/hooks/pre-tool-use.ts
 hydrateHookEnv();
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
@@ -173,8 +196,10 @@ async function main() {
 		if (res.ok) {
 			const result = await res.json();
 			if (result.context) process.stdout.write(contextPayload(data, result.context));
-		}
-	} catch {}
+		} else recordMissedInjection("pre-tool-use", `http_${res.status}`);
+	} catch (err) {
+		recordMissedInjection("pre-tool-use", missReason(err));
+	}
 }
 main().catch(() => process.exit(0));
 //#endregion

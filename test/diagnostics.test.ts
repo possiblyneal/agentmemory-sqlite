@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -179,11 +182,20 @@ function makePeer(overrides: Partial<MeshPeer> = {}): MeshPeer {
 describe("Diagnostics Functions", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let kv: ReturnType<typeof mockKV>;
+  let home = "";
+  const originalHome = process.env["HOME"];
 
   beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "diagnostics-home-"));
+    process.env["HOME"] = home;
     sdk = mockSdk();
     kv = mockKV();
     registerDiagnosticsFunction(sdk as never, kv as never);
+  });
+
+  afterEach(() => {
+    process.env["HOME"] = originalHome;
+    rmSync(home, { recursive: true, force: true });
   });
 
   describe("mem::diagnose", () => {
@@ -195,13 +207,14 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 17 checks = 8 original (actions, leases, sentinels, sketches, signals,
+      // 18 checks = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
       // 1 for observations, the last record type that had no check +
-      // 1 store write probe (#1166).
-      expect(result.summary.pass).toBe(16);
+      // 1 store write probe (#1166) +
+      // 1 Missed Injection record (#73).
+      expect(result.summary.pass).toBe(17);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
@@ -572,6 +585,46 @@ describe("Diagnostics Functions", () => {
       expect(
         result.checks.some((c) => c.category === "actions"),
       ).toBe(false);
+    });
+  });
+
+  describe("mem::diagnose injections (#73)", () => {
+    function writeRecord(entries: Array<{ at: string; hook: string; reason: string }>) {
+      mkdirSync(join(home, ".agentmemory"), { recursive: true });
+      writeFileSync(
+        join(home, ".agentmemory", "missed-injections.jsonl"),
+        entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      );
+    }
+
+    async function injectionChecks() {
+      const result = (await sdk.trigger("mem::diagnose", { categories: ["injections"] })) as {
+        checks: DiagnosticCheck[];
+      };
+      return result.checks;
+    }
+
+    it("passes when no Missed Injection was recorded", async () => {
+      const [check] = await injectionChecks();
+      expect(check.name).toBe("injections-ok");
+      expect(check.status).toBe("pass");
+    });
+
+    it("warns with counts by hook and reason for the last 24h only", async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      const stale = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      writeRecord([
+        { at: recent, hook: "session-start", reason: "connection" },
+        { at: recent, hook: "session-start", reason: "connection" },
+        { at: recent, hook: "pre-tool-use", reason: "timeout" },
+        { at: stale, hook: "pre-compact", reason: "http_500" },
+      ]);
+      const [check] = await injectionChecks();
+      expect(check.name).toBe("missed-injections");
+      expect(check.status).toBe("warn");
+      expect(check.message).toBe(
+        "3 Missed Injections in the last 24h: session-start/connection 2, pre-tool-use/timeout 1",
+      );
     });
   });
 
