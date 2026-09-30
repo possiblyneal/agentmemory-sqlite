@@ -58,4 +58,5 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npm run skills:check
+      - run: npm run typecheck
       - run: npm test
