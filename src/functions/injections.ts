@@ -16,23 +16,27 @@ function sameFile(a: string, b: string): boolean {
   return x === y || x.endsWith(`/${y}`) || y.endsWith(`/${x}`);
 }
 
-export function isInjectedItemUsed(
+export type InjectedItemUse = "used" | "unused" | "unscorable";
+
+export function injectedItemUse(
   ref: InjectedRef,
   record: InjectionRecord,
   sessionObservations: CompressedObservation[],
-): boolean {
-  const injectedAt = Date.parse(record.at);
+): InjectedItemUse {
   const triggerFiles = record.files ?? [];
   const evidenceFiles = (ref.files ?? []).filter(
     (f) => !triggerFiles.some((t) => sameFile(f, t)),
   );
-  return sessionObservations.some(
+  if (evidenceFiles.length === 0) return "unscorable";
+  const injectedAt = Date.parse(record.at);
+  const used = sessionObservations.some(
     (o) =>
       o.sessionId === record.sessionId &&
       Date.parse(o.timestamp) > injectedAt &&
-      (o.files.some((f) => evidenceFiles.some((e) => sameFile(f, e))) ||
-        `${o.subtitle ?? ""} ${o.narrative}`.includes(ref.id)),
+      ((o.files ?? []).some((f) => evidenceFiles.some((e) => sameFile(f, e))) ||
+        `${o.subtitle ?? ""} ${o.narrative ?? ""}`.includes(ref.id)),
   );
+  return used ? "used" : "unused";
 }
 
 export async function recordInjection(
@@ -62,7 +66,7 @@ export function registerInjectionsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::injections-sweep", async () => {
     const cutoff = Date.now() - INJECTION_RETENTION_MS;
     const records = await kv.list<InjectionRecord>(KV.injections);
-    const expired = records.filter((r) => new Date(r.at).getTime() < cutoff);
+    const expired = records.filter((r) => Date.parse(r.at) < cutoff);
     await Promise.all(expired.map((r) => kv.delete(KV.injections, r.id)));
     if (expired.length > 0) {
       logger.info("Injection records swept", { swept: expired.length });

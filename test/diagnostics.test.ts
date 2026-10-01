@@ -639,18 +639,22 @@ describe("Diagnostics Functions", () => {
 
   describe("mem::diagnose injection-use (#85)", () => {
     const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+    const memoryRefs = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        kind: "memory" as const, id: `mem_${i}`, files: [`src/f${i}.ts`],
+      }));
 
     async function seedRecord(
       id: string,
       source: "session-start" | "context" | "enrich",
       sessionId: string,
       injected: Array<{ kind: "observation" | "memory" | "lesson"; id: string; files?: string[] }>,
-      at = minutesAgo(30),
+      at = minutesAgo(90),
     ) {
       await kv.set(KV.injections, id, { id, source, sessionId, injected, tokens: 10, at });
     }
 
-    async function seedTouch(sessionId: string, id: string, files: string[], at = minutesAgo(10)) {
+    async function seedTouch(sessionId: string, id: string, files: string[], at = minutesAgo(30)) {
       await kv.set(KV.observations(sessionId), id, {
         id, sessionId, timestamp: at, type: "file_edit", title: "Edit", narrative: "",
         facts: [], concepts: [], files, importance: 5,
@@ -672,47 +676,60 @@ describe("Diagnostics Functions", () => {
       expect(check.status).toBe("pass");
     });
 
-    it("warns with a per-path breakdown when most injected items went unused", async () => {
-      const refs = Array.from({ length: 10 }, (_, i) => ({
-        kind: "memory" as const, id: `mem_${i}`, files: [`src/f${i}.ts`],
-      }));
-      await seedRecord("r1", "session-start", "s1", refs);
+    it("warns with a per-path share, the threshold, and a proxy note when most items went unused", async () => {
+      await seedRecord("r1", "session-start", "s1", memoryRefs(10));
       await seedTouch("s1", "obs_1", ["src/f0.ts"]);
 
       const check = await useCheck();
 
       expect(check.name).toBe("unused-injections");
       expect(check.status).toBe("warn");
-      expect(check.message).toContain("9 of 10 injected items unused in the last 24h");
-      expect(check.message).toContain("session-start 9/10");
+      expect(check.message).toContain("90% of 10 injected items unused");
+      expect(check.message).toContain("session-start 90% of 10");
+      expect(check.message).toContain("warns above 50%");
+      expect(check.message).toContain("This is a proxy");
     });
 
     it("passes when most injected items were used", async () => {
-      const refs = Array.from({ length: 10 }, (_, i) => ({
-        kind: "memory" as const, id: `mem_${i}`, files: [`src/f${i}.ts`],
-      }));
+      const refs = memoryRefs(10);
       await seedRecord("r1", "context", "s1", refs);
       await seedTouch("s1", "obs_1", refs.slice(0, 8).flatMap((r) => r.files));
 
       const check = await useCheck();
 
       expect(check.name).toBe("injection-use-ok");
-      expect(check.message).toContain("2 of 10 injected items unused");
+      expect(check.message).toContain("20% of 10 injected items unused");
     });
 
     it("ignores records older than 24h", async () => {
-      const refs = Array.from({ length: 10 }, (_, i) => ({ kind: "lesson" as const, id: `les_${i}` }));
-      await seedRecord("r1", "context", "s1", refs, minutesAgo(25 * 60));
+      await seedRecord("r1", "context", "s1", memoryRefs(10), minutesAgo(25 * 60));
       expect((await useCheck()).name).toBe("injection-use-ok");
     });
 
+    it("gives an Injection an hour to be used before scoring it", async () => {
+      await seedRecord("r1", "context", "s1", memoryRefs(10), minutesAgo(5));
+      expect((await useCheck()).message).toContain("No scorable injected items");
+    });
+
+    it("does not score items that carry no files", async () => {
+      const lessons = Array.from({ length: 10 }, (_, i) => ({ kind: "lesson" as const, id: `les_${i}` }));
+      await seedRecord("r1", "context", "s1", lessons);
+      expect((await useCheck()).message).toContain("No scorable injected items");
+    });
+
+    it("tolerates an Observation still awaiting compression", async () => {
+      await seedRecord("r1", "context", "s1", memoryRefs(10));
+      await kv.set(KV.observations("s1"), "raw_1", {
+        id: "raw_1", sessionId: "s1", timestamp: minutesAgo(30), hookType: "post_tool_use",
+      });
+      expect((await useCheck()).message).toContain("100% of 10 injected items unused");
+    });
+
     it("never lets another Session's Observations mark an item used", async () => {
-      const refs = Array.from({ length: 10 }, (_, i) => ({
-        kind: "memory" as const, id: `mem_${i}`, files: [`src/f${i}.ts`],
-      }));
+      const refs = memoryRefs(10);
       await seedRecord("r1", "context", "s1", refs);
       await seedTouch("s2", "obs_other", refs.flatMap((r) => r.files));
-      expect((await useCheck()).message).toContain("10 of 10 injected items unused");
+      expect((await useCheck()).message).toContain("100% of 10 injected items unused");
     });
   });
 

@@ -189,27 +189,31 @@ interface InjectionResult {
   injected?: InjectedRef[];
 }
 
+interface InjectionDelivery {
+  source: InjectionSource;
+  sessionId: string;
+  project?: string;
+  files?: string[];
+}
+
 function noteInjection(
   kv: StateKV,
-  source: InjectionSource,
-  sessionId: string,
-  project: string | undefined,
+  delivery: InjectionDelivery,
   result: InjectionResult | undefined,
-  files?: string[],
 ): void {
   countInjection(result?.context);
   const context = result?.context ?? "";
   recordInjection(kv, {
-    source,
-    sessionId,
-    ...(project ? { project } : {}),
+    source: delivery.source,
+    sessionId: delivery.sessionId,
+    ...(delivery.project ? { project: delivery.project } : {}),
     injected: context.trim() ? (result?.injected ?? []) : [],
-    ...(files ? { files } : {}),
+    ...(delivery.files ? { files: delivery.files } : {}),
     tokens: result?.tokens ?? 0,
   }).catch((err) => {
     logger.warn("Injection record write failed", {
-      source,
-      sessionId,
+      source: delivery.source,
+      sessionId: delivery.sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
   });
@@ -490,7 +494,7 @@ export function registerApiTriggers(
         function_id: "mem::context",
         payload,
       });
-      noteInjection(kv, "context", sessionId, project, result);
+      noteInjection(kv, { source: "context", sessionId, project }, result);
       return { status_code: 200, body: withoutInjected(result) };
     },
   );
@@ -765,7 +769,12 @@ export function registerApiTriggers(
         function_id: "mem::context",
         payload: { sessionId, project, ...(agentId ? { agentId } : {}) },
       });
-      noteInjection(kv, "session-start", sessionId, project, contextResult);
+      // With injection off the hook discards this reply, so nothing reached the Agent.
+      if (isContextInjectionEnabled()) {
+        noteInjection(kv, { source: "session-start", sessionId, project }, contextResult);
+      } else {
+        countInjection(contextResult.context);
+      }
       return {
         status_code: 200,
         body: { session, context: contextResult.context },
@@ -1115,8 +1124,8 @@ export function registerApiTriggers(
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const result = await sdk.trigger({ function_id: "mem::file-context", payload: pickFields(req.body, ["sessionId", "files", "project"]) });
-      return { status_code: 200, body: result };
+      const result = await sdk.trigger<unknown, InjectionResult>({ function_id: "mem::file-context", payload: pickFields(req.body, ["sessionId", "files", "project"]) });
+      return { status_code: 200, body: withoutInjected(result) };
     },
   );
   sdk.registerTrigger({
@@ -1182,11 +1191,13 @@ export function registerApiTriggers(
       });
       noteInjection(
         kv,
-        "enrich",
-        req.body.sessionId,
-        typeof req.body.project === "string" ? req.body.project.trim() : undefined,
+        {
+          source: "enrich",
+          sessionId: req.body.sessionId,
+          project: typeof req.body.project === "string" ? req.body.project.trim() : undefined,
+          files: req.body.files,
+        },
         result,
-        req.body.files,
       );
       return { status_code: 200, body: withoutInjected(result) };
     },

@@ -4,7 +4,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { recordAccessBatch } from "./access-tracker.js";
-import { estimateTokens } from "./context.js";
+import { estimateTokens } from "../utils/tokens.js";
 import { withFiles } from "./injections.js";
 
 const MAX_CONTEXT_LENGTH = 4000;
@@ -126,10 +126,11 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
 
       const separator = "\n\n";
       const surviving: InjectedRef[] = [];
-      let offset = 0;
+      let end = 0;
       for (const part of parts) {
-        if (offset < MAX_CONTEXT_LENGTH) surviving.push(...part.injected);
-        offset += part.text.length + separator.length;
+        end += part.text.length;
+        if (end <= MAX_CONTEXT_LENGTH) surviving.push(...part.injected);
+        end += separator.length;
       }
 
       let context = parts.map((p) => p.text).join(separator);

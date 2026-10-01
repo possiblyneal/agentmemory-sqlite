@@ -6,7 +6,7 @@ import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
 import { readMissedInjections } from "../hooks/_missed-injection.js";
 import { loadProjectTime } from "../state/project-time.js";
-import { isInjectedItemUsed } from "./injections.js";
+import { injectedItemUse } from "./injections.js";
 import type { AccessLog } from "./access-tracker.js";
 import type {
   Action,
@@ -56,6 +56,8 @@ const UNRECALLED_GRACE_ACTIVE_WEEKS = 4;
 const UNRECALLED_SAMPLE_SIZE = 5;
 const UNUSED_INJECTION_WARN_SHARE = 0.5;
 const UNUSED_INJECTION_MIN_ITEMS = 10;
+// An Injection younger than this has not had a fair chance to be used yet.
+const UNUSED_INJECTION_SETTLE_MS = ONE_HOUR_MS;
 
 export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::diagnose", 
@@ -739,49 +741,52 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("injection-use")) {
-        const records = (await kv.list<InjectionRecord>(KV.injections)).filter(
-          (r) => now - Date.parse(r.at) <= TWENTY_FOUR_HOURS_MS && r.injected.length > 0,
-        );
+        const records = (await kv.list<InjectionRecord>(KV.injections)).filter((r) => {
+          const age = now - Date.parse(r.at);
+          return age >= UNUSED_INJECTION_SETTLE_MS && age <= TWENTY_FOUR_HOURS_MS && r.injected.length > 0;
+        });
         const sessionIds = [...new Set(records.map((r) => r.sessionId))];
         const observationsBySession = new Map(
           await Promise.all(
             sessionIds.map(
-              async (id) =>
-                [
-                  id,
-                  await kv
-                    .list<CompressedObservation>(KV.observations(id))
-                    .catch(() => [] as CompressedObservation[]),
-                ] as const,
+              async (id) => [id, await kv.list<CompressedObservation>(KV.observations(id))] as const,
             ),
           ),
         );
-        const bySource = new Map<string, { injected: number; unused: number }>();
+        const bySource = new Map<string, { scored: number; unused: number }>();
+        const total = { scored: 0, unused: 0 };
         for (const record of records) {
-          const tally = bySource.get(record.source) ?? { injected: 0, unused: 0 };
+          const tally = bySource.get(record.source) ?? { scored: 0, unused: 0 };
           const observations = observationsBySession.get(record.sessionId) ?? [];
           for (const ref of record.injected) {
-            tally.injected++;
-            if (!isInjectedItemUsed(ref, record, observations)) tally.unused++;
+            const use = injectedItemUse(ref, record, observations);
+            if (use === "unscorable") continue;
+            for (const t of [tally, total]) {
+              t.scored++;
+              if (use === "unused") t.unused++;
+            }
           }
           bySource.set(record.source, tally);
         }
-        const injected = [...bySource.values()].reduce((n, t) => n + t.injected, 0);
-        const unused = [...bySource.values()].reduce((n, t) => n + t.unused, 0);
+        const share = (t: { scored: number; unused: number }) => Math.round((t.unused / t.scored) * 100);
         const breakdown = [...bySource]
-          .map(([source, t]) => `${source} ${t.unused}/${t.injected}`)
+          .filter(([, t]) => t.scored > 0)
+          .map(([source, t]) => `${source} ${share(t)}% of ${t.scored}`)
           .join(", ");
         const tooUnused =
-          injected >= UNUSED_INJECTION_MIN_ITEMS && unused / injected > UNUSED_INJECTION_WARN_SHARE;
+          total.scored >= UNUSED_INJECTION_MIN_ITEMS &&
+          total.unused / total.scored > UNUSED_INJECTION_WARN_SHARE;
         checks.push({
           name: tooUnused ? "unused-injections" : "injection-use-ok",
           category: "injection-use",
           status: tooUnused ? "warn" : "pass",
           message:
-            injected === 0
-              ? "No injected items in the last 24h"
-              : `${unused} of ${injected} injected items unused in the last 24h (${breakdown}). ` +
-                "Used means a later Observation in the same Session touched one of the item's files or named it.",
+            total.scored === 0
+              ? "No scorable injected items between 1h and 24h ago"
+              : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
+                `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
+                "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
+                "and items with no files are not scored.",
           fixable: false,
         });
       }

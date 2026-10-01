@@ -21,12 +21,7 @@ import {
   renderPinnedContext,
 } from "./slots.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
-
-const CHARS_PER_TOKEN = 3;
-
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
+import { CHARS_PER_TOKEN, estimateTokens } from "../utils/tokens.js";
 
 function oneLine(s: string): string {
   return s.replace(/\s*\n+\s*/g, " ").trim();
