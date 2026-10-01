@@ -5,7 +5,7 @@ import { agentmemoryAdapter } from "./adapters/agentmemory.js";
 import { grepAdapter } from "./adapters/grep.js";
 import { randomAdapter } from "./adapters/random.js";
 import { vectorAdapter } from "./adapters/vector.js";
-import { aggregate, scoreQuestion } from "./score.js";
+import { aggregate, compareToBaseline, scoreQuestion, type Baseline } from "./score.js";
 import { questionPath, type Adapter, type Question, type ScoreRow, type Session } from "./types.js";
 
 const agentmemoryBm25: Adapter = {
@@ -29,6 +29,7 @@ interface CliOptions {
   out: string;
   instance: string;
   "base-url"?: string;
+  gate?: string;
 }
 
 function parse(): CliOptions {
@@ -40,6 +41,7 @@ function parse(): CliOptions {
       out: { type: "string", default: "eval/reports/coding-life" },
       instance: { type: "string", default: "3" },
       "base-url": { type: "string" },
+      gate: { type: "string" },
     },
   });
   return values as unknown as CliOptions;
@@ -68,7 +70,12 @@ async function main(): Promise<void> {
     readFileSync(resolve(opts.data, "queries.json"), "utf8"),
   ) as Array<Omit<Question, "haystack">>;
   const questions: Question[] = queriesRaw.map((q) => ({ ...q, haystack: sessions }));
-  const adapterNames = opts.adapters.split(",").map((s) => s.trim()).filter(Boolean);
+  const baseline = opts.gate
+    ? (JSON.parse(readFileSync(resolve(opts.gate), "utf8")) as Baseline)
+    : null;
+  const adapterNames = baseline
+    ? Object.keys(baseline.metrics)
+    : opts.adapters.split(",").map((s) => s.trim()).filter(Boolean);
   for (const a of adapterNames) {
     if (!ADAPTERS[a]) {
       console.error(`unknown adapter: ${a}. options: ${Object.keys(ADAPTERS).join(",")}`);
@@ -122,6 +129,18 @@ async function main(): Promise<void> {
     }
   }
   console.log(`\nwrote ${ndjsonPath}`);
+
+  if (baseline) {
+    const { failed, lines } = compareToBaseline(summary, baseline);
+    console.log(`\n=== Gate: ${opts.gate} (tolerance ${baseline.tolerance}) ===`);
+    for (const line of lines) console.log(`  ${line}`);
+    if (failed) {
+      console.error(
+        `\nA metric fell below baseline minus tolerance. If the drop is intended, update ${opts.gate} in the same PR and say why.`,
+      );
+      process.exit(1);
+    }
+  }
 }
 
 main().catch((err) => {

@@ -60,3 +60,10 @@ jobs:
       - run: npm run skills:check
       - run: npm run typecheck
       - run: npm test
+      # Retrieval-quality gate: ingests eval/data/coding-agent-life-v2 into a
+      # throwaway daemon and fails when search, pre-tool-use or session-start
+      # scores drop below eval/baselines/ minus tolerance. BM25-only, so it
+      # needs no embedding model download; one leg is enough because the
+      # numbers do not depend on OS or Node version.
+      - if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+        run: npm run eval:gate

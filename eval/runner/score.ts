@@ -90,3 +90,38 @@ export function aggregate(rows: ScoreRow[]): Summary {
   }
   return summary;
 }
+
+export type GatedMetric = "recall" | "precision" | "noAnswerClean";
+
+export interface Baseline {
+  tolerance: number;
+  metrics: Record<string, Record<string, Partial<Record<GatedMetric, number>>>>;
+}
+
+export function compareToBaseline(
+  summary: Summary,
+  baseline: Baseline,
+): { failed: boolean; lines: string[] } {
+  const lines: string[] = [];
+  let failed = false;
+  for (const [adapter, byPath] of Object.entries(baseline.metrics)) {
+    for (const [path, expected] of Object.entries(byPath)) {
+      const actual = summary[adapter]?.[path];
+      if (!actual) {
+        failed = true;
+        lines.push(`FAIL ${adapter}/${path}: missing from this run`);
+        continue;
+      }
+      for (const [metric, floor] of Object.entries(expected) as Array<[GatedMetric, number]>) {
+        const got = actual[metric] ?? 0;
+        const delta = Number((got - floor).toFixed(3));
+        const ok = delta >= -baseline.tolerance;
+        if (!ok) failed = true;
+        lines.push(
+          `${ok ? "ok  " : "FAIL"} ${`${adapter}/${path}`.padEnd(32)} ${metric.padEnd(13)} baseline ${floor.toFixed(3)}  got ${got.toFixed(3)}  ${delta >= 0 ? "+" : ""}${delta.toFixed(3)}`,
+        );
+      }
+    }
+  }
+  return { failed, lines };
+}

@@ -169,6 +169,7 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
 - Retrieval quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, pre-tool-use and session-start Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
+- CI gates retrieval quality with `npm run eval:gate` (ubuntu / Node 22 leg only, BM25-only, ~10s): it fails with a per-metric diff when recall, precision or no-answer clean on any path falls below `eval/baselines/coding-agent-life-v2.json` minus its tolerance. A PR that moves those numbers on purpose updates that file and says why
 
 ## Supported hosts
 

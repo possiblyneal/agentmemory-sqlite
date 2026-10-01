@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
 import { randomAdapter } from "../eval/runner/adapters/random.js";
-import { aggregate, scoreQuestion } from "../eval/runner/score.js";
+import { aggregate, compareToBaseline, scoreQuestion } from "../eval/runner/score.js";
 import type { Question, QueryResult, Session } from "../eval/runner/types.js";
 
 function question(overrides: Partial<Question>): Question {
@@ -63,6 +63,40 @@ describe("aggregate", () => {
     const summary = aggregate(rows);
     expect(summary.x.search).toMatchObject({ n: 2, answerable: 1, recall: 1, noAnswerClean: 0 });
     expect(summary.x["pre-tool-use"]).toMatchObject({ n: 1, noAnswerClean: 1, meanChars: 0 });
+  });
+});
+
+describe("compareToBaseline", () => {
+  const stats = (recall: number, precision: number, noAnswerClean: number | null) => ({
+    n: 1,
+    answerable: 1,
+    recall,
+    precision,
+    noAnswerClean,
+    hit: 1,
+    meanChars: null,
+    latencyP50: 0,
+  });
+  const baseline = {
+    tolerance: 0.05,
+    metrics: { x: { search: { recall: 0.9, precision: 0.5, noAnswerClean: 0.5 } } },
+  };
+
+  it("passes a metric that dropped by no more than the tolerance", () => {
+    const { failed } = compareToBaseline({ x: { search: stats(0.86, 0.6, 0.5) } }, baseline);
+    expect(failed).toBe(false);
+  });
+
+  it("fails and names the metric that dropped below baseline minus tolerance", () => {
+    const { failed, lines } = compareToBaseline({ x: { search: stats(0.8, 0.5, 0.5) } }, baseline);
+    expect(failed).toBe(true);
+    expect(lines.find((l) => l.includes("recall"))).toMatch(/FAIL.*0\.900.*0\.800.*-0\.100/);
+  });
+
+  it("fails when a baselined adapter path produced no numbers", () => {
+    const { failed, lines } = compareToBaseline({}, baseline);
+    expect(failed).toBe(true);
+    expect(lines.join("\n")).toMatch(/x\/search.*missing/);
   });
 });
 

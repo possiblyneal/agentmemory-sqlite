@@ -57,6 +57,21 @@ npm run eval:coding-life                      # agentmemory, agentmemory-bm25, g
 npm run eval:coding-life -- --adapters grep   # no daemon
 ```
 
+### CI gate
+
+```sh
+npm run build
+npm run eval:gate
+```
+
+Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentmemory-bm25`) and compares recall, precision and no-answer clean per path against the recorded numbers. Any metric more than `tolerance` (0.02) below its baseline fails the run with a per-metric diff:
+
+```text
+FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
+```
+
+CI runs it on the ubuntu / Node 22 leg. The gate is BM25-only so CI never downloads the embedding model and needs no network beyond `npm ci`; the on-device embedding stack is still measured by `npm run eval:coding-life`. A PR that changes these numbers on purpose updates the baseline file in the same PR and says why. One question gained or lost on a path moves recall by at least 0.05, so the tolerance only absorbs rounding.
+
 ### LongMemEval `_s` (public, 278MB download)
 
 ```sh
@@ -75,9 +90,11 @@ The `agentmemory` adapter starts a fresh sandbox per question there, since every
 ```text
 eval/
 ├── README.md
+├── baselines/
+│   └── coding-agent-life-v2.json  CI gate: per adapter × path floors and tolerance
 ├── runner/
 │   ├── types.ts                   Adapter, Question, QueryResult, ScoreRow
-│   ├── score.ts                   per-question scoring, per adapter × path aggregation
+│   ├── score.ts                   per-question scoring, per adapter × path aggregation, baseline gate
 │   ├── sandbox.ts                 throwaway daemon under tmp/eval-sandbox/
 │   ├── load.ts                    LongMemEval JSON → Question[]
 │   ├── adapters/

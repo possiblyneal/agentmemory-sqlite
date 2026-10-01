@@ -30,7 +30,8 @@
     "skills:check": "tsx scripts/skills/generate.ts --check && tsx scripts/skills/check.ts",
     "bench:load": "node --import tsx benchmark/load-100k.ts",
     "eval:longmemeval": "tsx eval/runner/longmemeval.ts",
-    "eval:coding-life": "tsx eval/runner/coding-life.ts"
+    "eval:coding-life": "tsx eval/runner/coding-life.ts",
+    "eval:gate": "tsx eval/runner/coding-life.ts --gate eval/baselines/coding-agent-life-v2.json"
   },
   "keywords": [
     "ai",
