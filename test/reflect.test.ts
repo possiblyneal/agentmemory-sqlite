@@ -259,6 +259,30 @@ describe("Reflect", () => {
       expect(provider.summarize).not.toHaveBeenCalled();
     });
 
+    it("fits a large cluster to its prompt budget, lessons first then the strongest facts", async () => {
+      await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
+      await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
+      await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+      for (let i = 0; i < 300; i++) {
+        await kv.set("mem:semantic", `sem_${i}`, {
+          ...makeSemantic(`security fact ${i} ${"x".repeat(400)}`, `sem_${i}`),
+          confidence: i / 300,
+        });
+      }
+      await kv.set("mem:lessons", "lsn_1", makeLesson("Use execFile for security", ["security"]));
+
+      await sdk.trigger("mem::reflect", {});
+
+      const prompt = String(provider.summarize.mock.calls[0]![1]);
+      expect(prompt.length).toBeLessThan(25_000);
+      expect(prompt).toContain("Use execFile for security");
+      expect(prompt).toContain("security fact 299 ");
+      expect(prompt).not.toContain("security fact 0 ");
+      const [insight] = await kv.list<Insight>("mem:insights");
+      expect(insight!.sourceMemoryIds).toContain("sem_299");
+      expect(insight!.sourceMemoryIds).not.toContain("sem_0");
+    });
+
     it("deduplicates insights by fingerprint", async () => {
       await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
       await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
