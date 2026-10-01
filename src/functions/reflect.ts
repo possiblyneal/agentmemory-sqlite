@@ -26,6 +26,7 @@ import { logger } from "../logger.js";
 // Operator's broker reached 100k+ tokens and starved sibling slots during
 // prefill. ~8k tokens at the tree's chars/3 estimate.
 const CLUSTER_PROMPT_CHARS = 24_000;
+const MIN_CLUSTER_ITEMS = 3;
 
 interface ConceptCluster {
   concepts: string[];
@@ -46,6 +47,8 @@ function fitClusterToBudget(
   crystals: Crystal[],
   facts: SemanticMemory[],
 ): { lessons: Lesson[]; crystals: Crystal[]; facts: SemanticMemory[] } {
+  // Rendering every section with an empty item reserves the intro, concept
+  // header and section headings before any item is counted.
   const header = buildReflectPrompt({
     concepts,
     facts: [{ fact: "", confidence: 0 }],
@@ -313,7 +316,7 @@ export function registerReflectFunctions(
 
         const totalItems =
           clusterFacts.length + clusterLessons.length + clusterCrystals.length;
-        if (totalItems < 3) {
+        if (totalItems < MIN_CLUSTER_ITEMS) {
           clustersSkipped++;
           continue;
         }
@@ -334,7 +337,7 @@ export function registerReflectFunctions(
             droppedItems: totalItems - keptItems,
           });
         }
-        if (keptItems < 3) {
+        if (keptItems < MIN_CLUSTER_ITEMS) {
           clustersSkipped++;
           continue;
         }
