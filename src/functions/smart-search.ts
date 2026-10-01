@@ -315,7 +315,7 @@ export function registerSmartSearchFunction(
         lessons?: CompactLessonResult[];
         insights?: CompactInsightResult[];
         graphOmitted?: boolean;
-      } = { mode: "compact", results: [...compact].reverse(), graphOmitted };
+      } = { mode: "compact", results: compact, graphOmitted };
       if (includeLessons) response.lessons = lessons;
       if (includeInsights) response.insights = insights;
       return response;
