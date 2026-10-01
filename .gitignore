@@ -42,5 +42,3 @@ eval/data/longmemeval/
 
 # agent scratch space
 tmp/
-/TASKS.md
-/.tasks.git
