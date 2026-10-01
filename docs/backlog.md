@@ -49,3 +49,19 @@ repeats `loadEnvFile()` in `config.ts` without its cache.
 
 - **Done when.** One helper, taking the "is unset" test as a parameter, serves all three,
   and their precedence tests still pass.
+
+## Cap the crystallize and procedural-extraction prompts
+
+Reflect's cluster prompt now fits a 24k-character budget (`src/functions/reflect.ts`). Two
+other consolidation calls still send whatever their inputs add up to.
+
+- **What exists.** `mem::crystallize` (`src/functions/crystallize.ts:54-57`) joins every
+  action in a group into one prompt, and auto-crystallize groups all done actions of a
+  project on every Stop (`src/triggers/events.ts:180`). Procedural extraction
+  (`src/functions/consolidation-pipeline.ts:207-222`) sends every `pattern` Memory seen in
+  2+ Sessions.
+- **Evidence (2026-10-01).** On dev, `mem:actions` holds 1 action and `mem:crystals` none,
+  and procedural extraction had too few patterns to run, so neither has sent a large
+  prompt yet.
+- **Done when.** Both prompts are bounded the way reflect's is, before either input grows
+  enough to starve sibling slots on the broker.

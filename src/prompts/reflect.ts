@@ -16,6 +16,14 @@ Rules:
 - Skip insights that merely restate a single source item
 - Always emit confidence attribute before title attribute`;
 
+export function formatScoredLine(confidence: number, text: string): string {
+  return `- [confidence=${confidence}] ${text}`;
+}
+
+export function formatNarrativeLine(narrative: string): string {
+  return `- ${narrative}`;
+}
+
 export function buildReflectPrompt(cluster: {
   concepts: string[];
   facts: Array<{ fact: string; confidence: number }>;
@@ -29,25 +37,21 @@ export function buildReflectPrompt(cluster: {
   if (cluster.facts.length > 0) {
     sections.push(
       "\n## Known Facts",
-      ...cluster.facts.map(
-        (f) => `- [confidence=${f.confidence}] ${f.fact}`,
-      ),
+      ...cluster.facts.map((f) => formatScoredLine(f.confidence, f.fact)),
     );
   }
 
   if (cluster.lessons.length > 0) {
     sections.push(
       "\n## Lessons Learned",
-      ...cluster.lessons.map(
-        (l) => `- [confidence=${l.confidence}] ${l.content}`,
-      ),
+      ...cluster.lessons.map((l) => formatScoredLine(l.confidence, l.content)),
     );
   }
 
   if (cluster.crystalNarratives.length > 0) {
     sections.push(
       "\n## Completed Work Summaries",
-      ...cluster.crystalNarratives.map((n) => `- ${n}`),
+      ...cluster.crystalNarratives.map(formatNarrativeLine),
     );
   }
 

@@ -12,7 +12,12 @@ import type {
   Session,
 } from "../types.js";
 import { recordAudit } from "./audit.js";
-import { REFLECT_SYSTEM, buildReflectPrompt } from "../prompts/reflect.js";
+import {
+  REFLECT_SYSTEM,
+  buildReflectPrompt,
+  formatNarrativeLine,
+  formatScoredLine,
+} from "../prompts/reflect.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { logger } from "../logger.js";
@@ -21,8 +26,6 @@ import { logger } from "../logger.js";
 // Operator's broker reached 100k+ tokens and starved sibling slots during
 // prefill. ~8k tokens at the tree's chars/3 estimate.
 const CLUSTER_PROMPT_CHARS = 24_000;
-// Characters buildReflectPrompt adds around each item's text.
-const ITEM_OVERHEAD_CHARS = 24;
 
 interface ConceptCluster {
   concepts: string[];
@@ -34,42 +37,44 @@ interface ConceptCluster {
   crystalIds: string[];
 }
 
-function takeWithinBudget<T>(
-  items: T[],
-  text: (item: T) => string,
-  budget: { remaining: number },
-): T[] {
-  return items.filter((item) => {
-    const chars = text(item).length + ITEM_OVERHEAD_CHARS;
-    if (chars > budget.remaining) return false;
-    budget.remaining -= chars;
-    return true;
-  });
-}
-
 // Lessons and crystals are the more durable record, so they fill the budget
-// before facts; within each kind the strongest goes first.
+// before facts. Lessons and facts go strongest first, crystals newest first.
+// An item too large for what is left is skipped and smaller ones keep filling.
 function fitClusterToBudget(
+  concepts: string[],
   lessons: Lesson[],
   crystals: Crystal[],
   facts: SemanticMemory[],
 ): { lessons: Lesson[]; crystals: Crystal[]; facts: SemanticMemory[] } {
-  const budget = { remaining: CLUSTER_PROMPT_CHARS };
+  const header = buildReflectPrompt({
+    concepts,
+    facts: [{ fact: "", confidence: 0 }],
+    lessons: [{ content: "", confidence: 0 }],
+    crystalNarratives: [""],
+  });
+  let remaining = CLUSTER_PROMPT_CHARS - header.length;
+  const take = <T>(items: T[], line: (item: T) => string): T[] =>
+    items.filter((item) => {
+      const chars = line(item).length + 1;
+      if (chars > remaining) return false;
+      remaining -= chars;
+      return true;
+    });
   return {
-    lessons: takeWithinBudget(
+    lessons: take(
       [...lessons].sort((a, b) => b.confidence - a.confidence),
-      (l) => l.content,
-      budget,
+      (l) => formatScoredLine(l.confidence, l.content),
     ),
-    crystals: takeWithinBudget(
-      [...crystals].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-      (c) => c.narrative,
-      budget,
+    crystals: take(
+      [...crystals].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+      (c) => formatNarrativeLine(c.narrative),
     ),
-    facts: takeWithinBudget(
+    facts: take(
       [...facts].sort((a, b) => b.confidence - a.confidence),
-      (f) => f.fact,
-      budget,
+      (f) => formatScoredLine(f.confidence, f.fact),
     ),
   };
 }
@@ -314,6 +319,7 @@ export function registerReflectFunctions(
         }
 
         const fitted = fitClusterToBudget(
+          conceptNames,
           clusterLessons,
           clusterCrystals,
           clusterFacts,
@@ -327,6 +333,10 @@ export function registerReflectFunctions(
             keptItems,
             droppedItems: totalItems - keptItems,
           });
+        }
+        if (keptItems < 3) {
+          clustersSkipped++;
+          continue;
         }
 
         const cluster: ConceptCluster = {

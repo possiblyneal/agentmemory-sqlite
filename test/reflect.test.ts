@@ -274,13 +274,47 @@ describe("Reflect", () => {
       await sdk.trigger("mem::reflect", {});
 
       const prompt = String(provider.summarize.mock.calls[0]![1]);
-      expect(prompt.length).toBeLessThan(25_000);
+      expect(prompt.length).toBeLessThanOrEqual(24_000);
       expect(prompt).toContain("Use execFile for security");
       expect(prompt).toContain("security fact 299 ");
       expect(prompt).not.toContain("security fact 0 ");
       const [insight] = await kv.list<Insight>("mem:insights");
       expect(insight!.sourceMemoryIds).toContain("sem_299");
       expect(insight!.sourceMemoryIds).not.toContain("sem_0");
+    });
+
+    it("skips a cluster left with fewer than 3 items after fitting its budget", async () => {
+      await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
+      await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
+      await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+      await kv.set("mem:semantic", "sem_small", makeSemantic("security fact small", "sem_small"));
+      for (let i = 0; i < 3; i++) {
+        await kv.set("mem:semantic", `sem_big_${i}`, makeSemantic(`security fact ${i} ${"x".repeat(30_000)}`, `sem_big_${i}`));
+      }
+
+      const result = (await sdk.trigger("mem::reflect", {})) as { clustersSkipped: number };
+
+      expect(result.clustersSkipped).toBe(1);
+      expect(provider.summarize).not.toHaveBeenCalled();
+    });
+
+    it("fills the budget with the newest crystals first", async () => {
+      await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
+      await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
+      await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+      for (let i = 0; i < 100; i++) {
+        await kv.set("mem:crystals", `crys_${i}`, {
+          ...makeCrystal(`crystal ${i} ${"y".repeat(400)}`, ["security matters"]),
+          id: `crys_${i}`,
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+        });
+      }
+
+      await sdk.trigger("mem::reflect", {});
+
+      const prompt = String(provider.summarize.mock.calls[0]![1]);
+      expect(prompt).toContain("crystal 99 ");
+      expect(prompt).not.toContain("crystal 0 ");
     });
 
     it("deduplicates insights by fingerprint", async () => {
