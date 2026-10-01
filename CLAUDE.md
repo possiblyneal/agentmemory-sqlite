@@ -164,7 +164,7 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 
 ## Testing
 
-- `npm run typecheck` must report 0 errors and `npm test` (1,850+ tests) must pass before a PR; CI runs both
+- `npm run typecheck` must report 0 errors and `npm test` (2,150+ tests) must pass before a PR; CI runs both
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
@@ -232,7 +232,7 @@ unchecked: the note is still upstream's claim, not a verified defect.
 - 6 MCP resources, 3 MCP prompts
 - 11 hooks, 17 skills
 - 260+ registered functions
-- 1,850+ tests
+- 2,150+ tests
 
 ## Agent skills
 

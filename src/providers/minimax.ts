@@ -10,7 +10,7 @@ import { fetchWithTimeout, ProviderHttpError } from './_fetch.js'
  *
  * Required env vars (loaded from ~/.agentmemory/.env or process.env):
  *   MINIMAX_API_KEY  — your MiniMax API key
- *   MINIMAX_MODEL    — model name (default: MiniMax-M3)
+ *   MINIMAX_MODEL    — model name (default: DEFAULT_MODELS in src/config.ts)
  *   MAX_TOKENS       — max output tokens (default: 4096)
  *
  * Optional:

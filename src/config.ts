@@ -6,6 +6,7 @@ import { parseEnvFile } from "./hooks/_env.js";
 import pc from "picocolors";
 import type {
   AgentMemoryConfig,
+  ProviderType,
   ProviderConfig,
   EmbeddingConfig,
   FallbackConfig,
@@ -67,14 +68,35 @@ export function hydrateProcessEnvFromFile(): void {
   refreshBootVerbose();
 }
 
+export const DEFAULT_MODELS = {
+  openai: { envKey: "OPENAI_MODEL", model: "gpt-5.6-luna" },
+  anthropic: { envKey: "ANTHROPIC_MODEL", model: "claude-sonnet-5" },
+  gemini: { envKey: "GEMINI_MODEL", model: "gemini-3.7-flash" },
+  openrouter: { envKey: "OPENROUTER_MODEL", model: "anthropic/claude-sonnet-5" },
+  minimax: { envKey: "MINIMAX_MODEL", model: "MiniMax-M3" },
+  "agent-sdk": { envKey: null, model: "claude-sonnet-5" },
+} satisfies Record<Exclude<ProviderType, "noop">, { envKey: string | null; model: string }>;
+
+// Primary (detectProvider) and fallback (rohitg00/agentmemory#778) providers
+// both resolve here, so a fallback never inherits the primary's model name.
+export function resolveModel(
+  provider: ProviderType,
+  readEnv: (key: string) => string | undefined,
+): string {
+  if (provider === "noop") return "noop";
+  const { envKey, model } = DEFAULT_MODELS[provider];
+  return (envKey && readEnv(envKey)) || model;
+}
+
 function detectProvider(env: Record<string, string>): ProviderConfig {
+  const readEnv = (key: string) => env[key];
   const maxTokens = parseInt(env["MAX_TOKENS"] || "4096", 10);
 
   // OpenAI-compatible: supports OpenAI, DeepSeek, SiliconFlow, Azure, vLLM, LM Studio
   if (hasRealValue(env["OPENAI_API_KEY"]) && env["OPENAI_API_KEY_FOR_LLM"] !== "false") {
     return {
       provider: "openai",
-      model: env["OPENAI_MODEL"] || "gpt-5.6-luna",
+      model: resolveModel("openai", readEnv),
       maxTokens,
       baseURL: env["OPENAI_BASE_URL"],
     };
@@ -84,7 +106,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   if (hasRealValue(env["MINIMAX_API_KEY"])) {
     return {
       provider: "minimax",
-      model: env["MINIMAX_MODEL"] || "MiniMax-M3",
+      model: resolveModel("minimax", readEnv),
       maxTokens,
     };
   }
@@ -92,7 +114,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   if (hasRealValue(env["ANTHROPIC_API_KEY"])) {
     return {
       provider: "anthropic",
-      model: env["ANTHROPIC_MODEL"] || "claude-sonnet-5",
+      model: resolveModel("anthropic", readEnv),
       maxTokens,
       baseURL: env["ANTHROPIC_BASE_URL"],
     };
@@ -106,12 +128,12 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
     }
     return {
       provider: "gemini",
-      model: env["GEMINI_MODEL"] || "gemini-3.7-flash",
+      model: resolveModel("gemini", readEnv),
       maxTokens,
     };
   }
   if (hasRealValue(env["OPENROUTER_API_KEY"])) {
-    const model = env["OPENROUTER_MODEL"] || "anthropic/claude-sonnet-5";
+    const model = resolveModel("openrouter", readEnv);
     // warn when the configured OpenRouter model is in the
     // premium tier and likely to burn money on background compression.
     // Captured workload data shows ~$5/35h on claude-sonnet-4 vs
@@ -164,7 +186,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   );
   return {
     provider: "agent-sdk",
-    model: "claude-sonnet-5",
+    model: resolveModel("agent-sdk", readEnv),
     maxTokens,
   };
 }

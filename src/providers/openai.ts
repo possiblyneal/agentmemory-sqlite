@@ -29,7 +29,7 @@ const TOKENIZE_TIMEOUT_MS = 10_000;
  * Optional:
  *   OPENAI_BASE_URL          — base URL without path (default: https://api.openai.com).
  *                              Azure: https://<resource>.openai.azure.com/openai/deployments/<deployment>
- *   OPENAI_MODEL             — model name (default: gpt-5.6-luna)
+ *   OPENAI_MODEL             — model name (default: DEFAULT_MODELS in src/config.ts)
  *   OPENAI_API_VERSION       — Azure api-version query param (default: 2024-08-01-preview)
  *   OPENAI_TIMEOUT_MS        — outbound fetch timeout in ms (OpenAI-scoped alias,
  *                              takes precedence over AGENTMEMORY_LLM_TIMEOUT_MS

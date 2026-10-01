@@ -11,7 +11,7 @@ import { OpenAIProvider } from "./openai.js";
 import { OpenRouterProvider } from "./openrouter.js";
 import { ResilientProvider } from "./resilient.js";
 import { FallbackChainProvider } from "./fallback-chain.js";
-import { getEnvVar } from "../config.js";
+import { getEnvVar, resolveModel } from "../config.js";
 
 export { createEmbeddingProvider, createImageEmbeddingProvider } from "./embedding/index.js";
 
@@ -23,33 +23,6 @@ function requireEnvVar(key: string): string {
     );
   }
   return value;
-}
-
-// #778: fallback providers used to inherit the primary provider's
-// model name (e.g. fallback Gemini was called with `gpt-4o-mini`),
-// 404'd every call, and tripped the circuit breaker — making
-// FALLBACK_PROVIDERS actively worse than no fallback. Each provider
-// must resolve its OWN env-driven default model. Mirrors the resolution
-// in detectProvider() so primary + fallback agree on what each
-// provider's default model is.
-function defaultModelFor(providerType: ProviderConfig["provider"]): string {
-  switch (providerType) {
-    case "openai":
-      return getEnvVar("OPENAI_MODEL") || "gpt-5.6-luna";
-    case "anthropic":
-      return getEnvVar("ANTHROPIC_MODEL") || "claude-sonnet-5";
-    case "gemini":
-      return getEnvVar("GEMINI_MODEL") || "gemini-3.7-flash";
-    case "openrouter":
-      return getEnvVar("OPENROUTER_MODEL") || "anthropic/claude-sonnet-5";
-    case "minimax":
-      return getEnvVar("MINIMAX_MODEL") || "MiniMax-M3";
-    case "agent-sdk":
-      return "claude-sonnet-5";
-    case "noop":
-    default:
-      return "noop";
-  }
 }
 
 export function createProvider(config: ProviderConfig): ResilientProvider {
@@ -75,7 +48,7 @@ export function createFallbackProvider(
       // and trip the circuit breaker.
       const fbConfig: ProviderConfig = {
         provider: providerType,
-        model: defaultModelFor(providerType),
+        model: resolveModel(providerType, getEnvVar),
         maxTokens: config.maxTokens,
       };
       providers.push(createBaseProvider(fbConfig));

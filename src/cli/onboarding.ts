@@ -26,6 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
 import { appendFileSync, readFileSync } from "node:fs";
+import { DEFAULT_MODELS } from "../config.js";
 import { readPrefs, writePrefs } from "./preferences.js";
 import { ADAPTERS, resolveAdapter, runAdapter } from "./connect/index.js";
 import type { ConnectResult } from "./connect/types.js";
@@ -51,7 +52,7 @@ const PROVIDERS: { value: string; label: string; envKey: string | null }[] = [
   { value: "openai", label: "OpenAI — gpt", envKey: "OPENAI_API_KEY" },
   { value: "gemini", label: "Google — gemini", envKey: "GEMINI_API_KEY" },
   { value: "openrouter", label: "OpenRouter — multi-model", envKey: "OPENROUTER_API_KEY" },
-  { value: "minimax", label: "MiniMax — MiniMax-M3", envKey: "MINIMAX_API_KEY" },
+  { value: "minimax", label: `MiniMax — ${DEFAULT_MODELS.minimax.model}`, envKey: "MINIMAX_API_KEY" },
   { value: "skip", label: "Skip — BM25-only mode (no LLM key)", envKey: null },
 ];
 
