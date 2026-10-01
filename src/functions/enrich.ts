@@ -5,6 +5,7 @@ import { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { estimateTokens } from "./context.js";
+import { withFiles } from "./injections.js";
 
 const MAX_CONTEXT_LENGTH = 4000;
 
@@ -56,7 +57,7 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
           ? sdk
               .trigger<
                 { query: string; limit: number; project?: string },
-                { results: Array<{ observation: { id: string; narrative: string } }> }
+                { results: Array<{ observation: { id: string; narrative: string; files?: string[] } }> }
               >({
                 function_id: "mem::search",
                 payload: {
@@ -107,7 +108,7 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
         const observations = narrated.map((o) => escapeXml(o.narrative)).join("\n");
         parts.push({
           text: `<agentmemory-relevant-context>\n${observations}\n</agentmemory-relevant-context>`,
-          injected: narrated.map((o) => ({ kind: "observation" as const, id: o.id })),
+          injected: narrated.map((o) => withFiles({ kind: "observation", id: o.id }, o.files)),
         });
       }
 
@@ -119,7 +120,7 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
           .join("\n");
         parts.push({
           text: `<agentmemory-past-errors>\n${bugs}\n</agentmemory-past-errors>`,
-          injected: injected.map((m) => ({ kind: "memory" as const, id: m.id })),
+          injected: injected.map((m) => withFiles({ kind: "memory", id: m.id }, m.files)),
         });
       }
 

@@ -13,6 +13,7 @@ import type {
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAccessBatch } from "./access-tracker.js";
+import { withFiles } from "./injections.js";
 import { logger } from "../logger.js";
 import {
   isSlotsEnabled,
@@ -244,7 +245,7 @@ export function registerContextFunction(
             content,
             tokens: estimateTokens(content),
             recency: new Date(summary.createdAt).getTime(),
-            sources: [{ kind: "summary", id: sessions[i].id }],
+            sources: [withFiles({ kind: "summary", id: sessions[i].id }, summary.filesModified)],
           });
         } else {
           sessionsNeedingObs.push(i);
@@ -279,7 +280,7 @@ export function registerContextFunction(
             content,
             tokens: estimateTokens(content),
             recency: new Date(sessions[i].startedAt).getTime(),
-            sources: top.map((o) => ({ kind: "observation" as const, id: o.id })),
+            sources: top.map((o) => withFiles({ kind: "observation", id: o.id }, o.files)),
           });
         }
       }

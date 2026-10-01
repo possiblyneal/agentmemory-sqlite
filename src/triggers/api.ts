@@ -195,6 +195,7 @@ function noteInjection(
   sessionId: string,
   project: string | undefined,
   result: InjectionResult | undefined,
+  files?: string[],
 ): void {
   countInjection(result?.context);
   const context = result?.context ?? "";
@@ -203,6 +204,7 @@ function noteInjection(
     sessionId,
     ...(project ? { project } : {}),
     injected: context.trim() ? (result?.injected ?? []) : [],
+    ...(files ? { files } : {}),
     tokens: result?.tokens ?? 0,
   }).catch((err) => {
     logger.warn("Injection record write failed", {
@@ -1184,6 +1186,7 @@ export function registerApiTriggers(
         req.body.sessionId,
         typeof req.body.project === "string" ? req.body.project.trim() : undefined,
         result,
+        req.body.files,
       );
       return { status_code: 200, body: withoutInjected(result) };
     },

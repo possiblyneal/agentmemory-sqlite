@@ -9,10 +9,11 @@ import { registerEnrichFunction } from "../src/functions/enrich.js";
 import {
   registerInjectionsFunction,
   INJECTION_RETENTION_MS,
+  isInjectedItemUsed,
 } from "../src/functions/injections.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { KV } from "../src/state/schema.js";
-import type { InjectionRecord, Lesson, Insight, Memory } from "../src/types.js";
+import type { CompressedObservation, InjectionRecord, Lesson, Insight, Memory } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -113,7 +114,7 @@ describe("mem::context reports what it injected", () => {
         { kind: "lesson", id: "les_1" },
         { kind: "insight", id: "ins_1" },
         { kind: "summary", id: "ses_sum" },
-        { kind: "observation", id: "obs_1" },
+        { kind: "observation", id: "obs_1", files: ["src/a.ts"] },
       ]),
     );
     expect(result.injected).toHaveLength(4);
@@ -153,7 +154,7 @@ describe("mem::enrich reports what it injected", () => {
     expect(result.injected).toEqual([
       { kind: "observation", id: "obs_file" },
       { kind: "observation", id: "obs_search" },
-      { kind: "memory", id: "mem_bug" },
+      { kind: "memory", id: "mem_bug", files: ["src/a.ts"] },
     ]);
   });
 
@@ -287,5 +288,80 @@ describe("REST Injection paths write a record", () => {
     expect(res.status_code).toBe(200);
     expect(res.body.injections).toHaveLength(1);
     expect(missing.status_code).toBe(400);
+  });
+});
+
+describe("isInjectedItemUsed", () => {
+  const at = "2026-01-01T00:00:00.000Z";
+
+  function obs(over: Partial<CompressedObservation>): CompressedObservation {
+    return {
+      id: "o", sessionId: "s1", timestamp: "2026-01-01T00:05:00.000Z", type: "file_edit",
+      title: "Edit", narrative: "", facts: [], concepts: [], files: [], importance: 5, ...over,
+    };
+  }
+
+  const record = (over: Partial<InjectionRecord> = {}): InjectionRecord => ({
+    id: "r", source: "context", sessionId: "s1", injected: [], tokens: 0, at, ...over,
+  });
+
+  it("counts a later touch of one of the item's files", () => {
+    const ref = { kind: "memory" as const, id: "mem_1", files: ["src/a.ts"] };
+    expect(isInjectedItemUsed(ref, record(), [obs({ files: ["./src/a.ts"] })])).toBe(true);
+    expect(isInjectedItemUsed(ref, record(), [obs({ files: ["/repo/src/a.ts"] })])).toBe(true);
+  });
+
+  it("counts an explicit recall that names the item", () => {
+    const ref = { kind: "lesson" as const, id: "les_1" };
+    const recall = obs({ title: "mcp__agentmemory__memory_get", narrative: '{"id":"les_1"}' });
+    expect(isInjectedItemUsed(ref, record(), [recall])).toBe(true);
+  });
+
+  it("does not count an item nothing touched or named", () => {
+    const ref = { kind: "memory" as const, id: "mem_1", files: ["src/a.ts"] };
+    expect(isInjectedItemUsed(ref, record(), [obs({ files: ["src/b.ts"] })])).toBe(false);
+  });
+
+  it("only counts an item with no files through an explicit recall", () => {
+    const ref = { kind: "lesson" as const, id: "les_1" };
+    expect(isInjectedItemUsed(ref, record(), [obs({ files: ["src/a.ts"] })])).toBe(false);
+  });
+
+  it("ignores Observations from before the Injection", () => {
+    const ref = { kind: "memory" as const, id: "mem_1", files: ["src/a.ts"] };
+    const earlier = obs({ timestamp: "2025-12-31T23:59:00.000Z", files: ["src/a.ts"] });
+    expect(isInjectedItemUsed(ref, record(), [earlier])).toBe(false);
+  });
+
+  it("does not let the tool call that triggered an enrich Injection count as use", () => {
+    const ref = { kind: "observation" as const, id: "obs_1", files: ["src/a.ts"] };
+    const enrich = record({ source: "enrich", files: ["src/a.ts"] });
+    expect(isInjectedItemUsed(ref, enrich, [obs({ files: ["src/a.ts"] })])).toBe(false);
+  });
+});
+
+describe("Injected refs carry their files", () => {
+  it("records the files an enrich Injection was asked about", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, kv as never);
+    sdk.registerFunction("mem::enrich", async () => ({ context: "x", injected: [] }));
+
+    await sdk.call("api::enrich", { body: { sessionId: "s1", files: ["src/a.ts"] } });
+    await new Promise((r) => setTimeout(r, 0));
+
+    const [record] = await kv.list<InjectionRecord>(KV.injections);
+    expect(record.files).toEqual(["src/a.ts"]);
+  });
+
+  it("mem::context attaches observation and summary files", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    registerContextFunction(sdk as never, kv as never, 4000);
+    await seedSession(kv, "ses_obs", false);
+
+    const result = await sdk.call("mem::context", { sessionId: "now", project: "/p" });
+
+    expect(result.injected).toEqual([{ kind: "observation", id: "obs_1", files: ["src/a.ts"] }]);
   });
 });

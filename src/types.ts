@@ -220,6 +220,7 @@ export interface ContextBlock {
 export interface InjectedRef {
   kind: "observation" | "memory" | "lesson" | "insight" | "summary";
   id: string;
+  files?: string[];
 }
 
 export type InjectionSource = "session-start" | "context" | "enrich";
@@ -230,6 +231,7 @@ export interface InjectionRecord {
   sessionId: string;
   project?: string;
   injected: InjectedRef[];
+  files?: string[];
   tokens: number;
   at: string;
 }

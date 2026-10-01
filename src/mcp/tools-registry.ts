@@ -710,7 +710,7 @@ export const V051_TOOLS: McpToolDef[] = [
   {
     name: "memory_diagnose",
     description:
-      "Run health checks across all subsystems (actions, leases, sentinels, sketches, signals, sessions, observations, memories, lessons, summaries, semantic, procedural, crystals, insights, mesh, injections, recall-coverage). Identifies stuck, orphaned, and inconsistent state, Missed Injections, and Unrecalled Memories.",
+      "Run health checks across all subsystems (actions, leases, sentinels, sketches, signals, sessions, observations, memories, lessons, summaries, semantic, procedural, crystals, insights, mesh, injections, injection-use, recall-coverage). Identifies stuck, orphaned, and inconsistent state, Missed Injections, injected items the Session never used, and Unrecalled Memories.",
     inputSchema: {
       type: "object",
       properties: {
