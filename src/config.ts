@@ -67,6 +67,15 @@ export function hydrateProcessEnvFromFile(): void {
   refreshBootVerbose();
 }
 
+export const DEFAULT_MODELS = {
+  openai: "gpt-5.6-luna",
+  anthropic: "claude-sonnet-5",
+  gemini: "gemini-3.7-flash",
+  openrouter: "anthropic/claude-sonnet-5",
+  minimax: "MiniMax-M3",
+  "agent-sdk": "claude-sonnet-5",
+} as const;
+
 function detectProvider(env: Record<string, string>): ProviderConfig {
   const maxTokens = parseInt(env["MAX_TOKENS"] || "4096", 10);
 
@@ -74,7 +83,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   if (hasRealValue(env["OPENAI_API_KEY"]) && env["OPENAI_API_KEY_FOR_LLM"] !== "false") {
     return {
       provider: "openai",
-      model: env["OPENAI_MODEL"] || "gpt-5.6-luna",
+      model: env["OPENAI_MODEL"] || DEFAULT_MODELS.openai,
       maxTokens,
       baseURL: env["OPENAI_BASE_URL"],
     };
@@ -84,7 +93,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   if (hasRealValue(env["MINIMAX_API_KEY"])) {
     return {
       provider: "minimax",
-      model: env["MINIMAX_MODEL"] || "MiniMax-M3",
+      model: env["MINIMAX_MODEL"] || DEFAULT_MODELS.minimax,
       maxTokens,
     };
   }
@@ -92,7 +101,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   if (hasRealValue(env["ANTHROPIC_API_KEY"])) {
     return {
       provider: "anthropic",
-      model: env["ANTHROPIC_MODEL"] || "claude-sonnet-5",
+      model: env["ANTHROPIC_MODEL"] || DEFAULT_MODELS.anthropic,
       maxTokens,
       baseURL: env["ANTHROPIC_BASE_URL"],
     };
@@ -106,12 +115,12 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
     }
     return {
       provider: "gemini",
-      model: env["GEMINI_MODEL"] || "gemini-3.7-flash",
+      model: env["GEMINI_MODEL"] || DEFAULT_MODELS.gemini,
       maxTokens,
     };
   }
   if (hasRealValue(env["OPENROUTER_API_KEY"])) {
-    const model = env["OPENROUTER_MODEL"] || "anthropic/claude-sonnet-5";
+    const model = env["OPENROUTER_MODEL"] || DEFAULT_MODELS.openrouter;
     // warn when the configured OpenRouter model is in the
     // premium tier and likely to burn money on background compression.
     // Captured workload data shows ~$5/35h on claude-sonnet-4 vs
@@ -164,7 +173,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   );
   return {
     provider: "agent-sdk",
-    model: "claude-sonnet-5",
+    model: DEFAULT_MODELS["agent-sdk"],
     maxTokens,
   };
 }

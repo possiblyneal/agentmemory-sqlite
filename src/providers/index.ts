@@ -11,7 +11,7 @@ import { OpenAIProvider } from "./openai.js";
 import { OpenRouterProvider } from "./openrouter.js";
 import { ResilientProvider } from "./resilient.js";
 import { FallbackChainProvider } from "./fallback-chain.js";
-import { getEnvVar } from "../config.js";
+import { DEFAULT_MODELS, getEnvVar } from "../config.js";
 
 export { createEmbeddingProvider, createImageEmbeddingProvider } from "./embedding/index.js";
 
@@ -30,22 +30,22 @@ function requireEnvVar(key: string): string {
 // 404'd every call, and tripped the circuit breaker — making
 // FALLBACK_PROVIDERS actively worse than no fallback. Each provider
 // must resolve its OWN env-driven default model. Mirrors the resolution
-// in detectProvider() so primary + fallback agree on what each
-// provider's default model is.
+// in detectProvider(); both read DEFAULT_MODELS so primary + fallback
+// agree on what each provider's default model is.
 function defaultModelFor(providerType: ProviderConfig["provider"]): string {
   switch (providerType) {
     case "openai":
-      return getEnvVar("OPENAI_MODEL") || "gpt-5.6-luna";
+      return getEnvVar("OPENAI_MODEL") || DEFAULT_MODELS.openai;
     case "anthropic":
-      return getEnvVar("ANTHROPIC_MODEL") || "claude-sonnet-5";
+      return getEnvVar("ANTHROPIC_MODEL") || DEFAULT_MODELS.anthropic;
     case "gemini":
-      return getEnvVar("GEMINI_MODEL") || "gemini-3.7-flash";
+      return getEnvVar("GEMINI_MODEL") || DEFAULT_MODELS.gemini;
     case "openrouter":
-      return getEnvVar("OPENROUTER_MODEL") || "anthropic/claude-sonnet-5";
+      return getEnvVar("OPENROUTER_MODEL") || DEFAULT_MODELS.openrouter;
     case "minimax":
-      return getEnvVar("MINIMAX_MODEL") || "MiniMax-M3";
+      return getEnvVar("MINIMAX_MODEL") || DEFAULT_MODELS.minimax;
     case "agent-sdk":
-      return "claude-sonnet-5";
+      return DEFAULT_MODELS["agent-sdk"];
     case "noop":
     default:
       return "noop";
