@@ -30,7 +30,7 @@
 //     `message`, which `src/index.ts`'s unhandledRejection handler reads.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { ISdk } from "iii-sdk";
+import type { ISdk } from "../types.js";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { SqliteState, stateFunctions, type StateEvent } from "./state.js";
