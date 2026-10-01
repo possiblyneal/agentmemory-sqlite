@@ -9,9 +9,9 @@ import { aggregate, scoreQuestion } from "./score.js";
 import type { Adapter, ScoreRow } from "./types.js";
 
 const ADAPTERS: Record<string, Adapter> = {
-  grep: grepAdapter as unknown as Adapter,
-  vector: vectorAdapter as unknown as Adapter,
-  agentmemory: agentmemoryAdapter as unknown as Adapter,
+  grep: grepAdapter,
+  vector: vectorAdapter,
+  agentmemory: agentmemoryAdapter,
 };
 
 interface CliOptions {
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     console.log(`\n== ${adapter.name} ==`);
     for (const q of questions) {
       const t0 = performance.now();
-      const state = await adapter.init(q.haystack);
+      const state = await adapter.init(q.haystack, { baseUrl: process.env.AGENTMEMORY_BASE_URL });
       try {
         const result = await adapter.query(q, state, k);
         const latencyMs = performance.now() - t0;
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   writeFileSync(summaryPath, JSON.stringify(agg, null, 2));
 
   console.log("\n=== Summary ===");
-  for (const [adapter, byPath] of Object.entries(agg)) {
+  for (const [adapter, byPath] of Object.entries(agg.byPath)) {
     const stats = byPath.search;
     console.log(
       `  ${adapter.padEnd(22)} P@${k}=${stats.precision.toFixed(3)} R@${k}=${stats.recall.toFixed(3)} hit=${stats.hit}/${stats.n} p50=${Math.round(stats.latencyP50)}ms`,

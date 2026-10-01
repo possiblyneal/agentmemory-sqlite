@@ -4,7 +4,7 @@ import { attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
 import { randomAdapter } from "../eval/runner/adapters/random.js";
 import { aggregate, compareToBaseline, scoreQuestion } from "../eval/runner/score.js";
-import type { Question, QueryResult, Session } from "../eval/runner/types.js";
+import { questionPath, type Question, type QueryResult, type Session } from "../eval/runner/types.js";
 
 function question(overrides: Partial<Question>): Question {
   return { id: "q", type: "t", goldSessionIds: [], haystack: [], ...overrides };
@@ -60,9 +60,20 @@ describe("aggregate", () => {
         1,
       ),
     ];
-    const summary = aggregate(rows);
-    expect(summary.x.search).toMatchObject({ n: 2, answerable: 1, recall: 1, noAnswerClean: 0 });
-    expect(summary.x["pre-tool-use"]).toMatchObject({ n: 1, noAnswerClean: 1, meanChars: 0 });
+    const { byPath } = aggregate(rows);
+    expect(byPath.x.search).toMatchObject({ n: 2, answerable: 1, recall: 1, noAnswerClean: 0 });
+    expect(byPath.x["pre-tool-use"]).toMatchObject({ n: 1, noAnswerClean: 1, meanChars: 0 });
+  });
+
+  it("breaks the numbers down by question type per adapter", () => {
+    const rows = [
+      scoreQuestion(question({ id: "1", type: "decision", goldSessionIds: ["a"] }), ranked("a"), 5, "x", 1),
+      scoreQuestion(question({ id: "2", type: "decision", goldSessionIds: ["b"] }), ranked("a"), 5, "x", 1),
+      scoreQuestion(question({ id: "3", type: "file", goldSessionIds: ["a"] }), ranked("a"), 5, "x", 1),
+    ];
+    const { byType } = aggregate(rows);
+    expect(byType.decision.x).toMatchObject({ n: 2, recall: 0.5, hit: 1 });
+    expect(byType.file.x).toMatchObject({ n: 1, recall: 1 });
   });
 });
 
@@ -160,7 +171,7 @@ describe("coding-agent-life-v2 dataset", () => {
 
   it("lets the grep baseline find most answerable search questions", async () => {
     const state = await grepAdapter.init(sessions);
-    const answerable = queries.filter((q) => (q.path ?? "search") === "search" && q.goldSessionIds.length > 0);
+    const answerable = queries.filter((q) => questionPath(q) === "search" && q.goldSessionIds.length > 0);
     let hits = 0;
     for (const q of answerable) {
       const { ranked } = await grepAdapter.query(q, state, 5);
@@ -171,7 +182,7 @@ describe("coding-agent-life-v2 dataset", () => {
 
   it("has no-answer questions on every path", () => {
     for (const path of ["search", "pre-tool-use", "session-start"]) {
-      expect(queries.some((q) => (q.path ?? "search") === path && q.goldSessionIds.length === 0)).toBe(
+      expect(queries.some((q) => questionPath(q) === path && q.goldSessionIds.length === 0)).toBe(
         true,
       );
     }

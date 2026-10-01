@@ -39,10 +39,15 @@ export interface QueryResult {
   chars?: number;
 }
 
-export interface Adapter<State = unknown> {
+export interface AdapterConfig {
+  instance?: number;
+  baseUrl?: string;
+}
+
+export interface Adapter<State = unknown, Config extends AdapterConfig = AdapterConfig> {
   name: string;
   paths: QuestionPath[];
-  init(sessions: Session[], config?: Record<string, unknown>): Promise<State>;
+  init(sessions: Session[], config?: Config): Promise<State>;
   query(q: Question, state: State, k: number): Promise<QueryResult>;
   teardown?(state: State): Promise<void>;
 }

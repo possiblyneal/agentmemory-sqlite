@@ -1,11 +1,11 @@
 # agentmemory-evals
 
-Retrieval benchmarks for agentmemory, scored on what each Injection puts in front of the Agent.
+Recall benchmarks for agentmemory, scored on what each Injection puts in front of the Agent.
 
 Two families:
 
 - **coding-agent-life-v2** — in-house corpus of 21 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 38 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
-- **LongMemEval** — public 500-question retrieval benchmark over multi-session chat, search path only.
+- **LongMemEval** — public 500-question long-term memory benchmark over multi-session chat, search path only.
 
 ## Paths
 
@@ -45,7 +45,7 @@ The `agentmemory` adapters start their own daemon (`runner/sandbox.ts`) and stop
 - an environment built from scratch: `PATH`, the `HF_*` cache variables, and `EMBEDDING_PROVIDER=local` unless the adapter is `agentmemory-bm25`. No LLM provider, so compression is synthetic and there are no summaries;
 - its log at `tmp/eval-sandbox/instance-3.log`.
 
-The run refuses to start if something already answers on the port; pick another block with `--instance N`. To score a daemon you started yourself instead, pass `--base-url http://localhost:PORT` (or set `AGENTMEMORY_BASE_URL`) — the runner then ingests into that store, so point it at a throwaway one.
+The run refuses to start if any of the instance's three ports (REST 3411, streams 3412, viewer 3413) is in use; pick another block with `--instance N`. On a stop the daemon gets 10 seconds to exit after SIGTERM before it is killed. To score a daemon you started yourself instead, pass `--base-url http://localhost:PORT` (or set `AGENTMEMORY_BASE_URL`) — the runner then ingests into that store, so point it at a throwaway one. `npm run eval:gate` ignores both and always starts a fresh sandbox.
 
 ## Quickstart
 
@@ -69,6 +69,8 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 ```text
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
+
+Search no-answer clean is not gated: smart-search has no relevance floor yet, so it returns something for every query and scores 0 there. That is known debt, and the search entry gains a `noAnswerClean` floor once a relevance cutoff lands.
 
 CI runs it on the ubuntu / Node 22 leg. The gate is BM25-only so CI never downloads the embedding model and needs no network beyond `npm ci`; the on-device embedding stack is still measured by `npm run eval:coding-life`. A PR that changes these numbers on purpose updates the baseline file in the same PR and says why. One question gained or lost on a path moves recall by at least 0.05, so the tolerance only absorbs rounding.
 

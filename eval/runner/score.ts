@@ -1,9 +1,7 @@
 import { questionPath, type Question, type QueryResult, type ScoreRow } from "./types.js";
 
-// Precision is gold hits over what was actually returned, so a near-miss
-// costs the score even when the gold item is also present. Returning
-// nothing is vacuously precise; an answerable question pays for that in
-// recall instead. Recall is undefined for a question with no gold.
+// Returning nothing is vacuously precise; an answerable question pays for
+// that in recall instead.
 export function scoreQuestion(
   q: Question,
   result: QueryResult,
@@ -76,19 +74,30 @@ export function summarize(rows: ScoreRow[]): PathStats {
   };
 }
 
-export function aggregate(rows: ScoreRow[]): Summary {
+function groupStats(
+  rows: ScoreRow[],
+  outer: (r: ScoreRow) => string,
+  inner: (r: ScoreRow) => string,
+): Summary {
   const groups = new Map<string, Map<string, ScoreRow[]>>();
   for (const r of rows) {
-    const byPath = groups.get(r.adapter) ?? new Map<string, ScoreRow[]>();
-    groups.set(r.adapter, byPath);
-    byPath.set(r.path, [...(byPath.get(r.path) ?? []), r]);
+    const byInner = groups.get(outer(r)) ?? new Map<string, ScoreRow[]>();
+    groups.set(outer(r), byInner);
+    byInner.set(inner(r), [...(byInner.get(inner(r)) ?? []), r]);
   }
   const summary: Summary = {};
-  for (const [adapter, byPath] of groups) {
-    summary[adapter] = {};
-    for (const [path, pathRows] of byPath) summary[adapter][path] = summarize(pathRows);
+  for (const [o, byInner] of groups) {
+    summary[o] = {};
+    for (const [i, innerRows] of byInner) summary[o][i] = summarize(innerRows);
   }
   return summary;
+}
+
+export function aggregate(rows: ScoreRow[]): { byPath: Summary; byType: Summary } {
+  return {
+    byPath: groupStats(rows, (r) => r.adapter, (r) => r.path),
+    byType: groupStats(rows, (r) => r.questionType, (r) => r.adapter),
+  };
 }
 
 export type GatedMetric = "recall" | "precision" | "noAnswerClean";

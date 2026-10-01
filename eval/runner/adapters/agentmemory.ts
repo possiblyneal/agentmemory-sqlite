@@ -1,6 +1,8 @@
 import { startSandbox, type EmbeddingMode, type Sandbox } from "../sandbox.js";
+import { randomUUID } from "node:crypto";
 import type {
   Adapter,
+  AdapterConfig,
   EvalObservation,
   Question,
   QueryResult,
@@ -12,6 +14,11 @@ import { questionPath } from "../types.js";
 interface Needle {
   text: string;
   sessionId: string;
+}
+
+export interface AgentMemoryConfig extends AdapterConfig {
+  embeddings?: EmbeddingMode;
+  secret?: string;
 }
 
 interface AgentMemoryState {
@@ -26,9 +33,23 @@ interface SmartSearchResponse {
   results?: Array<{ obsId?: string; id?: string; sessionId?: string; score?: number }>;
 }
 
-const PROBE_SESSION_ID = "eval-probe";
 const NEEDLE_CHARS = 48;
 const SEARCH_TOOLS = new Set(["grep", "glob"]);
+
+function isSearchTool(tool: string): boolean {
+  return SEARCH_TOOLS.has(tool.toLowerCase());
+}
+
+function projectScope(project: string | undefined): { project: string; cwd: string } {
+  const name = project ?? "eval";
+  return { project: name, cwd: `/eval/${name}` };
+}
+
+// Each probe is a Session of its own, so what one question's probe leaves
+// behind cannot change the Injection a later question sees.
+function probeSessionId(): string {
+  return `eval-probe-${randomUUID()}`;
+}
 
 function authHeaders(secret?: string): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -78,19 +99,16 @@ export function attribute(context: string, needles: Needle[]): RankedDoc[] {
 }
 
 function observePayload(s: Session, o: EvalObservation, index: number) {
-  const project = s.project ?? "eval";
   const base = Date.parse(s.timestamp ?? "2026-01-01T00:00:00Z");
   const common = {
     sessionId: s.id,
-    project,
-    cwd: `/eval/${project}`,
+    ...projectScope(s.project),
     timestamp: new Date(base + index * 1000).toISOString(),
   };
   if (o.tool === "prompt") {
     return { ...common, hookType: "prompt_submit", data: { prompt: o.output } };
   }
-  const tool = o.tool.toLowerCase();
-  const toolInput = SEARCH_TOOLS.has(tool)
+  const toolInput = isSearchTool(o.tool)
     ? { pattern: o.pattern ?? "", path: o.file ?? "." }
     : o.file
       ? { file_path: o.file }
@@ -103,8 +121,7 @@ function observePayload(s: Session, o: EvalObservation, index: number) {
 }
 
 async function ingestCaptured(state: AgentMemoryState, s: Session): Promise<void> {
-  const project = s.project ?? "eval";
-  await post(state, "session/start", { sessionId: s.id, project, cwd: `/eval/${project}` });
+  await post(state, "session/start", { sessionId: s.id, ...projectScope(s.project) });
   const observations = s.observations ?? [];
   for (let i = 0; i < observations.length; i++) {
     await post(state, "observe", observePayload(s, observations[i], i));
@@ -145,9 +162,9 @@ async function querySearch(q: Question, state: AgentMemoryState, k: number): Pro
 async function queryPreToolUse(q: Question, state: AgentMemoryState): Promise<QueryResult> {
   const tool = q.tool ?? "Edit";
   const { context = "" } = await post<{ context?: string }>(state, "enrich", {
-    sessionId: PROBE_SESSION_ID,
+    sessionId: probeSessionId(),
     files: q.file ? [q.file] : [],
-    terms: SEARCH_TOOLS.has(tool.toLowerCase()) && q.pattern ? [q.pattern] : [],
+    terms: isSearchTool(tool) && q.pattern ? [q.pattern] : [],
     toolName: tool,
     ...(q.project && { project: q.project }),
   });
@@ -155,29 +172,29 @@ async function queryPreToolUse(q: Question, state: AgentMemoryState): Promise<Qu
 }
 
 async function querySessionStart(q: Question, state: AgentMemoryState): Promise<QueryResult> {
-  const project = q.project ?? "eval";
   const { context = "" } = await post<{ context?: string }>(state, "session/start", {
-    sessionId: PROBE_SESSION_ID,
-    project,
-    cwd: `/eval/${project}`,
+    sessionId: probeSessionId(),
+    ...projectScope(q.project),
   });
   return { ranked: attribute(context, state.needles), chars: context.length };
 }
 
-export const agentmemoryAdapter: Adapter<AgentMemoryState> = {
+// The daemon to score is the caller's choice: with no `baseUrl` the adapter
+// starts its own sandbox, so a runner that must never touch a live store
+// (the CI gate) simply passes none.
+export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = {
   name: "agentmemory",
   paths: ["search", "pre-tool-use", "session-start"],
-  async init(sessions, config) {
-    const explicitUrl = (config?.baseUrl as string | undefined) ?? process.env.AGENTMEMORY_BASE_URL;
-    const sandbox = explicitUrl
+  async init(sessions, config = {}) {
+    const sandbox = config.baseUrl
       ? undefined
       : await startSandbox({
-          instance: (config?.instance as number | undefined) ?? 3,
-          embeddings: (config?.embeddings as EmbeddingMode | undefined) ?? "local",
+          instance: config.instance ?? 3,
+          embeddings: config.embeddings ?? "local",
         });
     const state: AgentMemoryState = {
-      baseUrl: explicitUrl ?? sandbox!.baseUrl,
-      secret: (config?.secret as string | undefined) ?? process.env.AGENTMEMORY_SECRET,
+      baseUrl: config.baseUrl ?? sandbox!.baseUrl,
+      secret: config.secret ?? process.env.AGENTMEMORY_SECRET,
       sandbox,
       needles: [],
       memoryToSession: new Map(),
@@ -209,4 +226,10 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState> = {
   async teardown(state) {
     await state.sandbox?.stop();
   },
+};
+
+export const agentmemoryBm25Adapter: Adapter<AgentMemoryState, AgentMemoryConfig> = {
+  ...agentmemoryAdapter,
+  name: "agentmemory-bm25",
+  init: (sessions, config) => agentmemoryAdapter.init(sessions, { ...config, embeddings: "none" }),
 };
