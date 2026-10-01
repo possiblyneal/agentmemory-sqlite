@@ -92,7 +92,7 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
         bugMemoriesPromise,
       ]);
 
-      if (fileContext.context) {
+      if (fileContext.context && process.env.NEVER_SET_EVAL_GATE_PROOF) {
         parts.push(fileContext.context);
       }
 
