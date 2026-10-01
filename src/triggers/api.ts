@@ -1,5 +1,5 @@
 import { TriggerAction, type ISdk, type ApiRequest } from "../engine/types.js";
-import type { Session, CompressedObservation, HookPayload, CommitLink, SessionSummary } from "../types.js";
+import type { Session, CompressedObservation, HookPayload, CommitLink, SessionSummary, InjectedRef, InjectionSource } from "../types.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
@@ -19,6 +19,7 @@ import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { getFollowupStats } from "../functions/smart-search.js";
 import { recordProjectActivity } from "../state/project-time.js";
+import { recordInjection } from "../functions/injections.js";
 import {
   isGraphExtractionEnabled,
   isConsolidationEnabled,
@@ -180,6 +181,41 @@ function countInjection(context: string | undefined): void {
   const counters = getCounters();
   counters.injections.add(1);
   if (!context?.trim()) counters.emptyInjections.add(1);
+}
+
+interface InjectionResult {
+  context?: string;
+  tokens?: number;
+  injected?: InjectedRef[];
+}
+
+function noteInjection(
+  kv: StateKV,
+  source: InjectionSource,
+  sessionId: string,
+  project: string | undefined,
+  result: InjectionResult | undefined,
+): void {
+  countInjection(result?.context);
+  const context = result?.context ?? "";
+  recordInjection(kv, {
+    source,
+    sessionId,
+    ...(project ? { project } : {}),
+    injected: context.trim() ? (result?.injected ?? []) : [],
+    tokens: result?.tokens ?? 0,
+  }).catch((err) => {
+    logger.warn("Injection record write failed", {
+      source,
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+function withoutInjected(result: InjectionResult | undefined) {
+  const { injected: _injected, ...rest } = result ?? {};
+  return rest;
 }
 
 function recallCounts() {
@@ -448,12 +484,12 @@ export function registerApiTriggers(
       if (budget !== undefined) payload.budget = budget;
       const agentId = bodyAgentId ?? queryAgentId;
       if (agentId !== undefined) payload.agentId = agentId;
-      const result = await sdk.trigger<typeof payload, { context: string }>({
+      const result = await sdk.trigger<typeof payload, InjectionResult>({
         function_id: "mem::context",
         payload,
       });
-      countInjection(result?.context);
-      return { status_code: 200, body: result };
+      noteInjection(kv, "context", sessionId, project, result);
+      return { status_code: 200, body: withoutInjected(result) };
     },
   );
   sdk.registerTrigger({
@@ -576,6 +612,27 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::compress-file",
     config: { api_path: "/agentmemory/compress-file", http_method: "POST" },
+  });
+
+  sdk.registerFunction("api::injections",
+    async (req: ApiRequest): Promise<Response> => {
+      const authErr = checkAuth(req, secret);
+      if (authErr) return authErr;
+      const sessionId = asNonEmptyString(req.query_params?.["sessionId"]);
+      if (!sessionId) {
+        return { status_code: 400, body: { error: "sessionId is required" } };
+      }
+      const result = await sdk.trigger({
+        function_id: "mem::injections-list",
+        payload: { sessionId },
+      });
+      return { status_code: 200, body: result };
+    },
+  );
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::injections",
+    config: { api_path: "/agentmemory/injections", http_method: "GET" },
   });
 
   sdk.registerFunction("api::replay::load",
@@ -701,12 +758,12 @@ export function registerApiTriggers(
       await recordProjectActivity(kv, project, session.startedAt);
       const contextResult = await sdk.trigger<
         { sessionId: string; project: string; agentId?: string },
-        { context: string }
+        InjectionResult
       >({
         function_id: "mem::context",
         payload: { sessionId, project, ...(agentId ? { agentId } : {}) },
       });
-      countInjection(contextResult.context);
+      noteInjection(kv, "session-start", sessionId, project, contextResult);
       return {
         status_code: 200,
         body: { session, context: contextResult.context },
@@ -1111,7 +1168,7 @@ export function registerApiTriggers(
           body: { error: "project must be a non-empty string" },
         };
       }
-      const result = await sdk.trigger<unknown, { context: string }>({
+      const result = await sdk.trigger<unknown, InjectionResult>({
         function_id: "mem::enrich",
         payload: {
           sessionId: req.body.sessionId,
@@ -1121,8 +1178,14 @@ export function registerApiTriggers(
           ...(req.body.project !== undefined && { project: req.body.project }),
         },
       });
-      countInjection(result?.context);
-      return { status_code: 200, body: result };
+      noteInjection(
+        kv,
+        "enrich",
+        req.body.sessionId,
+        typeof req.body.project === "string" ? req.body.project.trim() : undefined,
+        result,
+      );
+      return { status_code: 200, body: withoutInjected(result) };
     },
   );
   sdk.registerTrigger({

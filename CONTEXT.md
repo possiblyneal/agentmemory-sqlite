@@ -110,6 +110,13 @@ An Injection the daemon answered with nothing to inject. The daemon was reachabl
 found nothing that bore on the work.
 _Avoid_: miss, no-op
 
+**Injection Record**:
+The daemon's note of one answered Injection: the path that served it (session start, context,
+enrich), the Session, and the identifiers of the Observations, Memories, Lessons, Insights and
+Session Summaries it carried. An Empty Injection leaves a record with no identifiers; a Missed
+Injection leaves none, because the daemon never answered. Kept for seven days.
+_Avoid_: injection log, context log
+
 **Unrecalled Memory**:
 A Memory older than its grace period that no Recall has ever returned. Evidence that the
 Memory was not worth storing, or that Recall cannot reach it.

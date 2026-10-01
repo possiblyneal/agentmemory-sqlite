@@ -122,13 +122,14 @@ export function registerFileIndexFunction(sdk: ISdk, kv: StateKV): void {
         for (const obs of fh.observations) accessedIds.push(obs.obsId);
       }
       void recordAccessBatch(kv, accessedIds);
+      const injected = accessedIds.map((id) => ({ kind: "observation" as const, id }));
 
       const context = lines.join("\n");
       logger.info("File context generated", {
         files: files.length,
         results: results.length,
       });
-      return { context };
+      return { context, injected };
     },
   );
 }

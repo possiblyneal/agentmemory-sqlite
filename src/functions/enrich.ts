@@ -1,9 +1,10 @@
 import type { ISdk } from "../engine/types.js";
-import type { Memory } from "../types.js";
+import type { InjectedRef, Memory } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { recordAccessBatch } from "./access-tracker.js";
+import { estimateTokens } from "./context.js";
 
 const MAX_CONTEXT_LENGTH = 4000;
 
@@ -30,17 +31,20 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
           ? data.project.trim()
           : undefined;
 
-      const parts: string[] = [];
+      const parts: Array<{ text: string; injected: InjectedRef[] }> = [];
 
       const fileContextPromise = sdk
-        .trigger<{ sessionId: string; files: string[] }, { context: string }>({
+        .trigger<
+          { sessionId: string; files: string[] },
+          { context: string; injected?: InjectedRef[] }
+        >({
           function_id: "mem::file-context",
           payload: {
             sessionId: data.sessionId,
             files: data.files,
           },
         })
-        .catch(() => ({ context: "" }));
+        .catch((): { context: string; injected?: InjectedRef[] } => ({ context: "" }));
 
       const searchQueries: string[] = [
         ...data.files.map((f) => f.split("/").pop() || f),
@@ -52,7 +56,7 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
           ? sdk
               .trigger<
                 { query: string; limit: number; project?: string },
-                { results: Array<{ observation: { narrative: string } }> }
+                { results: Array<{ observation: { id: string; narrative: string } }> }
               >({
                 function_id: "mem::search",
                 payload: {
@@ -93,20 +97,18 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
       ]);
 
       if (fileContext.context) {
-        parts.push(fileContext.context);
+        parts.push({ text: fileContext.context, injected: fileContext.injected ?? [] });
       }
 
-      if (searchResult.results.length > 0) {
-        const observations = searchResult.results
-          .map((r) => r.observation?.narrative)
-          .filter(Boolean)
-          .map((n) => escapeXml(n as string))
-          .join("\n");
-        if (observations) {
-          parts.push(
-            `<agentmemory-relevant-context>\n${observations}\n</agentmemory-relevant-context>`,
-          );
-        }
+      const narrated = searchResult.results
+        .map((r) => r.observation)
+        .filter((o) => o?.narrative);
+      if (narrated.length > 0) {
+        const observations = narrated.map((o) => escapeXml(o.narrative)).join("\n");
+        parts.push({
+          text: `<agentmemory-relevant-context>\n${observations}\n</agentmemory-relevant-context>`,
+          injected: narrated.map((o) => ({ kind: "observation" as const, id: o.id })),
+        });
       }
 
       if (bugMemories.length > 0) {
@@ -115,12 +117,21 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
         const bugs = injected
           .map((m) => `- ${escapeXml(m.title)}: ${escapeXml(m.content)}`)
           .join("\n");
-        parts.push(
-          `<agentmemory-past-errors>\n${bugs}\n</agentmemory-past-errors>`,
-        );
+        parts.push({
+          text: `<agentmemory-past-errors>\n${bugs}\n</agentmemory-past-errors>`,
+          injected: injected.map((m) => ({ kind: "memory" as const, id: m.id })),
+        });
       }
 
-      let context = parts.join("\n\n");
+      const separator = "\n\n";
+      const surviving: InjectedRef[] = [];
+      let offset = 0;
+      for (const part of parts) {
+        if (offset < MAX_CONTEXT_LENGTH) surviving.push(...part.injected);
+        offset += part.text.length + separator.length;
+      }
+
+      let context = parts.map((p) => p.text).join(separator);
       let truncated = false;
       if (context.length > MAX_CONTEXT_LENGTH) {
         context = context.slice(0, MAX_CONTEXT_LENGTH);
@@ -135,7 +146,7 @@ export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
         truncated,
       });
 
-      return { context, truncated };
+      return { context, truncated, tokens: estimateTokens(context), injected: surviving };
     },
   );
 }
