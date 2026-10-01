@@ -966,6 +966,7 @@ async function extractGraph(
           type: o.type,
         })),
       );
+      const started = Date.now();
       try {
         const response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
         const parsed = parseGraphXml(
@@ -980,7 +981,11 @@ async function extractGraph(
         failure ??= err;
         logger.error("LLM graph extraction failed", {
           error: err instanceof Error ? err.message : String(err),
+          sessionId: batch[0]!.sessionId,
+          sessionCount: new Set(batch.map((o) => o.sessionId)).size,
           batchSize: batch.length,
+          promptChars: prompt.length,
+          tookMs: Date.now() - started,
         });
         if (stopAtFirstFailure || isProviderDown(err)) break;
       }
