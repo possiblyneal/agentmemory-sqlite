@@ -12,9 +12,21 @@ import type {
   Session,
 } from "../types.js";
 import { recordAudit } from "./audit.js";
-import { REFLECT_SYSTEM, buildReflectPrompt } from "../prompts/reflect.js";
+import {
+  REFLECT_SYSTEM,
+  buildReflectPrompt,
+  formatNarrativeLine,
+  formatScoredLine,
+} from "../prompts/reflect.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
+import { logger } from "../logger.js";
+
+// A cluster takes every fact sharing a word with its concepts, which on the
+// Operator's broker reached 100k+ tokens and starved sibling slots during
+// prefill. ~8k tokens at the tree's chars/3 estimate.
+const CLUSTER_PROMPT_CHARS = 24_000;
+const MIN_CLUSTER_ITEMS = 3;
 
 interface ConceptCluster {
   concepts: string[];
@@ -24,6 +36,50 @@ interface ConceptCluster {
   factIds: string[];
   lessonIds: string[];
   crystalIds: string[];
+}
+
+// Lessons and crystals are the more durable record, so they fill the budget
+// before facts. Lessons and facts go strongest first, crystals newest first.
+// An item too large for what is left is skipped and smaller ones keep filling.
+function fitClusterToBudget(
+  concepts: string[],
+  lessons: Lesson[],
+  crystals: Crystal[],
+  facts: SemanticMemory[],
+): { lessons: Lesson[]; crystals: Crystal[]; facts: SemanticMemory[] } {
+  // Rendering every section with an empty item reserves the intro, concept
+  // header and section headings before any item is counted.
+  const header = buildReflectPrompt({
+    concepts,
+    facts: [{ fact: "", confidence: 0 }],
+    lessons: [{ content: "", confidence: 0 }],
+    crystalNarratives: [""],
+  });
+  let remaining = CLUSTER_PROMPT_CHARS - header.length;
+  const take = <T>(items: T[], line: (item: T) => string): T[] =>
+    items.filter((item) => {
+      const chars = line(item).length + 1;
+      if (chars > remaining) return false;
+      remaining -= chars;
+      return true;
+    });
+  return {
+    lessons: take(
+      [...lessons].sort((a, b) => b.confidence - a.confidence),
+      (l) => formatScoredLine(l.confidence, l.content),
+    ),
+    crystals: take(
+      [...crystals].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+      (c) => formatNarrativeLine(c.narrative),
+    ),
+    facts: take(
+      [...facts].sort((a, b) => b.confidence - a.confidence),
+      (f) => formatScoredLine(f.confidence, f.fact),
+    ),
+  };
 }
 
 function reinforceInsight(insight: Insight): void {
@@ -260,25 +316,46 @@ export function registerReflectFunctions(
 
         const totalItems =
           clusterFacts.length + clusterLessons.length + clusterCrystals.length;
-        if (totalItems < 3) {
+        if (totalItems < MIN_CLUSTER_ITEMS) {
+          clustersSkipped++;
+          continue;
+        }
+
+        const fitted = fitClusterToBudget(
+          conceptNames,
+          clusterLessons,
+          clusterCrystals,
+          clusterFacts,
+        );
+        const keptItems =
+          fitted.facts.length + fitted.lessons.length + fitted.crystals.length;
+        if (keptItems < totalItems) {
+          logger.info("Reflect cluster trimmed to its prompt budget", {
+            project: data?.project,
+            concepts: conceptNames,
+            keptItems,
+            droppedItems: totalItems - keptItems,
+          });
+        }
+        if (keptItems < MIN_CLUSTER_ITEMS) {
           clustersSkipped++;
           continue;
         }
 
         const cluster: ConceptCluster = {
           concepts: conceptNames,
-          facts: clusterFacts.map((f) => ({
+          facts: fitted.facts.map((f) => ({
             fact: f.fact,
             confidence: f.confidence,
           })),
-          lessons: clusterLessons.map((l) => ({
+          lessons: fitted.lessons.map((l) => ({
             content: l.content,
             confidence: l.confidence,
           })),
-          crystalNarratives: clusterCrystals.map((c) => c.narrative),
-          factIds: clusterFacts.map((f) => f.id),
-          lessonIds: clusterLessons.map((l) => l.id),
-          crystalIds: clusterCrystals.map((c) => c.id),
+          crystalNarratives: fitted.crystals.map((c) => c.narrative),
+          factIds: fitted.facts.map((f) => f.id),
+          lessonIds: fitted.lessons.map((l) => l.id),
+          crystalIds: fitted.crystals.map((c) => c.id),
         };
 
         try {
