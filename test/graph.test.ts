@@ -144,6 +144,21 @@ describe("Graph Functions", () => {
     expect(result.nodesAdded).toBe(4);
   });
 
+  it("logs the Session, prompt size and elapsed time of a failed batch", async () => {
+    mockProvider.compress.mockRejectedValueOnce(new Error("timed out after 300000ms"));
+
+    await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+
+    const prompt = String(mockProvider.compress.mock.calls[0]![1]);
+    expect(logger.error).toHaveBeenCalledWith("LLM graph extraction failed", {
+      error: "timed out after 300000ms",
+      sessionId: "ses_1",
+      batchSize: 1,
+      promptChars: prompt.length,
+      elapsedMs: expect.any(Number),
+    });
+  });
+
   it("graph-extract stops sending batches once the provider's circuit breaker is open", async () => {
     const observations = Array.from({ length: 25 }, (_, i) => ({ ...testObs, id: `obs_${i}` }));
     mockProvider.compress.mockRejectedValueOnce(new Error("circuit_breaker_open"));
