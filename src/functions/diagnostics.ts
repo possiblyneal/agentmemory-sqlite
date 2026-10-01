@@ -14,7 +14,6 @@ import type {
   Insight,
   Lease,
   Lesson,
-  Checkpoint,
   Crystal,
   ProceduralMemory,
   SemanticMemory,
@@ -27,7 +26,7 @@ import type {
   Memory,
 } from "../types.js";
 
-const ALL_CATEGORIES = [
+export const ALL_CATEGORIES = [
   "actions",
   "leases",
   "sentinels",

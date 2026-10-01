@@ -7,7 +7,8 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { registerDiagnosticsFunction } from "../src/functions/diagnostics.js";
+import { ALL_CATEGORIES, registerDiagnosticsFunction } from "../src/functions/diagnostics.js";
+import { getAllTools } from "../src/mcp/tools-registry.js";
 import type {
   Action,
   ActionEdge,
@@ -199,6 +200,12 @@ describe("Diagnostics Functions", () => {
   });
 
   describe("mem::diagnose", () => {
+    it("memory_diagnose names every category it accepts", () => {
+      const tool = getAllTools().find((t) => t.name === "memory_diagnose")!;
+      const listed = tool.description.match(/\(([^)]*)\)/)![1].split(", ");
+      expect(listed).toEqual(ALL_CATEGORIES);
+    });
+
     it("empty system warns that no sessions exist and passes the rest (#1166)", async () => {
       const result = (await sdk.trigger("mem::diagnose", {})) as {
         success: boolean;

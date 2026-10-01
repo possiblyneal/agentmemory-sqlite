@@ -37,6 +37,9 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 - **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 14 hook entries, to
   `plugin/scripts/*.mjs` — those are committed build output, and tsdown gives them mode 755 for
   their shebang. Regenerate them with `npm run build`; never hand-edit one or reset its mode.
+  An installed plugin runs its own cached copy, and `claude plugin update` skips any update
+  that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
+  only after `claude plugin uninstall` and then `claude plugin install`.
 - **Test**: vitest (`npm test` excludes integration tests)
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
@@ -161,7 +164,7 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 
 ## Testing
 
-- All tests must pass before PR: `npm test` (1,850+ tests)
+- `npm run typecheck` must report 0 errors and `npm test` (1,850+ tests) must pass before a PR; CI runs both
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests

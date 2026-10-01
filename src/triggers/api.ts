@@ -323,7 +323,7 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::health", 
-    async (req: ApiRequest): Promise<Response> => {
+    async (): Promise<Response> => {
       const health = await getLatestHealth(kv);
       const functionMetrics = metricsStore ? await metricsStore.getAll() : [];
       const circuitBreaker =
@@ -360,7 +360,7 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::observe",
-    async (req: ApiRequest<HookPayload>): Promise<Response> => {
+    async (req: ApiRequest): Promise<Response> => {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const hookType = asNonEmptyString(body.hookType);
       const sessionId = asNonEmptyString(body.sessionId);
@@ -2859,7 +2859,7 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::routine-create",
-    async (req: ApiRequest): Promise<Response> => {
+    async (req: ApiRequest<{ name?: unknown; steps?: unknown }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       if (!req.body?.name || !req.body?.steps) {
