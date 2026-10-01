@@ -64,6 +64,7 @@ jobs:
       # throwaway daemon and fails when search, pre-tool-use or session-start
       # scores drop below eval/baselines/ minus tolerance. BM25-only, so it
       # needs no embedding model download; one leg is enough because the
-      # numbers do not depend on OS or Node version.
-      - if: matrix.os == 'ubuntu-latest' && matrix.node-version == 22
+      # numbers do not depend on OS or Node version. It runs even when unit
+      # tests fail, so a ranking change shows its Recall cost alongside them.
+      - if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.node-version == 22 }}
         run: npm run eval:gate
