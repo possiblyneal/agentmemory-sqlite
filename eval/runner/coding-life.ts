@@ -1,16 +1,25 @@
-import { readFileSync, existsSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agentmemoryAdapter } from "./adapters/agentmemory.js";
 import { grepAdapter } from "./adapters/grep.js";
+import { randomAdapter } from "./adapters/random.js";
 import { vectorAdapter } from "./adapters/vector.js";
 import { aggregate, scoreQuestion } from "./score.js";
-import type { Adapter, Question, ScoreRow, Session } from "./types.js";
+import { questionPath, type Adapter, type Question, type ScoreRow, type Session } from "./types.js";
+
+const agentmemoryBm25: Adapter = {
+  ...(agentmemoryAdapter as unknown as Adapter),
+  name: "agentmemory-bm25",
+  init: (sessions, config) => agentmemoryAdapter.init(sessions, { ...config, embeddings: "none" }),
+};
 
 const ADAPTERS: Record<string, Adapter> = {
-  grep: grepAdapter as unknown as Adapter,
-  vector: vectorAdapter as unknown as Adapter,
   agentmemory: agentmemoryAdapter as unknown as Adapter,
+  "agentmemory-bm25": agentmemoryBm25,
+  grep: grepAdapter as unknown as Adapter,
+  random: randomAdapter as unknown as Adapter,
+  vector: vectorAdapter as unknown as Adapter,
 };
 
 interface CliOptions {
@@ -18,18 +27,26 @@ interface CliOptions {
   adapters: string;
   k: string;
   out: string;
+  instance: string;
+  "base-url"?: string;
 }
 
 function parse(): CliOptions {
   const { values } = parseArgs({
     options: {
-      data: { type: "string", default: "eval/data/coding-agent-life-v1" },
-      adapters: { type: "string", default: "grep,vector,agentmemory" },
+      data: { type: "string", default: "eval/data/coding-agent-life-v2" },
+      adapters: { type: "string", default: "agentmemory,agentmemory-bm25,grep,random" },
       k: { type: "string", default: "5" },
       out: { type: "string", default: "eval/reports/coding-life" },
+      instance: { type: "string", default: "3" },
+      "base-url": { type: "string" },
     },
   });
   return values as unknown as CliOptions;
+}
+
+function fmt(x: number | null, digits = 3): string {
+  return x === null ? "—" : x.toFixed(digits);
 }
 
 async function main(): Promise<void> {
@@ -37,6 +54,11 @@ async function main(): Promise<void> {
   const k = Number(opts.k);
   if (!Number.isInteger(k) || k <= 0) {
     console.error(`--k must be a positive integer, got: ${opts.k}`);
+    process.exit(2);
+  }
+  const instance = Number(opts.instance);
+  if (!Number.isInteger(instance) || instance < 1) {
+    console.error(`--instance must be a positive integer, got: ${opts.instance}`);
     process.exit(2);
   }
   const sessions = JSON.parse(
@@ -60,24 +82,25 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  if (existsSync(ndjsonPath)) writeFileSync(ndjsonPath, "");
+  writeFileSync(ndjsonPath, "");
 
   const rows: ScoreRow[] = [];
   for (const adapterName of adapterNames) {
     const adapter = ADAPTERS[adapterName];
     console.log(`\n== ${adapter.name} ==`);
-    const state = await adapter.init(sessions);
+    const state = await adapter.init(sessions, { instance, baseUrl: opts["base-url"] });
     try {
       for (const q of questions) {
+        if (!adapter.paths.includes(questionPath(q))) continue;
         const t0 = performance.now();
-        const ranked = await adapter.query(q.question, state, k);
+        const result = await adapter.query(q, state, k);
         const latencyMs = performance.now() - t0;
-        const row = scoreQuestion(q, ranked, k, adapter.name, latencyMs);
+        const row = scoreQuestion(q, result, k, adapter.name, latencyMs);
         rows.push(row);
         appendFileSync(ndjsonPath, JSON.stringify(row) + "\n");
         const mark = row.hit ? "+" : "-";
         console.log(
-          `  ${mark} ${q.id} [${q.type}] R@${k}=${row.recallAtK.toFixed(2)} (${Math.round(latencyMs)}ms)`,
+          `  ${mark} ${q.id} [${row.path}/${q.type}] returned=${row.returned} recall=${fmt(row.recall, 2)} precision=${row.precision.toFixed(2)} (${Math.round(latencyMs)}ms)`,
         );
       }
     } finally {
@@ -85,14 +108,20 @@ async function main(): Promise<void> {
     }
   }
 
-  const agg = aggregate(rows);
-  writeFileSync(`${outDir}/summary.json`, JSON.stringify(agg, null, 2));
+  const summary = aggregate(rows);
+  writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2));
   console.log("\n=== Summary ===");
-  for (const [adapter, stats] of Object.entries(agg.byAdapter)) {
-    console.log(
-      `  ${adapter.padEnd(22)} P@${k}=${stats.p.toFixed(3)} R@${k}=${stats.r.toFixed(3)} hit=${stats.hit}/${stats.n} p50=${Math.round(stats.latencyP50)}ms`,
-    );
+  console.log(
+    `  ${"adapter".padEnd(18)} ${"path".padEnd(14)} ${"n".padStart(3)} ${"recall".padStart(7)} ${"precision".padStart(9)} ${"no-answer".padStart(9)} ${"hit".padStart(7)} ${"chars".padStart(7)} ${"p50".padStart(6)}`,
+  );
+  for (const [adapter, byPath] of Object.entries(summary)) {
+    for (const [path, s] of Object.entries(byPath)) {
+      console.log(
+        `  ${adapter.padEnd(18)} ${path.padEnd(14)} ${String(s.n).padStart(3)} ${fmt(s.recall).padStart(7)} ${fmt(s.precision).padStart(9)} ${fmt(s.noAnswerClean).padStart(9)} ${`${s.hit}/${s.n}`.padStart(7)} ${(s.meanChars === null ? "—" : String(Math.round(s.meanChars))).padStart(7)} ${`${Math.round(s.latencyP50)}ms`.padStart(6)}`,
+      );
+    }
   }
+  console.log(`\nwrote ${ndjsonPath}`);
 }
 
 main().catch((err) => {

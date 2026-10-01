@@ -91,14 +91,14 @@ async function main(): Promise<void> {
       const t0 = performance.now();
       const state = await adapter.init(q.haystack);
       try {
-        const ranked = await adapter.query(q.question, state, k);
+        const result = await adapter.query(q, state, k);
         const latencyMs = performance.now() - t0;
-        const row = scoreQuestion(q, ranked, k, adapter.name, latencyMs);
+        const row = scoreQuestion(q, result, k, adapter.name, latencyMs);
         rows.push(row);
         appendFileSync(ndjsonPath, JSON.stringify(row) + "\n");
         const mark = row.hit ? "+" : "-";
         console.log(
-          `  ${mark} ${q.id} [${q.type}] R@${k}=${row.recallAtK.toFixed(2)} (${Math.round(latencyMs)}ms)`,
+          `  ${mark} ${q.id} [${q.type}] R@${k}=${(row.recall ?? 0).toFixed(2)} (${Math.round(latencyMs)}ms)`,
         );
       } finally {
         if (adapter.teardown) await adapter.teardown(state);
@@ -111,9 +111,10 @@ async function main(): Promise<void> {
   writeFileSync(summaryPath, JSON.stringify(agg, null, 2));
 
   console.log("\n=== Summary ===");
-  for (const [adapter, stats] of Object.entries(agg.byAdapter)) {
+  for (const [adapter, byPath] of Object.entries(agg)) {
+    const stats = byPath.search;
     console.log(
-      `  ${adapter.padEnd(22)} P@${k}=${stats.p.toFixed(3)} R@${k}=${stats.r.toFixed(3)} hit=${stats.hit}/${stats.n} p50=${Math.round(stats.latencyP50)}ms`,
+      `  ${adapter.padEnd(22)} P@${k}=${stats.precision.toFixed(3)} R@${k}=${stats.recall.toFixed(3)} hit=${stats.hit}/${stats.n} p50=${Math.round(stats.latencyP50)}ms`,
     );
   }
   console.log(`\nwrote ${ndjsonPath}`);

@@ -1,78 +1,92 @@
-import type { Question, RankedDoc, ScoreRow } from "./types.js";
+import { questionPath, type Question, type QueryResult, type ScoreRow } from "./types.js";
 
+// Precision is gold hits over what was actually returned, so a near-miss
+// costs the score even when the gold item is also present. Returning
+// nothing is vacuously precise; an answerable question pays for that in
+// recall instead. Recall is undefined for a question with no gold.
 export function scoreQuestion(
   q: Question,
-  ranked: RankedDoc[],
+  result: QueryResult,
   k: number,
   adapter: string,
   latencyMs: number,
 ): ScoreRow {
-  const topK = ranked.slice(0, k).map((r) => r.sessionId);
+  const path = questionPath(q);
+  const ranked = path === "search" ? result.ranked.slice(0, k) : result.ranked;
+  const returnedIds = ranked.map((r) => r.sessionId);
   const gold = new Set(q.goldSessionIds);
-  const hits = topK.filter((id) => gold.has(id)).length;
-  const precisionAtK = k > 0 ? hits / k : 0;
-  const recallAtK = gold.size === 0 ? 0 : hits / gold.size;
-  const hit = hits > 0;
-  let topGoldRank: number | null = null;
-  for (let i = 0; i < ranked.length; i++) {
-    if (gold.has(ranked[i].sessionId)) {
-      topGoldRank = i + 1;
-      break;
-    }
-  }
+  const answerable = gold.size > 0;
+  const hits = returnedIds.filter((id) => gold.has(id)).length;
+  const precision = returnedIds.length === 0 ? 1 : hits / returnedIds.length;
+  const recall = answerable ? hits / gold.size : null;
+  const hit = answerable ? hits > 0 : returnedIds.length === 0;
+  const goldIndex = returnedIds.findIndex((id) => gold.has(id));
   return {
     questionId: q.id,
     questionType: q.type,
+    path,
     adapter,
     k,
-    precisionAtK,
-    recallAtK,
+    returned: returnedIds.length,
+    returnedIds,
+    answerable,
+    precision,
+    recall,
     hit,
-    topGoldRank,
+    topGoldRank: goldIndex === -1 ? null : goldIndex + 1,
+    chars: result.chars ?? null,
     latencyMs,
   };
 }
 
-export function aggregate(rows: ScoreRow[]): {
-  byAdapter: Record<string, { p: number; r: number; hit: number; n: number; latencyP50: number }>;
-  byType: Record<string, Record<string, { p: number; r: number; hit: number; n: number }>>;
-} {
-  const byAdapter: Record<
-    string,
-    { p: number; r: number; hit: number; n: number; latencyP50: number }
-  > = {};
-  const latencies: Record<string, number[]> = {};
+export interface PathStats {
+  n: number;
+  answerable: number;
+  recall: number;
+  precision: number;
+  noAnswerClean: number | null;
+  hit: number;
+  meanChars: number | null;
+  latencyP50: number;
+}
+
+export type Summary = Record<string, Record<string, PathStats>>;
+
+function mean(xs: number[]): number {
+  return xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+export function summarize(rows: ScoreRow[]): PathStats {
+  const answerable = rows.filter((r) => r.answerable);
+  const noAnswer = rows.filter((r) => !r.answerable);
+  const chars = rows.map((r) => r.chars).filter((t): t is number => t !== null);
+  const latencies = rows.map((r) => r.latencyMs).sort((a, b) => a - b);
+  return {
+    n: rows.length,
+    answerable: answerable.length,
+    recall: mean(answerable.map((r) => r.recall ?? 0)),
+    precision: mean(rows.map((r) => r.precision)),
+    noAnswerClean:
+      noAnswer.length === 0
+        ? null
+        : noAnswer.filter((r) => r.returned === 0).length / noAnswer.length,
+    hit: rows.filter((r) => r.hit).length,
+    meanChars: chars.length === 0 ? null : mean(chars),
+    latencyP50: latencies[Math.floor(latencies.length / 2)] ?? 0,
+  };
+}
+
+export function aggregate(rows: ScoreRow[]): Summary {
+  const groups = new Map<string, Map<string, ScoreRow[]>>();
   for (const r of rows) {
-    const a = (byAdapter[r.adapter] ??= { p: 0, r: 0, hit: 0, n: 0, latencyP50: 0 });
-    a.p += r.precisionAtK;
-    a.r += r.recallAtK;
-    a.hit += r.hit ? 1 : 0;
-    a.n += 1;
-    (latencies[r.adapter] ??= []).push(r.latencyMs);
+    const byPath = groups.get(r.adapter) ?? new Map<string, ScoreRow[]>();
+    groups.set(r.adapter, byPath);
+    byPath.set(r.path, [...(byPath.get(r.path) ?? []), r]);
   }
-  for (const adapter of Object.keys(byAdapter)) {
-    const a = byAdapter[adapter];
-    a.p = a.p / a.n;
-    a.r = a.r / a.n;
-    const sorted = latencies[adapter].slice().sort((x, y) => x - y);
-    a.latencyP50 = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const summary: Summary = {};
+  for (const [adapter, byPath] of groups) {
+    summary[adapter] = {};
+    for (const [path, pathRows] of byPath) summary[adapter][path] = summarize(pathRows);
   }
-  const byType: Record<string, Record<string, { p: number; r: number; hit: number; n: number }>> =
-    {};
-  for (const r of rows) {
-    const t = (byType[r.questionType] ??= {});
-    const a = (t[r.adapter] ??= { p: 0, r: 0, hit: 0, n: 0 });
-    a.p += r.precisionAtK;
-    a.r += r.recallAtK;
-    a.hit += r.hit ? 1 : 0;
-    a.n += 1;
-  }
-  for (const t of Object.keys(byType)) {
-    for (const adapter of Object.keys(byType[t])) {
-      const a = byType[t][adapter];
-      a.p = a.p / a.n;
-      a.r = a.r / a.n;
-    }
-  }
-  return { byAdapter, byType };
+  return summary;
 }

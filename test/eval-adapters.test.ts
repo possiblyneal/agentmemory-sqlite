@@ -1,92 +1,145 @@
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import { attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
+import { randomAdapter } from "../eval/runner/adapters/random.js";
 import { aggregate, scoreQuestion } from "../eval/runner/score.js";
-import type { Question, Session } from "../eval/runner/types.js";
+import type { Question, QueryResult, Session } from "../eval/runner/types.js";
 
-const DATA_DIR = resolve(__dirname, "..", "eval", "data", "coding-agent-life-v1");
-const sessions = JSON.parse(readFileSync(`${DATA_DIR}/sessions.json`, "utf8")) as Session[];
-const queries = JSON.parse(readFileSync(`${DATA_DIR}/queries.json`, "utf8")) as Array<
-  Omit<Question, "haystack">
->;
+function question(overrides: Partial<Question>): Question {
+  return { id: "q", type: "t", goldSessionIds: [], haystack: [], ...overrides };
+}
 
-describe("eval scaffold", () => {
-  it("coding-agent-life-v1 corpus is well-formed", () => {
-    expect(sessions.length).toBeGreaterThan(0);
-    expect(queries.length).toBeGreaterThan(0);
-    const sessionIds = new Set(sessions.map((s) => s.id));
+function ranked(...ids: string[]): QueryResult {
+  return { ranked: ids.map((sessionId, i) => ({ sessionId, score: ids.length - i })) };
+}
+
+describe("scoreQuestion", () => {
+  it("charges a near-miss to precision even when the gold item is returned", () => {
+    const row = scoreQuestion(question({ goldSessionIds: ["a"] }), ranked("a", "b"), 5, "x", 0);
+    expect(row.recall).toBe(1);
+    expect(row.precision).toBe(0.5);
+    expect(row.hit).toBe(true);
+    expect(row.topGoldRank).toBe(1);
+  });
+
+  it("scores a no-answer question as a hit only when nothing is returned", () => {
+    const q = question({ goldSessionIds: [] });
+    const empty = scoreQuestion(q, ranked(), 5, "x", 0);
+    expect(empty).toMatchObject({ hit: true, precision: 1, recall: null, answerable: false });
+    const noisy = scoreQuestion(q, ranked("a"), 5, "x", 0);
+    expect(noisy).toMatchObject({ hit: false, precision: 0 });
+  });
+
+  it("truncates search results to k but scores an Injection as a whole", () => {
+    const result = ranked("b", "c", "a");
+    const search = scoreQuestion(question({ goldSessionIds: ["a"] }), result, 2, "x", 0);
+    expect(search.recall).toBe(0);
+    const injection = scoreQuestion(
+      question({ path: "pre-tool-use", goldSessionIds: ["a"] }),
+      result,
+      2,
+      "x",
+      0,
+    );
+    expect(injection.recall).toBe(1);
+    expect(injection.returned).toBe(3);
+  });
+});
+
+describe("aggregate", () => {
+  it("keeps each path's numbers apart and reports the no-answer clean rate", () => {
+    const rows = [
+      scoreQuestion(question({ id: "1", goldSessionIds: ["a"] }), ranked("a"), 5, "x", 1),
+      scoreQuestion(question({ id: "2", goldSessionIds: [] }), ranked("a"), 5, "x", 1),
+      scoreQuestion(
+        question({ id: "3", path: "pre-tool-use", goldSessionIds: [] }),
+        { ranked: [], chars: 0 },
+        5,
+        "x",
+        1,
+      ),
+    ];
+    const summary = aggregate(rows);
+    expect(summary.x.search).toMatchObject({ n: 2, answerable: 1, recall: 1, noAnswerClean: 0 });
+    expect(summary.x["pre-tool-use"]).toMatchObject({ n: 1, noAnswerClean: 1, meanChars: 0 });
+  });
+});
+
+describe("attribute", () => {
+  const needles = [
+    { text: needleFor("fixed the <retry> loop & backoff"), sessionId: "s1" },
+    { text: needleFor("added helm chart support"), sessionId: "s2" },
+  ];
+
+  it("finds Observations through XML escaping and orders by first appearance", () => {
+    const context =
+      "<ctx>- added helm chart\n  support\n- fixed the &lt;retry&gt; loop &amp; backoff</ctx>";
+    expect(attribute(context, needles).map((r) => r.sessionId)).toEqual(["s2", "s1"]);
+  });
+
+  it("attributes nothing in an Empty Injection", () => {
+    expect(attribute("", needles)).toEqual([]);
+  });
+});
+
+describe("random control", () => {
+  it("returns the same k sessions for the same question", async () => {
+    const sessions: Session[] = ["a", "b", "c", "d"].map((id) => ({ id }));
+    const state = await randomAdapter.init(sessions);
+    const q = question({ id: "q-1" });
+    const first = await randomAdapter.query(q, state, 2);
+    const second = await randomAdapter.query(q, state, 2);
+    expect(first.ranked).toHaveLength(2);
+    expect(second).toEqual(first);
+  });
+});
+
+describe("coding-agent-life-v2 dataset", () => {
+  const dir = new URL("../eval/data/coding-agent-life-v2/", import.meta.url);
+  const sessions = JSON.parse(readFileSync(new URL("sessions.json", dir), "utf8")) as Session[];
+  const queries = JSON.parse(readFileSync(new URL("queries.json", dir), "utf8")) as Question[];
+  const ids = new Set(sessions.map((s) => s.id));
+
+  it("points every gold id at a session in the same project", () => {
     for (const q of queries) {
-      expect(q.goldSessionIds.length).toBeGreaterThan(0);
-      for (const id of q.goldSessionIds) {
-        expect(sessionIds.has(id)).toBe(true);
+      for (const gold of q.goldSessionIds) {
+        expect(ids.has(gold), `${q.id} -> ${gold}`).toBe(true);
+        expect(sessions.find((s) => s.id === gold)?.project, `${q.id} -> ${gold}`).toBe(q.project);
       }
     }
   });
 
-  it("grep adapter ranks gold session in top-5 for most queries", async () => {
-    const state = await grepAdapter.init(sessions);
-    let hits = 0;
-    for (const q of queries) {
-      const ranked = await grepAdapter.query(q.question, state, 5);
-      const topIds = new Set(ranked.map((r) => r.sessionId));
-      if (q.goldSessionIds.some((id) => topIds.has(id))) hits += 1;
+  it("gives every Observation a needle no other Session shares", () => {
+    const owner = new Map<string, string>();
+    for (const s of sessions) {
+      for (const o of s.observations ?? []) {
+        const needle = needleFor(o.output);
+        const prev = owner.get(needle);
+        expect(prev === undefined || prev === s.id, `${s.id} shares "${needle}" with ${prev}`).toBe(
+          true,
+        );
+        owner.set(needle, s.id);
+      }
     }
-    expect(hits / queries.length).toBeGreaterThan(0.5);
   });
 
-  it("scoreQuestion computes P@K, R@K, hit, topGoldRank", () => {
-    const q: Question = {
-      id: "test",
-      type: "single-session",
-      question: "?",
-      goldSessionIds: ["a", "b"],
-      haystack: [],
-    };
-    const ranked = [
-      { sessionId: "x", score: 0.9 },
-      { sessionId: "a", score: 0.7 },
-      { sessionId: "y", score: 0.5 },
-      { sessionId: "b", score: 0.3 },
-    ];
-    const row = scoreQuestion(q, ranked, 5, "test", 12);
-    expect(row.hit).toBe(true);
-    expect(row.recallAtK).toBe(1);
-    expect(row.precisionAtK).toBeCloseTo(2 / 5);
-    expect(row.topGoldRank).toBe(2);
+  it("lets the grep baseline find most answerable search questions", async () => {
+    const state = await grepAdapter.init(sessions);
+    const answerable = queries.filter((q) => (q.path ?? "search") === "search" && q.goldSessionIds.length > 0);
+    let hits = 0;
+    for (const q of answerable) {
+      const { ranked } = await grepAdapter.query(q, state, 5);
+      if (ranked.some((r) => q.goldSessionIds.includes(r.sessionId))) hits += 1;
+    }
+    expect(hits / answerable.length).toBeGreaterThan(0.5);
   });
 
-  it("scoreQuestion handles miss", () => {
-    const q: Question = {
-      id: "test",
-      type: "x",
-      question: "?",
-      goldSessionIds: ["a"],
-      haystack: [],
-    };
-    const ranked = [
-      { sessionId: "x", score: 1 },
-      { sessionId: "y", score: 0.5 },
-    ];
-    const row = scoreQuestion(q, ranked, 5, "test", 5);
-    expect(row.hit).toBe(false);
-    expect(row.recallAtK).toBe(0);
-    expect(row.topGoldRank).toBeNull();
-  });
-
-  it("aggregate computes per-adapter and per-type means", () => {
-    const q: Question = {
-      id: "1",
-      type: "t1",
-      question: "?",
-      goldSessionIds: ["a"],
-      haystack: [],
-    };
-    const row1 = scoreQuestion(q, [{ sessionId: "a", score: 1 }], 5, "grep", 10);
-    const row2 = scoreQuestion(q, [{ sessionId: "x", score: 1 }], 5, "grep", 20);
-    const agg = aggregate([row1, row2]);
-    expect(agg.byAdapter.grep.hit).toBe(1);
-    expect(agg.byAdapter.grep.n).toBe(2);
-    expect(agg.byType.t1.grep.n).toBe(2);
+  it("has no-answer questions on every path", () => {
+    for (const path of ["search", "pre-tool-use", "session-start"]) {
+      expect(queries.some((q) => (q.path ?? "search") === path && q.goldSessionIds.length === 0)).toBe(
+        true,
+      );
+    }
   });
 });

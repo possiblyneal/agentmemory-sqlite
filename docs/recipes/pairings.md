@@ -123,6 +123,6 @@ All four are local-first (no data leaves the machine for code-graph workloads). 
 
 ## Cross-project benchmark idea
 
-`eval/runner/adapters/` accepts new adapters against the same coding-agent-life-v1 corpus and the published LongMemEval `_s` benchmark. A `codegraph` adapter or an `understand-anything` adapter or a `graphify` adapter would let us publish a side-by-side scorecard showing which project owns which question class. The win for the ecosystem is precise framing: each project gets credit for what it does best, with reproducible numbers from a shared harness.
+`eval/runner/adapters/` accepts new adapters against the same coding-agent-life-v2 corpus and the published LongMemEval `_s` benchmark. A `codegraph` adapter or an `understand-anything` adapter or a `graphify` adapter would let us publish a side-by-side scorecard showing which project owns which question class. The win for the ecosystem is precise framing: each project gets credit for what it does best, with reproducible numbers from a shared harness.
 
 If you build any of those adapters, open a PR against `agentmemory` with the adapter file under `eval/runner/adapters/` and a scorecard under `docs/benchmarks/`. The scaffold and contract live in [`eval/README.md`](../../eval/README.md).
