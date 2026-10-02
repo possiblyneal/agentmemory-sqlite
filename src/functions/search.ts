@@ -518,7 +518,7 @@ export function createSessionLoader(
 }
 
 // A result's project is its session's. Results with no session entry fall
-// back to the Session Summary, then to KV.memories, and pass through when
+// back to KV.memories, then to the Session Summary, and pass through when
 // neither has a project. Two cases arrive without a session:
 //   1. Synthetic sessionId: memories indexed via mem::remember use
 //      sessionIds[0] ?? 'memory'. The string 'memory' has no session entry;
@@ -538,18 +538,18 @@ export function createProjectMatcher(
   return async (sessionId, obsId) => {
     const session = await loadSession(sessionId)
     if (session) return session.project === project
-    if (!summaryProjects.has(sessionId)) {
-      const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null)
-      summaryProjects.set(sessionId, summary?.project ?? null)
-    }
-    const summaryProject = summaryProjects.get(sessionId)!
-    if (summaryProject !== null) return summaryProject === project
     if (!memoryProjects.has(obsId)) {
       const mem = await kv.get<Memory>(KV.memories, obsId).catch(() => null)
       memoryProjects.set(obsId, mem?.project ?? null)
     }
     const memProject = memoryProjects.get(obsId)!
-    return memProject === null || memProject === project
+    if (memProject !== null) return memProject === project
+    if (!summaryProjects.has(sessionId)) {
+      const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null)
+      summaryProjects.set(sessionId, summary?.project || null)
+    }
+    const summaryProject = summaryProjects.get(sessionId)!
+    return summaryProject === null || summaryProject === project
   }
 }
 

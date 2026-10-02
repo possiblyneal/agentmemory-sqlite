@@ -204,6 +204,10 @@ describe("Smart Search Function", () => {
       const evictedElsewhere = makeObs({ id: "obs_evicted_elsewhere", sessionId: "ses_gone_elsewhere", title: "Evicted elsewhere" });
       await kv.set("mem:summaries", "ses_gone_here", { sessionId: "ses_gone_here", project: "my-project" });
       await kv.set("mem:summaries", "ses_gone_elsewhere", { sessionId: "ses_gone_elsewhere", project: "other-project" });
+      const savedInEvicted = makeObs({ id: "mem_saved_in_gone", sessionId: "ses_gone_elsewhere", title: "Saved in evicted" });
+      await kv.set("mem:memories", "mem_saved_in_gone", { id: "mem_saved_in_gone", project: "my-project" });
+      const blankSummary = makeObs({ id: "obs_blank_summary", sessionId: "ses_blank", title: "Blank summary" });
+      await kv.set("mem:summaries", "ses_blank", { sessionId: "ses_blank", project: "" });
       await kv.set("mem:sessions", "ses_other", {
         id: "ses_other",
         project: "other-project",
@@ -215,7 +219,7 @@ describe("Smart Search Function", () => {
       await kv.set("mem:memories", "mem_here", { id: "mem_here", project: "my-project" });
       await kv.set("mem:memories", "mem_elsewhere", { id: "mem_elsewhere", project: "other-project" });
       searchResults.unshift(
-        ...[other, savedHere, savedElsewhere, unknownSession, evictedHere, evictedElsewhere].map((observation) => ({
+        ...[other, savedHere, savedElsewhere, unknownSession, evictedHere, evictedElsewhere, savedInEvicted, blankSummary].map((observation) => ({
           observation,
           bm25Score: 0.9,
           vectorScore: 0,
@@ -235,6 +239,8 @@ describe("Smart Search Function", () => {
         "mem_here",
         "obs_orphan",
         "obs_evicted_here",
+        "mem_saved_in_gone",
+        "obs_blank_summary",
         "obs_1",
         "obs_2",
       ]);
@@ -245,7 +251,7 @@ describe("Smart Search Function", () => {
         query: "auth",
       })) as { results: CompactSearchResult[] };
 
-      expect(result.results).toHaveLength(8);
+      expect(result.results).toHaveLength(10);
     });
 
     it("over-fetches so filtered-out rows do not underfill the page", async () => {

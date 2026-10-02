@@ -165,7 +165,7 @@ const THREE_HOURS_AGO = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOStr
 async function seedSessionless(
   kv: ReturnType<typeof mockKV>,
   sessionId: string,
-  opts: { summary: boolean },
+  opts: { summary: boolean; summaryProject?: string },
 ): Promise<void> {
   await kv.set(KV.observations(sessionId), `obs_raw_${sessionId}`, {
     id: `obs_raw_${sessionId}`,
@@ -176,7 +176,11 @@ async function seedSessionless(
     raw: {},
   });
   if (opts.summary) {
-    await kv.set(KV.summaries, sessionId, { sessionId, project: "api", title: "t" });
+    await kv.set(KV.summaries, sessionId, {
+      sessionId,
+      project: opts.summaryProject ?? "api",
+      title: "t",
+    });
   }
 }
 
@@ -997,6 +1001,18 @@ describe("Diagnostics Functions", () => {
       const untouched = await kv.get<Record<string, unknown>>(KV.observations("ses_unknown"), "obs_raw_ses_unknown");
       expect(untouched!["narrative"]).toBeUndefined();
       expect(await kv.get(KV.sessions, "ses_evicted")).toBeNull();
+    });
+
+    it("leaves raw Observations alone when their Session Summary names no project", async () => {
+      await seedSessionless(kv, "ses_blank", { summary: true, summaryProject: "" });
+
+      const result = (await sdk.trigger("mem::heal", {
+        categories: ["observations"],
+      })) as { fixed: number };
+
+      expect(result.fixed).toBe(0);
+      const raw = await kv.get<Record<string, unknown>>(KV.observations("ses_blank"), "obs_raw_ses_blank");
+      expect(raw!["narrative"]).toBeUndefined();
     });
 
     it("dry run reports but does not fix", async () => {
