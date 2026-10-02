@@ -276,6 +276,16 @@ export class SqliteState {
     return rows.map((r) => JSON.parse(r.value));
   }
 
+  // A half-open range over the (scope, seq) index, so the prefix needs no
+  // LIKE escaping.
+  listScopes(prefix: string): string[] {
+    const hi = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+    const rows = this.db
+      .prepare("SELECT DISTINCT scope FROM kv WHERE scope >= ? AND scope < ?")
+      .all(prefix, hi) as Array<{ scope: string }>;
+    return rows.map((r) => r.scope);
+  }
+
   // Raw upsert used by set/update. Keeps the existing row's `seq`. Returns the
   // stored encoding so callers can hand back exactly what landed in the row
   // instead of the caller's own object.
@@ -438,6 +448,7 @@ export function stateFunctions(
     "state::update": async (p) => cooperate(store.update(p.scope, p.key, p.ops ?? [])),
     "state::delete": async (p) => cooperate(store.delete(p.scope, p.key)),
     "state::list": async (p) => cooperate(store.list(p.scope)),
+    "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
     "state::delete-many-if-unchanged": async (p) =>
       cooperate(store.deleteManyIfUnchanged(p.scope, p.entries ?? [])),

@@ -160,6 +160,26 @@ function makePeer(overrides: Partial<MeshPeer> = {}): MeshPeer {
   };
 }
 
+const THREE_HOURS_AGO = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+
+async function seedSessionless(
+  kv: ReturnType<typeof mockKV>,
+  sessionId: string,
+  opts: { summary: boolean },
+): Promise<void> {
+  await kv.set(KV.observations(sessionId), `obs_raw_${sessionId}`, {
+    id: `obs_raw_${sessionId}`,
+    sessionId,
+    timestamp: THREE_HOURS_AGO(),
+    hookType: "post_tool_use",
+    toolName: "Read",
+    raw: {},
+  });
+  if (opts.summary) {
+    await kv.set(KV.summaries, sessionId, { sessionId, project: "api", title: "t" });
+  }
+}
+
 describe("Diagnostics Functions", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let kv: ReturnType<typeof mockKV>;
@@ -265,6 +285,22 @@ describe("Diagnostics Functions", () => {
       })) as { checks: DiagnosticCheck[] };
 
       expect(result.checks.find((c) => c.name === "observations-ok")).toBeDefined();
+    });
+
+    it("splits Observations whose Session is gone by whether a Session Summary names their project", async () => {
+      await seedSessionless(kv, "ses_evicted", { summary: true });
+      await seedSessionless(kv, "ses_unknown", { summary: false });
+
+      const result = (await sdk.trigger("mem::diagnose", {
+        categories: ["observations"],
+      })) as { checks: DiagnosticCheck[] };
+
+      const healable = result.checks.find((c) => c.name === "observations-sessionless-healable:1");
+      expect(healable).toMatchObject({ status: "warn", fixable: true });
+      expect(healable!.message).toContain("ses_evicted");
+      const sessionless = result.checks.find((c) => c.name === "observations-sessionless:2");
+      expect(sessionless).toMatchObject({ status: "warn", fixable: false });
+      expect(sessionless!.message).toContain("0 compressed, 1 raw and healable, 1 raw with neither");
     });
 
     it("compressed observation is not flagged", async () => {
@@ -944,6 +980,23 @@ describe("Diagnostics Functions", () => {
       expect(closed!.status).toBe("abandoned");
       expect(closed!.endedAt).toBe(lastSeen);
       expect((await kv.get<Session>(KV.sessions, live.id))!.status).toBe("active");
+    });
+
+    it("compresses raw Observations whose Session is gone only where a Session Summary survives", async () => {
+      await seedSessionless(kv, "ses_evicted", { summary: true });
+      await seedSessionless(kv, "ses_unknown", { summary: false });
+
+      const result = (await sdk.trigger("mem::heal", {
+        categories: ["observations"],
+      })) as { fixed: number; details: string[] };
+
+      expect(result.fixed).toBe(1);
+      expect(result.details).toEqual(["Compressed 1 raw observations of session ses_evicted"]);
+      const healed = await kv.get<Record<string, unknown>>(KV.observations("ses_evicted"), "obs_raw_ses_evicted");
+      expect(typeof healed!["narrative"]).toBe("string");
+      const untouched = await kv.get<Record<string, unknown>>(KV.observations("ses_unknown"), "obs_raw_ses_unknown");
+      expect(untouched!["narrative"]).toBeUndefined();
+      expect(await kv.get(KV.sessions, "ses_evicted")).toBeNull();
     });
 
     it("dry run reports but does not fix", async () => {

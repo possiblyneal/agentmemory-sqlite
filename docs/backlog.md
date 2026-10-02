@@ -106,10 +106,13 @@ keeps the warning on for good.
 - **Done when.** A Memory can be marked global explicitly, and the check counts only Memories
   that have neither a project nor that mark.
 
-## Recover raw Observations that have no Session
+## Scope an evicted Session's Observations by its Session Summary
 
-105 raw Observations on dev have no `mem:sessions` record, so `/recompress-orphans`, which
-walks Sessions, never reaches them.
+Stale-Session Eviction deletes the Session record and keeps its Observations indexed
+(`src/state/index-corpus.ts`). `createProjectMatcher` (`src/functions/search.ts`) then finds no
+Session and passes them through every project filter, so one repo's work surfaces in
+another's. On dev that is 92 Sessions. Their Session Summary still names the project.
 
-- **Done when.** They are either compressed under a Session rebuilt from what they carry, or
-  reported by diagnostics as a separate count. Nothing is deleted.
+- **Done when.** The matcher falls back to the Session Summary's project before passing a
+  result through unscoped, and a test proves an evicted Session's Observation is filtered out
+  of another project's search.

@@ -7,6 +7,7 @@ import { storeAcceptsWrite } from "../health/store-probe.js";
 import { readMissedInjections } from "../hooks/_missed-injection.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { injectedItemUse } from "./injections.js";
+import { storeSyntheticCompression } from "./observe.js";
 import type { AccessLog } from "./access-tracker.js";
 import type {
   Action,
@@ -27,6 +28,7 @@ import type {
   Memory,
   CompressedObservation,
   InjectionRecord,
+  RawObservation,
 } from "../types.js";
 
 export const ALL_CATEGORIES = [
@@ -68,6 +70,48 @@ function isAbandonedSession(session: Session, now: number): boolean {
   return (
     session.status === "active" &&
     now - new Date(lastActivity(session)).getTime() > TWENTY_FOUR_HOURS_MS
+  );
+}
+
+// Past the grace window a raw record is a compression that never ran; inside
+// it, compression may still be in flight.
+function isStrandedRaw(o: Record<string, unknown>, now: number): boolean {
+  if (typeof o["narrative"] === "string") return false;
+  if (typeof o["hookType"] !== "string") return false;
+  const ts = new Date(String(o["timestamp"])).getTime();
+  return !(Number.isFinite(ts) && now - ts < ONE_HOUR_MS);
+}
+
+type SessionlessScope = {
+  sessionId: string;
+  raw: RawObservation[];
+  compressed: number;
+  // A Session Summary is the one surviving record that names the project.
+  healable: boolean;
+};
+
+// Eviction deletes a Session record and keeps its Observations, and a host
+// that never sends a session start leaves Observations with no Session at all.
+async function sessionlessObservations(
+  kv: StateKV,
+  sessions: Session[],
+  now: number,
+): Promise<SessionlessScope[]> {
+  const known = new Set(sessions.map((session) => session.id));
+  const prefix = KV.observations("");
+  const sessionIds = (await kv.listScopes(prefix))
+    .map((scope) => scope.slice(prefix.length))
+    .filter((sessionId) => !known.has(sessionId));
+  return Promise.all(
+    sessionIds.map(async (sessionId) => {
+      const [observations, summary] = await Promise.all([
+        kv.list<Record<string, unknown>>(KV.observations(sessionId)),
+        kv.get<SessionSummary>(KV.summaries, sessionId),
+      ]);
+      const raw = observations.filter((o) => isStrandedRaw(o, now)) as unknown as RawObservation[];
+      const compressed = observations.filter((o) => typeof o["narrative"] === "string").length;
+      return { sessionId, raw, compressed, healable: summary !== null };
+    }),
   );
 }
 
@@ -384,14 +428,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           );
           total += observations.length;
           for (const o of observations) {
-            if (typeof o["narrative"] === "string") continue;
-            if (typeof o["hookType"] !== "string") continue;
-            // An observation created moments ago is legitimately still raw
-            // while its compression is in flight. Only records past the
-            // grace window are genuinely orphaned.
-            const ts = new Date(String(o["timestamp"])).getTime();
-            if (Number.isFinite(ts) && now - ts < ONE_HOUR_MS) continue;
-            orphaned.push(String(o["id"] ?? "unknown"));
+            if (isStrandedRaw(o, now)) orphaned.push(String(o["id"] ?? "unknown"));
           }
         }
 
@@ -412,6 +449,40 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             category: "observations",
             status: "pass",
             message: `All ${total} observations are compressed and indexable`,
+            fixable: false,
+          });
+        }
+
+        const sessionless = await sessionlessObservations(kv, sessions, now);
+        const healable = sessionless.filter((scope) => scope.healable && scope.raw.length > 0);
+        const healableRaw = healable.reduce((n, scope) => n + scope.raw.length, 0);
+        const unhealableRaw = sessionless
+          .filter((scope) => !scope.healable)
+          .reduce((n, scope) => n + scope.raw.length, 0);
+        const sessionlessCompressed = sessionless.reduce((n, scope) => n + scope.compressed, 0);
+
+        if (healableRaw > 0) {
+          checks.push({
+            name: `observations-sessionless-healable:${healableRaw}`,
+            category: "observations",
+            status: "warn",
+            message:
+              `${healableRaw} raw observations in ${healable.length} sessions whose session record ` +
+              `is gone still have a Session Summary (e.g. ${healable[0].sessionId}). ` +
+              `POST /agentmemory/diagnostics/heal {"categories":["observations"]} compresses them.`,
+            fixable: true,
+          });
+        }
+        if (sessionless.length > 0) {
+          checks.push({
+            name: `observations-sessionless:${sessionless.length}`,
+            category: "observations",
+            status: unhealableRaw > 0 ? "warn" : "pass",
+            message:
+              `${sessionless.length} sessions have observations but no session record: ` +
+              `${sessionlessCompressed} compressed, ${healableRaw} raw and healable, ` +
+              `${unhealableRaw} raw with neither a session nor a Session Summary to name their ` +
+              `project, so they cannot be healed.`,
             fixable: false,
           });
         }
@@ -1256,6 +1327,46 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             });
             details.push(`Deleted expired signal ${signal.id}`);
             fixed++;
+          }
+        }
+      }
+
+      if (categories.includes("observations")) {
+        const sessions = await kv.list<Session>(KV.sessions);
+        const sessionless = await sessionlessObservations(kv, sessions, now);
+
+        for (const scope of sessionless) {
+          if (!scope.healable || scope.raw.length === 0) continue;
+          if (dryRun) {
+            details.push(
+              `[dry-run] Would compress ${scope.raw.length} raw observations of session ${scope.sessionId}`,
+            );
+            fixed += scope.raw.length;
+            continue;
+          }
+          const compressed = await withKeyedLock(`obs:${scope.sessionId}`, async () => {
+            const fresh = (
+              await kv.list<Record<string, unknown>>(KV.observations(scope.sessionId))
+            ).filter((o) => isStrandedRaw(o, Date.now())) as unknown as RawObservation[];
+            for (const o of fresh) {
+              await storeSyntheticCompression(kv, { ...o, sessionId: scope.sessionId });
+            }
+            if (fresh.length > 0) {
+              await recordAudit(kv, "heal", "mem::heal", fresh.map((o) => o.id), {
+                entityType: "observation",
+                reason: "sessionless-raw-observation",
+                sessionId: scope.sessionId,
+              });
+            }
+            return fresh.length;
+          });
+          if (compressed > 0) {
+            details.push(
+              `Compressed ${compressed} raw observations of session ${scope.sessionId}`,
+            );
+            fixed += compressed;
+          } else {
+            skipped++;
           }
         }
       }

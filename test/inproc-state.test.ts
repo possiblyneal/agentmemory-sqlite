@@ -26,6 +26,19 @@ describe("inproc state store", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("lists the scopes under a prefix and nothing beside it", async () => {
+    const fns = stateFunctions(store);
+    for (const scope of ["mem:obs:a", "mem:obs:b", "mem:obs;x", "mem:sessions"]) {
+      await fns["state::set"]({ scope, key: "k", value: 1 });
+    }
+    await fns["state::set"]({ scope: "mem:obs:a", key: "k2", value: 2 });
+
+    expect((await fns["state::list-scopes"]({ prefix: "mem:obs:" }) as string[]).sort()).toEqual([
+      "mem:obs:a",
+      "mem:obs:b",
+    ]);
+  });
+
   it("round-trips all five operations", async () => {
     const fns = stateFunctions(store);
 
