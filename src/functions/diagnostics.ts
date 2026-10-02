@@ -6,7 +6,7 @@ import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
 import { readMissedInjections } from "../hooks/_missed-injection.js";
 import { loadProjectTime } from "../state/project-time.js";
-import { injectedItemUse } from "./injections.js";
+import { injectedItemUse, resolveInsightFiles, withFiles } from "./injections.js";
 import type { AccessLog } from "./access-tracker.js";
 import type {
   Action,
@@ -810,20 +810,22 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           return age >= UNUSED_INJECTION_SETTLE_MS && age <= TWENTY_FOUR_HOURS_MS && r.injected.length > 0;
         });
         const sessionIds = [...new Set(records.map((r) => r.sessionId))];
-        const observationsBySession = new Map(
-          await Promise.all(
+        const [observationsBySession, insightFiles] = await Promise.all([
+          Promise.all(
             sessionIds.map(
               async (id) => [id, await kv.list<CompressedObservation>(KV.observations(id))] as const,
             ),
-          ),
-        );
+          ).then((entries) => new Map(entries)),
+          resolveInsightFiles(kv, records),
+        ]);
         const bySource = new Map<string, { scored: number; unused: number }>();
         const total = { scored: 0, unused: 0 };
         for (const record of records) {
           const tally = bySource.get(record.source) ?? { scored: 0, unused: 0 };
           const observations = observationsBySession.get(record.sessionId) ?? [];
           for (const ref of record.injected) {
-            const use = injectedItemUse(ref, record, observations);
+            const scoredRef = ref.kind === "insight" ? withFiles(ref, insightFiles.get(ref.id)) : ref;
+            const use = injectedItemUse(scoredRef, record, observations);
             if (use === "unscorable") continue;
             for (const t of [tally, total]) {
               t.scored++;
@@ -850,7 +852,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
               : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
                 `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
                 "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
-                "and items with no files are not scored.",
+                "an Insight's files are those of its source Memories and Crystals, and items with no files are not scored.",
           fixable: false,
         });
       }

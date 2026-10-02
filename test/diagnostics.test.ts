@@ -765,6 +765,64 @@ describe("Diagnostics Functions", () => {
       await seedTouch("s2", "obs_other", refs.flatMap((r) => r.files));
       expect((await useCheck()).message).toContain("100% of 10 injected items unused");
     });
+
+    describe("Insights (#94)", () => {
+      async function seedInsight(id: string, sources: { memories?: string[]; lessons?: string[]; crystals?: string[] }) {
+        await kv.set(KV.insights, id, {
+          id, title: id, content: "c", confidence: 0.5, reinforcements: 0, sourceConceptCluster: [],
+          sourceMemoryIds: sources.memories ?? [], sourceLessonIds: sources.lessons ?? [],
+          sourceCrystalIds: sources.crystals ?? [], tags: [], createdAt: minutesAgo(600),
+          updatedAt: minutesAgo(600), decayRate: 0.1,
+        });
+      }
+
+      const insightRefs = (ids: string[]) => ids.map((id) => ({ kind: "insight" as const, id }));
+
+      beforeEach(async () => {
+        await kv.set(KV.memories, "mem_src", { id: "mem_src", files: ["src/memory-file.ts"] });
+        await kv.set(KV.crystals, "cry_src", { id: "cry_src", filesAffected: ["src/crystal-file.ts"] });
+      });
+
+      it("scores an Insight as used when a later Observation touches a source Memory's or Crystal's file", async () => {
+        await seedInsight("ins_mem", { memories: ["mem_src"] });
+        await seedInsight("ins_cry", { crystals: ["cry_src"] });
+        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_mem", "ins_cry"]) as never);
+        await seedTouch("s1", "obs_1", ["src/memory-file.ts", "src/crystal-file.ts"]);
+        expect((await useCheck()).message).toContain("0% of 2 injected items unused");
+      });
+
+      it("scores an Insight as unused when no later Observation touches its sources' files", async () => {
+        await seedInsight("ins_mem", { memories: ["mem_src"] });
+        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_mem"]) as never);
+        await seedTouch("s1", "obs_1", ["src/elsewhere.ts"]);
+        expect((await useCheck()).message).toContain("100% of 1 injected items unused");
+      });
+
+      it("leaves an Insight unscorable when its sources carry no files, Lessons included", async () => {
+        await kv.set(KV.lessons, "les_src", { id: "les_src", content: "rule" });
+        await seedInsight("ins_les", { lessons: ["les_src"] });
+        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_les"]) as never);
+        expect((await useCheck()).message).toContain("No scorable injected items");
+      });
+
+      it("skips a missing source Memory, Crystal or Insight", async () => {
+        await seedInsight("ins_part", { memories: ["mem_gone", "mem_src"], crystals: ["cry_gone"] });
+        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_part", "ins_gone"]) as never);
+        await seedTouch("s1", "obs_1", ["src/memory-file.ts"]);
+        expect((await useCheck()).message).toContain("0% of 1 injected items unused");
+      });
+
+      it("reads each Insight and source once per run", async () => {
+        await seedInsight("ins_mem", { memories: ["mem_src"] });
+        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_mem"]) as never);
+        await seedRecord("r2", "session-start", "s1", insightRefs(["ins_mem"]) as never);
+        const get = vi.spyOn(kv, "get");
+        await useCheck();
+        const reads = get.mock.calls.map(([scope, key]) => `${scope}/${key}`);
+        expect(reads.filter((r) => r === `${KV.insights}/ins_mem`)).toHaveLength(1);
+        expect(reads.filter((r) => r === `${KV.memories}/mem_src`)).toHaveLength(1);
+      });
+    });
   });
 
   describe("mem::diagnose recall-coverage (#76)", () => {

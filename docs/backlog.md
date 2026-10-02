@@ -86,17 +86,6 @@ Observation, so the filter keeps all of them and the top 5 are just the most rec
 - **Done when.** The cut separates Observations under synthetic compression, or it is
   removed, and `npm run eval:gate` holds.
 
-## Score insights in the injection-use check
-
-`injectedItemUse` returns `unscorable` for any item without files
-(`src/functions/injections.ts:30`). Insights carry no files, so injection-use cannot tell
-whether any of them were used.
-
-- **Evidence (2026-10-02).** All 226 insight items injected on dev in 7 days were
-  unscorable.
-- **Done when.** Insights have usage evidence, such as their concepts appearing in later
-  Observations, and the check reports a rate for them.
-
 ## Let a Memory be global on purpose
 
 `memory-project-coverage` (`src/functions/diagnostics.ts:462`) counts every Memory without a
