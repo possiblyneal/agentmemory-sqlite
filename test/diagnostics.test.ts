@@ -22,36 +22,7 @@ import type {
   MeshPeer,
 } from "../src/types.js";
 import { KV } from "../src/state/schema.js";
-
-function mockKV() {
-  const store = new Map<string, Map<string, unknown>>();
-  return {
-    get: async <T>(scope: string, key: string): Promise<T | null> => {
-      return (store.get(scope)?.get(key) as T) ?? null;
-    },
-    set: async <T>(scope: string, key: string, data: T): Promise<T> => {
-      if (!store.has(scope)) store.set(scope, new Map());
-      store.get(scope)!.set(key, data);
-      return data;
-    },
-    update: async (
-      scope: string,
-      key: string,
-      ops: Array<{ path: string; value: unknown }>,
-    ): Promise<void> => {
-      const value = store.get(scope)?.get(key) as Record<string, unknown> | undefined;
-      if (!value) return;
-      for (const op of ops) value[op.path] = op.value;
-    },
-    delete: async (scope: string, key: string): Promise<void> => {
-      store.get(scope)?.delete(key);
-    },
-    list: async <T>(scope: string): Promise<T[]> => {
-      const entries = store.get(scope);
-      return entries ? (Array.from(entries.values()) as T[]) : [];
-    },
-  };
-}
+import { mockKV } from "./helpers/mocks.js";
 
 function mockSdk() {
   const functions = new Map<string, Function>();
@@ -970,7 +941,7 @@ describe("Diagnostics Functions", () => {
       expect(result.fixed).toBe(1);
       expect(result.details[0]).toContain("Closed abandoned session");
       const closed = await kv.get<Session>(KV.sessions, abandoned.id);
-      expect(closed!.status).toBe("completed");
+      expect(closed!.status).toBe("abandoned");
       expect(closed!.endedAt).toBe(lastSeen);
       expect((await kv.get<Session>(KV.sessions, live.id))!.status).toBe("active");
     });

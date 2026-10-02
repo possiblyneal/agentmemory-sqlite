@@ -1088,13 +1088,13 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             const fresh = await kv.get<Session>(KV.sessions, session.id);
             if (!fresh || !isAbandonedSession(fresh, Date.now())) return false;
             await kv.update(KV.sessions, fresh.id, [
-              { type: "set", path: "status", value: "completed" },
+              { type: "set", path: "status", value: "abandoned" },
               { type: "set", path: "endedAt", value: lastActivity(fresh) },
             ]);
             await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
               entityType: "session",
               reason: "abandoned-session",
-              newStatus: "completed",
+              newStatus: "abandoned",
             });
             return true;
           });

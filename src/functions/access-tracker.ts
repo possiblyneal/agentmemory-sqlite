@@ -1,9 +1,13 @@
 import { KV } from "../state/schema.js";
-import type { StateKV } from "../state/kv.js";
-import { withKeyedLock } from "../state/keyed-mutex.js";
+import { SET_MANY_CHUNK, type StateKV } from "../state/kv.js";
+import { withKeyedLock, withKeyedLocks } from "../state/keyed-mutex.js";
 import { logger } from "../logger.js";
 
 const RECENT_CAP = 20;
+
+function accessLockKey(memoryId: string): string {
+  return `mem:access:${memoryId}`;
+}
 
 export interface AccessLog {
   memoryId: string;
@@ -51,7 +55,7 @@ export async function getAccessLog(
   }
 }
 
-function withAccess(log: AccessLog, ts: number): AccessLog {
+function applyAccess(log: AccessLog, ts: number): AccessLog {
   log.count += 1;
   log.lastAt = new Date(ts).toISOString();
   log.recent.push(ts);
@@ -78,26 +82,19 @@ export async function recordAccess(
   if (!memoryId) return;
   const ts = timestampMs ?? Date.now();
   try {
-    await withKeyedLock(`mem:access:${memoryId}`, async () => {
+    await withKeyedLock(accessLockKey(memoryId), async () => {
       const existing = await getAccessLog(kv, memoryId);
-      await kv.set(KV.accessLog, memoryId, withAccess(existing, ts));
+      await kv.set(KV.accessLog, memoryId, applyAccess(existing, ts));
     });
   } catch (err) {
     warnAccessFailed(memoryId, err);
   }
 }
 
-// Locks are taken in sorted order so two overlapping batches cannot deadlock.
-function withKeyedLocks<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
-  return [...keys]
-    .sort()
-    .reduceRight<() => Promise<T>>((inner, key) => () => withKeyedLock(key, inner), fn)();
-}
-
-// One `setMany` - one transaction, one fsync - for the whole batch. A write
-// per id put one fsync per injected item on every pre-tool-use Injection.
-// If the batch write fails, each id is retried alone so one bad row cannot
-// cost its siblings their access.
+// One transaction, one fsync, per SET_MANY_CHUNK ids. A write per id put one
+// fsync per injected item on every pre-tool-use Injection. If a chunk fails,
+// only the ids not yet written are retried alone, so none is counted twice
+// and one bad row cannot cost its siblings their access.
 export async function recordAccessBatch(
   kv: StateKV,
   memoryIds: string[],
@@ -107,19 +104,19 @@ export async function recordAccessBatch(
   const ts = timestampMs ?? Date.now();
   const unique = Array.from(new Set(memoryIds.filter(Boolean)));
   if (unique.length === 0) return;
+  const unwritten = new Set(unique);
   try {
-    await withKeyedLocks(
-      unique.map((id) => `mem:access:${id}`),
-      async () => {
-        const logs = await Promise.all(unique.map((id) => getAccessLog(kv, id)));
-        await kv.setMany(
-          KV.accessLog,
-          logs.map((log, i) => ({ key: unique[i]!, value: withAccess(log, ts) })),
-        );
-      },
-    );
+    await withKeyedLocks(unique.map(accessLockKey), async () => {
+      const logs = await Promise.all(unique.map((id) => getAccessLog(kv, id)));
+      const entries = logs.map((log, i) => ({ key: unique[i]!, value: applyAccess(log, ts) }));
+      for (let i = 0; i < entries.length; i += SET_MANY_CHUNK) {
+        const chunk = entries.slice(i, i + SET_MANY_CHUNK);
+        await kv.setMany(KV.accessLog, chunk);
+        for (const { key } of chunk) unwritten.delete(key);
+      }
+    });
   } catch {
-    await Promise.allSettled(unique.map((id) => recordAccess(kv, id, ts)));
+    await Promise.allSettled([...unwritten].map((id) => recordAccess(kv, id, ts)));
   }
 }
 
@@ -129,7 +126,7 @@ export async function deleteAccessLog(
 ): Promise<void> {
   if (!memoryId) return;
   try {
-    await withKeyedLock(`mem:access:${memoryId}`, async () => {
+    await withKeyedLock(accessLockKey(memoryId), async () => {
       await kv.delete(KV.accessLog, memoryId);
     });
   } catch {}

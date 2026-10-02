@@ -4,33 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-function mockKV() {
-  const store = new Map<string, Map<string, unknown>>();
-  return {
-    store,
-    get: async <T>(scope: string, key: string): Promise<T | null> =>
-      (store.get(scope)?.get(key) as T) ?? null,
-    set: async <T>(scope: string, key: string, data: T): Promise<T> => {
-      if (!store.has(scope)) store.set(scope, new Map());
-      store.get(scope)!.set(key, data);
-      return data;
-    },
-    update: async (scope: string, key: string, updates: Array<{ path: string; value: unknown }>) => {
-      const m = store.get(scope);
-      if (!m) return;
-      const v = (m.get(key) as Record<string, unknown>) ?? {};
-      for (const u of updates) v[u.path] = u.value;
-      m.set(key, v);
-    },
-    delete: async (scope: string, key: string) => {
-      store.get(scope)?.delete(key);
-    },
-    list: async <T>(scope: string): Promise<T[]> => {
-      const m = store.get(scope);
-      return m ? (Array.from(m.values()) as T[]) : [];
-    },
-  };
-}
+import { mockKV } from "./helpers/mocks.js";
 
 function mockSdk() {
   const fns = new Map<string, Function>();
@@ -140,5 +114,36 @@ describe("observe implicit session create (#638)", () => {
     // Counter bumped, updatedAt refreshed
     expect(session.observationCount).toBe(8);
     expect(session.updatedAt).toBeTruthy();
+  });
+
+  it("reopens a closed Session when work arrives on it", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    await kv.set("mem:sessions", "ses_idle", {
+      id: "ses_idle",
+      project: "/p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T01:00:00Z",
+      status: "abandoned",
+      observationCount: 3,
+    });
+
+    await sdk.trigger("mem::observe", {
+      sessionId: "ses_idle",
+      project: "/p",
+      cwd: "/p",
+      hookType: "post_tool_use",
+      timestamp: new Date().toISOString(),
+      data: { tool_name: "Read" },
+    });
+
+    const session = kv.store.get("mem:sessions")!.get("ses_idle") as Record<string, unknown>;
+    expect(session.status).toBe("active");
+    expect(session).not.toHaveProperty("endedAt");
+    expect(session.observationCount).toBe(4);
   });
 });

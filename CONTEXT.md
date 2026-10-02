@@ -22,6 +22,11 @@ One continuous stretch of an Agent's work, bounded by a start hook and either an
 going idle after a turn end. The unit that Observations are attributed to and that Recall is
 scoped by.
 
+**Abandoned Session**:
+A Session still marked active with no activity for 24 hours. Heal closes it with status
+`abandoned` at its last activity; it is not summarized, and the next Observation or session
+start on it reopens it.
+
 ### What is stored
 
 **Observation**:

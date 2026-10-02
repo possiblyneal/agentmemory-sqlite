@@ -1,6 +1,6 @@
 import type { ISdk } from '../engine/types.js'
 
-const SET_MANY_CHUNK = 100
+export const SET_MANY_CHUNK = 100
 
 export class StateKV {
   constructor(private sdk: ISdk) {}

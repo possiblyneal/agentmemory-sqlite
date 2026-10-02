@@ -1,5 +1,5 @@
 import { TriggerAction, type ISdk } from "../engine/types.js";
-import type { CompressedObservation, RawObservation, HookPayload, Origin } from "../types.js";
+import type { CompressedObservation, RawObservation, HookPayload, Origin, Session } from "../types.js";
 
 const TOOL_HOOKS = new Set(["pre_tool_use", "post_tool_use", "post_tool_failure"]);
 import { KV, STREAM, generateId } from "../state/schema.js";
@@ -253,6 +253,7 @@ export function registerObserveFunction(
           agentId?: string;
           observationCount?: number;
           firstPrompt?: string;
+          status?: Session["status"];
         }>(KV.sessions, payload.sessionId);
         const inheritedAgentId = existingSession
           ? existingSession.agentId
@@ -337,7 +338,7 @@ export function registerObserveFunction(
 
         const session = existingSession;
         if (session) {
-          const updates: Array<{ type: "set"; path: string; value: unknown }> = [
+          const updates: Array<{ type: "set" | "remove"; path: string; value?: unknown }> = [
             { type: "set", path: "updatedAt", value: new Date().toISOString() },
             {
               type: "set",
@@ -354,6 +355,14 @@ export function registerObserveFunction(
                 value: trimmed.slice(0, 200),
               });
             }
+          }
+          // Work arriving on a closed Session means it is live again, as when
+          // heal closed it during a long idle spell and no SessionStart followed.
+          if (session.status !== "active") {
+            updates.push(
+              { type: "set", path: "status", value: "active" },
+              { type: "remove", path: "endedAt" },
+            );
           }
           await kv.update(KV.sessions, payload.sessionId, updates);
         } else if (

@@ -7,35 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
-
-function mockKV() {
-  const store = new Map<string, Map<string, unknown>>();
-  return {
-    get: async <T>(scope: string, key: string): Promise<T | null> =>
-      (store.get(scope)?.get(key) as T) ?? null,
-    set: async <T>(scope: string, key: string, data: T): Promise<T> => {
-      if (!store.has(scope)) store.set(scope, new Map());
-      store.get(scope)!.set(key, data);
-      return data;
-    },
-    update: async (scope: string, key: string, ops: Array<{ type: string; path: string; value?: unknown }>) => {
-      const old_value = store.get(scope)?.get(key);
-      const value = structuredClone((old_value ?? {}) as Record<string, unknown>);
-      for (const op of ops) {
-        if (op.type === "set") value[op.path] = op.value;
-        if (op.type === "remove") delete value[op.path];
-      }
-      if (!store.has(scope)) store.set(scope, new Map());
-      store.get(scope)!.set(key, value);
-      return { old_value, new_value: value };
-    },
-    delete: async (scope: string, key: string): Promise<void> => {
-      store.get(scope)?.delete(key);
-    },
-    list: async <T>(scope: string): Promise<T[]> =>
-      Array.from(store.get(scope)?.values() ?? []) as T[],
-  };
-}
+import { mockKV } from "./helpers/mocks.js";
 
 function mockSdk() {
   const fns = new Map<string, Function>();
@@ -96,7 +68,9 @@ describe("POST /agentmemory/session/start title (#276)", () => {
       cwd: "/p/sub",
       status: "active",
       endedAt: undefined,
+      updatedAt: expect.any(String),
     });
+    expect(session!.updatedAt! > original.endedAt!).toBe(true);
     expect(session).not.toHaveProperty("endedAt");
   });
 });
