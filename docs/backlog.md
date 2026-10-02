@@ -3,53 +3,6 @@
 Work the Operator has accepted but not yet scheduled. An item moves to a GitHub issue on
 `possiblyneal/agentmemory-sqlite` when work starts, and is deleted from here when it lands.
 
-## Identify a model fit for LLM Observation compression
-
-`AGENTMEMORY_AUTO_COMPRESS` stays off because the broker's `general` model is too slow to
-compress every Observation. Find a model that can keep up with it, then turn it on.
-
-- **Why it matters.** Synthetic compression (`src/functions/compress-synthetic.ts`) writes
-  `concepts: []`, `facts: []` and `importance: 5` on every Observation. As a result:
-  - consolidation never forms a concept group, so no Memories are made;
-  - session-start context and eviction rank Observations on a tie;
-  - the profile's importance-≥7 activity list is always empty.
-- **Evidence (2026-09-27).** `general` on the broker at `10.10.10.13:4010` took 30–165s to
-  first token per `graph-extract` batch, with no scheduler wait and no 429s. The model is
-  the bottleneck, not queueing. The volume to keep up with is roughly 500 Observations a
-  day, one LLM call each.
-- **Done when.** A model sustains that rate at `AGENTMEMORY_LLM_MAX_CONCURRENCY=2` without
-  starving Session summaries or graph extraction, and its output parses under
-  `src/prompts/compression.ts`.
-
-## Keep a stale-Session recovery sweep from starving graph extraction
-
-While eviction's stale-Session recovery runs, its Summarize chunks crowd out graph
-extraction on the broker. Give background recovery a smaller share of LLM capacity than
-work for live Sessions.
-
-- **What exists.** `ResilientProvider` (`src/providers/resilient.ts`) already caps every
-  generating call at one shared `AGENTMEMORY_LLM_MAX_CONCURRENCY` (2 on dev). The cap
-  bounds how many calls run at once, not who gets them: a recovery sweep can hold both
-  slots, and a graph batch sharing the GPU with a 50k-token Summarize chunk slows to under
-  1 token/s.
-- **Evidence (2026-09-28).** During the recovery sweep of 43 stale Sessions, the broker
-  mostly served ~50k-token prompts (`SUMMARIZE_CHUNK_TOKENS`, 2 chunks at a time). A
-  10-Observation graph batch timed out at 300 s at 16:46, while one slot was generating
-  6.6k tokens and another was prefilling a 45k-token prompt.
-- **Done when.** A recovery sweep leaves at least one slot for Session-stop work (Summarize
-  and graph extraction), for example by capping background callers at one slot, and no
-  graph batch times out during a sweep.
-
-## Merge the three env-file hydration loops
-
-`hydrateProcessEnvFromFile` (`src/config.ts`), `hydrateHookEnv` (`src/hooks/_env.ts`) and
-`hydrateMcpEnv` (`src/mcp/standalone.ts`) each parse `~/.agentmemory/.env` and fill
-`process.env`, differing only in what counts as unset. `readEnvFile()` in `_env.ts` also
-repeats `loadEnvFile()` in `config.ts` without its cache.
-
-- **Done when.** One helper, taking the "is unset" test as a parameter, serves all three,
-  and their precedence tests still pass.
-
 ## Cap the crystallize and procedural-extraction prompts
 
 Reflect's cluster prompt now fits a 24k-character budget (`src/functions/reflect.ts`). Two
@@ -66,42 +19,11 @@ other consolidation calls still send whatever their inputs add up to.
 - **Done when.** Both prompts are bounded the way reflect's is, before either input grows
   enough to starve sibling slots on the broker.
 
-## Put Session writers on one lock
+## Moved to issues
 
-Commit-link writes a Session under `session:${id}` (`src/triggers/api.ts:969`), while observe
-(`src/functions/observe.ts:243`) and the abandoned-Session heal
-(`src/functions/diagnostics.ts:1087`) take `obs:${id}`. Commit-link reads, edits and replaces
-the whole record, so a concurrent observe can lose its count or a commit SHA can be dropped.
-
-- **Done when.** Every read-modify-write of `mem:sessions` holds the same key, or commit-link
-  appends `commitShas` with a field-level `kv.update` and needs no lock.
-
-## Rank session-start Observations by something that varies
-
-`mem::context` keeps a Session's Observations with `importance >= 5`
-(`src/functions/context.ts:262`). Synthetic compression writes `importance: 5` on every
-Observation, so the filter keeps all of them and the top 5 are just the most recent.
-
-- **Evidence (2026-10-02).** Every devex Observation has importance ≥5.
-- **Done when.** The cut separates Observations under synthetic compression, or it is
-  removed, and `npm run eval:gate` holds.
-
-## Score insights in the injection-use check
-
-`injectedItemUse` returns `unscorable` for any item without files
-(`src/functions/injections.ts:30`). Insights carry no files, so injection-use cannot tell
-whether any of them were used.
-
-- **Evidence (2026-10-02).** All 226 insight items injected on dev in 7 days were
-  unscorable.
-- **Done when.** Insights have usage evidence, such as their concepts appearing in later
-  Observations, and the check reports a rate for them.
-
-## Let a Memory be global on purpose
-
-`memory-project-coverage` (`src/functions/diagnostics.ts:462`) counts every Memory without a
-`project` as unscoped. A preference that is meant to apply everywhere, such as the tmux one,
-keeps the warning on for good.
-
-- **Done when.** A Memory can be marked global explicitly, and the check counts only Memories
-  that have neither a project nor that mark.
+- Derive Observation type, importance and concepts — #90 (also covers ranking session-start Observations)
+- Cap stale-Session recovery at one LLM slot — #91
+- Merge the three env-file hydration loops — #92
+- Put Session writers on one lock — #93
+- Score Insights in the injection-use check — #94
+- Let a Memory be global on purpose — #95

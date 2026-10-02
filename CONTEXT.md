@@ -24,8 +24,9 @@ scoped by.
 
 **Abandoned Session**:
 A Session still marked active with no activity for 24 hours. Heal closes it with status
-`abandoned` at its last activity; it is not summarized, and the next Observation or session
-start on it reopens it.
+`abandoned` at its last activity without summarizing it, and the next Observation or session
+start on it reopens it. Like any unsummarized Session, it is summarized before Eviction
+removes it.
 
 ### What is stored
 
@@ -38,6 +39,12 @@ _Avoid_: event, log entry
 A durable distilled record derived from Observations, intended to be recalled later. Memories
 are content-addressed, so the same content captured twice is one Memory.
 _Avoid_: note, fact, item
+
+**Global Memory**:
+A Memory deliberately marked to apply in every project, such as an Operator preference.
+Recall surfaces it everywhere, even when it was saved during a Session in one project. A
+Memory that merely lacks a project is not global; it is unscoped.
+_Avoid_: shared memory, unscoped memory
 
 **Session Summary**:
 The distilled account of one Session, produced from its Observations each time the Session
