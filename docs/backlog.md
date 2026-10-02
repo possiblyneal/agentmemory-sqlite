@@ -65,3 +65,51 @@ other consolidation calls still send whatever their inputs add up to.
   prompt yet.
 - **Done when.** Both prompts are bounded the way reflect's is, before either input grows
   enough to starve sibling slots on the broker.
+
+## Put Session writers on one lock
+
+Commit-link writes a Session under `session:${id}` (`src/triggers/api.ts:969`), while observe
+(`src/functions/observe.ts:243`) and the abandoned-Session heal
+(`src/functions/diagnostics.ts:1087`) take `obs:${id}`. Commit-link reads, edits and replaces
+the whole record, so a concurrent observe can lose its count or a commit SHA can be dropped.
+
+- **Done when.** Every read-modify-write of `mem:sessions` holds the same key, or commit-link
+  appends `commitShas` with a field-level `kv.update` and needs no lock.
+
+## Rank session-start Observations by something that varies
+
+`mem::context` keeps a Session's Observations with `importance >= 5`
+(`src/functions/context.ts:262`). Synthetic compression writes `importance: 5` on every
+Observation, so the filter keeps all of them and the top 5 are just the most recent.
+
+- **Evidence (2026-10-02).** Every devex Observation has importance ≥5.
+- **Done when.** The cut separates Observations under synthetic compression, or it is
+  removed, and `npm run eval:gate` holds.
+
+## Score insights in the injection-use check
+
+`injectedItemUse` returns `unscorable` for any item without files
+(`src/functions/injections.ts:30`). Insights carry no files, so injection-use cannot tell
+whether any of them were used.
+
+- **Evidence (2026-10-02).** All 226 insight items injected on dev in 7 days were
+  unscorable.
+- **Done when.** Insights have usage evidence, such as their concepts appearing in later
+  Observations, and the check reports a rate for them.
+
+## Let a Memory be global on purpose
+
+`memory-project-coverage` (`src/functions/diagnostics.ts:462`) counts every Memory without a
+`project` as unscoped. A preference that is meant to apply everywhere, such as the tmux one,
+keeps the warning on for good.
+
+- **Done when.** A Memory can be marked global explicitly, and the check counts only Memories
+  that have neither a project nor that mark.
+
+## Recover raw Observations that have no Session
+
+105 raw Observations on dev have no `mem:sessions` record, so `/recompress-orphans`, which
+walks Sessions, never reaches them.
+
+- **Done when.** They are either compressed under a Session rebuilt from what they carry, or
+  reported by diagnostics as a separate count. Nothing is deleted.
