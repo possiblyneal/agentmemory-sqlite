@@ -116,7 +116,7 @@ describe("observe implicit session create (#638)", () => {
     expect(session.updatedAt).toBeTruthy();
   });
 
-  it("reopens a closed Session when work arrives on it", async () => {
+  it("reopens an Abandoned Session when work arrives on it", async () => {
     const { registerObserveFunction } = await import("../src/functions/observe.js");
     const sdk = mockSdk();
     const kv = mockKV();
@@ -145,5 +145,35 @@ describe("observe implicit session create (#638)", () => {
     expect(session.status).toBe("active");
     expect(session).not.toHaveProperty("endedAt");
     expect(session.observationCount).toBe(4);
+  });
+
+  it("leaves a Session that ended normally ended", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    await kv.set("mem:sessions", "ses_done", {
+      id: "ses_done",
+      project: "/p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T01:00:00Z",
+      status: "completed",
+      observationCount: 3,
+    });
+
+    await sdk.trigger("mem::observe", {
+      sessionId: "ses_done",
+      project: "/p",
+      cwd: "/p",
+      hookType: "post_tool_use",
+      timestamp: new Date().toISOString(),
+      data: { tool_name: "Read" },
+    });
+
+    const session = kv.store.get("mem:sessions")!.get("ses_done") as Record<string, unknown>;
+    expect(session.status).toBe("completed");
+    expect(session.endedAt).toBe("2026-01-01T01:00:00Z");
   });
 });

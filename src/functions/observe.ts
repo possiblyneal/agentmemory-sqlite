@@ -356,9 +356,9 @@ export function registerObserveFunction(
               });
             }
           }
-          // Work arriving on a closed Session means it is live again, as when
-          // heal closed it during a long idle spell and no SessionStart followed.
-          if (session.status !== "active") {
+          // Heal closes a Session that sat idle, and work may resume in the same
+          // terminal with no SessionStart. A Session that ended normally stays ended.
+          if (session.status === "abandoned") {
             updates.push(
               { type: "set", path: "status", value: "active" },
               { type: "remove", path: "endedAt" },
