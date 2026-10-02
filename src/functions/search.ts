@@ -1,5 +1,5 @@
 import type { ISdk } from '../engine/types.js'
-import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session } from '../types.js'
+import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
 import { SearchIndex } from '../state/search-index.js'
@@ -518,20 +518,22 @@ export function createSessionLoader(
 }
 
 // A result's project is its session's. Results with no session entry fall
-// back to KV.memories, and pass through when that also has no project.
-// Two cases arrive without a session:
+// back to KV.memories, then to the Session Summary, and pass through when
+// neither has a project. Two cases arrive without a session:
 //   1. Synthetic sessionId: memories indexed via mem::remember use
 //      sessionIds[0] ?? 'memory'. The string 'memory' has no session entry;
 //      neither does a real sessionId from a different lifecycle.
-//   2. Deleted session: the session was evicted after the entry was
-//      indexed. The KV.memories probe returns null for these (they are
-//      observations), so the entry passes through as unscoped. We lose the
-//      ability to filter but never block a result we can no longer verify.
+//   2. Evicted session: eviction deletes the session record and keeps its
+//      observations indexed, but its Session Summary still names the
+//      project. Only an observation with neither passes through unscoped:
+//      we lose the ability to filter but never block a result we can no
+//      longer verify.
 export function createProjectMatcher(
   kv: StateKV,
   project: string,
   loadSession = createSessionLoader(kv),
 ): (sessionId: string, obsId: string) => Promise<boolean> {
+  const summaryProjects = new Map<string, string | null>()
   const memoryProjects = new Map<string, string | null>()
   return async (sessionId, obsId) => {
     const session = await loadSession(sessionId)
@@ -541,7 +543,13 @@ export function createProjectMatcher(
       memoryProjects.set(obsId, mem?.project ?? null)
     }
     const memProject = memoryProjects.get(obsId)!
-    return memProject === null || memProject === project
+    if (memProject !== null) return memProject === project
+    if (!summaryProjects.has(sessionId)) {
+      const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null)
+      summaryProjects.set(sessionId, summary?.project || null)
+    }
+    const summaryProject = summaryProjects.get(sessionId)!
+    return summaryProject === null || summaryProject === project
   }
 }
 

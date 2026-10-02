@@ -105,11 +105,3 @@ keeps the warning on for good.
 
 - **Done when.** A Memory can be marked global explicitly, and the check counts only Memories
   that have neither a project nor that mark.
-
-## Recover raw Observations that have no Session
-
-105 raw Observations on dev have no `mem:sessions` record, so `/recompress-orphans`, which
-walks Sessions, never reaches them.
-
-- **Done when.** They are either compressed under a Session rebuilt from what they carry, or
-  reported by diagnostics as a separate count. Nothing is deleted.

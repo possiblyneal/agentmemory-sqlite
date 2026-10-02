@@ -81,4 +81,11 @@ export class StateKV {
       payload: { scope },
     })
   }
+
+  async listScopes(prefix: string): Promise<string[]> {
+    return this.sdk.trigger<{ prefix: string }, string[]>({
+      function_id: 'state::list-scopes',
+      payload: { prefix },
+    })
+  }
 }

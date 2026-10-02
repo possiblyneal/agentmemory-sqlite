@@ -36,6 +36,8 @@ export function mockKV() {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
     },
+    listScopes: async (prefix: string): Promise<string[]> =>
+      [...store.keys()].filter((scope) => scope.startsWith(prefix)),
   };
 }
 

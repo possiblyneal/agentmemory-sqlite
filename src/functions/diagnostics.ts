@@ -71,6 +71,47 @@ function isAbandonedSession(session: Session, now: number): boolean {
   );
 }
 
+// Past the grace window a raw record is a compression that never ran; inside
+// it, compression may still be in flight.
+function isStrandedRaw(o: Record<string, unknown>, now: number): boolean {
+  if (typeof o["narrative"] === "string") return false;
+  if (typeof o["hookType"] !== "string") return false;
+  const ts = new Date(String(o["timestamp"])).getTime();
+  return !(Number.isFinite(ts) && now - ts < ONE_HOUR_MS);
+}
+
+type SessionlessScope = {
+  raw: number;
+  compressed: number;
+  // A Session Summary is the one surviving record that names the project.
+  summaryNamesProject: boolean;
+};
+
+// Eviction deletes a Session record and keeps its Observations, and a host
+// that never sends a session start leaves Observations with no Session at all.
+async function sessionlessObservations(
+  kv: StateKV,
+  sessions: Session[],
+  now: number,
+): Promise<SessionlessScope[]> {
+  const known = new Set(sessions.map((session) => session.id));
+  const prefix = KV.observations("");
+  const sessionIds = (await kv.listScopes(prefix))
+    .map((scope) => scope.slice(prefix.length))
+    .filter((sessionId) => !known.has(sessionId));
+  return Promise.all(
+    sessionIds.map(async (sessionId) => {
+      const [observations, summary] = await Promise.all([
+        kv.list<Record<string, unknown>>(KV.observations(sessionId)),
+        kv.get<SessionSummary>(KV.summaries, sessionId),
+      ]);
+      const raw = observations.filter((o) => isStrandedRaw(o, now)).length;
+      const compressed = observations.filter((o) => typeof o["narrative"] === "string").length;
+      return { raw, compressed, summaryNamesProject: Boolean(summary?.project) };
+    }),
+  );
+}
+
 export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::diagnose", 
     async (data: { categories?: string[] }) => {
@@ -384,14 +425,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           );
           total += observations.length;
           for (const o of observations) {
-            if (typeof o["narrative"] === "string") continue;
-            if (typeof o["hookType"] !== "string") continue;
-            // An observation created moments ago is legitimately still raw
-            // while its compression is in flight. Only records past the
-            // grace window are genuinely orphaned.
-            const ts = new Date(String(o["timestamp"])).getTime();
-            if (Number.isFinite(ts) && now - ts < ONE_HOUR_MS) continue;
-            orphaned.push(String(o["id"] ?? "unknown"));
+            if (isStrandedRaw(o, now)) orphaned.push(String(o["id"] ?? "unknown"));
           }
         }
 
@@ -411,7 +445,27 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             name: "observations-ok",
             category: "observations",
             status: "pass",
-            message: `All ${total} observations are compressed and indexable`,
+            message: `All ${total} Observations of known Sessions are compressed and indexable`,
+            fixable: false,
+          });
+        }
+
+        const sessionless = await sessionlessObservations(kv, sessions, now);
+        const raw = (scopes: SessionlessScope[]) => scopes.reduce((n, scope) => n + scope.raw, 0);
+        const namedRaw = raw(sessionless.filter((scope) => scope.summaryNamesProject));
+        const unnamedRaw = raw(sessionless.filter((scope) => !scope.summaryNamesProject));
+        const sessionlessCompressed = sessionless.reduce((n, scope) => n + scope.compressed, 0);
+
+        if (sessionless.length > 0) {
+          checks.push({
+            name: `observations-sessionless:${sessionless.length}`,
+            category: "observations",
+            status: namedRaw + unnamedRaw > 0 ? "warn" : "pass",
+            message:
+              `${sessionless.length} Sessions have Observations but no Session record: ` +
+              `${sessionlessCompressed} compressed, ${namedRaw} raw whose Session Summary names ` +
+              `their project, and ${unnamedRaw} raw with neither a Session nor a Session Summary ` +
+              `to name it. Raw ones are in neither search index.`,
             fixable: false,
           });
         }
