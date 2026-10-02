@@ -200,6 +200,10 @@ describe("Smart Search Function", () => {
       const savedHere = makeObs({ id: "mem_here", sessionId: "memory", title: "Saved here" });
       const savedElsewhere = makeObs({ id: "mem_elsewhere", sessionId: "memory", title: "Saved elsewhere" });
       const unknownSession = makeObs({ id: "obs_orphan", sessionId: "ses_evicted", title: "Orphan" });
+      const evictedHere = makeObs({ id: "obs_evicted_here", sessionId: "ses_gone_here", title: "Evicted here" });
+      const evictedElsewhere = makeObs({ id: "obs_evicted_elsewhere", sessionId: "ses_gone_elsewhere", title: "Evicted elsewhere" });
+      await kv.set("mem:summaries", "ses_gone_here", { sessionId: "ses_gone_here", project: "my-project" });
+      await kv.set("mem:summaries", "ses_gone_elsewhere", { sessionId: "ses_gone_elsewhere", project: "other-project" });
       await kv.set("mem:sessions", "ses_other", {
         id: "ses_other",
         project: "other-project",
@@ -211,7 +215,7 @@ describe("Smart Search Function", () => {
       await kv.set("mem:memories", "mem_here", { id: "mem_here", project: "my-project" });
       await kv.set("mem:memories", "mem_elsewhere", { id: "mem_elsewhere", project: "other-project" });
       searchResults.unshift(
-        ...[other, savedHere, savedElsewhere, unknownSession].map((observation) => ({
+        ...[other, savedHere, savedElsewhere, unknownSession, evictedHere, evictedElsewhere].map((observation) => ({
           observation,
           bm25Score: 0.9,
           vectorScore: 0,
@@ -221,7 +225,7 @@ describe("Smart Search Function", () => {
       );
     });
 
-    it("drops results whose session or saved memory belongs to another project", async () => {
+    it("drops results whose session, Session Summary or saved memory belongs to another project", async () => {
       const result = (await sdk.trigger("mem::smart-search", {
         query: "auth",
         project: "my-project",
@@ -230,6 +234,7 @@ describe("Smart Search Function", () => {
       expect(result.results.map((r) => r.obsId)).toEqual([
         "mem_here",
         "obs_orphan",
+        "obs_evicted_here",
         "obs_1",
         "obs_2",
       ]);
@@ -240,7 +245,7 @@ describe("Smart Search Function", () => {
         query: "auth",
       })) as { results: CompactSearchResult[] };
 
-      expect(result.results).toHaveLength(6);
+      expect(result.results).toHaveLength(8);
     });
 
     it("over-fetches so filtered-out rows do not underfill the page", async () => {

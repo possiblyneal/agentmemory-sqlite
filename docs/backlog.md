@@ -105,14 +105,3 @@ keeps the warning on for good.
 
 - **Done when.** A Memory can be marked global explicitly, and the check counts only Memories
   that have neither a project nor that mark.
-
-## Scope an evicted Session's Observations by its Session Summary
-
-Stale-Session Eviction deletes the Session record and keeps its Observations indexed
-(`src/state/index-corpus.ts`). `createProjectMatcher` (`src/functions/search.ts`) then finds no
-Session and passes them through every project filter, so one repo's work surfaces in
-another's. On dev that is 92 Sessions. Their Session Summary still names the project.
-
-- **Done when.** The matcher falls back to the Session Summary's project before passing a
-  result through unscoped, and a test proves an evicted Session's Observation is filtered out
-  of another project's search.
