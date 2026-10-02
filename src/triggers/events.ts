@@ -101,11 +101,22 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     config: { topic: "agentmemory.observation" },
   });
 
-  sdk.registerFunction("event::session::stopped", async (data: { sessionId: string; skipConsolidation?: boolean }) => {
-    const summary = await sdk.trigger({ function_id: "mem::summarize", payload: data });
-    const fireVoid = (function_id: string, payload: unknown) =>
+  // recovery marks a stop driven by Eviction's stale-Session recovery, which
+  // holds at most one LLM slot: chunks run one at a time, reflect and graph
+  // extraction are awaited rather than fired, and consolidation is left to
+  // Eviction's single pass.
+  sdk.registerFunction("event::session::stopped", async (data: { sessionId: string; recovery?: boolean }) => {
+    const summary = await sdk.trigger({
+      function_id: "mem::summarize",
+      payload: { sessionId: data.sessionId, ...(data.recovery && { sequentialChunks: true }) },
+    });
+    const fanOut = (function_id: string, payload: unknown) =>
       sdk
-        .trigger({ function_id, payload, action: TriggerAction.Void() })
+        .trigger({
+          function_id,
+          payload,
+          ...(!data.recovery && { action: TriggerAction.Void() }),
+        })
         .catch((err) =>
           logger.warn(function_id + " trigger failed", {
             sessionId: data.sessionId,
@@ -113,7 +124,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
           }),
         );
     if (isReflectEnabled()) {
-      fireVoid("mem::slot-reflect", { sessionId: data.sessionId });
+      await fanOut("mem::slot-reflect", { sessionId: data.sessionId });
     }
     // Fork posture (graph-off). Stock 0.9.29 fires this unconditionally and
     // lets mem::graph-extract gate only its LLM pass, so a keyless install
@@ -146,7 +157,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
           (o) => o.title && (oldestPending === undefined || o.timestamp < oldestPending),
         );
         if (session && fresh.length > 0) {
-          fireVoid("mem::graph-extract", {
+          await fanOut("mem::graph-extract", {
             observations: fresh,
             sessionId: data.sessionId,
           });
@@ -163,7 +174,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     // client-side session-end hook no longer drives consolidation directly).
     // Gated so keyless/zero-LLM users don't fire no-op LLM calls.
     //
-    // skipConsolidation suppresses the fan-out when this handler is driven
+    // recovery suppresses the fan-out when this handler is driven
     // by eviction's stale-session recovery: evict calls session::stopped
     // once per recovered session, then runs ONE final consolidation pass.
     // Without this guard, N recovered sessions launch N concurrent forced
@@ -174,10 +185,10 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     // are full-corpus LLM work with no internal "nothing changed" guard, so
     // firing them every turn is a cost/latency storm for connected agents.
     // Bound the global corpus consolidation to once per cooldown window.
-    if (isConsolidationEnabled() && !data.skipConsolidation) {
+    if (isConsolidationEnabled() && !data.recovery) {
       if (await consolidationDue(kv)) {
-        fireVoid("mem::consolidate-pipeline", { tier: "all", force: true });
-        fireVoid("mem::auto-crystallize", { olderThanDays: 0 });
+        fanOut("mem::consolidate-pipeline", { tier: "all", force: true });
+        fanOut("mem::auto-crystallize", { olderThanDays: 0 });
       }
     }
     return summary;

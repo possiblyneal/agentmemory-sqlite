@@ -106,7 +106,7 @@ async function stopSession(kv: ReturnType<typeof spyKV>) {
   registerGraphFunction(sdk as never, kv as never, provider as never);
   registerEventTriggers(sdk as never, kv as never);
   await sdk.trigger("event::session::stopped", { sessionId: SESSION });
-  // fireVoid is fire-and-forget; let the dispatched handler settle.
+  // fanOut is fire-and-forget; let the dispatched handler settle.
   await new Promise((r) => setTimeout(r, 20));
   return sdk;
 }

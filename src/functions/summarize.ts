@@ -188,6 +188,7 @@ async function planChunks(
   provider: MemoryProvider,
   compressed: CompressedObservation[],
   sessionId: string,
+  concurrency: number,
 ): Promise<CompressedObservation[][]> {
   const budget = getChunkTokens();
   const texts = compressed.map(renderSummaryObservation);
@@ -198,7 +199,7 @@ async function planChunks(
       sessionId,
       chunks: chunks.length,
       budget,
-      concurrency: getChunkConcurrency(),
+      concurrency,
       totalObservations: compressed.length,
     });
   }
@@ -214,6 +215,7 @@ async function produceSummaryXml(
   chunks: CompressedObservation[][],
   sessionId: string,
   project: string,
+  concurrency: number,
 ): Promise<{
   response: string;
   mode: "single" | "chunked";
@@ -232,7 +234,7 @@ async function produceSummaryXml(
   // chronological order even when some were skipped.
   const partialByIdx = await mapWithConcurrency(
     chunks.map((chunk, idx) => ({ chunk, idx })),
-    getChunkConcurrency(),
+    concurrency,
     ({ chunk, idx }) =>
       summarizeChunkWithRetry(provider, chunk, sessionId, project, idx, chunks.length),
   );
@@ -327,7 +329,11 @@ export function registerSummarizeFunction(
   metricsStore?: MetricsStore,
 ): void {
   sdk.registerFunction("mem::summarize", 
-    async (data: { sessionId: string; force?: boolean } | undefined) => {
+    // sequentialChunks is for Eviction's recovery sweep, which must hold at
+    // most one LLM slot so live Sessions keep the other.
+    async (
+      data: { sessionId: string; force?: boolean; sequentialChunks?: boolean } | undefined,
+    ) => {
       const startMs = Date.now();
       if (!data || typeof data.sessionId !== "string" || !data.sessionId.trim()) {
         return { success: false, error: "sessionId is required" };
@@ -395,13 +401,15 @@ export function registerSummarizeFunction(
         let response = "";
         let mode = "single";
         let chunks = 1;
-        const planned = await planChunks(provider, compressed, sessionId);
+        const concurrency = data.sequentialChunks ? 1 : getChunkConcurrency();
+        const planned = await planChunks(provider, compressed, sessionId, concurrency);
         for (let attempt = 1; attempt <= 2; attempt++) {
           const produced = await produceSummaryXml(
             provider,
             planned,
             sessionId,
             session.project,
+            concurrency,
           );
           response = produced.response;
           mode = produced.mode;

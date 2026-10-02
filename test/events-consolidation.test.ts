@@ -43,12 +43,12 @@ function mockKV() {
 
 type StoppedHandler = (data: {
   sessionId: string;
-  skipConsolidation?: boolean;
+  recovery?: boolean;
 }) => Promise<unknown>;
 
 // Builds a spy-backed sdk. `trigger` resolves for mem::summarize with a fake
 // summary; void triggers resolve unless `rejectFor` matches the function_id,
-// in which case they reject (to exercise fireVoid's .catch()).
+// in which case they reject (to exercise fanOut's .catch()).
 function mockSdk(opts?: { rejectFor?: string }) {
   const handlers = new Map<string, StoppedHandler>();
   const trigger = vi.fn(
@@ -127,17 +127,17 @@ describe("event::session::stopped consolidation fan-out", () => {
     expect(ids).not.toContain("mem::auto-crystallize");
   });
 
-  it("suppresses the consolidation fan-out when skipConsolidation is set (eviction recovery path)", async () => {
+  it("suppresses the consolidation fan-out on the eviction recovery path", async () => {
     // Regression: mem::evict calls event::session::stopped once per recovered
     // stale session, then runs ONE final consolidation pass. Without the
-    // skipConsolidation guard, N recovered sessions would launch N concurrent
+    // recovery guard, N recovered sessions would launch N concurrent
     // forced full-corpus consolidations + N crystallizations.
     vi.mocked(isConsolidationEnabled).mockReturnValue(true);
     const { sdk, handlers, trigger } = mockSdk();
     registerEventTriggers(sdk as never, mockKV() as never);
 
     const stopped = handlers.get("event::session::stopped")!;
-    await stopped({ sessionId: "ses_1", skipConsolidation: true });
+    await stopped({ sessionId: "ses_1", recovery: true });
 
     const ids = functionIds(trigger);
     // Per-session work still happens...
@@ -147,14 +147,14 @@ describe("event::session::stopped consolidation fan-out", () => {
     expect(ids).not.toContain("mem::auto-crystallize");
   });
 
-  it("still fans out when skipConsolidation is explicitly false (normal stop)", async () => {
+  it("still fans out when recovery is explicitly false (normal stop)", async () => {
     vi.mocked(isConsolidationEnabled).mockReturnValue(true);
     const { sdk, handlers, trigger } = mockSdk();
     registerEventTriggers(sdk as never, mockKV() as never);
 
     await handlers.get("event::session::stopped")!({
       sessionId: "ses_1",
-      skipConsolidation: false,
+      recovery: false,
     });
 
     const ids = functionIds(trigger);
@@ -185,6 +185,50 @@ describe("event::session::stopped consolidation fan-out", () => {
     registerEventTriggers(on.sdk as never, mockKV() as never);
     await on.handlers.get("event::session::stopped")!({ sessionId: "ses_1" });
     expect(functionIds(on.trigger)).toContain("mem::slot-reflect");
+  });
+
+  it("asks summarize for sequential chunks only on the recovery path", async () => {
+    const { sdk, handlers, trigger } = mockSdk();
+    registerEventTriggers(sdk as never, mockKV() as never);
+    const stopped = handlers.get("event::session::stopped")!;
+
+    await stopped({ sessionId: "ses_1" });
+    await stopped({ sessionId: "ses_2", recovery: true });
+
+    const summarizePayloads = trigger.mock.calls
+      .map((c) => c[0] as { function_id: string; payload: unknown })
+      .filter((c) => c.function_id === "mem::summarize")
+      .map((c) => c.payload);
+    expect(summarizePayloads).toEqual([
+      { sessionId: "ses_1" },
+      { sessionId: "ses_2", sequentialChunks: true },
+    ]);
+  });
+
+  it("on the recovery path, returns only after slot-reflect and graph-extract finish", async () => {
+    vi.mocked(isReflectEnabled).mockReturnValue(true);
+    vi.mocked(isGraphExtractionEnabled).mockReturnValue(true);
+    const finished: string[] = [];
+    const { sdk, handlers, trigger } = mockSdk();
+    trigger.mockImplementation(async (input: { function_id: string }) => {
+      if (input.function_id === "mem::summarize") return { success: true };
+      await new Promise((r) => setTimeout(r, 5));
+      finished.push(input.function_id);
+      return { ok: true };
+    });
+    const kv = mockKV();
+    kv.get.mockResolvedValue({ id: "ses_1" } as never);
+    kv.list.mockResolvedValue([
+      { id: "obs_1", title: "Edit", timestamp: "2026-10-01T00:00:00.000Z" },
+    ] as never);
+    registerEventTriggers(sdk as never, kv as never);
+
+    await handlers.get("event::session::stopped")!({ sessionId: "ses_1", recovery: true });
+
+    expect(finished).toEqual(["mem::slot-reflect", "mem::graph-extract"]);
+    for (const call of trigger.mock.calls) {
+      expect((call[0] as { action?: unknown }).action).toBeUndefined();
+    }
   });
 
   it("does not throw and still returns the summary when consolidate-pipeline trigger rejects", async () => {

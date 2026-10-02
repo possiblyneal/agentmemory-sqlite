@@ -427,6 +427,30 @@ describe("mem::summarize chunking", () => {
     expect(maxInflight).toBe(2);
   });
 
+  it("runs chunks one at a time when the caller asks for sequential chunks", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "2";
+    let inflight = 0;
+    let maxInflight = 0;
+    const provider: MemoryProvider = {
+      name: "test",
+      compress: async () => "",
+      summarize: async (system: string) => {
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        await new Promise((r) => setTimeout(r, 5));
+        inflight -= 1;
+        return summaryXml({ title: system.includes("merging") ? "merged" : "ok" });
+      },
+    };
+    const { handler } = await setupHandler({ sessionId: "ses_seq", obsCount: 400, provider });
+
+    const result: any = await handler({ sessionId: "ses_seq", sequentialChunks: true });
+
+    expect(result.success).toBe(true);
+    expect(maxInflight).toBe(1);
+  });
+
   it("packs Observations by measured tokens: every chunk fits the budget, order kept", async () => {
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + 250);
