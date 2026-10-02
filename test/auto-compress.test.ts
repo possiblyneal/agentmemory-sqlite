@@ -202,6 +202,17 @@ describe("buildSyntheticCompression", () => {
       ["WebFetch", "web_fetch"],
       ["Task", "subagent"],
       ["UnknownTool", "other"],
+      ["Agent", "subagent"],
+      ["TaskStop", "subagent"],
+      ["TaskUpdate", "subagent"],
+      ["SendMessage", "subagent"],
+      ["ListAgents", "subagent"],
+      ["AskUserQuestion", "decision"],
+      ["Skill", "other"],
+      ["ToolSearch", "other"],
+      ["mcp__claude-in-chrome__read_console_messages", "web_fetch"],
+      ["mcp__claude-in-chrome__javascript_tool", "web_fetch"],
+      ["mcp__claude-in-chrome__navigate", "web_fetch"],
     ];
     for (const [name, expectedType] of cases) {
       const synthetic = (
@@ -259,6 +270,21 @@ describe("buildSyntheticCompression", () => {
       sessionId: "ses_1",
       timestamp: new Date().toISOString(),
       hookType: "post_tool_failure",
+      raw: {},
+    });
+    expect(synth.type).toBe("error");
+  });
+
+  it("keeps the hook type ahead of the tool-name table", async () => {
+    const { buildSyntheticCompression } = await import(
+      "../src/functions/compress-synthetic.js"
+    );
+    const synth = buildSyntheticCompression({
+      id: "obs_5",
+      sessionId: "ses_1",
+      timestamp: new Date().toISOString(),
+      hookType: "post_tool_failure",
+      toolName: "AskUserQuestion",
       raw: {},
     });
     expect(synth.type).toBe("error");

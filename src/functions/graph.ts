@@ -33,6 +33,7 @@ import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { capSourceIds } from "./graph-provenance.js";
 import { recordAudit } from "./audit.js";
+import { getSearchIndex } from "./search.js";
 import { logger } from "../logger.js";
 
 // #753: keep the response payload below the iii state channel ceiling.
@@ -529,6 +530,15 @@ function parseAttrs(raw: string): Record<string, string> {
   return attrs;
 }
 
+export const MAX_OBSERVATION_CONCEPTS = 10;
+
+// What Extraction learned about one Observation: the importance the model gave
+// it and the names of the non-file Entities it says came from it.
+interface ObservationAnnotation {
+  importance?: number;
+  concepts: string[];
+}
+
 function parseGraphXml(
   xml: string,
   observationIds: string[],
@@ -540,10 +550,24 @@ function parseGraphXml(
 ): {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  annotations: Map<string, ObservationAnnotation>;
 } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const annotations = new Map<string, ObservationAnnotation>();
   const now = new Date().toISOString();
+
+  const annotationFor = (n: string): ObservationAnnotation | undefined => {
+    if (!/^\d+$/.test(n.trim())) return undefined;
+    const obsId = observationIds[Number(n) - 1];
+    if (!obsId) return undefined;
+    let annotation = annotations.get(obsId);
+    if (!annotation) {
+      annotation = { concepts: [] };
+      annotations.set(obsId, annotation);
+    }
+    return annotation;
+  };
 
   // Two passes because <entity> can be self-closing or have a body
   // (<property> children). The self-closing form needs `[^>]*[^/]` on
@@ -558,6 +582,11 @@ function parseGraphXml(
     const type = attrs["type"] as GraphNode["type"] | undefined;
     const name = attrs["name"];
     if (!type || !name) return;
+    if (type !== "file") {
+      for (const n of (attrs["obs"] ?? "").split(",")) {
+        annotationFor(n)?.concepts.push(name);
+      }
+    }
     const properties: Record<string, string> = {};
     const propRegex = /<property\s+key="([^"]+)">([^<]*)<\/property>/g;
     let propMatch;
@@ -590,6 +619,14 @@ function parseGraphXml(
   };
 
   let match;
+  const observationRegex = /<observation\b([^>]*?)\/>/g;
+  while ((match = observationRegex.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1]);
+    const importance = Number(attrs["importance"]);
+    if (!Number.isInteger(importance) || importance < 1 || importance > 10) continue;
+    const annotation = annotationFor(attrs["n"] ?? "");
+    if (annotation) annotation.importance = importance;
+  }
   while ((match = entitySelfClose.exec(xml)) !== null) {
     addEntity(match[1]);
   }
@@ -621,7 +658,47 @@ function parseGraphXml(
     });
   }
 
-  return { nodes, edges };
+  return { nodes, edges, annotations };
+}
+
+// Field-level, so a concurrent writer's other fields survive. An Observation
+// gone from KV is skipped: update() would recreate it as a bare stub. Failures
+// are logged, not thrown: the graph is already written by then.
+async function writeObservationAnnotations(
+  kv: StateKV,
+  observations: CompressedObservation[],
+  annotations: Map<string, ObservationAnnotation>,
+): Promise<void> {
+  const index = getSearchIndex();
+  const results = await Promise.allSettled(
+    observations.map(async (o) => {
+      const annotation = annotations.get(o.id);
+      if (!annotation || !o.sessionId) return;
+      const scope = KV.observations(o.sessionId);
+      const current = await kv.get<CompressedObservation>(scope, o.id);
+      if (!current) return;
+      const updated: CompressedObservation = {
+        ...current,
+        importance: annotation.importance ?? current.importance,
+        concepts: [...new Set([...(current.concepts ?? []), ...annotation.concepts])].slice(
+          0,
+          MAX_OBSERVATION_CONCEPTS,
+        ),
+      };
+      await kv.update(scope, o.id, [
+        { type: "set", path: "importance", value: updated.importance },
+        { type: "set", path: "concepts", value: updated.concepts },
+      ]);
+      if (index.has(o.id)) index.add(updated);
+    }),
+  );
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    logger.warn("Observation importance write-back failed", {
+      failed: failed.length,
+      error: String((failed[0] as PromiseRejectedResult).reason),
+    });
+  }
 }
 
 const HEURISTIC_EDGE_WEIGHT = 0.4;
@@ -931,6 +1008,7 @@ async function extractGraph(
 
   let nodes: GraphNode[] = [];
   let edges: GraphEdge[] = [];
+  const annotations = new Map<string, ObservationAnnotation>();
   try {
     const heuristic = extractGraphHeuristics(observations);
     nodes = heuristic.nodes;
@@ -976,6 +1054,7 @@ async function extractGraph(
         );
         nodes = nodes.concat(parsed.nodes);
         edges = edges.concat(parsed.edges);
+        for (const [obsId, annotation] of parsed.annotations) annotations.set(obsId, annotation);
         if (failure === undefined) extracted = i + batch.length;
       } catch (err) {
         failure ??= err;
@@ -999,6 +1078,7 @@ async function extractGraph(
         : String(failure);
 
   if (nodes.length === 0 && edges.length === 0) {
+    await writeObservationAnnotations(kv, observations, annotations);
     return {
       result: llmError
         ? { success: false, error: llmError }
@@ -1014,6 +1094,8 @@ async function extractGraph(
       edges,
       obsIds,
     );
+
+    await writeObservationAnnotations(kv, observations, annotations);
 
     await recordAudit(kv, "observe", "mem::graph-extract", obsIds, {
       nodesExtracted: nodes.length,

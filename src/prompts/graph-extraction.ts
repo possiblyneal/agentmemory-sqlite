@@ -1,8 +1,11 @@
-export const GRAPH_EXTRACTION_SYSTEM = `You are a knowledge graph extraction engine. Given a compressed observation from a coding session, extract entities and relationships.
+export const GRAPH_EXTRACTION_SYSTEM = `You are a knowledge graph extraction engine. Given numbered compressed observations from a coding session, rate each observation's importance and extract entities and relationships.
 
 Output format (XML):
+<observations>
+  <observation n="observation number" importance="1-10"/>
+</observations>
 <entities>
-  <entity type="file|function|concept|error|decision|pattern|library|person" name="exact name">
+  <entity type="file|function|concept|error|decision|pattern|library|person" name="exact name" obs="comma-separated observation numbers">
     <property key="key">value</property>
   </entity>
 </entities>
@@ -11,6 +14,8 @@ Output format (XML):
 </relationships>
 
 Rules:
+- Rate every observation: 1-3 for routine reads, 4-6 for edits/commands, 7-9 for architectural decisions, 10 for breaking changes
+- On each entity, list the numbers of the observations it came from
 - Extract concrete entities only (real file paths, function names, library names)
 - Use the most specific type available
 - Weight relationships by how strong/direct the connection is

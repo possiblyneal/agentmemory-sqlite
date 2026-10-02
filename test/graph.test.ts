@@ -5,7 +5,8 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { logger } from "../src/logger.js";
-import { registerGraphFunction } from "../src/functions/graph.js";
+import { MAX_OBSERVATION_CONCEPTS, registerGraphFunction } from "../src/functions/graph.js";
+import { getSearchIndex } from "../src/functions/search.js";
 import { ProviderHttpError } from "../src/providers/_fetch.js";
 import type {
   CompressedObservation,
@@ -1230,5 +1231,141 @@ describe("Graph Functions", () => {
         expect(entry).not.toHaveProperty("sourceObservationIds");
       }
     });
+  });
+});
+
+describe("graph-extract importance and concepts (#90)", () => {
+  let sdk: ReturnType<typeof mockSdk>;
+  let kv: ReturnType<typeof mockKV>;
+  const ORIG_GRAPH_FLAG = process.env["GRAPH_EXTRACTION_ENABLED"];
+
+  const obs = (id: string, over: Partial<CompressedObservation> = {}): CompressedObservation => ({
+    ...testObs,
+    id,
+    importance: 5,
+    concepts: [],
+    ...over,
+  });
+
+  async function extract(observations: CompressedObservation[], xml: string) {
+    for (const o of observations) {
+      await kv.set(`mem:obs:${o.sessionId}`, o.id, o);
+      getSearchIndex().add(o);
+    }
+    mockProvider.compress.mockResolvedValueOnce(xml);
+    await sdk.trigger("mem::graph-extract", { observations });
+  }
+
+  const stored = (id: string) => kv.get<CompressedObservation>("mem:obs:ses_1", id);
+
+  beforeEach(() => {
+    sdk = mockSdk();
+    kv = mockKV();
+    vi.clearAllMocks();
+    getSearchIndex().clear();
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
+    registerGraphFunction(sdk as never, kv as never, mockProvider as never);
+  });
+
+  afterEach(() => {
+    if (ORIG_GRAPH_FLAG === undefined) delete process.env["GRAPH_EXTRACTION_ENABLED"];
+    else process.env["GRAPH_EXTRACTION_ENABLED"] = ORIG_GRAPH_FLAG;
+  });
+
+  it("writes each Observation's importance and the concepts attributed to it", async () => {
+    await extract(
+      [obs("obs_a", { concepts: ["routing"] }), obs("obs_b")],
+      `<observations>
+<observation n="1" importance="8"/>
+<observation n="2" importance="2"/>
+</observations>
+<entities>
+<entity type="concept" name="connection pooling" obs="1"/>
+<entity type="library" name="pgbouncer" obs="1,2"/>
+<entity type="file" name="src/db.ts" obs="1"/>
+</entities>
+<relationships/>`,
+    );
+
+    expect(await stored("obs_a")).toMatchObject({
+      importance: 8,
+      concepts: ["routing", "connection pooling", "pgbouncer"],
+    });
+    expect(await stored("obs_b")).toMatchObject({ importance: 2, concepts: ["pgbouncer"] });
+  });
+
+  it("makes written concepts searchable", async () => {
+    await extract(
+      [obs("obs_a")],
+      `<entities><entity type="library" name="pgbouncer" obs="1"/></entities>`,
+    );
+
+    expect(getSearchIndex().search("pgbouncer").map((r) => r.obsId)).toEqual(["obs_a"]);
+  });
+
+  it("leaves importance unchanged when it is missing, malformed or out of range", async () => {
+    const batch = ["obs_a", "obs_b", "obs_c", "obs_d"].map((id) => obs(id, { importance: 6 }));
+    await extract(
+      batch,
+      `<observations>
+<observation n="1" importance="high"/>
+<observation n="2" importance="0"/>
+<observation n="3" importance="11"/>
+<observation n="9" importance="7"/>
+</observations>
+<entities/>`,
+    );
+
+    for (const id of ["obs_a", "obs_b", "obs_c", "obs_d"]) {
+      expect((await stored(id))?.importance, id).toBe(6);
+    }
+  });
+
+  it("leaves an Observation the output does not name untouched", async () => {
+    const untouched = obs("obs_b", { importance: 4, concepts: ["kept"] });
+    await extract(
+      [obs("obs_a"), untouched],
+      `<observations><observation n="1" importance="9"/></observations>
+<entities><entity type="concept" name="caching" obs="1"/></entities>`,
+    );
+
+    expect(await stored("obs_b")).toEqual(untouched);
+  });
+
+  it("caps concepts and does not repeat one already held", async () => {
+    const entities = Array.from(
+      { length: 20 },
+      (_, i) => `<entity type="concept" name="c${i}" obs="1"/>`,
+    ).join("\n");
+    await extract(
+      [obs("obs_a", { concepts: ["c0"] })],
+      `<entities>${entities}</entities>`,
+    );
+
+    const concepts = (await stored("obs_a"))!.concepts;
+    expect(new Set(concepts).size).toBe(concepts.length);
+    expect(concepts.length).toBe(MAX_OBSERVATION_CONCEPTS);
+    expect(concepts.slice(0, 2)).toEqual(["c0", "c1"]);
+  });
+
+  it("writes nothing back when the graph cannot be written", async () => {
+    const original = obs("obs_a");
+    await kv.set("mem:obs:ses_1", original.id, original);
+    const failingSet = kv.set;
+    kv.set = (async (scope: string, key: string, data: unknown) => {
+      if (scope.startsWith("mem:graph")) throw new Error("disk full");
+      return failingSet(scope, key, data);
+    }) as typeof kv.set;
+    mockProvider.compress.mockResolvedValueOnce(
+      `<observations><observation n="1" importance="9"/></observations>
+<entities><entity type="concept" name="caching" obs="1"/></entities>`,
+    );
+
+    const result = (await sdk.trigger("mem::graph-extract", { observations: [original] })) as {
+      success: boolean;
+    };
+
+    expect(result.success).toBe(false);
+    expect(await stored("obs_a")).toEqual(original);
   });
 });
