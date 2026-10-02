@@ -5,6 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerApiTriggers } from "../src/triggers/api.js";
+import { registerObserveFunction } from "../src/functions/observe.js";
 import { withKeyedLock } from "../src/state/keyed-mutex.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
@@ -31,31 +32,37 @@ describe("api::session::commit Session write", () => {
     sdk.fns.get("api::session::commit")!({ headers: {}, body: { sha, sessionId } });
 
   beforeEach(async () => {
-    sdk = mockSdk();
+    sdk = mockSdk({ looseTrigger: true });
     kv = mockKV();
     registerApiTriggers(sdk as never, kv as never, undefined);
+    registerObserveFunction(sdk as never, kv as never);
     await kv.set(KV.sessions, SESSION.id, { ...SESSION });
   });
 
-  it("waits for the Session's observe lock and keeps the count observe wrote", async () => {
-    let link: Promise<unknown> | undefined;
+  it("queues behind observe on the Session's lock and keeps its count and activity time", async () => {
+    let writes: Promise<unknown[]> | undefined;
     await withKeyedLock(`obs:${SESSION.id}`, async () => {
-      link = linkCommit("aaa1111");
-      await settle();
-      const midway = await kv.get<Session>(KV.sessions, SESSION.id);
-      expect(midway?.commitShas).toBeUndefined();
-      await kv.update(KV.sessions, SESSION.id, [
-        { type: "set", path: "observationCount", value: 2 },
+      writes = Promise.all([
+        sdk.trigger("mem::observe", {
+          sessionId: SESSION.id,
+          hookType: "post_tool_use",
+          timestamp: "2026-10-02T01:00:00.000Z",
+          data: { tool_name: "Read", tool_input: { file_path: "a.ts" } },
+        }),
+        linkCommit("aaa1111"),
       ]);
+      await settle();
+      expect(await kv.get<Session>(KV.sessions, SESSION.id)).toEqual(SESSION);
     });
-    await link;
+    await writes;
 
     const session = await kv.get<Session>(KV.sessions, SESSION.id);
     expect(session?.observationCount).toBe(2);
+    expect(session?.updatedAt).toBeDefined();
     expect(session?.commitShas).toEqual(["aaa1111"]);
   });
 
-  it("keeps both of two concurrent commits and does not repeat a SHA", async () => {
+  it("keeps two SHAs from three concurrent links, one of them repeated", async () => {
     await Promise.all([linkCommit("aaa1111"), linkCommit("bbb2222"), linkCommit("aaa1111")]);
 
     const session = await kv.get<Session>(KV.sessions, SESSION.id);
