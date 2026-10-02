@@ -29,16 +29,37 @@ export function parseEnvFile(content: string): Record<string, string> {
   return vars;
 }
 
-export function readEnvFile(): Record<string, string> {
+// Memoized per path: getMergedEnv() runs on every config getter, so the daemon
+// would otherwise reread the file dozens of times per request. Keying on the
+// path keeps a test that points HOME elsewhere from reading a stale file.
+let envFileCache: { path: string; vars: Record<string, string> } | undefined;
+
+export function loadEnvFile(): Record<string, string> {
+  const path = join(homedir(), ".agentmemory", ".env");
+  if (envFileCache?.path === path) return envFileCache.vars;
+  let vars: Record<string, string>;
   try {
-    return parseEnvFile(readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8"));
+    vars = parseEnvFile(readFileSync(path, "utf-8"));
   } catch {
-    return {};
+    vars = {};
+  }
+  envFileCache = { path, vars };
+  return vars;
+}
+
+// Test hook for a test that rewrites the file without reloading this module.
+export function __resetEnvFileCache(): void {
+  envFileCache = undefined;
+}
+
+// Copies the env file into process.env for every key the caller's isUnset
+// says has no value yet, so a value already in process.env wins.
+export function hydrateEnvFromFile(isUnset: (current: string | undefined) => boolean): void {
+  for (const [key, value] of Object.entries(loadEnvFile())) {
+    if (isUnset(process.env[key])) process.env[key] = value;
   }
 }
 
 export function hydrateHookEnv(): void {
-  for (const [key, value] of Object.entries(readEnvFile())) {
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
+  hydrateEnvFromFile((current) => current === undefined);
 }

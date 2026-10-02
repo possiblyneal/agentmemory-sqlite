@@ -6,9 +6,9 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
-import { readEnvFile } from "../hooks/_env.js";
+import { hydrateEnvFromFile } from "../hooks/_env.js";
 import {
-  resolveEnvOrEmpty,
+  isBlankOrPlaceholder,
   resolveHandle,
   invalidateHandle,
   type Handle,
@@ -41,9 +41,7 @@ const SERVER_INFO = {
 // string when the secret lives only in ~/.agentmemory/.env, so unlike the
 // hooks' loader a blank or unexpanded placeholder value counts as unset here.
 export function hydrateMcpEnv(): void {
-  for (const [key, value] of Object.entries(readEnvFile())) {
-    if (!resolveEnvOrEmpty(key)) process.env[key] = value;
-  }
+  hydrateEnvFromFile(isBlankOrPlaceholder);
 }
 
 hydrateMcpEnv();

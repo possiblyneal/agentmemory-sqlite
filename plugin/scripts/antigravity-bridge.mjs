@@ -26,15 +26,27 @@ function parseEnvFile(content) {
 	}
 	return vars;
 }
-function readEnvFile() {
+let envFileCache;
+function loadEnvFile() {
+	const path = join(homedir(), ".agentmemory", ".env");
+	if (envFileCache?.path === path) return envFileCache.vars;
+	let vars;
 	try {
-		return parseEnvFile(readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8"));
+		vars = parseEnvFile(readFileSync(path, "utf-8"));
 	} catch {
-		return {};
+		vars = {};
 	}
+	envFileCache = {
+		path,
+		vars
+	};
+	return vars;
+}
+function hydrateEnvFromFile(isUnset) {
+	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
 }
 function hydrateHookEnv() {
-	for (const [key, value] of Object.entries(readEnvFile())) if (process.env[key] === void 0) process.env[key] = value;
+	hydrateEnvFromFile((current) => current === void 0);
 }
 //#endregion
 //#region src/hooks/antigravity-bridge.ts
