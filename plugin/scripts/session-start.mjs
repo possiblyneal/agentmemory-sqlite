@@ -148,6 +148,7 @@ async function main() {
 	}
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
+	if (typeof data.agent_id === "string" && data.agent_id) return;
 	const sessionId = data.session_id || data.sessionId || data.conversation_id || `ses_${Date.now().toString(36)}`;
 	const cwd = hookCwd(data) || process.cwd();
 	const project = resolveProject(cwd);

@@ -259,6 +259,34 @@ describe("session-start hook — context injection gate (#143)", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
   });
+
+  it("neither registers nor injects when the SessionStart fires inside a subagent", async () => {
+    const paths: string[] = [];
+    const server = createServer((req, res) => {
+      paths.push(req.url ?? "");
+      req.resume();
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ context: "project history" }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    const url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+    try {
+      const env = { AGENTMEMORY_INJECT_CONTEXT: "true", AGENTMEMORY_URL: url };
+      const main = { session_id: "ses_test", cwd: "/tmp/fake-project", source: "compact" };
+      const subagent = await runHook("session-start.mjs", JSON.stringify({ ...main, agent_id: "a078d460" }), env);
+      expect(subagent.stdout).toBe("");
+      expect(paths).toHaveLength(0);
+
+      const mainThread = await runHook("session-start.mjs", JSON.stringify(main), env);
+      expect(mainThread.stdout).toBe("project history");
+      expect(paths).toEqual(["/agentmemory/session/start"]);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
 });
 
 describe("context-injecting hooks — Missed Injection record (#73)", () => {

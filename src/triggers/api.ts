@@ -750,18 +750,37 @@ export function registerApiTriggers(
           ? body.agentId.trim().slice(0, 128)
           : undefined;
       const agentId = requestAgentId ?? getAgentId();
-      const session: Session = {
-        id: sessionId,
-        project,
-        cwd,
-        startedAt: new Date().toISOString(),
-        status: "active",
-        observationCount: 0,
-        ...(title ? { firstPrompt: title.slice(0, 200) } : {}),
-        ...(agentId ? { agentId } : {}),
-      };
-      await kv.set(KV.sessions, sessionId, session);
-      await recordProjectActivity(kv, project, session.startedAt);
+      const now = new Date().toISOString();
+      const firstPrompt = title ? title.slice(0, 200) : undefined;
+      // SessionStart also fires on resume, clear and compact. A field-level
+      // update reopens the existing Session without resetting what it has
+      // accumulated, and cannot clobber a concurrent observe or commit write.
+      const existing = await kv.get<Session>(KV.sessions, sessionId);
+      let session: Session;
+      if (existing) {
+        const updated = await kv.update<{ new_value: Session }>(KV.sessions, sessionId, [
+          { type: "set", path: "status", value: "active" },
+          { type: "set", path: "cwd", value: cwd },
+          { type: "remove", path: "endedAt" },
+          ...(firstPrompt && !existing.firstPrompt
+            ? [{ type: "set", path: "firstPrompt", value: firstPrompt }]
+            : []),
+        ]);
+        session = updated.new_value;
+      } else {
+        session = {
+          id: sessionId,
+          project,
+          cwd,
+          startedAt: now,
+          status: "active",
+          observationCount: 0,
+          ...(firstPrompt ? { firstPrompt } : {}),
+          ...(agentId ? { agentId } : {}),
+        };
+        await kv.set(KV.sessions, sessionId, session);
+      }
+      await recordProjectActivity(kv, project, now);
       const contextResult = await sdk.trigger<
         { sessionId: string; project: string; agentId?: string },
         InjectionResult
