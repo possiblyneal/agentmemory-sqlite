@@ -168,6 +168,8 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
+- Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, pre-tool-use and session-start Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
+- CI gates Recall quality with `npm run eval:gate` (ubuntu / Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance. A PR that moves those numbers on purpose updates that file and says why
 
 ## Supported hosts
 

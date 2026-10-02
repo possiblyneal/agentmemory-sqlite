@@ -1,78 +1,136 @@
-import type { Question, RankedDoc, ScoreRow } from "./types.js";
+import { questionPath, type Question, type QueryResult, type ScoreRow } from "./types.js";
 
+// Returning nothing is vacuously precise; an answerable question pays for
+// that in recall instead.
 export function scoreQuestion(
   q: Question,
-  ranked: RankedDoc[],
+  result: QueryResult,
   k: number,
   adapter: string,
   latencyMs: number,
 ): ScoreRow {
-  const topK = ranked.slice(0, k).map((r) => r.sessionId);
+  const path = questionPath(q);
+  const ranked = path === "search" ? result.ranked.slice(0, k) : result.ranked;
+  const returnedIds = ranked.map((r) => r.sessionId);
   const gold = new Set(q.goldSessionIds);
-  const hits = topK.filter((id) => gold.has(id)).length;
-  const precisionAtK = k > 0 ? hits / k : 0;
-  const recallAtK = gold.size === 0 ? 0 : hits / gold.size;
-  const hit = hits > 0;
-  let topGoldRank: number | null = null;
-  for (let i = 0; i < ranked.length; i++) {
-    if (gold.has(ranked[i].sessionId)) {
-      topGoldRank = i + 1;
-      break;
-    }
-  }
+  const answerable = gold.size > 0;
+  const hits = returnedIds.filter((id) => gold.has(id)).length;
+  const precision = returnedIds.length === 0 ? 1 : hits / returnedIds.length;
+  const recall = answerable ? hits / gold.size : null;
+  const hit = answerable ? hits > 0 : returnedIds.length === 0;
+  const goldIndex = returnedIds.findIndex((id) => gold.has(id));
   return {
     questionId: q.id,
     questionType: q.type,
+    path,
     adapter,
     k,
-    precisionAtK,
-    recallAtK,
+    returned: returnedIds.length,
+    returnedIds,
+    answerable,
+    precision,
+    recall,
     hit,
-    topGoldRank,
+    topGoldRank: goldIndex === -1 ? null : goldIndex + 1,
+    chars: result.chars ?? null,
     latencyMs,
   };
 }
 
-export function aggregate(rows: ScoreRow[]): {
-  byAdapter: Record<string, { p: number; r: number; hit: number; n: number; latencyP50: number }>;
-  byType: Record<string, Record<string, { p: number; r: number; hit: number; n: number }>>;
-} {
-  const byAdapter: Record<
-    string,
-    { p: number; r: number; hit: number; n: number; latencyP50: number }
-  > = {};
-  const latencies: Record<string, number[]> = {};
+export interface PathStats {
+  n: number;
+  answerable: number;
+  recall: number;
+  precision: number;
+  noAnswerClean: number | null;
+  hit: number;
+  meanChars: number | null;
+  latencyP50: number;
+}
+
+export type Summary = Record<string, Record<string, PathStats>>;
+
+function mean(xs: number[]): number {
+  return xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+export function summarize(rows: ScoreRow[]): PathStats {
+  const answerable = rows.filter((r) => r.answerable);
+  const noAnswer = rows.filter((r) => !r.answerable);
+  const chars = rows.map((r) => r.chars).filter((t): t is number => t !== null);
+  const latencies = rows.map((r) => r.latencyMs).sort((a, b) => a - b);
+  return {
+    n: rows.length,
+    answerable: answerable.length,
+    recall: mean(answerable.map((r) => r.recall ?? 0)),
+    precision: mean(rows.map((r) => r.precision)),
+    noAnswerClean:
+      noAnswer.length === 0
+        ? null
+        : noAnswer.filter((r) => r.returned === 0).length / noAnswer.length,
+    hit: rows.filter((r) => r.hit).length,
+    meanChars: chars.length === 0 ? null : mean(chars),
+    latencyP50: latencies[Math.floor(latencies.length / 2)] ?? 0,
+  };
+}
+
+function groupStats(
+  rows: ScoreRow[],
+  outer: (r: ScoreRow) => string,
+  inner: (r: ScoreRow) => string,
+): Summary {
+  const groups = new Map<string, Map<string, ScoreRow[]>>();
   for (const r of rows) {
-    const a = (byAdapter[r.adapter] ??= { p: 0, r: 0, hit: 0, n: 0, latencyP50: 0 });
-    a.p += r.precisionAtK;
-    a.r += r.recallAtK;
-    a.hit += r.hit ? 1 : 0;
-    a.n += 1;
-    (latencies[r.adapter] ??= []).push(r.latencyMs);
+    const byInner = groups.get(outer(r)) ?? new Map<string, ScoreRow[]>();
+    groups.set(outer(r), byInner);
+    byInner.set(inner(r), [...(byInner.get(inner(r)) ?? []), r]);
   }
-  for (const adapter of Object.keys(byAdapter)) {
-    const a = byAdapter[adapter];
-    a.p = a.p / a.n;
-    a.r = a.r / a.n;
-    const sorted = latencies[adapter].slice().sort((x, y) => x - y);
-    a.latencyP50 = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const summary: Summary = {};
+  for (const [o, byInner] of groups) {
+    summary[o] = {};
+    for (const [i, innerRows] of byInner) summary[o][i] = summarize(innerRows);
   }
-  const byType: Record<string, Record<string, { p: number; r: number; hit: number; n: number }>> =
-    {};
-  for (const r of rows) {
-    const t = (byType[r.questionType] ??= {});
-    const a = (t[r.adapter] ??= { p: 0, r: 0, hit: 0, n: 0 });
-    a.p += r.precisionAtK;
-    a.r += r.recallAtK;
-    a.hit += r.hit ? 1 : 0;
-    a.n += 1;
-  }
-  for (const t of Object.keys(byType)) {
-    for (const adapter of Object.keys(byType[t])) {
-      const a = byType[t][adapter];
-      a.p = a.p / a.n;
-      a.r = a.r / a.n;
+  return summary;
+}
+
+export function aggregate(rows: ScoreRow[]): { byPath: Summary; byType: Summary } {
+  return {
+    byPath: groupStats(rows, (r) => r.adapter, (r) => r.path),
+    byType: groupStats(rows, (r) => r.questionType, (r) => r.adapter),
+  };
+}
+
+export type GatedMetric = "recall" | "precision" | "noAnswerClean";
+
+export interface Baseline {
+  tolerance: number;
+  metrics: Record<string, Record<string, Partial<Record<GatedMetric, number>>>>;
+}
+
+export function compareToBaseline(
+  summary: Summary,
+  baseline: Baseline,
+): { failed: boolean; lines: string[] } {
+  const lines: string[] = [];
+  let failed = false;
+  for (const [adapter, byPath] of Object.entries(baseline.metrics)) {
+    for (const [path, expected] of Object.entries(byPath)) {
+      const actual = summary[adapter]?.[path];
+      if (!actual) {
+        failed = true;
+        lines.push(`FAIL ${adapter}/${path}: missing from this run`);
+        continue;
+      }
+      for (const [metric, floor] of Object.entries(expected) as Array<[GatedMetric, number]>) {
+        const got = actual[metric] ?? 0;
+        const delta = Number((got - floor).toFixed(3));
+        const ok = delta >= -baseline.tolerance;
+        if (!ok) failed = true;
+        lines.push(
+          `${ok ? "ok  " : "FAIL"} ${`${adapter}/${path}`.padEnd(32)} ${metric.padEnd(13)} baseline ${floor.toFixed(3)}  got ${got.toFixed(3)}  ${delta >= 0 ? "+" : ""}${delta.toFixed(3)}`,
+        );
+      }
     }
   }
-  return { byAdapter, byType };
+  return { failed, lines };
 }
