@@ -101,6 +101,7 @@ export const KV = {
   // #771: tracks the most recent smart-search call per session, used by
   // the followup-rate diagnostic. Key = sessionId. TTL-swept hourly.
   recentSearches: "mem:recent-searches",
+  injections: "mem:injections",
 } as const;
 
 // The removed engine's index persistence owned `mem:index:bm25` and wrote

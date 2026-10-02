@@ -8,10 +8,12 @@ import type {
   MemorySlot,
   Lesson,
   Insight,
+  InjectedRef,
 } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAccessBatch } from "./access-tracker.js";
+import { withFiles } from "./injections.js";
 import { logger } from "../logger.js";
 import {
   isSlotsEnabled,
@@ -19,12 +21,7 @@ import {
   renderPinnedContext,
 } from "./slots.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
-
-const CHARS_PER_TOKEN = 3;
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
+import { CHARS_PER_TOKEN, estimateTokens } from "../utils/tokens.js";
 
 function oneLine(s: string): string {
   return s.replace(/\s*\n+\s*/g, " ").trim();
@@ -186,7 +183,7 @@ export function registerContextFunction(
           content: lessonsContent,
           tokens: estimateTokens(lessonsContent),
           recency: mostRecent,
-          sourceIds: relevantLessons.map((l) => l.id),
+          sources: relevantLessons.map((l) => ({ kind: "lesson" as const, id: l.id })),
         });
       }
 
@@ -209,6 +206,7 @@ export function registerContextFunction(
           content: insightsContent,
           tokens: estimateTokens(insightsContent),
           recency: mostRecent,
+          sources: relevantInsights.map((i) => ({ kind: "insight" as const, id: i.id })),
         });
       }
 
@@ -242,6 +240,7 @@ export function registerContextFunction(
             content,
             tokens: estimateTokens(content),
             recency: new Date(summary.createdAt).getTime(),
+            sources: [withFiles({ kind: "summary", id: sessions[i].id }, summary.filesModified)],
           });
         } else {
           sessionsNeedingObs.push(i);
@@ -276,7 +275,7 @@ export function registerContextFunction(
             content,
             tokens: estimateTokens(content),
             recency: new Date(sessions[i].startedAt).getTime(),
-            sourceIds: top.map((o) => o.id),
+            sources: top.map((o) => withFiles({ kind: "observation", id: o.id }, o.files)),
           });
         }
       }
@@ -285,7 +284,7 @@ export function registerContextFunction(
 
       let usedTokens = 0;
       const selected: string[] = [];
-      const accessedIds: string[] = [];
+      const injected: InjectedRef[] = [];
       const header = `<agentmemory-context project="${escapeXmlAttr(data.project)}">\n${CONTEXT_PREFACE}`;
       const footer = `${CLOSING_TAG}>`;
       usedTokens += estimateTokens(header) + estimateTokens(footer);
@@ -306,18 +305,19 @@ export function registerContextFunction(
         }
         selected.push(block.content);
         usedTokens += block.tokens;
-        if (block.sourceIds && block.sourceIds.length > 0) {
-          accessedIds.push(...block.sourceIds);
-        }
+        if (block.sources) injected.push(...block.sources);
       }
 
+      const accessedIds = injected
+        .filter((ref) => ref.kind !== "summary" && ref.kind !== "insight")
+        .map((ref) => ref.id);
       if (accessedIds.length > 0) {
         void recordAccessBatch(kv, accessedIds);
       }
 
       if (selected.length === 0) {
         logger.info("No context available", { project: data.project });
-        return { context: "", blocks: 0, tokens: 0 };
+        return { context: "", blocks: 0, tokens: 0, injected };
       }
 
       const result = `${header}\n${selected.map(neutralizeClosingTag).join("\n\n")}\n${footer}`;
@@ -325,7 +325,7 @@ export function registerContextFunction(
         blocks: selected.length,
         tokens: usedTokens,
       });
-      return { context: result, blocks: selected.length, tokens: usedTokens };
+      return { context: result, blocks: selected.length, tokens: usedTokens, injected };
     },
   );
 }

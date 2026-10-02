@@ -22,6 +22,7 @@ import type { MetricsStore } from "../eval/metrics-store.js";
 import { safeAudit } from "./audit.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { logger } from "../logger.js";
+import { estimateTokens } from "../utils/tokens.js";
 
 // Per-chunk prompt budget in tokens when a Session is too large to fit in
 // one LLM call. Measured on the Operator's broker: a 50k-token chunk
@@ -57,12 +58,6 @@ function getChunkConcurrency(): number {
   if (!raw) return CHUNK_CONCURRENCY_DEFAULT;
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : CHUNK_CONCURRENCY_DEFAULT;
-}
-
-// The estimate idiom this tree already uses; it overcounts measured
-// content by ~17%, the safe direction for a budget.
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3);
 }
 
 async function mapWithConcurrency<T, R>(

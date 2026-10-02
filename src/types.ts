@@ -214,7 +214,26 @@ export interface ContextBlock {
   content: string;
   tokens: number;
   recency: number;
-  sourceIds?: string[];
+  sources?: InjectedRef[];
+}
+
+export interface InjectedRef {
+  kind: "observation" | "memory" | "lesson" | "insight" | "summary";
+  id: string;
+  files?: string[];
+}
+
+export type InjectionSource = "session-start" | "context" | "enrich";
+
+export interface InjectionRecord {
+  id: string;
+  source: InjectionSource;
+  sessionId: string;
+  project?: string;
+  injected: InjectedRef[];
+  files?: string[];
+  tokens: number;
+  at: string;
 }
 
 export interface EvalResult {

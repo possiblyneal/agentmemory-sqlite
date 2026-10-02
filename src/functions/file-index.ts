@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { recordAccessBatch } from "./access-tracker.js";
+import { withFiles } from "./injections.js";
 import { logger } from "../logger.js";
 
 interface FileHistory {
@@ -16,6 +17,7 @@ interface FileHistory {
     narrative: string;
     importance: number;
     timestamp: string;
+    files: string[];
   }>;
 }
 
@@ -91,6 +93,7 @@ export function registerFileIndexFunction(sdk: ISdk, kv: StateKV): void {
                 narrative: obs.narrative,
                 importance: obs.importance,
                 timestamp: obs.timestamp,
+                files: obs.files,
               });
             }
           }
@@ -117,18 +120,17 @@ export function registerFileIndexFunction(sdk: ISdk, kv: StateKV): void {
       }
       lines.push("</agentmemory-file-context>");
 
-      const accessedIds: string[] = [];
-      for (const fh of results) {
-        for (const obs of fh.observations) accessedIds.push(obs.obsId);
-      }
-      void recordAccessBatch(kv, accessedIds);
+      const injected = results.flatMap((fh) =>
+        fh.observations.map((obs) => withFiles({ kind: "observation", id: obs.obsId }, obs.files)),
+      );
+      void recordAccessBatch(kv, injected.map((ref) => ref.id));
 
       const context = lines.join("\n");
       logger.info("File context generated", {
         files: files.length,
         results: results.length,
       });
-      return { context };
+      return { context, injected };
     },
   );
 }
