@@ -59,6 +59,18 @@ const UNUSED_INJECTION_MIN_ITEMS = 10;
 // An Injection younger than this has not had a fair chance to be used yet.
 const UNUSED_INJECTION_SETTLE_MS = ONE_HOUR_MS;
 
+function lastActivity(session: Session): string {
+  return session.updatedAt ?? session.startedAt;
+}
+
+// Judged by last activity, not start, so a long-running live Session is left alone.
+function isAbandonedSession(session: Session, now: number): boolean {
+  return (
+    session.status === "active" &&
+    now - new Date(lastActivity(session)).getTime() > TWENTY_FOUR_HOURS_MS
+  );
+}
+
 export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::diagnose", 
     async (data: { categories?: string[] }) => {
@@ -316,22 +328,20 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         });
 
         const sessions = await kv.list<Session>(KV.sessions);
-        let sessionIssues = 0;
+        const abandoned = sessions.filter((session) => isAbandonedSession(session, now));
 
-        for (const session of sessions) {
-          if (
-            session.status === "active" &&
-            now - new Date(session.startedAt).getTime() > TWENTY_FOUR_HOURS_MS
-          ) {
-            checks.push({
-              name: `abandoned-session:${session.id}`,
-              category: "sessions",
-              status: "warn",
-              message: `Session ${session.id} has been active for over 24 hours`,
-              fixable: false,
-            });
-            sessionIssues++;
-          }
+        if (abandoned.length > 0) {
+          const examples = abandoned.slice(0, 3).map((session) => session.id).join(", ");
+          checks.push({
+            name: "abandoned-sessions",
+            category: "sessions",
+            status: "warn",
+            message:
+              `${abandoned.length} sessions are still active with no activity for over 24 hours ` +
+              `(e.g. ${examples}). POST /agentmemory/diagnostics/heal ` +
+              `{"categories":["sessions"]} closes them.`,
+            fixable: true,
+          });
         }
 
         if (sessions.length === 0) {
@@ -344,7 +354,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
               "is pointed at the wrong file or its data was lost.",
             fixable: false,
           });
-        } else if (sessionIssues === 0) {
+        } else if (abandoned.length === 0) {
           checks.push({
             name: "sessions-ok",
             category: "sessions",
@@ -1060,6 +1070,39 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             });
             details.push(`Deleted orphaned lease ${lease.id}`);
             fixed++;
+          }
+        }
+      }
+
+      if (categories.includes("sessions")) {
+        const sessions = await kv.list<Session>(KV.sessions);
+
+        for (const session of sessions) {
+          if (!isAbandonedSession(session, now)) continue;
+          if (dryRun) {
+            details.push(`[dry-run] Would close abandoned session ${session.id}`);
+            fixed++;
+            continue;
+          }
+          const didFix = await withKeyedLock(`obs:${session.id}`, async () => {
+            const fresh = await kv.get<Session>(KV.sessions, session.id);
+            if (!fresh || !isAbandonedSession(fresh, Date.now())) return false;
+            await kv.update(KV.sessions, fresh.id, [
+              { type: "set", path: "status", value: "completed" },
+              { type: "set", path: "endedAt", value: lastActivity(fresh) },
+            ]);
+            await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
+              entityType: "session",
+              reason: "abandoned-session",
+              newStatus: "completed",
+            });
+            return true;
+          });
+          if (didFix) {
+            details.push(`Closed abandoned session ${session.id}`);
+            fixed++;
+          } else {
+            skipped++;
           }
         }
       }
