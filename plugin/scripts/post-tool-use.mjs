@@ -25,16 +25,22 @@ function parseEnvFile(content) {
 	}
 	return vars;
 }
+function envFilePath() {
+	return join(homedir(), ".agentmemory", ".env");
+}
+function readEnvFile() {
+	try {
+		return parseEnvFile(readFileSync(envFilePath(), "utf-8"));
+	} catch (err) {
+		if (err.code === "ENOENT") return {};
+		throw err;
+	}
+}
 let envFileCache;
 function loadEnvFile() {
-	const path = join(homedir(), ".agentmemory", ".env");
+	const path = envFilePath();
 	if (envFileCache?.path === path) return envFileCache.vars;
-	let vars;
-	try {
-		vars = parseEnvFile(readFileSync(path, "utf-8"));
-	} catch {
-		vars = {};
-	}
+	const vars = readEnvFile();
 	envFileCache = {
 		path,
 		vars
@@ -45,7 +51,9 @@ function hydrateEnvFromFile(isUnset) {
 	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
 }
 function hydrateHookEnv() {
-	hydrateEnvFromFile((current) => current === void 0);
+	try {
+		hydrateEnvFromFile((current) => current === void 0);
+	} catch {}
 }
 //#endregion
 //#region src/hooks/sdk-guard.ts

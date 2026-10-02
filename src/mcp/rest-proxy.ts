@@ -38,13 +38,13 @@ let probeInFlight: Promise<Handle> | null = null;
 // fallback, and would have us POST to `${AGENTMEMORY_URL}/agentmemory/...`
 // (DNS failure). Strip any literal placeholder we see so the fallback
 // engages instead.
-export function isBlankOrPlaceholder(raw: string | undefined): boolean {
+export function isBlankOrPlaceholder(raw: string | undefined): raw is undefined | "" {
   return !raw || (raw.startsWith("${") && raw.endsWith("}"));
 }
 
 export function resolveEnvOrEmpty(name: string): string {
   const raw = process.env[name];
-  return isBlankOrPlaceholder(raw) ? "" : (raw as string);
+  return isBlankOrPlaceholder(raw) ? "" : raw;
 }
 
 function baseUrl(): string {

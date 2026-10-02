@@ -83,10 +83,36 @@ describe("hydrateEnvFromFile", () => {
   it("lets the caller's isUnset test decide whether the file beats process.env", () => {
     process.env["AGENTMEMORY_SECRET"] = "";
     hydrateEnvFromFile((current) => current === undefined);
-    expect(process.env["AGENTMEMORY_SECRET"]).toBe("");
+    const undefinedOnly = process.env["AGENTMEMORY_SECRET"];
 
+    process.env["AGENTMEMORY_SECRET"] = "";
     hydrateEnvFromFile((current) => !current);
-    expect(process.env["AGENTMEMORY_SECRET"]).toBe("from-file");
+    const blankToo = process.env["AGENTMEMORY_SECRET"];
+
+    expect({ undefinedOnly, blankToo }).toEqual({ undefinedOnly: "", blankToo: "from-file" });
+  });
+});
+
+describe("unreadable env file", () => {
+  beforeEach(() => {
+    sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-unreadable-"));
+    process.env["HOME"] = sandboxHome;
+    process.env["USERPROFILE"] = sandboxHome;
+    __resetEnvFileCache();
+    mkdirSync(join(sandboxHome, ".agentmemory", ".env"), { recursive: true });
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(sandboxHome, { recursive: true, force: true });
+  });
+
+  it("reaches the daemon's loader but not a hook", () => {
+    expect(() => hydrateEnvFromFile((current) => current === undefined)).toThrow();
+    expect(() => hydrateHookEnv()).not.toThrow();
   });
 });
 

@@ -40,8 +40,11 @@ const SERVER_INFO = {
 // The MCP host expands `${AGENTMEMORY_SECRET:-}` in .mcp.json to an empty
 // string when the secret lives only in ~/.agentmemory/.env, so unlike the
 // hooks' loader a blank or unexpanded placeholder value counts as unset here.
+// An unreadable file leaves the server on whatever the host passed.
 export function hydrateMcpEnv(): void {
-  hydrateEnvFromFile(isBlankOrPlaceholder);
+  try {
+    hydrateEnvFromFile(isBlankOrPlaceholder);
+  } catch {}
 }
 
 hydrateMcpEnv();
