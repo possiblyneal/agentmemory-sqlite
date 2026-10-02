@@ -3,6 +3,7 @@ export interface Session {
   project: string;
   cwd: string;
   startedAt: string;
+  updatedAt?: string;
   endedAt?: string;
   status: "active" | "completed" | "abandoned";
   observationCount: number;

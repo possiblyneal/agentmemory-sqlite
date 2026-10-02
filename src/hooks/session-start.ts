@@ -64,6 +64,9 @@ async function main() {
 
   if (!data || typeof data !== "object") return;
   if (shouldSkipSession()) return;
+  // A subagent that compacts fires SessionStart with its parent's session_id;
+  // the parent Session is already registered and the subagent is mid-task.
+  if (typeof data.agent_id === "string" && data.agent_id) return;
 
   const sessionId =
     ((data.session_id || data.sessionId || data.conversation_id) as string) ||

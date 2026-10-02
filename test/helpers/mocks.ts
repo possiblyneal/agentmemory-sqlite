@@ -12,13 +12,17 @@ export function mockKV() {
     update: async (
       scope: string,
       key: string,
-      updates: Array<{ path: string; value: unknown }>,
-    ): Promise<void> => {
-      const entries = store.get(scope);
-      if (!entries) return;
-      const value = (entries.get(key) as Record<string, unknown>) ?? {};
-      for (const u of updates) value[u.path] = u.value;
-      entries.set(key, value);
+      ops: Array<{ type?: string; path: string; value?: unknown }>,
+    ) => {
+      const old_value = store.get(scope)?.get(key);
+      const new_value = structuredClone((old_value ?? {}) as Record<string, unknown>);
+      for (const op of ops) {
+        if (op.type === "remove") delete new_value[op.path];
+        else new_value[op.path] = op.value;
+      }
+      if (!store.has(scope)) store.set(scope, new Map());
+      store.get(scope)!.set(key, new_value);
+      return { old_value, new_value };
     },
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());

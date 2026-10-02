@@ -750,18 +750,39 @@ export function registerApiTriggers(
           ? body.agentId.trim().slice(0, 128)
           : undefined;
       const agentId = requestAgentId ?? getAgentId();
-      const session: Session = {
-        id: sessionId,
-        project,
-        cwd,
-        startedAt: new Date().toISOString(),
-        status: "active",
-        observationCount: 0,
-        ...(title ? { firstPrompt: title.slice(0, 200) } : {}),
-        ...(agentId ? { agentId } : {}),
-      };
-      await kv.set(KV.sessions, sessionId, session);
-      await recordProjectActivity(kv, project, session.startedAt);
+      const now = new Date().toISOString();
+      const firstPrompt = title ? title.slice(0, 200) : undefined;
+      // SessionStart also fires on resume, clear and compact. Reopening under
+      // observe's lock keeps what the Session has accumulated, and refreshing
+      // updatedAt keeps a resumed Session from being healed as abandoned.
+      const session = await withKeyedLock(`obs:${sessionId}`, async () => {
+        const existing = await kv.get<Session>(KV.sessions, sessionId);
+        if (existing) {
+          const updated = await kv.update<{ new_value: Session }>(KV.sessions, sessionId, [
+            { type: "set", path: "status", value: "active" },
+            { type: "set", path: "cwd", value: cwd },
+            { type: "set", path: "updatedAt", value: now },
+            { type: "remove", path: "endedAt" },
+            ...(firstPrompt && !existing.firstPrompt
+              ? [{ type: "set", path: "firstPrompt", value: firstPrompt }]
+              : []),
+          ]);
+          return updated.new_value;
+        }
+        const created: Session = {
+          id: sessionId,
+          project,
+          cwd,
+          startedAt: now,
+          status: "active",
+          observationCount: 0,
+          ...(firstPrompt ? { firstPrompt } : {}),
+          ...(agentId ? { agentId } : {}),
+        };
+        await kv.set(KV.sessions, sessionId, created);
+        return created;
+      });
+      await recordProjectActivity(kv, project, now);
       const contextResult = await sdk.trigger<
         { sessionId: string; project: string; agentId?: string },
         InjectionResult

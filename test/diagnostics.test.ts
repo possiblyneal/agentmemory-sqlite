@@ -22,27 +22,7 @@ import type {
   MeshPeer,
 } from "../src/types.js";
 import { KV } from "../src/state/schema.js";
-
-function mockKV() {
-  const store = new Map<string, Map<string, unknown>>();
-  return {
-    get: async <T>(scope: string, key: string): Promise<T | null> => {
-      return (store.get(scope)?.get(key) as T) ?? null;
-    },
-    set: async <T>(scope: string, key: string, data: T): Promise<T> => {
-      if (!store.has(scope)) store.set(scope, new Map());
-      store.get(scope)!.set(key, data);
-      return data;
-    },
-    delete: async (scope: string, key: string): Promise<void> => {
-      store.get(scope)?.delete(key);
-    },
-    list: async <T>(scope: string): Promise<T[]> => {
-      const entries = store.get(scope);
-      return entries ? (Array.from(entries.values()) as T[]) : [];
-    },
-  };
-}
+import { mockKV } from "./helpers/mocks.js";
 
 function mockSdk() {
   const functions = new Map<string, Function>();
@@ -490,10 +470,29 @@ describe("Diagnostics Functions", () => {
       expect(check!.fixable).toBe(true);
     });
 
-    it("active session older than 24h produces warn", async () => {
+    it("sessions idle over 24h collapse into one fixable warn", async () => {
+      const stale = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      for (let i = 0; i < 5; i++) {
+        const session = makeSession({ status: "active", startedAt: stale });
+        await kv.set(KV.sessions, session.id, session);
+      }
+
+      const result = (await sdk.trigger("mem::diagnose", {
+        categories: ["sessions"],
+      })) as { checks: DiagnosticCheck[] };
+
+      const abandoned = result.checks.filter((c) => c.name.startsWith("abandoned-session"));
+      expect(abandoned).toHaveLength(1);
+      expect(abandoned[0]!.status).toBe("warn");
+      expect(abandoned[0]!.fixable).toBe(true);
+      expect(abandoned[0]!.message).toMatch(/^5 sessions/);
+    });
+
+    it("long-running session with recent activity is not abandoned", async () => {
       const session = makeSession({
         status: "active",
-        startedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+        startedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
       });
       await kv.set(KV.sessions, session.id, session);
 
@@ -501,12 +500,7 @@ describe("Diagnostics Functions", () => {
         categories: ["sessions"],
       })) as { checks: DiagnosticCheck[] };
 
-      const check = result.checks.find((c) =>
-        c.name.startsWith("abandoned-session:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("warn");
-      expect(check!.fixable).toBe(false);
+      expect(result.checks.some((c) => c.name === "sessions-ok")).toBe(true);
     });
 
     it("memory with stale isLatest produces fail (fixable)", async () => {
@@ -927,6 +921,29 @@ describe("Diagnostics Functions", () => {
 
       const updated = await kv.get<Sentinel>(KV.sentinels, sentinel.id);
       expect(updated!.status).toBe("expired");
+    });
+
+    it("closes abandoned session at its last activity without touching live ones", async () => {
+      const lastSeen = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
+      const abandoned = makeSession({
+        status: "active",
+        startedAt: new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString(),
+        updatedAt: lastSeen,
+      });
+      const live = makeSession({ status: "active", startedAt: new Date().toISOString() });
+      await kv.set(KV.sessions, abandoned.id, abandoned);
+      await kv.set(KV.sessions, live.id, live);
+
+      const result = (await sdk.trigger("mem::heal", {
+        categories: ["sessions"],
+      })) as { success: boolean; fixed: number; details: string[] };
+
+      expect(result.fixed).toBe(1);
+      expect(result.details[0]).toContain("Closed abandoned session");
+      const closed = await kv.get<Session>(KV.sessions, abandoned.id);
+      expect(closed!.status).toBe("abandoned");
+      expect(closed!.endedAt).toBe(lastSeen);
+      expect((await kv.get<Session>(KV.sessions, live.id))!.status).toBe("active");
     });
 
     it("dry run reports but does not fix", async () => {
