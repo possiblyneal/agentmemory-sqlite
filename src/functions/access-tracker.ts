@@ -51,6 +51,25 @@ export async function getAccessLog(
   }
 }
 
+function withAccess(log: AccessLog, ts: number): AccessLog {
+  log.count += 1;
+  log.lastAt = new Date(ts).toISOString();
+  log.recent.push(ts);
+  if (log.recent.length > RECENT_CAP) {
+    log.recent = log.recent.slice(-RECENT_CAP);
+  }
+  return log;
+}
+
+function warnAccessFailed(memoryId: string, err: unknown): void {
+  try {
+    logger.warn("recordAccess failed", {
+      memoryId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } catch {}
+}
+
 export async function recordAccess(
   kv: StateKV,
   memoryId: string,
@@ -61,24 +80,24 @@ export async function recordAccess(
   try {
     await withKeyedLock(`mem:access:${memoryId}`, async () => {
       const existing = await getAccessLog(kv, memoryId);
-      existing.count += 1;
-      existing.lastAt = new Date(ts).toISOString();
-      existing.recent.push(ts);
-      if (existing.recent.length > RECENT_CAP) {
-        existing.recent = existing.recent.slice(-RECENT_CAP);
-      }
-      await kv.set(KV.accessLog, memoryId, existing);
+      await kv.set(KV.accessLog, memoryId, withAccess(existing, ts));
     });
   } catch (err) {
-    try {
-      logger.warn("recordAccess failed", {
-        memoryId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } catch {}
+    warnAccessFailed(memoryId, err);
   }
 }
 
+// Locks are taken in sorted order so two overlapping batches cannot deadlock.
+function withKeyedLocks<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
+  return [...keys]
+    .sort()
+    .reduceRight<() => Promise<T>>((inner, key) => () => withKeyedLock(key, inner), fn)();
+}
+
+// One `setMany` - one transaction, one fsync - for the whole batch. A write
+// per id put one fsync per injected item on every pre-tool-use Injection.
+// If the batch write fails, each id is retried alone so one bad row cannot
+// cost its siblings their access.
 export async function recordAccessBatch(
   kv: StateKV,
   memoryIds: string[],
@@ -87,7 +106,21 @@ export async function recordAccessBatch(
   if (!memoryIds || memoryIds.length === 0) return;
   const ts = timestampMs ?? Date.now();
   const unique = Array.from(new Set(memoryIds.filter(Boolean)));
-  await Promise.allSettled(unique.map((id) => recordAccess(kv, id, ts)));
+  if (unique.length === 0) return;
+  try {
+    await withKeyedLocks(
+      unique.map((id) => `mem:access:${id}`),
+      async () => {
+        const logs = await Promise.all(unique.map((id) => getAccessLog(kv, id)));
+        await kv.setMany(
+          KV.accessLog,
+          logs.map((log, i) => ({ key: unique[i]!, value: withAccess(log, ts) })),
+        );
+      },
+    );
+  } catch {
+    await Promise.allSettled(unique.map((id) => recordAccess(kv, id, ts)));
+  }
 }
 
 export async function deleteAccessLog(
