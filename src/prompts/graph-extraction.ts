@@ -1,3 +1,5 @@
+import { IMPORTANCE_RUBRIC } from "./compression.js";
+
 export const GRAPH_EXTRACTION_SYSTEM = `You are a knowledge graph extraction engine. Given numbered compressed observations from a coding session, rate each observation's importance and extract entities and relationships.
 
 Output format (XML):
@@ -14,7 +16,7 @@ Output format (XML):
 </relationships>
 
 Rules:
-- Rate every observation: 1-3 for routine reads, 4-6 for edits/commands, 7-9 for architectural decisions, 10 for breaking changes
+- Rate every observation: ${IMPORTANCE_RUBRIC}
 - On each entity, list the numbers of the observations it came from
 - Extract concrete entities only (real file paths, function names, library names)
 - Use the most specific type available
@@ -40,5 +42,5 @@ export function buildGraphExtractionPrompt(
   // most of the token budget before any output. The suffix is their
   // documented soft switch to skip it; other models ignore the token.
   const noThink = process.env.AGENTMEMORY_LLM_NOTHINK === "1" ? "\n/no_think" : "";
-  return `Extract entities and relationships from these observations:\n\n${items}${noThink}`;
+  return `Give one importance per numbered observation, then extract entities and relationships from these observations:\n\n${items}${noThink}`;
 }

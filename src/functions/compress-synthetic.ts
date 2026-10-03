@@ -26,7 +26,11 @@ function inferType(
 ): ObservationType {
   if (hookType === "post_tool_failure") return "error";
   if (hookType === "prompt_submit") return "conversation";
-  if (hookType === "subagent_stop" || hookType === "task_completed")
+  if (
+    hookType === "subagent_start" ||
+    hookType === "subagent_stop" ||
+    hookType === "task_completed"
+  )
     return "subagent";
   if (hookType === "notification") return "notification";
 

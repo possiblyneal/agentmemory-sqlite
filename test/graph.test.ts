@@ -1348,6 +1348,42 @@ describe("graph-extract importance and concepts (#90)", () => {
     expect(concepts.slice(0, 2)).toEqual(["c0", "c1"]);
   });
 
+  it("writes an entity-free batch's importance and audits it", async () => {
+    await extract(
+      [obs("obs_a")],
+      `<observations><observation n="1" importance="8"/></observations><entities/>`,
+    );
+
+    expect((await stored("obs_a"))?.importance).toBe(8);
+    const audits = await kv.list<{ functionId: string; targetIds: string[] }>("mem:audit");
+    expect(audits).toEqual([
+      expect.objectContaining({ functionId: "mem::graph-extract", targetIds: ["obs_a"] }),
+    ]);
+  });
+
+  it("writes nothing back when an LLM batch failed and no graph was found", async () => {
+    const ORIG_BATCH = process.env["GRAPH_EXTRACTION_BATCH_SIZE"];
+    process.env["GRAPH_EXTRACTION_BATCH_SIZE"] = "1";
+    try {
+      const batch = [obs("obs_a"), obs("obs_b")];
+      for (const o of batch) await kv.set("mem:obs:ses_1", o.id, o);
+      mockProvider.compress
+        .mockResolvedValueOnce(`<observations><observation n="1" importance="9"/></observations>`)
+        .mockRejectedValueOnce(new Error("malformed reply"));
+
+      const result = (await sdk.trigger("mem::graph-extract", { observations: batch })) as {
+        success: boolean;
+      };
+
+      expect(result.success).toBe(false);
+      expect((await stored("obs_a"))?.importance).toBe(5);
+      expect(await kv.list("mem:audit")).toEqual([]);
+    } finally {
+      if (ORIG_BATCH === undefined) delete process.env["GRAPH_EXTRACTION_BATCH_SIZE"];
+      else process.env["GRAPH_EXTRACTION_BATCH_SIZE"] = ORIG_BATCH;
+    }
+  });
+
   it("writes nothing back when the graph cannot be written", async () => {
     const original = obs("obs_a");
     await kv.set("mem:obs:ses_1", original.id, original);

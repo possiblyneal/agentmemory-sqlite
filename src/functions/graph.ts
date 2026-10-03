@@ -550,24 +550,10 @@ function parseGraphXml(
 ): {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  annotations: Map<string, ObservationAnnotation>;
 } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  const annotations = new Map<string, ObservationAnnotation>();
   const now = new Date().toISOString();
-
-  const annotationFor = (n: string): ObservationAnnotation | undefined => {
-    if (!/^\d+$/.test(n.trim())) return undefined;
-    const obsId = observationIds[Number(n) - 1];
-    if (!obsId) return undefined;
-    let annotation = annotations.get(obsId);
-    if (!annotation) {
-      annotation = { concepts: [] };
-      annotations.set(obsId, annotation);
-    }
-    return annotation;
-  };
 
   // Two passes because <entity> can be self-closing or have a body
   // (<property> children). The self-closing form needs `[^>]*[^/]` on
@@ -582,11 +568,6 @@ function parseGraphXml(
     const type = attrs["type"] as GraphNode["type"] | undefined;
     const name = attrs["name"];
     if (!type || !name) return;
-    if (type !== "file") {
-      for (const n of (attrs["obs"] ?? "").split(",")) {
-        annotationFor(n)?.concepts.push(name);
-      }
-    }
     const properties: Record<string, string> = {};
     const propRegex = /<property\s+key="([^"]+)">([^<]*)<\/property>/g;
     let propMatch;
@@ -619,14 +600,6 @@ function parseGraphXml(
   };
 
   let match;
-  const observationRegex = /<observation\b([^>]*?)\/>/g;
-  while ((match = observationRegex.exec(xml)) !== null) {
-    const attrs = parseAttrs(match[1]);
-    const importance = Number(attrs["importance"]);
-    if (!Number.isInteger(importance) || importance < 1 || importance > 10) continue;
-    const annotation = annotationFor(attrs["n"] ?? "");
-    if (annotation) annotation.importance = importance;
-  }
   while ((match = entitySelfClose.exec(xml)) !== null) {
     addEntity(match[1]);
   }
@@ -658,7 +631,47 @@ function parseGraphXml(
     });
   }
 
-  return { nodes, edges, annotations };
+  return { nodes, edges };
+}
+
+// Observations are named by their 1-based number in the batch prompt, so an
+// importance or an Entity's obs="" list maps back through observationIds.
+function parseObservationAnnotations(
+  xml: string,
+  observationIds: string[],
+): Map<string, ObservationAnnotation> {
+  const annotations = new Map<string, ObservationAnnotation>();
+  const ensureAnnotation = (n: string): ObservationAnnotation | undefined => {
+    if (!/^\d+$/.test(n.trim())) return undefined;
+    const obsId = observationIds[Number(n) - 1];
+    if (!obsId) return undefined;
+    let annotation = annotations.get(obsId);
+    if (!annotation) {
+      annotation = { concepts: [] };
+      annotations.set(obsId, annotation);
+    }
+    return annotation;
+  };
+
+  let match;
+  const observationRegex = /<observation\b([^>]*?)\/>/g;
+  while ((match = observationRegex.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1]);
+    const importance = Number(attrs["importance"]);
+    if (!Number.isInteger(importance) || importance < 1 || importance > 10) continue;
+    const annotation = ensureAnnotation(attrs["n"] ?? "");
+    if (annotation) annotation.importance = importance;
+  }
+  const entityOpenTag = /<entity\b([^>]*?)\/?>/g;
+  while ((match = entityOpenTag.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1]);
+    const name = attrs["name"];
+    if (!attrs["type"] || attrs["type"] === "file" || !name) continue;
+    for (const n of (attrs["obs"] ?? "").split(",")) {
+      ensureAnnotation(n)?.concepts.push(name);
+    }
+  }
+  return annotations;
 }
 
 // Field-level, so a concurrent writer's other fields survive. An Observation
@@ -677,19 +690,19 @@ async function writeObservationAnnotations(
       const scope = KV.observations(o.sessionId);
       const current = await kv.get<CompressedObservation>(scope, o.id);
       if (!current) return;
-      const updated: CompressedObservation = {
-        ...current,
+      const fields: Pick<CompressedObservation, "importance" | "concepts"> = {
         importance: annotation.importance ?? current.importance,
         concepts: [...new Set([...(current.concepts ?? []), ...annotation.concepts])].slice(
           0,
           MAX_OBSERVATION_CONCEPTS,
         ),
       };
-      await kv.update(scope, o.id, [
-        { type: "set", path: "importance", value: updated.importance },
-        { type: "set", path: "concepts", value: updated.concepts },
-      ]);
-      if (index.has(o.id)) index.add(updated);
+      await kv.update(
+        scope,
+        o.id,
+        Object.entries(fields).map(([path, value]) => ({ type: "set", path, value })),
+      );
+      if (index.has(o.id)) index.add({ ...current, ...fields });
     }),
   );
   const failed = results.filter((r) => r.status === "rejected");
@@ -1054,7 +1067,12 @@ async function extractGraph(
         );
         nodes = nodes.concat(parsed.nodes);
         edges = edges.concat(parsed.edges);
-        for (const [obsId, annotation] of parsed.annotations) annotations.set(obsId, annotation);
+        for (const [obsId, annotation] of parseObservationAnnotations(
+          response,
+          batch.map((o) => o.id),
+        )) {
+          annotations.set(obsId, annotation);
+        }
         if (failure === undefined) extracted = i + batch.length;
       } catch (err) {
         failure ??= err;
@@ -1078,7 +1096,13 @@ async function extractGraph(
         : String(failure);
 
   if (nodes.length === 0 && edges.length === 0) {
-    await writeObservationAnnotations(kv, observations, annotations);
+    if (!llmError && annotations.size > 0) {
+      await writeObservationAnnotations(kv, observations, annotations);
+      await recordAudit(kv, "observe", "mem::graph-extract", obsIds, {
+        nodesExtracted: 0,
+        edgesExtracted: 0,
+      });
+    }
     return {
       result: llmError
         ? { success: false, error: llmError }

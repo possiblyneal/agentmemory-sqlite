@@ -7,23 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { registerContextFunction } from "../src/functions/context.js";
 import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, Session } from "../src/types.js";
-import { mockKV } from "./helpers/mocks.js";
-
-type ContextHandler = (data: {
-  sessionId: string;
-  project: string;
-}) => Promise<{ context: string }>;
-
-function wireContext(kv: ReturnType<typeof mockKV>): ContextHandler {
-  let handler: ContextHandler | undefined;
-  const sdk = {
-    registerFunction: (id: string, cb: ContextHandler) => {
-      if (id === "mem::context") handler = cb;
-    },
-  };
-  registerContextFunction(sdk as never, kv as never, 4000);
-  return handler!;
-}
+import { mockKV, mockSdk } from "./helpers/mocks.js";
 
 const session: Session = {
   id: "ses_past",
@@ -51,17 +35,21 @@ function obs(n: number, importance: number): CompressedObservation {
 
 describe("mem::context session-start Observations (#90)", () => {
   let kv: ReturnType<typeof mockKV>;
-  let handler: ContextHandler;
+  let sdk: ReturnType<typeof mockSdk>;
 
   beforeEach(async () => {
     kv = mockKV();
-    handler = wireContext(kv);
+    sdk = mockSdk();
+    registerContextFunction(sdk as never, kv as never, 4000);
     await kv.set(KV.sessions, session.id, session);
   });
 
   async function shownSteps(observations: CompressedObservation[]): Promise<string[]> {
     for (const o of observations) await kv.set(KV.observations(session.id), o.id, o);
-    const { context } = await handler({ sessionId: "ses_now", project: "/p" });
+    const { context } = (await sdk.trigger("mem::context", {
+      sessionId: "ses_now",
+      project: "/p",
+    })) as { context: string };
     return [...context.matchAll(/\] step (\d):/g)].map((m) => m[1]!);
   }
 

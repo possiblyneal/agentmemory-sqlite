@@ -275,6 +275,69 @@ describe("buildSyntheticCompression", () => {
     expect(synth.type).toBe("error");
   });
 
+  it("types subagent hooks as subagent work", async () => {
+    const { buildSyntheticCompression } = await import(
+      "../src/functions/compress-synthetic.js"
+    );
+    for (const hookType of ["subagent_start", "subagent_stop", "task_completed"] as const) {
+      const synth = buildSyntheticCompression({
+        id: "obs_6",
+        sessionId: "ses_1",
+        timestamp: new Date().toISOString(),
+        hookType,
+        raw: {},
+      });
+      expect(synth.type, hookType).toBe("subagent");
+    }
+  });
+
+  // The 15 Observations of the 30-Observation benchmark sample (#90) whose
+  // synthetic type disagreed with cybertiel's. `expected` is the type the table
+  // should give; where it differs from `reference`, cybertiel is overruled (a
+  // Bash command is command_run whatever it did, identical Agent spawns share
+  // one type, every claude-in-chrome tool is web_fetch, a task-notification
+  // prompt is still a prompt).
+  it("types the 15 benchmark-sample mismatches (#90)", async () => {
+    const { buildSyntheticCompression } = await import(
+      "../src/functions/compress-synthetic.js"
+    );
+    const mismatches: Array<{
+      id: string;
+      hookType: RawObservation["hookType"];
+      toolName?: string;
+      reference: string;
+      expected: string;
+    }> = [
+      { id: "obs_mupyc9ak", hookType: "post_tool_use", toolName: "Bash", reference: "file_edit", expected: "command_run" },
+      { id: "obs_mupzimrc", hookType: "post_tool_use", toolName: "Bash", reference: "command_run", expected: "command_run" },
+      { id: "obs_murbjjlf", hookType: "post_tool_use", toolName: "Bash", reference: "file_edit", expected: "command_run" },
+      { id: "obs_muqxdrcx", hookType: "post_tool_use", toolName: "Bash", reference: "search", expected: "command_run" },
+      { id: "obs_muprzskn", hookType: "post_tool_use", toolName: "Agent", reference: "task", expected: "subagent" },
+      { id: "obs_mupp1bjb", hookType: "post_tool_use", toolName: "AskUserQuestion", reference: "conversation", expected: "decision" },
+      { id: "obs_mupf85sa", hookType: "post_tool_use", toolName: "AskUserQuestion", reference: "decision", expected: "decision" },
+      { id: "obs_murbm320", hookType: "post_tool_use", toolName: "SendMessage", reference: "notification", expected: "subagent" },
+      { id: "obs_mur1fteg", hookType: "post_tool_use", toolName: "SendMessage", reference: "notification", expected: "subagent" },
+      { id: "obs_mupox0z8", hookType: "prompt_submit", reference: "subagent", expected: "conversation" },
+      { id: "obs_muqy52h3", hookType: "post_tool_use", toolName: "mcp__claude-in-chrome__read_console_messages", reference: "discovery", expected: "web_fetch" },
+      { id: "obs_muqy2y9s", hookType: "post_tool_use", toolName: "mcp__claude-in-chrome__javascript_tool", reference: "web_fetch", expected: "web_fetch" },
+      { id: "obs_mur6x7se", hookType: "post_tool_use", toolName: "mcp__claude-in-chrome__navigate", reference: "command_run", expected: "web_fetch" },
+      { id: "obs_mupo7tgw", hookType: "post_tool_use", toolName: "ListAgents", reference: "discovery", expected: "subagent" },
+      { id: "obs_mur1x14c", hookType: "post_tool_use", toolName: "TaskStop", reference: "task", expected: "subagent" },
+    ];
+    expect(mismatches).toHaveLength(15);
+    for (const { id, hookType, toolName, expected } of mismatches) {
+      const synth = buildSyntheticCompression({
+        id,
+        sessionId: "ses_1",
+        timestamp: new Date().toISOString(),
+        hookType,
+        toolName,
+        raw: {},
+      });
+      expect(synth.type, `${id} ${toolName ?? hookType}`).toBe(expected);
+    }
+  });
+
   it("keeps the hook type ahead of the tool-name table", async () => {
     const { buildSyntheticCompression } = await import(
       "../src/functions/compress-synthetic.js"
