@@ -130,7 +130,7 @@ describe("hook scripts", () => {
   it("every hook entry hydrates the env before its first AGENTMEMORY_* read", () => {
     const hooksDir = join(__dirname, "..", "src", "hooks");
     const entries = readdirSync(hooksDir).filter((f) => f.endsWith(".ts") && !f.startsWith("_") && f !== "sdk-guard.ts");
-    expect(entries).toHaveLength(13);
+    expect(entries).toHaveLength(12);
     for (const entry of entries) {
       const source = readFileSync(join(hooksDir, entry), "utf-8");
       const callAt = source.indexOf("hydrateHookEnv();");

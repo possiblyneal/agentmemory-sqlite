@@ -30,9 +30,9 @@ async function main() {
   if (!data || typeof data !== "object") return;
   if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
-  const agentId = data.agent_id || data.agentName;
-  const agentType = data.agent_type || data.agentDisplayName || data.agentName;
+  const sessionId = (data.session_id as string) || "unknown";
+  const agentId = data.agent_id;
+  const agentType = data.agent_type;
   const lastMsg =
     typeof data.last_assistant_message === "string"
       ? data.last_assistant_message.slice(0, 4000)

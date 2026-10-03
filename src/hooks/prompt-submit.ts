@@ -33,11 +33,11 @@ async function main() {
   if (!data || typeof data !== "object") return;
   if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
+  const sessionId = (data.session_id as string) || "unknown";
 
   const cwd = hookCwd(data) || process.cwd();
   const project = resolveProject(cwd);
-  const prompt = data.prompt ?? data.userPrompt;
+  const prompt = data.prompt;
 
   fetch(`${REST_URL}/agentmemory/observe`, {
     method: "POST",

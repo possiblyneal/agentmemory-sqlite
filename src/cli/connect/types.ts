@@ -1,23 +1,6 @@
 export type ConnectOptions = {
   dryRun: boolean;
   force: boolean;
-  /**
-   * When true, adapters that ship a native hook config alongside MCP
-   * additionally write it: Codex (`~/.codex/hooks.json`, workaround for
-   * openai/codex#16430), Claude Code (`~/.claude/settings.json`, workaround
-   * for #508), Droid (`~/.factory/hooks.json`, its native hooks config),
-   * and DeepSeek Harness (`$DSH_HOME/agentmemory.hooks.json` plus a
-   * hooks-claude-code patch row). No-op for adapters without a hooks
-   * installer.
-   */
-  withHooks?: boolean;
-  /**
-   * When true (default), after wiring the agent's MCP/hooks, also write a
-   * memory-usage guideline into the agent's native rules file so hook-less
-   * agents proactively call memory_recall / memory_save. Disabled with
-   * `--no-guidelines`. No-op for agents without a guideline target.
-   */
-  guidelines?: boolean;
 };
 
 export type ConnectAdapter = {
@@ -45,5 +28,4 @@ export type ConnectAdapter = {
 export type ConnectResult =
   | { kind: "installed"; mutatedPath?: string; backupPath?: string }
   | { kind: "already-wired"; mutatedPath?: string }
-  | { kind: "stub"; reason: string }
   | { kind: "skipped"; reason: string };

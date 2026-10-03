@@ -34,7 +34,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 - **Engine**: `createInprocSdk()` in `src/engine/inproc/sdk.ts`, over `node:sqlite`. It binds the ports itself. Engine-facing types (`ISdk`, `ApiRequest`, `TriggerAction`) come from `src/engine/types.ts` — this repository owns them; there is no external SDK package.
 - **State**: `SqliteState` (`src/engine/inproc/state.ts`), one file at `AGENTMEMORY_SQLITE_PATH` (default `<data-dir>/agentmemory.sqlite`). Reach it as `StateKV` over the scopes in `src/state/schema.ts`.
 - **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100.
-- **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 13 hook entries, to
+- **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 12 hook entries, to
   `plugin/scripts/*.mjs` — those are committed build output, and tsdown gives them mode 755 for
   their shebang. Regenerate them with `npm run build`; never hand-edit one or reset its mode.
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
@@ -53,8 +53,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 5. `test/mcp-standalone.test.ts` — per-group tool count assertion
 6. `test/tool-count-consistency.test.ts` — `EXPECTED_TOOL_COUNT`
 7. `plugin/.claude-plugin/plugin.json` — tool count in description
-8. `plugin/plugin.json` and `plugin/.mcp.copilot.json` (when present) — tool count or MCP exposure
-9. `npm run skills:gen` — regenerates the counts and tables in `plugin/skills/*/REFERENCE.md`
+8. `npm run skills:gen` — regenerates the counts and tables in `plugin/skills/*/REFERENCE.md`
 
 **When adding REST endpoints, you MUST update:**
 1. `src/triggers/api.ts` — endpoint registration
@@ -173,15 +172,11 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 
 ## Supported hosts
 
-18 `connect` adapters, enumerated by `ADAPTERS` in `src/cli/connect/index.ts` — that array is
-the source of truth for the count in the generated
-`plugin/skills/agentmemory-agents/REFERENCE.md`. Cursor, Codex and OpenCode are not supported.
-
-Two survivors are named for Codex but are not Codex-specific — do not delete them with a host:
-`plugin/hooks/hooks.codex.json` is the manifest `connect dsh` merges (`src/cli/connect/dsh.ts`),
-and `src/cli/connect/codex-hooks.ts` is the shared merge engine behind Claude Code
-`--with-hooks`, Droid, Devin and dsh, and also exports the `findPluginRoot` helper that
-`antigravity-cli.ts` and `pi.ts` import.
+Claude Code is the only supported host. The Operator installs it through the marketplace plugin
+(`plugin/.claude-plugin/plugin.json`, which loads `plugin/hooks/hooks.json`, `plugin/.mcp.json`
+and `plugin/skills/`). `agentmemory connect claude-code` is the one `connect` adapter (`ADAPTERS`
+in `src/cli/connect/index.ts`); it wires only the MCP server into `~/.claude.json`. Do not add
+adapters, per-host hook manifests or host payload shims in `src/hooks/` for any other agent.
 
 ## Relationship to upstream
 
@@ -203,8 +198,8 @@ Nothing is published from here — there is no release workflow and `dist/` is g
 the only install path is clone → `npm ci` → `npm run build` →
 `npm link`. Any doc that tells a user how to install must describe that path, never
 `npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. The one exception is
-the `@agentmemory/mcp` shim wherever it is invoked as a proxy — `plugin/.mcp.json` and
-`plugin/.mcp.copilot.json` — because in proxy mode the tool surface comes from this fork's
+the `@agentmemory/mcp` shim wherever it is invoked as a proxy — `plugin/.mcp.json` and the
+entry `connect claude-code` writes — because in proxy mode the tool surface comes from this fork's
 running server, not from the shim. The translated `READMEs/` were deleted rather than kept
 stale — do not re-add translations without a way to keep them current.
 

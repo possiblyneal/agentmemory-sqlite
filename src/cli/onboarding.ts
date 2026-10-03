@@ -42,8 +42,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // fall back to a neutral glyph.
 const AGENT_GLYPH: Record<string, string> = {
   "claude-code": "⟁",
-  "copilot-cli": "◈",
-  "gemini-cli": "✦",
 };
 
 const PROVIDERS: { value: string; label: string; envKey: string | null }[] = [
@@ -73,15 +71,6 @@ export function buildAgentOptions(): { value: string; label: string; hint?: stri
     ...options.filter((o) => o.hint === "native plugin"),
     ...options.filter((o) => o.hint === "MCP server"),
   ];
-}
-
-export function getInitialAgentValues(
-  env: Record<string, string | undefined> = process.env,
-): string[] {
-  if (env["COPILOT_CLI"] === "1" || env["COPILOT_AGENT_SESSION_ID"]) {
-    return ["copilot-cli"];
-  }
-  return ["claude-code"];
 }
 
 // Mirror src/cli.ts findEnvExample so onboarding ships the same .env
@@ -179,23 +168,11 @@ export async function runOnboarding(): Promise<OnboardingResult> {
     message: "Which agents will use agentmemory? (space to toggle, enter to confirm)",
     options: buildAgentOptions(),
     required: false,
-    initialValues: getInitialAgentValues(),
+    initialValues: ["claude-code"],
   });
   if (p.isCancel(agentsPicked)) {
     p.cancel("Setup cancelled. Re-run any time with: agentmemory --reset");
     process.exit(0);
-  }
-
-  const pickedAgentsList = (agentsPicked as string[]) ?? [];
-  if (pickedAgentsList.length > 0) {
-    p.note(
-      [
-        "━ how this works ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "All selected agents share the same memory at :3111.",
-        "A memory saved by Claude Code is visible to Copilot + Gemini CLI instantly.",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-      ].join("\n"),
-    );
   }
 
   const providerPicked = await p.select<string>({
@@ -316,7 +293,6 @@ async function wireSelectedAgents(agents: string[]): Promise<void> {
   }
 
   const wired: string[] = [];
-  const manual: { name: string; docs?: string }[] = [];
   const failed: { name: string; reason: string }[] = [];
 
   for (const name of agents) {
@@ -341,9 +317,6 @@ async function wireSelectedAgents(agents: string[]): Promise<void> {
       case "already-wired":
         wired.push(name);
         break;
-      case "stub":
-        manual.push({ name, docs: adapter.docs });
-        break;
       case "skipped":
         failed.push({ name, reason: result.reason });
         break;
@@ -354,11 +327,8 @@ async function wireSelectedAgents(agents: string[]): Promise<void> {
   if (wired.length > 0) {
     summary.push(`Wired: ${wired.join(", ")}.`);
   }
-  if (manual.length > 0 || failed.length > 0) {
+  if (failed.length > 0) {
     const parts: string[] = [];
-    for (const m of manual) {
-      parts.push(`${m.name} (manual install required${m.docs ? ` — see ${m.docs}` : ""})`);
-    }
     for (const f of failed) {
       parts.push(`${f.name} (${f.reason})`);
     }

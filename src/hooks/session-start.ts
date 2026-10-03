@@ -32,13 +32,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function contextPayload(data: Record<string, unknown>, context: string): string {
-  if (
-    typeof data.cursor_version === "string" ||
-    data.hook_event_name === "sessionStart"
-  ) {
-    return JSON.stringify({ additional_context: context });
-  }
-  if (process.env["DEVIN_PROJECT_DIR"] || data.prompt_id !== undefined) {
+  if (data.prompt_id !== undefined) {
     return JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "SessionStart",
@@ -69,7 +63,7 @@ async function main() {
   if (typeof data.agent_id === "string" && data.agent_id) return;
 
   const sessionId =
-    ((data.session_id || data.sessionId || data.conversation_id) as string) ||
+    (data.session_id as string) ||
     `ses_${Date.now().toString(36)}`;
   const cwd = hookCwd(data) || process.cwd();
   const project = resolveProject(cwd);

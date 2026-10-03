@@ -139,7 +139,7 @@ function env(): string {
 
 function agents(): string {
   const lines = [
-    `\`agentmemory connect <agent>\` wires the memory server into a host agent. ${ADAPTERS.length} adapters:`,
+    `\`agentmemory connect <agent>\` wires the memory server into a host agent. ${ADAPTERS.length} adapter${ADAPTERS.length === 1 ? "" : "s"}:`,
     "",
     "| Agent | Name | Protocol |",
     "| --- | --- | --- |",

@@ -106,11 +106,7 @@ function resolveProject(cwd) {
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
 	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
-	const roots = data.workspace_roots;
-	if (Array.isArray(roots)) {
-		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
-	}
-	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
+	const projectDir = process.env["CLAUDE_PROJECT_DIR"];
 	if (projectDir && projectDir.trim()) return projectDir;
 }
 //#endregion
@@ -150,8 +146,7 @@ function authHeaders() {
 	return h;
 }
 function contextPayload(data, context) {
-	if (typeof data.cursor_version === "string" || data.hook_event_name === "sessionStart") return JSON.stringify({ additional_context: context });
-	if (process.env["DEVIN_PROJECT_DIR"] || data.prompt_id !== void 0) return JSON.stringify({ hookSpecificOutput: {
+	if (data.prompt_id !== void 0) return JSON.stringify({ hookSpecificOutput: {
 		hookEventName: "SessionStart",
 		additionalContext: context
 	} });
@@ -169,7 +164,7 @@ async function main() {
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
 	if (typeof data.agent_id === "string" && data.agent_id) return;
-	const sessionId = data.session_id || data.sessionId || data.conversation_id || `ses_${Date.now().toString(36)}`;
+	const sessionId = data.session_id || `ses_${Date.now().toString(36)}`;
 	const cwd = hookCwd(data) || process.cwd();
 	const project = resolveProject(cwd);
 	const url = `${REST_URL}/agentmemory/session/start`;
