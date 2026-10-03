@@ -143,7 +143,7 @@ function agents(): string {
     "",
     "| Flag | Effect |",
     "| --- | --- |",
-    ...Object.entries(CONNECT_FLAGS).map(([flag, text]) => `| \`${flag}\` | ${mdEscape(text)} |`),
+    ...Object.entries(CONNECT_FLAGS).map(([flag, { help }]) => `| \`${flag}\` | ${mdEscape(help)} |`),
   ];
   return lines.join("\n");
 }

@@ -108,7 +108,7 @@ Commands:
   connect            Wire agentmemory's MCP server into Claude Code.
                      \`connect ${CONNECT_ALIAS}\` is accepted as an alias.
 ${Object.entries(CONNECT_FLAGS)
-  .map(([flag, text]) => `                     ${flag}: ${text}`)
+  .map(([flag, { help }]) => `                     ${flag}: ${help}`)
   .join("\n")}
   status             Show connection status, memory count, flags, and health
   doctor             Interactive diagnostic + fixer. [F]ix · [S]kip · [?]more · [Q]uit
