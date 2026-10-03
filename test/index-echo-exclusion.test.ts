@@ -70,8 +70,15 @@ describe("index exclusion by toolName prefix", () => {
     setEmbeddingProvider(null);
   });
 
-  it("excludes nothing when the flag is unset (default behaviour)", () => {
-    expect(isIndexExcluded(obs("obs_1", `${ECHO_PREFIX}memory_smart_search`))).toBe(false);
+  it("excludes agentmemory's own MCP tools when the flag is unset (#993)", () => {
+    expect(isIndexExcluded(obs("o", `${ECHO_PREFIX}memory_smart_search`))).toBe(true);
+    expect(isIndexExcluded(obs("o", "mcp__agentmemory__memory_recall"))).toBe(true);
+    expect(isIndexExcluded(obs("o", "Bash"))).toBe(false);
+  });
+
+  it("excludes nothing when the flag is set empty", () => {
+    process.env[FLAG] = "";
+    expect(isIndexExcluded(obs("o", `${ECHO_PREFIX}memory_smart_search`))).toBe(false);
   });
 
   it("matches on prefix, and only on the configured prefixes", () => {

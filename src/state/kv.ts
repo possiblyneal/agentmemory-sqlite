@@ -1,6 +1,6 @@
 import type { ISdk } from '../engine/types.js'
 
-const SET_MANY_CHUNK = 100
+export const SET_MANY_CHUNK = 100
 
 export class StateKV {
   constructor(private sdk: ISdk) {}
@@ -54,10 +54,38 @@ export class StateKV {
     return entries.length
   }
 
+  // Bounded batches like setMany. Deletes only rows whose updatedAt is still
+  // the one the caller read, and returns the keys it deleted.
+  async deleteManyIfUnchanged(
+    scope: string,
+    entries: Array<{ key: string; updatedAt: string }>,
+  ): Promise<string[]> {
+    const deleted: string[] = []
+    for (let i = 0; i < entries.length; i += SET_MANY_CHUNK) {
+      deleted.push(
+        ...(await this.sdk.trigger<
+          { scope: string; entries: Array<{ key: string; updatedAt: string }> },
+          string[]
+        >({
+          function_id: 'state::delete-many-if-unchanged',
+          payload: { scope, entries: entries.slice(i, i + SET_MANY_CHUNK) },
+        })),
+      )
+    }
+    return deleted
+  }
+
   async list<T = unknown>(scope: string): Promise<T[]> {
     return this.sdk.trigger<{ scope: string }, T[]>({
       function_id: 'state::list',
       payload: { scope },
+    })
+  }
+
+  async listScopes(prefix: string): Promise<string[]> {
+    return this.sdk.trigger<{ prefix: string }, string[]>({
+      function_id: 'state::list-scopes',
+      payload: { prefix },
     })
   }
 }

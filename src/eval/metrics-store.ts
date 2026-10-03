@@ -1,6 +1,7 @@
 import type { FunctionMetrics } from "../types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 
 export class MetricsStore {
   private cache = new Map<string, FunctionMetrics>();
@@ -9,6 +10,17 @@ export class MetricsStore {
   constructor(private kv: StateKV) {}
 
   async record(
+    functionId: string,
+    latencyMs: number,
+    success: boolean,
+    qualityScore?: number,
+  ): Promise<void> {
+    return withKeyedLock(`metrics:${functionId}`, () =>
+      this.recordLocked(functionId, latencyMs, success, qualityScore),
+    );
+  }
+
+  private async recordLocked(
     functionId: string,
     latencyMs: number,
     success: boolean,

@@ -1,3 +1,6 @@
+# Every text file is stored and checked out with LF: a CRLF shebang line fails on
+# Linux with "env: 'node\r': No such file or directory".
+* text=auto eol=lf
 # These files are scp'd to Linux hosts or baked into containers and are executed
 # there. core.autocrlf=true on a Windows checkout would hand them CRLF endings,
 # which bash rejects with "$'\r': command not found". Pin them to LF.

@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { ResilientProvider } from "../src/providers/resilient.js";
 import type { MemoryProvider } from "../src/types.js";
+import { ProviderHttpError } from "../src/providers/_fetch.js";
+import { OpenAIProvider } from "../src/providers/openai.js";
 
 function fakeProvider(overrides: Partial<MemoryProvider> = {}): MemoryProvider {
   return {
@@ -74,5 +76,147 @@ describe("ResilientProvider per-operation breakers", () => {
     expect(vision.circuitStates.describeImage.state).toBe("open");
     expect(vision.circuitStates.compress.state).toBe("closed");
     await expect(vision.compress("s", "u")).resolves.toBe("compressed");
+  });
+
+  it("does not open the breaker when the provider only says it is busy", async () => {
+    const provider = new ResilientProvider(
+      fakeProvider({
+        summarize: async () => {
+          throw new ProviderHttpError("OpenAI API error (429): queue_full", 429);
+        },
+      }),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("closed");
+  });
+
+  it("opens the breaker on a 429 that reports an exhausted quota", async () => {
+    const provider = new ResilientProvider(
+      fakeProvider({
+        summarize: async () => {
+          throw new ProviderHttpError('OpenAI API error (429): {"error":{"code":"insufficient_quota"}}', 429);
+        },
+      }),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("open");
+  });
+
+  it("does not open the breaker when a content filter rejects one prompt (#1276)", async () => {
+    const provider = new ResilientProvider(
+      fakeProvider({
+        summarize: async () => {
+          throw new ProviderHttpError(
+            'OpenAI API error (400): {"error":{"code":"content_filter","message":"The response was filtered"}}',
+            400,
+          );
+        },
+      }),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("closed");
+  });
+
+  it("does not open the breaker when a content filter blocks the completion (#1276)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: "content_filter", message: { content: null } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const provider = new ResilientProvider(
+      new OpenAIProvider("key", "gpt-4o", 1024, "https://example.openai.azure.com"),
+    );
+
+    await failTimes(() => provider.summarize("s", "u"), 5);
+
+    expect(provider.circuitStates.summarize.state).toBe("closed");
+    vi.restoreAllMocks();
+  });
+
+  it("treats an SDK error carrying status 503 as busy", async () => {
+    const provider = new ResilientProvider(
+      fakeProvider({
+        compress: async () => {
+          throw Object.assign(new Error("overloaded"), { status: 503 });
+        },
+      }),
+    );
+
+    await failTimes(() => provider.compress("s", "u"), 5);
+
+    expect(provider.circuitStates.compress.state).toBe("closed");
+  });
+});
+
+describe("ResilientProvider concurrency cap", () => {
+  afterEach(() => {
+    delete process.env.AGENTMEMORY_LLM_MAX_CONCURRENCY;
+  });
+
+  it("holds calls past AGENTMEMORY_LLM_MAX_CONCURRENCY until a slot frees, across operations", async () => {
+    process.env.AGENTMEMORY_LLM_MAX_CONCURRENCY = "1";
+    let running = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const gated = () =>
+      new Promise<string>((resolve) => {
+        running++;
+        peak = Math.max(peak, running);
+        releases.push(() => {
+          running--;
+          resolve("ok");
+        });
+      });
+    const provider = new ResilientProvider(
+      fakeProvider({ compress: gated, summarize: gated }),
+    );
+
+    const first = provider.compress("s", "u");
+    const second = provider.summarize("s", "u");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releases).toHaveLength(1);
+
+    releases[0]();
+    await first;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releases).toHaveLength(2);
+    releases[1]();
+    await second;
+
+    expect(peak).toBe(1);
+  });
+
+  it("frees the slot when a call throws", async () => {
+    process.env.AGENTMEMORY_LLM_MAX_CONCURRENCY = "1";
+    const provider = new ResilientProvider(
+      fakeProvider({ summarize: async () => { throw new Error("boom"); } }),
+    );
+
+    await expect(provider.summarize("s", "u")).rejects.toThrow("boom");
+    await expect(provider.compress("s", "u")).resolves.toBe("compressed");
+  });
+});
+
+describe("ResilientProvider prompt encoding", () => {
+  it("replaces a lone surrogate before the prompt reaches the provider", async () => {
+    const seen: string[] = [];
+    const provider = new ResilientProvider(
+      fakeProvider({
+        compress: async (s, u) => { seen.push(s, u); return "ok"; },
+        summarize: async (s, u) => { seen.push(s, u); return "ok"; },
+      }),
+    );
+
+    await provider.compress("sys\uD83D", "user \uDE00 tail");
+    await provider.summarize("sys", "cut mid-pair \uD83D");
+
+    expect(seen).toEqual(["sys�", "user � tail", "sys", "cut mid-pair �"]);
   });
 });

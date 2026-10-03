@@ -268,18 +268,18 @@ describe("mem::evict stale sessions", () => {
     );
   });
 
-  it("keeps a stale session that only has raw observations", async () => {
-    const sessionId = "ses_raw_only";
+  it("keeps a stale session whose raw observations fail to compress", async () => {
+    const sessionId = "ses_compress_failed";
     const store = storeForObservations(sessionId, [
       makeRawObservation(sessionId),
     ]);
     const kv = mockKV(store);
+    kv.set = async () => {
+      throw new Error("disk full");
+    };
     const { sdk, calls } = mockSdk();
 
     registerEvictFunction(sdk as never, kv as never);
-    sdk.registerFunction("event::session::stopped", () => ({
-      success: true,
-    }));
 
     const result = (await sdk.trigger({
       function_id: "mem::evict",
@@ -293,5 +293,31 @@ describe("mem::evict stale sessions", () => {
     expect(calls.map((call) => call.function_id)).not.toContain(
       "event::session::stopped",
     );
+  });
+
+  it("compresses a stale session's raw observations, then recovers and evicts it", async () => {
+    const sessionId = "ses_raw_only";
+    const store = storeForObservations(sessionId, [
+      makeRawObservation(sessionId),
+    ]);
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+
+    registerEvictFunction(sdk as never, kv as never);
+    sdk.registerFunction("event::session::stopped", async () => {
+      const [obs] = await kv.list<CompressedObservation>(KV.observations(sessionId));
+      expect(obs).toMatchObject({ id: "raw_1", title: "Edit" });
+      return { success: true };
+    });
+    sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
+
+    const result = (await sdk.trigger({
+      function_id: "mem::evict",
+      payload: {},
+    })) as { staleSessions: number };
+
+    expect(result.staleSessions).toBe(1);
+    expect(await kv.get(KV.sessions, sessionId)).toBeNull();
   });
 });

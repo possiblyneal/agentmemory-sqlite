@@ -1,14 +1,9 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
+import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
 
 hydrateHookEnv();
-
-function isSdkChildContext(payload: unknown): boolean {
-  if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-  if (!payload || typeof payload !== "object") return false;
-  return (payload as { entrypoint?: unknown }).entrypoint === "sdk-ts";
-}
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
@@ -33,9 +28,9 @@ async function main() {
   }
 
   if (!data || typeof data !== "object") return;
-  if (isSdkChildContext(data)) return;
+  if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
+  const sessionId = (data.session_id as string) || "unknown";
 
   const cwd = hookCwd(data) || process.cwd();
 

@@ -12,6 +12,7 @@ import { getVisibleTools } from "./tools-registry.js";
 import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import { logger } from "../logger.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
 
 type McpResponse = {
@@ -148,6 +149,7 @@ export function registerMcpEndpoints(
               format,
               token_budget: tokenBudget,
               agentId: recallAgentId,
+              project: asNonEmptyString(args.project),
             } });
             const text =
               format === "narrative" &&
@@ -211,6 +213,12 @@ export function registerMcpEndpoints(
               typeof args.agentId === "string" && args.agentId.trim().length > 0
                 ? (args.agentId as string).trim()
                 : undefined;
+            if (args.global !== undefined && typeof args.global !== "boolean") {
+              return { status_code: 400, body: { error: "global must be a boolean" } };
+            }
+            if (args.global && project !== undefined) {
+              return { status_code: 400, body: { error: "a Memory cannot have both a project and global" } };
+            }
 
             const result = await sdk.trigger({ function_id: "mem::remember", payload: {
               content: args.content,
@@ -219,6 +227,7 @@ export function registerMcpEndpoints(
               files,
               ...(project !== undefined && { project }),
               ...(saveAgentId !== undefined && { agentId: saveAgentId }),
+              ...(args.global === true && { global: true }),
             } });
             return {
               status_code: 200,
@@ -349,6 +358,7 @@ export function registerMcpEndpoints(
                 query: args.query,
                 expandIds,
                 limit,
+                project: asNonEmptyString(args.project),
               },
             });
             return {
@@ -1347,6 +1357,10 @@ export function registerMcpEndpoints(
             };
         }
       } catch (err) {
+        logger.error("MCP tool call failed", {
+          tool: name,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return {
           status_code: 500,
           body: {

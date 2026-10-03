@@ -38,11 +38,13 @@ let probeInFlight: Promise<Handle> | null = null;
 // fallback, and would have us POST to `${AGENTMEMORY_URL}/agentmemory/...`
 // (DNS failure). Strip any literal placeholder we see so the fallback
 // engages instead.
+export function isBlankOrPlaceholder(raw: string | undefined): raw is undefined | "" {
+  return !raw || (raw.startsWith("${") && raw.endsWith("}"));
+}
+
 export function resolveEnvOrEmpty(name: string): string {
   const raw = process.env[name];
-  if (!raw) return "";
-  if (raw.startsWith("${") && raw.endsWith("}")) return "";
-  return raw;
+  return isBlankOrPlaceholder(raw) ? "" : raw;
 }
 
 function baseUrl(): string {
@@ -149,8 +151,11 @@ export async function resolveHandle(): Promise<Handle> {
           if (!res.ok) {
             // Carry the status: the caller treats "the server answered 503"
             // differently from "the server could not be reached".
+            const detail = (await res.text().catch(() => "")).slice(0, 500);
             throw Object.assign(
-              new Error(`${init?.method || "GET"} ${path} -> ${res.status} ${res.statusText}`),
+              new Error(
+                `${init?.method || "GET"} ${path} -> ${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`,
+              ),
               { status: res.status },
             );
           }

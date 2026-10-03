@@ -9,10 +9,24 @@ import type {
   Lesson,
   Crystal,
   MemoryProvider,
+  Session,
 } from "../types.js";
 import { recordAudit } from "./audit.js";
-import { REFLECT_SYSTEM, buildReflectPrompt } from "../prompts/reflect.js";
+import {
+  REFLECT_SYSTEM,
+  buildReflectPrompt,
+  formatNarrativeLine,
+  formatScoredLine,
+} from "../prompts/reflect.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
+import { loadProjectTime } from "../state/project-time.js";
+import { logger } from "../logger.js";
+
+// A cluster takes every fact sharing a word with its concepts, which on the
+// Operator's broker reached 100k+ tokens and starved sibling slots during
+// prefill. ~8k tokens at the tree's chars/3 estimate.
+const CLUSTER_PROMPT_CHARS = 24_000;
+const MIN_CLUSTER_ITEMS = 3;
 
 interface ConceptCluster {
   concepts: string[];
@@ -22,6 +36,50 @@ interface ConceptCluster {
   factIds: string[];
   lessonIds: string[];
   crystalIds: string[];
+}
+
+// Lessons and crystals are the more durable record, so they fill the budget
+// before facts. Lessons and facts go strongest first, crystals newest first.
+// An item too large for what is left is skipped and smaller ones keep filling.
+function fitClusterToBudget(
+  concepts: string[],
+  lessons: Lesson[],
+  crystals: Crystal[],
+  facts: SemanticMemory[],
+): { lessons: Lesson[]; crystals: Crystal[]; facts: SemanticMemory[] } {
+  // Rendering every section with an empty item reserves the intro, concept
+  // header and section headings before any item is counted.
+  const header = buildReflectPrompt({
+    concepts,
+    facts: [{ fact: "", confidence: 0 }],
+    lessons: [{ content: "", confidence: 0 }],
+    crystalNarratives: [""],
+  });
+  let remaining = CLUSTER_PROMPT_CHARS - header.length;
+  const take = <T>(items: T[], line: (item: T) => string): T[] =>
+    items.filter((item) => {
+      const chars = line(item).length + 1;
+      if (chars > remaining) return false;
+      remaining -= chars;
+      return true;
+    });
+  return {
+    lessons: take(
+      [...lessons].sort((a, b) => b.confidence - a.confidence),
+      (l) => formatScoredLine(l.confidence, l.content),
+    ),
+    crystals: take(
+      [...crystals].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+      (c) => formatNarrativeLine(c.narrative),
+    ),
+    facts: take(
+      [...facts].sort((a, b) => b.confidence - a.confidence),
+      (f) => formatScoredLine(f.confidence, f.fact),
+    ),
+  };
 }
 
 function reinforceInsight(insight: Insight): void {
@@ -67,10 +125,11 @@ function buildGraphClusters(
 
   const visited = new Set<string>();
   const clusters: string[][] = [];
-  const conceptNodeIds = new Set(conceptNodes.map((n) => n.id));
+  const conceptById = new Map(conceptNodes.map((n) => [n.id, n]));
 
   for (const seed of sorted) {
-    if (visited.has(seed.id) || clusters.length >= maxClusters) break;
+    if (clusters.length >= maxClusters) break;
+    if (visited.has(seed.id)) continue;
 
     const cluster: string[] = [];
     const queue = [seed.id];
@@ -81,12 +140,12 @@ function buildGraphClusters(
       const levelCount = queue.length;
       for (let i = 0; i < levelCount; i++) {
         const current = queue.shift()!;
-        if (seen.has(current)) continue;
+        if (seen.has(current) || visited.has(current)) continue;
         seen.add(current);
 
-        if (conceptNodeIds.has(current)) {
-          const node = conceptNodes.find((n) => n.id === current);
-          if (node) cluster.push(node.name);
+        const node = conceptById.get(current);
+        if (node) {
+          cluster.push(node.name);
           visited.add(current);
         }
 
@@ -184,20 +243,42 @@ export function registerReflectFunctions(
         ]);
 
       let activeLessons = lessons.filter((l) => !l.deleted);
+      let scopedSemantic = semanticMemories;
+      let scopedCrystals = crystals;
+      let scopedNodes = graphNodes;
+      let scopedEdges = graphEdges;
+      // One project's clusters must never borrow another's facts, crystals or
+      // concepts: an insight is stamped with the project it was built for (#1344).
       if (data?.project) {
-        activeLessons = activeLessons.filter((l) => l.project === data.project);
+        const project = data.project;
+        const sessions = await kv.list<Session>(KV.sessions);
+        const projectSessionIds = new Set(
+          sessions.filter((s) => s.project === project).map((s) => s.id),
+        );
+        activeLessons = activeLessons.filter((l) => l.project === project);
+        scopedSemantic = semanticMemories.filter((m) =>
+          m.sourceSessionIds.some((id) => projectSessionIds.has(id)),
+        );
+        scopedCrystals = crystals.filter((c) => c.project === project);
+        scopedNodes = graphNodes.filter(
+          (n) => n.sessionId !== undefined && projectSessionIds.has(n.sessionId),
+        );
+        const nodeIds = new Set(scopedNodes.map((n) => n.id));
+        scopedEdges = graphEdges.filter(
+          (e) => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId),
+        );
       }
 
       let conceptClusters = buildGraphClusters(
-        graphNodes,
-        graphEdges,
+        scopedNodes,
+        scopedEdges,
         maxClusters,
       );
 
       const usedFallback = conceptClusters.length === 0;
       if (usedFallback) {
         conceptClusters = buildJaccardClusters(
-          semanticMemories,
+          scopedSemantic,
           activeLessons,
           maxClusters,
         );
@@ -213,7 +294,7 @@ export function registerReflectFunctions(
 
         const conceptSet = new Set(conceptNames.map((c) => c.toLowerCase()));
 
-        const clusterFacts = semanticMemories.filter((s) => {
+        const clusterFacts = scopedSemantic.filter((s) => {
           const factTerms = s.fact.toLowerCase().split(/\s+/);
           return factTerms.some((t) => conceptSet.has(t));
         });
@@ -225,7 +306,7 @@ export function registerReflectFunctions(
           ),
         );
 
-        const clusterCrystals = crystals.filter((c) =>
+        const clusterCrystals = scopedCrystals.filter((c) =>
           (c.lessons || []).some((l) =>
             conceptNames.some((cn) =>
               l.toLowerCase().includes(cn.toLowerCase()),
@@ -235,25 +316,46 @@ export function registerReflectFunctions(
 
         const totalItems =
           clusterFacts.length + clusterLessons.length + clusterCrystals.length;
-        if (totalItems < 3) {
+        if (totalItems < MIN_CLUSTER_ITEMS) {
+          clustersSkipped++;
+          continue;
+        }
+
+        const fitted = fitClusterToBudget(
+          conceptNames,
+          clusterLessons,
+          clusterCrystals,
+          clusterFacts,
+        );
+        const keptItems =
+          fitted.facts.length + fitted.lessons.length + fitted.crystals.length;
+        if (keptItems < totalItems) {
+          logger.info("Reflect cluster trimmed to its prompt budget", {
+            project: data?.project,
+            concepts: conceptNames,
+            keptItems,
+            droppedItems: totalItems - keptItems,
+          });
+        }
+        if (keptItems < MIN_CLUSTER_ITEMS) {
           clustersSkipped++;
           continue;
         }
 
         const cluster: ConceptCluster = {
           concepts: conceptNames,
-          facts: clusterFacts.map((f) => ({
+          facts: fitted.facts.map((f) => ({
             fact: f.fact,
             confidence: f.confidence,
           })),
-          lessons: clusterLessons.map((l) => ({
+          lessons: fitted.lessons.map((l) => ({
             content: l.content,
             confidence: l.confidence,
           })),
-          crystalNarratives: clusterCrystals.map((c) => c.narrative),
-          factIds: clusterFacts.map((f) => f.id),
-          lessonIds: clusterLessons.map((l) => l.id),
-          crystalIds: clusterCrystals.map((c) => c.id),
+          crystalNarratives: fitted.crystals.map((c) => c.narrative),
+          factIds: fitted.facts.map((f) => f.id),
+          lessonIds: fitted.lessons.map((l) => l.id),
+          crystalIds: fitted.crystals.map((c) => c.id),
         };
 
         try {
@@ -357,7 +459,7 @@ export function registerReflectFunctions(
 
       items.sort((a, b) => b.confidence - a.confidence);
 
-      return { success: true, insights: items.slice(0, limit) };
+      return { success: true, insights: items.slice(0, limit), total: items.length };
     },
   );
 
@@ -427,40 +529,42 @@ export function registerReflectFunctions(
 
   sdk.registerFunction("mem::insight-decay-sweep", 
     async () => {
-      const items = await kv.list<Insight>(KV.insights);
-      let decayed = 0;
-      let softDeleted = 0;
-      const now = Date.now();
+      const [items, activeWeeksSince] = await Promise.all([
+        kv.list<Insight>(KV.insights),
+        loadProjectTime(kv),
+      ]);
       const timestamp = new Date().toISOString();
       const dirty: Insight[] = [];
+      const expired: Array<{ key: string; updatedAt: string }> = [];
+      const activeWeeksApplied: Record<string, number> = {};
 
       for (const insight of items) {
-        if (insight.deleted) continue;
+        if (insight.deleted) {
+          expired.push({ key: insight.id, updatedAt: insight.updatedAt });
+          continue;
+        }
 
         const baseline =
           insight.lastDecayedAt ||
           insight.lastReinforcedAt ||
           insight.createdAt;
-        const weeksSince =
-          (now - new Date(baseline).getTime()) / (1000 * 60 * 60 * 24 * 7);
+        const activeWeeks = activeWeeksSince(insight.project, baseline, timestamp);
 
-        if (weeksSince < 1) continue;
+        if (activeWeeks < 1) continue;
 
-        const decay = insight.decayRate * weeksSince;
+        const decay = insight.decayRate * activeWeeks;
         const newConfidence = Math.max(0.05, insight.confidence - decay);
 
         if (newConfidence !== insight.confidence) {
-          insight.confidence = Math.round(newConfidence * 1000) / 1000;
+          activeWeeksApplied[insight.id] = activeWeeks;
+          const confidence = Math.round(newConfidence * 1000) / 1000;
+          if (confidence <= 0.1 && insight.reinforcements === 0) {
+            expired.push({ key: insight.id, updatedAt: insight.updatedAt });
+            continue;
+          }
+          insight.confidence = confidence;
           insight.lastDecayedAt = timestamp;
           insight.updatedAt = timestamp;
-
-          if (insight.confidence <= 0.1 && insight.reinforcements === 0) {
-            insight.deleted = true;
-            softDeleted++;
-          } else {
-            decayed++;
-          }
-
           dirty.push(insight);
         }
       }
@@ -468,15 +572,18 @@ export function registerReflectFunctions(
       // Awaited batches, not a fan-out: N un-awaited sets run back to back on
       // the event loop under inproc (see StateKV.setMany).
       await kv.setMany(KV.insights, dirty.map((i) => ({ key: i.id, value: i })));
-      await recordAudit(kv, "reflect", "mem::insight-decay-sweep", dirty.map((i) => i.id), {
+      const deletedIds = await kv.deleteManyIfUnchanged(KV.insights, expired);
+      await recordAudit(kv, "reflect", "mem::insight-decay-sweep", [...dirty.map((i) => i.id), ...deletedIds], {
         event: "insight.decay",
-        decayed,
-        softDeleted,
+        decayed: dirty.length,
+        deleted: deletedIds.length,
+        deletedIds,
+        activeWeeks: activeWeeksApplied,
         total: items.length,
         timestamp,
       });
 
-      return { success: true, decayed, softDeleted, total: items.length };
+      return { success: true, decayed: dirty.length, deleted: deletedIds.length, total: items.length };
     },
   );
 }

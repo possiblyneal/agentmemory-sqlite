@@ -16,3 +16,10 @@ export function withKeyedLock<T>(
   });
   return next;
 }
+
+// Locks are taken in sorted order so two overlapping batches cannot deadlock.
+export function withKeyedLocks<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
+  return [...keys]
+    .sort()
+    .reduceRight<() => Promise<T>>((inner, key) => () => withKeyedLock(key, inner), fn)();
+}

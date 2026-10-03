@@ -2,11 +2,13 @@
 
 import { InMemoryKV } from "./in-memory-kv.js";
 import { createStdioTransport } from "./transport.js";
-import { getAllTools } from "./tools-registry.js";
+import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
+import { hydrateEnvFromFile } from "../hooks/_env.js";
 import {
+  isBlankOrPlaceholder,
   resolveHandle,
   invalidateHandle,
   type Handle,
@@ -34,6 +36,18 @@ const SERVER_INFO = {
   name: "agentmemory",
   version: VERSION,
 };
+
+// The MCP host expands `${AGENTMEMORY_SECRET:-}` in .mcp.json to an empty
+// string when the secret lives only in ~/.agentmemory/.env, so unlike the
+// hooks' loader a blank or unexpanded placeholder value counts as unset here.
+// An unreadable file leaves the server on whatever the host passed.
+export function hydrateMcpEnv(): void {
+  try {
+    hydrateEnvFromFile(isBlankOrPlaceholder);
+  } catch {}
+}
+
+hydrateMcpEnv();
 
 const kv = new InMemoryKV(getStandalonePersistPath());
 let modeAnnounced = false;
@@ -107,6 +121,7 @@ interface Validated {
   files?: string[];
   project?: string;
   agentId?: string;
+  global?: boolean;
   query?: string;
   limit?: number;
   format?: string;
@@ -139,6 +154,13 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       if (typeof args["agentId"] === "string" && args["agentId"].trim()) {
         v.agentId = args["agentId"].trim();
       }
+      if (args["global"] !== undefined && typeof args["global"] !== "boolean") {
+        throw new Error("global must be a boolean");
+      }
+      if (args["global"] && v.project !== undefined) {
+        throw new Error("a Memory cannot have both a project and global");
+      }
+      if (args["global"] === true) v.global = true;
       return v;
     }
     case "memory_recall":
@@ -159,6 +181,9 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       } else if (typeof budget === "string" && budget.trim()) {
         const n = Number(budget);
         if (Number.isFinite(n) && n > 0) v.tokenBudget = Math.floor(n);
+      }
+      if (typeof args["project"] === "string" && args["project"].trim()) {
+        v.project = args["project"].trim();
       }
       return v;
     }
@@ -199,6 +224,7 @@ async function handleProxy(
           files: v.files,
           ...(v.project !== undefined && { project: v.project }),
           ...(v.agentId !== undefined && { agentId: v.agentId }),
+          ...(v.global && { global: true }),
         }),
       });
       return textResponse(result);
@@ -210,6 +236,7 @@ async function handleProxy(
         format: v.format ?? "full",
       };
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
+      if (v.project != null) body["project"] = v.project;
       const result = await handle.call("/agentmemory/search", {
         method: "POST",
         body: JSON.stringify(body),
@@ -220,6 +247,7 @@ async function handleProxy(
       const body: Record<string, unknown> = { query: v.query, limit: v.limit };
       if (v.format != null) body["format"] = v.format;
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
+      if (v.project != null) body["project"] = v.project;
       const result = await handle.call("/agentmemory/smart-search", {
         method: "POST",
         body: JSON.stringify(body),
@@ -277,6 +305,8 @@ async function handleLocal(
         version: 1,
         isLatest: true,
         sessionIds: [],
+        ...(v.project !== undefined && { project: v.project }),
+        ...(v.global && { global: true }),
       });
       kvInstance.persist();
       return textResponse({ saved: id });
@@ -300,7 +330,9 @@ async function handleLocal(
           ]
             .join(" ")
             .toLowerCase();
-          return query.split(/\s+/).every((word) => text.includes(word));
+          const inProject =
+            v.project == null || m["project"] == null || m["project"] === v.project;
+          return inProject && query.split(/\s+/).every((word) => text.includes(word));
         })
         .slice(0, limit);
       return textResponse({ mode: "compact", results }, true);
@@ -315,11 +347,14 @@ async function handleLocal(
 
     case "memory_governance_delete": {
       let deleted = 0;
+      const notFound: string[] = [];
       for (const id of v.memoryIds || []) {
         const existing = await kvInstance.get("mem:memories", id);
         if (existing) {
           await kvInstance.delete("mem:memories", id);
           deleted++;
+        } else {
+          notFound.push(id);
         }
       }
       kvInstance.persist();
@@ -327,6 +362,7 @@ async function handleLocal(
         deleted,
         requested: (v.memoryIds || []).length,
         reason: v.reason,
+        ...(notFound.length > 0 && { notFound, hint: NOT_A_MEMORY_HINT }),
       });
     }
 
@@ -371,6 +407,14 @@ async function handleProxyGeneric(
   return textResponse(result, true);
 }
 
+// A gateway 502/504 is a proxy reporting the daemon behind it is down.
+const GATEWAY_DOWN = new Set([502, 504]);
+
+function serverAnswered(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" && !GATEWAY_DOWN.has(status);
+}
+
 export async function handleToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -390,7 +434,7 @@ export async function handleToolCall(
         process.stderr.write(
           `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`,
         );
-        invalidateHandle();
+        if (!serverAnswered(err)) invalidateHandle();
         throw err;
       }
     }
@@ -413,6 +457,9 @@ export async function handleToolCall(
           `agentmemory server is not ready (503) for ${toolName}; retry shortly. Not falling back to the local store.`,
         );
       }
+      // Any other answer is the tool's real error; the local store is only
+      // for a server that could not be reached.
+      if (serverAnswered(err)) throw err;
       process.stderr.write(
         `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}; invalidating handle and falling back to local KV\n`,
       );

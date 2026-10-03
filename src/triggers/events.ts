@@ -10,11 +10,16 @@ import {
   isGraphExtractionEnabled,
 } from "../config.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
+import { recordProjectActivity } from "../state/project-time.js";
 import { logger } from "../logger.js";
 
 // Global marker recording when corpus consolidation last ran, used to debounce
 // the per-turn session-stop fan-out.
 const CONSOLIDATION_MARKER_KEY = "consolidation:lastRun";
+
+// A raw Observation older than this is taken to be a compression that never
+// finished, so it stops holding back graph extraction.
+const PENDING_COMPRESSION_HOLD_MS = 60 * 60 * 1000;
 
 async function consolidationDueUnserialized(kv: StateKV): Promise<boolean> {
   const cooldownMs = getConsolidationCooldownMs();
@@ -66,6 +71,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
         ...(agentId ? { agentId } : {}),
       };
       await kv.set(KV.sessions, data.sessionId, session);
+      await recordProjectActivity(kv, data.project, session.startedAt);
       const contextResult = await sdk.trigger<
         { sessionId: string; project: string; agentId?: string },
         { context: string }
@@ -113,14 +119,37 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     // lets mem::graph-extract gate only its LLM pass, so a keyless install
     // grows the graph from every session stop. Here the whole fan-out needs
     // the extraction flag AND the graph leg not killed (AGENTMEMORY_GRAPH_LEG).
+    //
+    // A Session ends at every idle gap, so extraction takes only the
+    // Observations newer than the Session's watermark. It stops short of the
+    // oldest one still awaiting compression, which keeps its timestamp once
+    // compressed and would otherwise fall behind the watermark, unless it has
+    // been waiting longer than PENDING_COMPRESSION_HOLD_MS.
+    // mem::graph-extract moves the watermark past the batches that succeed, so
+    // a failed batch is retried at the next stop.
     if (isGraphExtractionEnabled() && !graphLegDisabled()) {
       try {
-        const observations = await kv.list<CompressedObservation>(
-          KV.observations(data.sessionId),
+        const [session, observations] = await Promise.all([
+          kv.get<Session>(KV.sessions, data.sessionId),
+          kv.list<CompressedObservation>(KV.observations(data.sessionId)),
+        ]);
+        const extractedThrough = session?.graphExtractedThrough ?? "";
+        const unseen = observations.filter((o) => o.timestamp > extractedThrough);
+        const holdSince = new Date(Date.now() - PENDING_COMPRESSION_HOLD_MS).toISOString();
+        const oldestPending = unseen
+          .filter((o) => !o.title && o.timestamp > holdSince)
+          .reduce<string | undefined>(
+            (min, o) => (min === undefined || o.timestamp < min ? o.timestamp : min),
+            undefined,
+          );
+        const fresh = unseen.filter(
+          (o) => o.title && (oldestPending === undefined || o.timestamp < oldestPending),
         );
-        const compressed = observations.filter((o) => o.title);
-        if (compressed.length > 0) {
-          fireVoid("mem::graph-extract", { observations: compressed });
+        if (session && fresh.length > 0) {
+          fireVoid("mem::graph-extract", {
+            observations: fresh,
+            sessionId: data.sessionId,
+          });
         }
       } catch (err) {
         logger.warn("graph-extract trigger failed", {
@@ -200,7 +229,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
             sessionId: payload.key,
             observationCount: newCount,
             delta: newCount - oldCount,
-            updatedAt: payload.new_value?.updatedAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           },
         },
         action: TriggerAction.Void(),

@@ -10,12 +10,12 @@ import {
   buildDiagnostics,
   DIAGNOSTIC_IDS,
   dryRunPlan,
-  parseEnvFile,
   placeholderProviderKeys,
   realProviderKeys,
   type DoctorContext,
   type DoctorEffects,
 } from "../src/cli/doctor-diagnostics.js";
+import { parseEnvFile } from "../src/hooks/_env.js";
 
 function stubCtx(overrides: Partial<DoctorContext> = {}): DoctorContext {
   return {

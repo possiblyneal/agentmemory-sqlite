@@ -184,10 +184,9 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     expect(q.calls()).toBe(2);
   });
 
-  // 2. 429 with a hostile Retry-After (100000s) must NOT wait that long. The
-  //    delay collapses to the low per-delay cap (5000ms) so the retry fires
-  //    quickly and total elapsed stays nowhere near 100000s.
-  it("does not honour a hostile Retry-After literally — caps it and stays within budget", async () => {
+  // 2. 429 with a hostile Retry-After (100000s) must NOT wait that long: it
+  //    cannot fit the budget, so the 429 comes back without a retry.
+  it("returns a hostile Retry-After's 429 at once instead of waiting it out", async () => {
     const q = queuedFetch([
       { status: 429, headers: { "Retry-After": "100000" } }, // 100000s
       { status: 200 },
@@ -197,23 +196,18 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     const start = Date.now();
 
     const p = fetchWithTimeout("https://example.com", {}, 60000);
-    // runAllTimers drains every scheduled sleep; if the code honored 100000s
-    // literally this would advance 100_000_000ms of simulated time.
     await vi.runAllTimersAsync();
     const res = await p;
     const elapsed = Date.now() - start;
 
-    expect(res.status).toBe(200);
-    expect(q.calls()).toBe(2);
-    // The only sleep was the capped 5000ms delay — total elapsed is bounded to
-    // the cap, nowhere near the 100_000_000ms the header requested.
-    expect(elapsed).toBeLessThanOrEqual(5000);
+    expect(res.status).toBe(429);
+    expect(q.calls()).toBe(1);
     expect(elapsed).toBeLessThan(60000);
   });
 
-  // 2c. When the capped delay still cannot fit inside a small budget, we do NOT
+  // 2c. When the requested delay cannot fit inside a small budget, we do NOT
   //     retry and return the last 429 within bound.
-  it("returns the last 429 without retrying when even the capped delay overruns a small budget", async () => {
+  it("returns the last 429 without retrying when the delay overruns a small budget", async () => {
     const q = queuedFetch([
       { status: 429, headers: { "Retry-After": "100000" } },
       { status: 200 },
@@ -222,7 +216,7 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     vi.useFakeTimers();
     const start = Date.now();
 
-    // Budget 1000ms: capped delay 5000ms + floor 100ms > remaining, no retry.
+    // Budget 1000ms: delay + floor 100ms > remaining, no retry.
     const p = fetchWithTimeout("https://example.com", {}, 1000);
     await vi.runAllTimersAsync();
     const res = await p;
@@ -233,20 +227,20 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     expect(elapsed).toBeLessThan(1000);
   });
 
-  // 2b. Retry-After present but LARGER than the low per-delay cap collapses to
-  //     MAX_RETRY_DELAY_MS (5000), still bounded, still retries when budget
-  //     allows.
-  it("caps an oversized Retry-After to the max delay and still retries within budget", async () => {
+  // 2b. A long Retry-After that fits the budget is waited out in full — a busy
+  //     server asking for 30s gets 30s, not an early retry that 429s again.
+  it("honors a long Retry-After in full when it fits the budget", async () => {
     const q = queuedFetch([
-      { status: 503, headers: { "Retry-After": "60" } }, // 60s requested
+      { status: 503, headers: { "Retry-After": "30" } },
       { status: 200 },
     ]);
     vi.spyOn(globalThis, "fetch").mockImplementation(q.fetch);
     vi.useFakeTimers();
 
     const p = fetchWithTimeout("https://example.com", {}, 60000);
-    // Requested 60s, but the honored delay is capped at 5000ms.
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(q.calls()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
     const res = await p;
 
     expect(res.status).toBe(200);
@@ -294,10 +288,8 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     expect(q.calls()).toBe(1);
   });
 
-  // 5. Retry-After as an HTTP-date is parsed, capped to the max delay, and the
-  //    retry fires within budget.
-  it("parses an HTTP-date Retry-After and caps the honored delay", async () => {
-    // 2s in the future — under the max delay cap, so honored as-is.
+  // 5. Retry-After as an HTTP-date is parsed and the retry fires within budget.
+  it("parses an HTTP-date Retry-After", async () => {
     const future = new Date(Date.now() + 2000).toUTCString();
     const q = queuedFetch([
       { status: 429, headers: { "Retry-After": future } },
@@ -314,8 +306,8 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     expect(q.calls()).toBe(2);
   });
 
-  // 5b. A far-future HTTP-date collapses to the capped delay (5000ms), which
-  //     still exceeds a small budget → no retry, last 503 returned in bound.
+  // 5b. A far-future HTTP-date exceeds a small budget → no retry, last 503
+  //     returned in bound.
   it("does not retry on a far-future HTTP-date Retry-After that overruns a small budget", async () => {
     const farFuture = new Date(Date.now() + 3600_000).toUTCString(); // 1h out
     const q = queuedFetch([
@@ -326,7 +318,7 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     vi.useFakeTimers();
     const start = Date.now();
 
-    // Budget 1000ms: capped delay 5000ms + floor > remaining, so no retry.
+    // Budget 1000ms: delay + floor > remaining, so no retry.
     const p = fetchWithTimeout("https://example.com", {}, 1000);
     await vi.runAllTimersAsync();
     const res = await p;

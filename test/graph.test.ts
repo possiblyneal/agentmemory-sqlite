@@ -6,11 +6,13 @@ vi.mock("../src/logger.js", () => ({
 
 import { logger } from "../src/logger.js";
 import { registerGraphFunction } from "../src/functions/graph.js";
+import { ProviderHttpError } from "../src/providers/_fetch.js";
 import type {
   CompressedObservation,
   GraphNode,
   GraphEdge,
   GraphQueryResult,
+  Session,
 } from "../src/types.js";
 
 function mockKV() {
@@ -30,6 +32,16 @@ function mockKV() {
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
+    },
+    update: async (
+      scope: string,
+      key: string,
+      ops: Array<{ path: string; value: unknown }>,
+    ): Promise<void> => {
+      if (!store.has(scope)) store.set(scope, new Map());
+      const row = { ...(store.get(scope)!.get(key) as object) } as Record<string, unknown>;
+      for (const op of ops) row[op.path] = op.value;
+      store.get(scope)!.set(key, row);
     },
   };
 }
@@ -115,6 +127,184 @@ describe("Graph Functions", () => {
     const edges = await kv.list<GraphEdge>("mem:graph:edges");
     expect(edges.length).toBe(1);
     expect(edges[0].type).toBe("uses");
+  });
+
+  it("graph-extract sends one bounded prompt per batch and keeps the batches that succeed", async () => {
+    const observations = Array.from({ length: 25 }, (_, i) => ({ ...testObs, id: `obs_${i}` }));
+    mockProvider.compress.mockRejectedValueOnce(new Error("timed out after 300000ms"));
+
+    const result = (await sdk.trigger("mem::graph-extract", { observations })) as {
+      success: boolean;
+      nodesAdded: number;
+    };
+
+    const prompts = mockProvider.compress.mock.calls.map((c) => String(c[1]));
+    expect(prompts.map((p) => p.match(/^\[\d+\] Type:/gm)?.length)).toEqual([10, 10, 5]);
+    expect(result.success).toBe(true);
+    expect(result.nodesAdded).toBe(4);
+  });
+
+  it("logs the Sessions, prompt size and elapsed time of a failed batch", async () => {
+    mockProvider.compress.mockRejectedValueOnce(new Error("timed out after 300000ms"));
+
+    await sdk.trigger("mem::graph-extract", {
+      observations: [testObs, { ...testObs, id: "obs_2", sessionId: "ses_2" }],
+    });
+
+    const prompt = String(mockProvider.compress.mock.calls[0]![1]);
+    expect(logger.error).toHaveBeenCalledWith("LLM graph extraction failed", {
+      error: "timed out after 300000ms",
+      sessionId: "ses_1",
+      sessionCount: 2,
+      batchSize: 2,
+      promptChars: prompt.length,
+      tookMs: expect.any(Number),
+    });
+  });
+
+  it("graph-extract stops sending batches once the provider's circuit breaker is open", async () => {
+    const observations = Array.from({ length: 25 }, (_, i) => ({ ...testObs, id: `obs_${i}` }));
+    mockProvider.compress.mockRejectedValueOnce(new Error("circuit_breaker_open"));
+
+    const result = (await sdk.trigger("mem::graph-extract", { observations })) as {
+      success: boolean;
+      error?: string;
+    };
+
+    expect(mockProvider.compress).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ success: false, error: "circuit_breaker_open" });
+  });
+
+  describe("with a sessionId", () => {
+    const observations = Array.from({ length: 25 }, (_, i) => ({
+      ...testObs,
+      id: `obs_${i}`,
+      timestamp: `2026-02-01T10:00:${String(i).padStart(2, "0")}Z`,
+    }));
+    const extract = (obs = observations) =>
+      sdk.trigger("mem::graph-extract", { observations: obs, sessionId: "ses_1" });
+    const session = () => kv.get<Session>("mem:sessions", "ses_1");
+
+    beforeEach(async () => {
+      await kv.set("mem:sessions", "ses_1", { id: "ses_1" });
+    });
+
+    it("advances the watermark past the batches that succeed and retries the rest", async () => {
+      mockProvider.compress
+        .mockResolvedValueOnce("<entities></entities>")
+        .mockRejectedValueOnce(new Error("timed out after 300000ms"));
+
+      await extract([...observations].reverse());
+
+      expect(mockProvider.compress).toHaveBeenCalledTimes(2);
+      expect(await session()).toMatchObject({
+        graphExtractedThrough: observations[9]!.timestamp,
+        graphExtractFailures: 1,
+      });
+
+      await extract(observations.slice(10));
+
+      expect(await session()).toMatchObject({
+        graphExtractedThrough: observations[24]!.timestamp,
+        graphExtractFailures: 0,
+      });
+    });
+
+    it("skips a head batch that fails three times in a row", async () => {
+      const timeout = new Error("timed out after 300000ms");
+      mockProvider.compress
+        .mockRejectedValueOnce(timeout)
+        .mockRejectedValueOnce(timeout)
+        .mockRejectedValueOnce(timeout);
+
+      await extract();
+      await extract();
+      expect(await session()).toMatchObject({ graphExtractFailures: 2 });
+      expect((await session())?.graphExtractedThrough).toBeUndefined();
+
+      await extract();
+
+      expect(mockProvider.compress).toHaveBeenCalledTimes(3);
+      expect(await session()).toMatchObject({
+        graphExtractedThrough: observations[9]!.timestamp,
+        graphExtractFailures: 0,
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Skipping a graph batch that keeps failing",
+        expect.objectContaining({ sessionId: "ses_1" }),
+      );
+    });
+
+    it("does not count a provider that is down or overloaded against the batch", async () => {
+      mockProvider.compress
+        .mockRejectedValueOnce(new ProviderHttpError("OpenAI API error (503): busy", 503))
+        .mockRejectedValueOnce(new ProviderHttpError("OpenAI API error (429): slow down", 429))
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockRejectedValueOnce(new Error("circuit_breaker_open"));
+
+      for (let i = 0; i < 4; i++) await extract();
+
+      expect(mockProvider.compress).toHaveBeenCalledTimes(4);
+      expect(await session()).toMatchObject({ graphExtractFailures: 0 });
+      expect((await session())?.graphExtractedThrough).toBeUndefined();
+    });
+
+    it("does not leave the watermark between Observations that share a timestamp", async () => {
+      const tied = observations.map((o, i) =>
+        i === 10 ? { ...o, timestamp: observations[9]!.timestamp } : o,
+      );
+      mockProvider.compress
+        .mockResolvedValueOnce("<entities></entities>")
+        .mockRejectedValueOnce(new Error("timed out after 300000ms"));
+
+      await extract(tied);
+
+      expect(await session()).toMatchObject({
+        graphExtractedThrough: tied[8]!.timestamp,
+      });
+    });
+
+    it("still skips a failing batch when the batch before it shares its timestamp", async () => {
+      const tied = observations.map((o, i) =>
+        i <= 10 ? { ...o, timestamp: observations[0]!.timestamp } : o,
+      );
+      for (let i = 0; i < 3; i++) {
+        mockProvider.compress
+          .mockResolvedValueOnce("<entities></entities>")
+          .mockRejectedValueOnce(new Error("timed out after 300000ms"));
+        await extract(tied);
+      }
+
+      expect(await session()).toMatchObject({
+        graphExtractedThrough: tied[10]!.timestamp,
+        graphExtractFailures: 0,
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Skipping a graph batch that keeps failing",
+        expect.objectContaining({ observations: tied.slice(0, 11).map((o) => o.id) }),
+      );
+    });
+
+    it("skips a Session whose extraction is still running", async () => {
+      let release!: (xml: string) => void;
+      mockProvider.compress.mockReturnValueOnce(new Promise((r) => (release = r)));
+
+      const first = extract(observations.slice(0, 1));
+      const second = await extract(observations.slice(0, 1));
+      release("<entities></entities>");
+      await first;
+
+      expect(second).toMatchObject({ success: true, skipped: "session-extracting" });
+      expect(mockProvider.compress).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not recreate a Session that was deleted during extraction", async () => {
+      await kv.delete("mem:sessions", "ses_1");
+
+      await extract(observations.slice(0, 1));
+
+      expect(await session()).toBeNull();
+    });
   });
 
   it("graph-extract stamps nodes with the source observation's sessionId (#656)", async () => {

@@ -223,6 +223,49 @@ describe("viewer session rendering", () => {
     expect(getElement("view-dashboard").innerHTML).toContain("Unknown session");
   });
 
+  it("shows a dash for a dashboard count whose request failed", () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    sandbox.state.dashboard = {
+      loaded: true,
+      health: { status: "healthy", health: {} },
+      sessions: [],
+      memories: [],
+      graphStats: null,
+      recentAudit: [],
+      lessons: [],
+      crystals: [],
+      semanticTotal: 12,
+      insightTotal: null,
+      failed: { insights: true },
+    };
+
+    sandbox.renderDashboard();
+    const html = getElement("view-dashboard").innerHTML;
+    expect(html).toMatch(/Insights<\/div><div class="value">(–|&ndash;)</);
+    expect(html).toMatch(/Semantic Facts<\/div><div class="value">12</);
+  });
+
+  it("shows dashes, not an empty store, when the sessions request failed", () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    sandbox.state.dashboard = {
+      loaded: true,
+      health: { status: "healthy", health: {} },
+      sessions: [],
+      memories: [],
+      graphStats: null,
+      recentAudit: [],
+      lessons: [],
+      crystals: [],
+      failed: { sessions: true },
+    };
+
+    sandbox.renderDashboard();
+    const html = getElement("view-dashboard").innerHTML;
+    expect(html).not.toContain("First run");
+    expect(html).toMatch(/(–|&ndash;) active/);
+    expect(html).toMatch(/~(–|&ndash;) tokens/);
+  });
+
   it("does not throw when timeline and sessions tabs receive sessions missing ids", () => {
     const { sandbox, getElement } = loadViewerSandbox();
     const sessions = [{ status: "active", observationCount: 1, startedAt: "2026-05-13T12:00:00Z" }];

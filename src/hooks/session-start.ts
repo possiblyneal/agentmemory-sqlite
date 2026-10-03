@@ -1,16 +1,10 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
+import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
+import { recordMissedInjection, missReason } from "./_missed-injection.js";
 
 hydrateHookEnv();
-
-// Inlined from ./sdk-guard so each hook bundles to a single self-contained
-// .mjs (matches the pattern used by every other hook entry in tsdown.config).
-function isSdkChildContext(payload: unknown): boolean {
-  if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-  if (!payload || typeof payload !== "object") return false;
-  return (payload as { entrypoint?: unknown }).entrypoint === "sdk-ts";
-}
 
 // Session-start hook.
 //
@@ -18,7 +12,7 @@ function isSdkChildContext(payload: unknown): boolean {
 // captured on PostToolUse get attached to the right session). Only writes
 // project context to stdout — which Claude Code prepends to the very first
 // turn — when AGENTMEMORY_INJECT_CONTEXT=true. Default off as of 0.8.10
-// (#143); see pre-tool-use.ts for the full explanation.
+// (rohitg00/agentmemory#143).
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
@@ -38,13 +32,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function contextPayload(data: Record<string, unknown>, context: string): string {
-  if (
-    typeof data.cursor_version === "string" ||
-    data.hook_event_name === "sessionStart"
-  ) {
-    return JSON.stringify({ additional_context: context });
-  }
-  if (process.env["DEVIN_PROJECT_DIR"] || data.prompt_id !== undefined) {
+  if (data.prompt_id !== undefined) {
     return JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "SessionStart",
@@ -69,10 +57,13 @@ async function main() {
   }
 
   if (!data || typeof data !== "object") return;
-  if (isSdkChildContext(data)) return;
+  if (shouldSkipSession()) return;
+  // A subagent that compacts fires SessionStart with its parent's session_id;
+  // the parent Session is already registered and the subagent is mid-task.
+  if (typeof data.agent_id === "string" && data.agent_id) return;
 
   const sessionId =
-    ((data.session_id || data.sessionId || data.conversation_id) as string) ||
+    (data.session_id as string) ||
     `ses_${Date.now().toString(36)}`;
   const cwd = hookCwd(data) || process.cwd();
   const project = resolveProject(cwd);
@@ -105,8 +96,11 @@ async function main() {
       if (result.context) {
         process.stdout.write(contextPayload(data, result.context));
       }
+    } else {
+      recordMissedInjection("session-start", `http_${res.status}`);
     }
-  } catch {
+  } catch (err) {
+    recordMissedInjection("session-start", missReason(err));
     // silently fail -- don't block Claude Code startup
   }
 }

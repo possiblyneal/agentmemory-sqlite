@@ -6,6 +6,7 @@ import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
+import { loadProjectTime } from "../state/project-time.js";
 
 // Dedicated BM25 index for lessons, with the full records cached
 // alongside it. Recall previously listed every lesson from KV and
@@ -158,11 +159,13 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "query is required" };
       }
 
-      const minConfidence = data.minConfidence ?? 0.1;
+      // Soft-delete is the only default gate: a reinforced lesson decays to
+      // the 0.05 floor and stays live, and confidence already ranks it low.
+      const minConfidence = data.minConfidence ?? 0;
       const limit = data.limit ?? 10;
 
       const idx = await ensureLessonIndex(kv);
-      const filtering = !!data.project || minConfidence > 0.1;
+      const filtering = !!data.project || minConfidence > 0;
       const fetchLimit = filtering
         ? Math.max(limit * 10, 100)
         : Math.max(limit * 5, 50);
@@ -294,15 +297,18 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
 
   sdk.registerFunction("mem::lesson-decay-sweep", 
     async () => {
-      const lessons = await kv.list<Lesson>(KV.lessons);
+      const [lessons, activeWeeksSince] = await Promise.all([
+        kv.list<Lesson>(KV.lessons),
+        loadProjectTime(kv),
+      ]);
       let decayed = 0;
       let softDeleted = 0;
-      const now = Date.now();
       const timestamp = new Date().toISOString();
       const dirty: Lesson[] = [];
       const auditEvents: Array<{
         id: string;
         action: "decay" | "soft-delete";
+        activeWeeks: number;
         beforeConfidence: number;
         afterConfidence: number;
         beforeDeleted: boolean;
@@ -313,12 +319,11 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         if (lesson.deleted) continue;
 
         const baseline = lesson.lastDecayedAt || lesson.lastReinforcedAt || lesson.createdAt;
-        const weeksSinceBaseline =
-          (now - new Date(baseline).getTime()) / (1000 * 60 * 60 * 24 * 7);
+        const activeWeeks = activeWeeksSince(lesson.project, baseline, timestamp);
 
-        if (weeksSinceBaseline < 1) continue;
+        if (activeWeeks < 1) continue;
 
-        const decay = lesson.decayRate * weeksSinceBaseline;
+        const decay = lesson.decayRate * activeWeeks;
         const newConfidence = Math.max(0.05, lesson.confidence - decay);
 
         if (newConfidence !== lesson.confidence) {
@@ -339,6 +344,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
           auditEvents.push({
             id: lesson.id,
             action: lesson.deleted ? "soft-delete" : "decay",
+            activeWeeks,
             beforeConfidence,
             afterConfidence: lesson.confidence,
             beforeDeleted,
@@ -364,6 +370,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
           action: event.action,
           actor: "system",
           reason: "decay-sweep",
+          activeWeeks: event.activeWeeks,
           before: {
             confidence: event.beforeConfidence,
             deleted: event.beforeDeleted,

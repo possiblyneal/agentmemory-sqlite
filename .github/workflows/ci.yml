@@ -1,13 +1,12 @@
 name: CI
 
-# `paths-ignore` keeps doc-only / website churn from
+# `paths-ignore` keeps doc-only churn from
 # burning runner minutes. Source / config / workflow changes always run.
 # `workflow_dispatch` gives a manual re-run button for flake debugging.
 on:
   push:
     branches: [main]
     paths-ignore:
-      - "website/**"
       - "docs/**"
       - "assets/**"
       - "**/*.md"
@@ -15,7 +14,6 @@ on:
   pull_request:
     branches: [main]
     paths-ignore:
-      - "website/**"
       - "docs/**"
       - "assets/**"
       - "**/*.md"
@@ -56,6 +54,14 @@ jobs:
       # `npm ci` over the committed package-lock.json, so every leg installs
       # the tree the lockfile pins rather than whatever npm resolves that day.
       - run: npm ci --no-audit --no-fund
-      - run: npm run build
+      - id: build
+        run: npm run build
       - run: npm run skills:check
+      - run: npm run typecheck
       - run: npm test
+      # One leg is enough because the numbers do not depend on OS or Node
+      # version. It runs even when unit tests fail, so a ranking change shows
+      # its Recall cost alongside them, but not when install or build failed.
+      - name: Recall quality gate
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.os == 'ubuntu-latest' && matrix.node-version == 22 }}
+        run: npm run eval:gate

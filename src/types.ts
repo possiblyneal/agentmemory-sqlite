@@ -3,6 +3,7 @@ export interface Session {
   project: string;
   cwd: string;
   startedAt: string;
+  updatedAt?: string;
   endedAt?: string;
   status: "active" | "completed" | "abandoned";
   observationCount: number;
@@ -12,6 +13,8 @@ export interface Session {
   summary?: string;
   commitShas?: string[];
   agentId?: string;
+  graphExtractedThrough?: string;
+  graphExtractFailures?: number;
 }
 
 export interface CommitLink {
@@ -134,6 +137,7 @@ export interface Memory {
   imageData?: string;
   agentId?: string;
   project?: string;
+  global?: boolean;
   origin?: Origin;
 }
 
@@ -212,7 +216,25 @@ export interface ContextBlock {
   content: string;
   tokens: number;
   recency: number;
-  sourceIds?: string[];
+  sources?: InjectedRef[];
+}
+
+export interface InjectedRef {
+  kind: "observation" | "memory" | "lesson" | "insight" | "summary";
+  id: string;
+  files?: string[];
+}
+
+export type InjectionSource = "session-start" | "context" | "prompt-submit";
+
+export interface InjectionRecord {
+  id: string;
+  source: InjectionSource;
+  sessionId: string;
+  project?: string;
+  injected: InjectedRef[];
+  tokens: number;
+  at: string;
 }
 
 export interface EvalResult {
@@ -318,6 +340,17 @@ export interface CompactSearchResult {
 
 export interface CompactLessonResult {
   lessonId: string;
+  content: string;
+  confidence: number;
+  score: number;
+  createdAt: string;
+  project?: string;
+  tags: string[];
+}
+
+export interface CompactInsightResult {
+  insightId: string;
+  title: string;
   content: string;
   confidence: number;
   score: number;
@@ -637,6 +670,7 @@ export interface AuditEntry {
     | "action_update"
     | "lease_acquire"
     | "lease_release"
+    | "lease_renew"
     | "routine_run"
     | "signal_send"
     | "checkpoint_resolve"
@@ -652,7 +686,6 @@ export interface AuditEntry {
     | "crystallize"
     | "diagnose"
     | "heal"
-    | "index_persist"
     | "facet_tag"
     | "lesson_save"
     | "lesson_recall"
@@ -898,6 +931,11 @@ export interface Insight {
   deleted?: boolean;
 }
 
+export interface ProjectActivity {
+  project: string;
+  weeks: string[];
+}
+
 export interface DiagnosticCheck {
   name: string;
   category: string;
@@ -1009,6 +1047,7 @@ export interface StateScope {
   "system:currentDiskSize": number;
   /** Highest startup-maintenance version this store has completed. */
   "system:startupMaintenanceVersion": number;
+  "system:projectActivityBackfilledAt": number;
 }
 
 export type StateScopeKey = keyof StateScope;

@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
+import { shouldSkipSession } from "./sdk-guard.js";
 
 hydrateHookEnv();
-
-// Inlined — see src/hooks/sdk-guard.ts for canonical version. Kept local
-// per-hook so tsdown does not emit a shared hashed chunk that would churn
-// the diff on every rebuild.
-function isSdkChildContext(payload: unknown): boolean {
-  if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-  if (!payload || typeof payload !== "object") return false;
-  return (payload as { entrypoint?: unknown }).entrypoint === "sdk-ts";
-}
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
@@ -35,19 +27,17 @@ async function main() {
   }
 
   if (!data || typeof data !== "object") return;
-  if (isSdkChildContext(data)) {
-    // Do not summarize from inside a Claude Agent SDK child session;
-    // would re-enter agent-sdk provider and loop (see sdk-guard.ts).
-    return;
-  }
+  if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
+  const sessionId = (data.session_id as string) || "unknown";
 
-  // session/end already fans out the summary server-side (#1203).
+  // session/end already fans out the summary server-side (#1203). Stop
+  // fires after every turn, so the daemon holds the end until the Session
+  // goes idle (#1131).
   fetch(`${REST_URL}/agentmemory/session/end`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, turnEnd: true }),
     signal: AbortSignal.timeout(5000),
   }).catch(() => {});
 

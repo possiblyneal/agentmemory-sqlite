@@ -3,6 +3,11 @@ import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
+import { storeAcceptsWrite } from "../health/store-probe.js";
+import { readMissedInjections } from "../hooks/_missed-injection.js";
+import { loadProjectTime } from "../state/project-time.js";
+import { injectedItemUse, resolveInsightFiles, withFiles } from "./injections.js";
+import type { AccessLog } from "./access-tracker.js";
 import type {
   Action,
   ActionEdge,
@@ -10,7 +15,6 @@ import type {
   Insight,
   Lease,
   Lesson,
-  Checkpoint,
   Crystal,
   ProceduralMemory,
   SemanticMemory,
@@ -21,9 +25,11 @@ import type {
   MeshPeer,
   Session,
   Memory,
+  CompressedObservation,
+  InjectionRecord,
 } from "../types.js";
 
-const ALL_CATEGORIES = [
+export const ALL_CATEGORIES = [
   "actions",
   "leases",
   "sentinels",
@@ -39,10 +45,72 @@ const ALL_CATEGORIES = [
   "crystals",
   "insights",
   "mesh",
+  "injections",
+  "injection-use",
+  "recall-coverage",
 ];
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const UNRECALLED_GRACE_ACTIVE_WEEKS = 4;
+const UNRECALLED_SAMPLE_SIZE = 5;
+const UNUSED_INJECTION_WARN_SHARE = 0.5;
+const UNUSED_INJECTION_MIN_ITEMS = 10;
+// An Injection younger than this has not had a fair chance to be used yet.
+const UNUSED_INJECTION_SETTLE_MS = ONE_HOUR_MS;
+
+function lastActivity(session: Session): string {
+  return session.updatedAt ?? session.startedAt;
+}
+
+// Judged by last activity, not start, so a long-running live Session is left alone.
+function isAbandonedSession(session: Session, now: number): boolean {
+  return (
+    session.status === "active" &&
+    now - new Date(lastActivity(session)).getTime() > TWENTY_FOUR_HOURS_MS
+  );
+}
+
+// Past the grace window a raw record is a compression that never ran; inside
+// it, compression may still be in flight.
+function isStrandedRaw(o: Record<string, unknown>, now: number): boolean {
+  if (typeof o["narrative"] === "string") return false;
+  if (typeof o["hookType"] !== "string") return false;
+  const ts = new Date(String(o["timestamp"])).getTime();
+  return !(Number.isFinite(ts) && now - ts < ONE_HOUR_MS);
+}
+
+type SessionlessScope = {
+  raw: number;
+  compressed: number;
+  // A Session Summary is the one surviving record that names the project.
+  summaryNamesProject: boolean;
+};
+
+// Eviction deletes a Session record and keeps its Observations, and a host
+// that never sends a session start leaves Observations with no Session at all.
+async function sessionlessObservations(
+  kv: StateKV,
+  sessions: Session[],
+  now: number,
+): Promise<SessionlessScope[]> {
+  const known = new Set(sessions.map((session) => session.id));
+  const prefix = KV.observations("");
+  const sessionIds = (await kv.listScopes(prefix))
+    .map((scope) => scope.slice(prefix.length))
+    .filter((sessionId) => !known.has(sessionId));
+  return Promise.all(
+    sessionIds.map(async (sessionId) => {
+      const [observations, summary] = await Promise.all([
+        kv.list<Record<string, unknown>>(KV.observations(sessionId)),
+        kv.get<SessionSummary>(KV.summaries, sessionId),
+      ]);
+      const raw = observations.filter((o) => isStrandedRaw(o, now)).length;
+      const compressed = observations.filter((o) => typeof o["narrative"] === "string").length;
+      return { raw, compressed, summaryNamesProject: Boolean(summary?.project) };
+    }),
+  );
+}
 
 export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::diagnose", 
@@ -289,26 +357,45 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("sessions")) {
-        const sessions = await kv.list<Session>(KV.sessions);
-        let sessionIssues = 0;
+        const writable = await storeAcceptsWrite(kv, "_diagnose_probe");
+        checks.push({
+          name: writable ? "store-writable" : "store-unwritable",
+          category: "sessions",
+          status: writable ? "pass" : "fail",
+          message: writable
+            ? "The store accepts writes"
+            : "The store rejected a write or did not return it, so no new data is being saved.",
+          fixable: false,
+        });
 
-        for (const session of sessions) {
-          if (
-            session.status === "active" &&
-            now - new Date(session.startedAt).getTime() > TWENTY_FOUR_HOURS_MS
-          ) {
-            checks.push({
-              name: `abandoned-session:${session.id}`,
-              category: "sessions",
-              status: "warn",
-              message: `Session ${session.id} has been active for over 24 hours`,
-              fixable: false,
-            });
-            sessionIssues++;
-          }
+        const sessions = await kv.list<Session>(KV.sessions);
+        const abandoned = sessions.filter((session) => isAbandonedSession(session, now));
+
+        if (abandoned.length > 0) {
+          const examples = abandoned.slice(0, 3).map((session) => session.id).join(", ");
+          checks.push({
+            name: "abandoned-sessions",
+            category: "sessions",
+            status: "warn",
+            message:
+              `${abandoned.length} sessions are still active with no activity for over 24 hours ` +
+              `(e.g. ${examples}). POST /agentmemory/diagnostics/heal ` +
+              `{"categories":["sessions"]} closes them.`,
+            fixable: true,
+          });
         }
 
-        if (sessionIssues === 0) {
+        if (sessions.length === 0) {
+          checks.push({
+            name: "sessions-empty",
+            category: "sessions",
+            status: "warn",
+            message:
+              "No sessions are recorded. A new install starts this way; otherwise the store " +
+              "is pointed at the wrong file or its data was lost.",
+            fixable: false,
+          });
+        } else if (abandoned.length === 0) {
           checks.push({
             name: "sessions-ok",
             category: "sessions",
@@ -338,14 +425,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           );
           total += observations.length;
           for (const o of observations) {
-            if (typeof o["narrative"] === "string") continue;
-            if (typeof o["hookType"] !== "string") continue;
-            // An observation created moments ago is legitimately still raw
-            // while its compression is in flight. Only records past the
-            // grace window are genuinely orphaned.
-            const ts = new Date(String(o["timestamp"])).getTime();
-            if (Number.isFinite(ts) && now - ts < ONE_HOUR_MS) continue;
-            orphaned.push(String(o["id"] ?? "unknown"));
+            if (isStrandedRaw(o, now)) orphaned.push(String(o["id"] ?? "unknown"));
           }
         }
 
@@ -365,7 +445,27 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             name: "observations-ok",
             category: "observations",
             status: "pass",
-            message: `All ${total} observations are compressed and indexable`,
+            message: `All ${total} Observations of known Sessions are compressed and indexable`,
+            fixable: false,
+          });
+        }
+
+        const sessionless = await sessionlessObservations(kv, sessions, now);
+        const raw = (scopes: SessionlessScope[]) => scopes.reduce((n, scope) => n + scope.raw, 0);
+        const namedRaw = raw(sessionless.filter((scope) => scope.summaryNamesProject));
+        const unnamedRaw = raw(sessionless.filter((scope) => !scope.summaryNamesProject));
+        const sessionlessCompressed = sessionless.reduce((n, scope) => n + scope.compressed, 0);
+
+        if (sessionless.length > 0) {
+          checks.push({
+            name: `observations-sessionless:${sessionless.length}`,
+            category: "observations",
+            status: namedRaw + unnamedRaw > 0 ? "warn" : "pass",
+            message:
+              `${sessionless.length} Sessions have Observations but no Session record: ` +
+              `${sessionlessCompressed} compressed, ${namedRaw} raw whose Session Summary names ` +
+              `their project, and ${unnamedRaw} raw with neither a Session nor a Session Summary ` +
+              `to name it. Raw ones are in neither search index.`,
             fixable: false,
           });
         }
@@ -413,7 +513,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         // infer-memory-projects migration runs. Surface a count so operators
         // know the backfill is still pending and can trigger it explicitly.
         const latestMemories = memories.filter((m) => m.isLatest);
-        const unscopedCount = latestMemories.filter((m) => !m.project).length;
+        const unscopedCount = latestMemories.filter((m) => !m.project && !m.global).length;
         if (unscopedCount === 0) {
           checks.push({
             name: "memory-project-coverage",
@@ -673,6 +773,133 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         }
       }
 
+      if (categories.includes("injections")) {
+        const recent = readMissedInjections().filter(
+          (m) => now - new Date(m.at).getTime() <= TWENTY_FOUR_HOURS_MS,
+        );
+        if (recent.length === 0) {
+          checks.push({
+            name: "injections-ok",
+            category: "injections",
+            status: "pass",
+            message: "No Missed Injections in the last 24h",
+            fixable: false,
+          });
+        } else {
+          const byHookAndReason = new Map<string, number>();
+          for (const m of recent) {
+            const key = `${m.hook}/${m.reason}`;
+            byHookAndReason.set(key, (byHookAndReason.get(key) ?? 0) + 1);
+          }
+          const breakdown = [...byHookAndReason]
+            .map(([key, count]) => `${key} ${count}`)
+            .join(", ");
+          checks.push({
+            name: "missed-injections",
+            category: "injections",
+            status: "warn",
+            message: `${recent.length} Missed Injections in the last 24h: ${breakdown}`,
+            fixable: false,
+          });
+        }
+      }
+
+      if (categories.includes("injection-use")) {
+        const records = (await kv.list<InjectionRecord>(KV.injections)).filter((r) => {
+          const age = now - Date.parse(r.at);
+          return age >= UNUSED_INJECTION_SETTLE_MS && age <= TWENTY_FOUR_HOURS_MS && r.injected.length > 0;
+        });
+        const sessionIds = [...new Set(records.map((r) => r.sessionId))];
+        const [observationsBySession, insightFiles] = await Promise.all([
+          Promise.all(
+            sessionIds.map(
+              async (id) => [id, await kv.list<CompressedObservation>(KV.observations(id))] as const,
+            ),
+          ).then((entries) => new Map(entries)),
+          resolveInsightFiles(kv, records),
+        ]);
+        const bySource = new Map<string, { scored: number; unused: number }>();
+        const total = { scored: 0, unused: 0 };
+        const insights = { scored: 0, unused: 0 };
+        for (const record of records) {
+          const tally = bySource.get(record.source) ?? { scored: 0, unused: 0 };
+          const observations = observationsBySession.get(record.sessionId) ?? [];
+          for (const ref of record.injected) {
+            const isInsight = ref.kind === "insight";
+            const use = injectedItemUse(isInsight ? withFiles(ref, insightFiles.get(ref.id)) : ref, record, observations);
+            if (use === "unscorable") continue;
+            for (const t of isInsight ? [insights] : [tally, total]) {
+              t.scored++;
+              if (use === "unused") t.unused++;
+            }
+          }
+          bySource.set(record.source, tally);
+        }
+        const share = (t: { scored: number; unused: number }) => Math.round((t.unused / t.scored) * 100);
+        const breakdown = [...bySource]
+          .filter(([, t]) => t.scored > 0)
+          .map(([source, t]) => `${source} ${share(t)}% of ${t.scored}`)
+          .join(", ");
+        const tooUnused =
+          total.scored >= UNUSED_INJECTION_MIN_ITEMS &&
+          total.unused / total.scored > UNUSED_INJECTION_WARN_SHARE;
+        const injectedItemsNote =
+          total.scored === 0
+            ? `No scorable injected items${insights.scored > 0 ? " other than Insights" : ""} between 1h and 24h ago.`
+            : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
+              `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
+              "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
+              "and items with no files are not scored.";
+        const insightNote =
+          insights.scored > 0 &&
+          `Insights ${share(insights)}% of ${insights.scored} unused, scored apart by their source Crystals' files and never warned on.`;
+        checks.push({
+          name: tooUnused ? "unused-injections" : "injection-use-ok",
+          category: "injection-use",
+          status: tooUnused ? "warn" : "pass",
+          message: insightNote ? `${injectedItemsNote} ${insightNote}` : injectedItemsNote,
+          fixable: false,
+        });
+      }
+
+      if (categories.includes("recall-coverage")) {
+        const [memories, accessLogs, activeWeeksSince] = await Promise.all([
+          kv.list<Memory>(KV.memories),
+          kv.list<AccessLog>(KV.accessLog),
+          loadProjectTime(kv),
+        ]);
+        const recalled = new Set(accessLogs.filter((a) => a.count > 0).map((a) => a.memoryId));
+        const nowIso = new Date(now).toISOString();
+        const unrecalled = memories.filter(
+          (m) =>
+            m.isLatest !== false &&
+            !recalled.has(m.id) &&
+            activeWeeksSince(m.project, m.createdAt, nowIso) >= UNRECALLED_GRACE_ACTIVE_WEEKS,
+        );
+        if (unrecalled.length === 0) {
+          checks.push({
+            name: "recall-coverage-ok",
+            category: "recall-coverage",
+            status: "pass",
+            message: "Every Memory past its grace period has been returned by a Recall",
+            fixable: false,
+          });
+        } else {
+          const noun = unrecalled.length === 1 ? "Unrecalled Memory" : "Unrecalled Memories";
+          const sample = unrecalled
+            .slice(0, UNRECALLED_SAMPLE_SIZE)
+            .map((m) => `${m.id} (${m.title})`)
+            .join(", ");
+          checks.push({
+            name: "unrecalled-memories",
+            category: "recall-coverage",
+            status: "warn",
+            message: `${unrecalled.length} ${noun} past ${UNRECALLED_GRACE_ACTIVE_WEEKS} active weeks, e.g. ${sample}`,
+            fixable: false,
+          });
+        }
+      }
+
       const summary = {
         pass: checks.filter((c) => c.status === "pass").length,
         warn: checks.filter((c) => c.status === "warn").length,
@@ -904,6 +1131,39 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             });
             details.push(`Deleted orphaned lease ${lease.id}`);
             fixed++;
+          }
+        }
+      }
+
+      if (categories.includes("sessions")) {
+        const sessions = await kv.list<Session>(KV.sessions);
+
+        for (const session of sessions) {
+          if (!isAbandonedSession(session, now)) continue;
+          if (dryRun) {
+            details.push(`[dry-run] Would close abandoned session ${session.id}`);
+            fixed++;
+            continue;
+          }
+          const didFix = await withKeyedLock(`obs:${session.id}`, async () => {
+            const fresh = await kv.get<Session>(KV.sessions, session.id);
+            if (!fresh || !isAbandonedSession(fresh, Date.now())) return false;
+            await kv.update(KV.sessions, fresh.id, [
+              { type: "set", path: "status", value: "abandoned" },
+              { type: "set", path: "endedAt", value: lastActivity(fresh) },
+            ]);
+            await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
+              entityType: "session",
+              reason: "abandoned-session",
+              newStatus: "abandoned",
+            });
+            return true;
+          });
+          if (didFix) {
+            details.push(`Closed abandoned session ${session.id}`);
+            fixed++;
+          } else {
+            skipped++;
           }
         }
       }

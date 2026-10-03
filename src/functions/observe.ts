@@ -1,5 +1,5 @@
 import { TriggerAction, type ISdk } from "../engine/types.js";
-import type { RawObservation, HookPayload, Origin } from "../types.js";
+import type { CompressedObservation, RawObservation, HookPayload, Origin, Session } from "../types.js";
 
 const TOOL_HOOKS = new Set(["pre_tool_use", "post_tool_use", "post_tool_failure"]);
 import { KV, STREAM, generateId } from "../state/schema.js";
@@ -9,9 +9,12 @@ import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
-import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded } from "./search.js";
+import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
+import { safeAudit } from "./audit.js";
+import { decrementImageRef } from "./image-refs.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
+import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
 
 export function extractImage(d: unknown): string | undefined {
@@ -35,6 +38,100 @@ export function extractImage(d: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+export async function storeSyntheticCompression(
+  kv: StateKV,
+  raw: RawObservation,
+): Promise<CompressedObservation> {
+  const synthetic = buildSyntheticCompression(raw);
+  await kv.set(KV.observations(raw.sessionId), raw.id, synthetic);
+  // Stored above unconditionally; only the INDEX writes are
+  // skipped for excluded tools (retrieval echoes).
+  if (!isIndexExcluded(synthetic)) {
+    getSearchIndex().add(synthetic);
+    await vectorIndexAddGuarded(
+      synthetic.id,
+      synthetic.sessionId,
+      synthetic.title + " " + (synthetic.narrative || ""),
+      { kind: "synthetic", logId: synthetic.id },
+    );
+  }
+  return synthetic;
+}
+
+// Uncompressed rows carry no importance yet; rank them just below the
+// default so a scored row of average value outlives an unscored one.
+const UNSCORED_IMPORTANCE = 3;
+
+// Every eviction is audited; the log names each capped Session once per
+// process, since a long Session at its cap evicts on every tool call.
+const capWarnedSessions = new Set<string>();
+
+// A session at its cap still admits the newest observation: the work at the
+// end of a long session is what a later one most often needs. The least
+// important rows go first, oldest breaking ties (PR#1174).
+async function evictToAdmitOne(
+  sdk: ISdk,
+  kv: StateKV,
+  sessionId: string,
+  cap: number,
+): Promise<void> {
+  const scope = KV.observations(sessionId);
+  const existing = await kv.list<{
+    id: string;
+    timestamp?: string;
+    importance?: number;
+    imageData?: string;
+    imageRef?: string;
+  }>(scope);
+  const excess = existing.length - cap + 1;
+  if (excess <= 0) return;
+  const victims = existing
+    .sort(
+      (a, b) =>
+        (a.importance ?? UNSCORED_IMPORTANCE) - (b.importance ?? UNSCORED_IMPORTANCE) ||
+        (a.timestamp ?? "").localeCompare(b.timestamp ?? ""),
+    )
+    .slice(0, excess);
+  let evicted = 0;
+  for (const obs of victims) {
+    try {
+      await deleteIndexed(kv, scope, obs.id);
+      evicted++;
+    } catch (err) {
+      logger.warn("Session cap eviction failed", {
+        sessionId,
+        obsId: obs.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
+    if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
+    await safeAudit(kv, "delete", "mem::observe", [obs.id], {
+      resource: "observation",
+      reason: "session_observation_cap",
+      sessionId,
+    });
+  }
+  if (capWarnedSessions.has(sessionId)) return;
+  capWarnedSessions.add(sessionId);
+  logger.warn("Session observation cap reached; evicting least important from now on", {
+    sessionId,
+    cap,
+    evicted,
+  });
+}
+
+function hasCompressibleContent(raw: RawObservation): boolean {
+  return [raw.toolInput, raw.toolOutput, raw.userPrompt, raw.imageData].some(
+    (v) =>
+      v !== undefined &&
+      v !== null &&
+      v !== "" &&
+      !(typeof v === "object" && Object.keys(v).length === 0),
+  );
 }
 
 export function registerObserveFunction(
@@ -145,13 +242,7 @@ export function registerObserveFunction(
 
       return withKeyedLock(`obs:${payload.sessionId}`, async () => {
         if (maxObservationsPerSession && maxObservationsPerSession > 0) {
-          const existing = await kv.list(KV.observations(payload.sessionId));
-          if (existing.length >= maxObservationsPerSession) {
-            return {
-              success: false,
-              error: `Session observation limit reached (${maxObservationsPerSession})`,
-            };
-          }
+          await evictToAdmitOne(sdk, kv, payload.sessionId, maxObservationsPerSession);
         }
 
         // Existing session is the source of truth for agentId (even
@@ -162,6 +253,7 @@ export function registerObserveFunction(
           agentId?: string;
           observationCount?: number;
           firstPrompt?: string;
+          status?: Session["status"];
         }>(KV.sessions, payload.sessionId);
         const inheritedAgentId = existingSession
           ? existingSession.agentId
@@ -246,7 +338,7 @@ export function registerObserveFunction(
 
         const session = existingSession;
         if (session) {
-          const updates: Array<{ type: "set"; path: string; value: unknown }> = [
+          const updates: Array<{ type: "set" | "remove"; path: string; value?: unknown }> = [
             { type: "set", path: "updatedAt", value: new Date().toISOString() },
             {
               type: "set",
@@ -264,6 +356,14 @@ export function registerObserveFunction(
               });
             }
           }
+          // Heal closes a Session that sat idle, and work may resume in the same
+          // terminal with no SessionStart. A Session that ended normally stays ended.
+          if (session.status === "abandoned") {
+            updates.push(
+              { type: "set", path: "status", value: "active" },
+              { type: "remove", path: "endedAt" },
+            );
+          }
           await kv.update(KV.sessions, payload.sessionId, updates);
         } else if (
           typeof payload.project === "string" &&
@@ -271,8 +371,7 @@ export function registerObserveFunction(
           typeof payload.cwd === "string" &&
           payload.cwd.trim().length > 0
         ) {
-          // OpenCode (and any plugin that skips POST /session/start)
-          // can fire observations before the session record exists. Without
+          // A plugin that skips POST /session/start can fire observations before the session record exists. Without
           // an implicit create, those observations stack up but
           // `memory_sessions` never lists them, and summarize bails with
           // "Session not found for summarize". Create the session now from
@@ -284,11 +383,12 @@ export function registerObserveFunction(
               ? raw.userPrompt.replace(/\s+/g, " ").trim().slice(0, 200)
               : undefined;
           const ts = new Date().toISOString();
+          const startedAt = payload.timestamp ?? ts;
           await kv.set(KV.sessions, payload.sessionId, {
             id: payload.sessionId,
             project: payload.project,
             cwd: payload.cwd,
-            startedAt: payload.timestamp ?? ts,
+            startedAt,
             updatedAt: ts,
             status: "active",
             observationCount: 1,
@@ -297,13 +397,15 @@ export function registerObserveFunction(
               ? { firstPrompt: trimmedPrompt }
               : {}),
           });
+          await recordProjectActivity(kv, payload.project, startedAt);
         }
 
         // Per-observation LLM compression is opt-in as of 0.8.8.
         // Default path: build a zero-LLM synthetic compression so recall
         // and BM25 search still work without burning the user's Claude
         // token allocation on every tool invocation.
-        if (isAutoCompressEnabled()) {
+        const llmCompress = isAutoCompressEnabled() && hasCompressibleContent(raw);
+        if (llmCompress) {
           await sdk.trigger({
             function_id: "mem::compress",
             payload: {
@@ -314,23 +416,7 @@ export function registerObserveFunction(
             action: TriggerAction.Void(),
           });
         } else {
-          const synthetic = buildSyntheticCompression(raw);
-          await kv.set(
-            KV.observations(payload.sessionId),
-            obsId,
-            synthetic,
-          );
-          // Stored above unconditionally; only the INDEX writes are
-          // skipped for excluded tools (retrieval echoes).
-          if (!isIndexExcluded(synthetic)) {
-            getSearchIndex().add(synthetic);
-            await vectorIndexAddGuarded(
-              synthetic.id,
-              synthetic.sessionId,
-              synthetic.title + " " + (synthetic.narrative || ""),
-              { kind: "synthetic", logId: synthetic.id },
-            );
-          }
+          const synthetic = await storeSyntheticCompression(kv, raw);
           await sdk.trigger({
             function_id: "stream::set",
             payload: {
@@ -359,7 +445,7 @@ export function registerObserveFunction(
           obsId,
           sessionId: payload.sessionId,
           hook: payload.hookType,
-          compress: isAutoCompressEnabled() ? "llm" : "synthetic",
+          compress: llmCompress ? "llm" : "synthetic",
         });
         return { observationId: obsId };
       });

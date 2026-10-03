@@ -8,7 +8,11 @@ function fakeSdk() {
     calls,
     trigger: async (req: { function_id: string; payload: any }) => {
       calls.push(req);
-      return req.function_id === "state::set-many" ? req.payload.entries.length : req.payload.value;
+      if (req.function_id === "state::set-many") return req.payload.entries.length;
+      if (req.function_id === "state::delete-many-if-unchanged") {
+        return req.payload.entries.map((e: { key: string }) => e.key);
+      }
+      return req.payload.value;
     },
   };
 }
@@ -28,6 +32,24 @@ describe("StateKV.setMany", () => {
   it("an empty batch sends nothing", async () => {
     const sdk = fakeSdk();
     expect(await new StateKV(sdk as never).setMany("s", [])).toBe(0);
+    expect(sdk.calls).toEqual([]);
+  });
+});
+
+const stale = (n: number) => Array.from({ length: n }, (_, i) => ({ key: "k" + i, updatedAt: "t" }));
+
+describe("StateKV.deleteManyIfUnchanged", () => {
+  it("sends state::delete-many-if-unchanged in chunks of 100 and returns every deleted key", async () => {
+    const sdk = fakeSdk();
+    const deleted = await new StateKV(sdk as never).deleteManyIfUnchanged("s", stale(150));
+    expect(deleted).toEqual(stale(150).map((e) => e.key));
+    expect(sdk.calls.map((c) => c.payload.entries.length)).toEqual([100, 50]);
+    expect(sdk.calls[1].payload).toEqual({ scope: "s", entries: stale(150).slice(100) });
+  });
+
+  it("an empty batch sends nothing", async () => {
+    const sdk = fakeSdk();
+    expect(await new StateKV(sdk as never).deleteManyIfUnchanged("s", [])).toEqual([]);
     expect(sdk.calls).toEqual([]);
   });
 });

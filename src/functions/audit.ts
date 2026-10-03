@@ -59,7 +59,7 @@ function isDeletion(operation: AuditEntry["operation"], details: Record<string, 
   if (DELETION_OPS.has(operation)) return true;
   if (details.action === "delete" || details.action === "soft-delete" || details.action === "mesh.remove") return true;
   if (details.newStatus === "discarded") return true;
-  if (typeof details.softDeleted === "number" && details.softDeleted > 0) return true;
+  if (typeof details.deleted === "number" && details.deleted > 0) return true;
   return operation === "import" && details.strategy === "replace";
 }
 
@@ -127,6 +127,30 @@ export async function safeAudit(
       });
     } catch {}
   }
+}
+
+const AUDIT_MAX_DEFAULT = 50_000;
+
+function auditMax(): number {
+  const raw = process.env.AGENTMEMORY_AUDIT_MAX?.trim();
+  const n = raw && /^\d+$/.test(raw) ? Number(raw) : 0;
+  return n > 0 ? n : AUDIT_MAX_DEFAULT;
+}
+
+// Retention for the audit store: keeps the newest AGENTMEMORY_AUDIT_MAX
+// entries. Evicting from the log is not itself audited - that would write the
+// rows it exists to bound - so it leaves one log line instead.
+export async function evictOldestAudit(kv: StateKV): Promise<number> {
+  if (auditStoreOff()) return 0;
+  const max = auditMax();
+  const all = await kv.list<AuditEntry>(KV.audit);
+  if (all.length <= max) return 0;
+  const oldest = [...all]
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    .slice(0, all.length - max);
+  for (const entry of oldest) await kv.delete(KV.audit, entry.id);
+  logger.info("Audit log evicted beyond cap", { removed: oldest.length, kept: max });
+  return oldest.length;
 }
 
 export async function queryAudit(

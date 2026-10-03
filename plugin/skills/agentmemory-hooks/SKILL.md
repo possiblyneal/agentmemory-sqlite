@@ -19,14 +19,15 @@ Watch observations land live at `http://localhost:3113`.
 
 ## What the hooks do
 
-- Session start and end frame each unit of work and let `handoff` resume it.
+- Session start and end frame each unit of work and let `handoff` resume it. `Stop` fires after every turn, so it only marks a turn end: the Session ends, and is summarized, once it has gone 30 minutes with no turn and no new Observation, or at once on `SessionEnd`.
 - Tool-use hooks capture what changed and why, the raw material for `recall` and `recap`.
 - Prompt-submit captures intent. Pre-compact preserves context before the host trims it.
 - A post-commit hook links commits to sessions, which powers `commit-context` and `commit-history`.
 
 ## Important
 
-- Capture is on by default and is zero-LLM. Turning observations into LLM summaries (`AGENTMEMORY_AUTO_COMPRESS`) and injecting them back into context (`AGENTMEMORY_INJECT_CONTEXT`) are separate opt-ins because they spend tokens.
+- Capture is on by default and is zero-LLM. Turning observations into LLM summaries (`AGENTMEMORY_AUTO_COMPRESS`) and injecting them back into context are separate opt-ins because they spend tokens. `AGENTMEMORY_INJECT_CONTEXT` injects at session start and, on each user prompt, up to three memories that match it strongly.
+- Headless Sessions are skipped by default: every hook returns early when `CLAUDE_CODE_ENTRYPOINT` starts with `sdk-` (`claude -p`, TS and Python Agent SDK). Set `AGENTMEMORY_CAPTURE_HEADLESS=1` to capture them. `AGENTMEMORY_SDK_CHILD=1` (agentmemory's own summarize calls) is skipped regardless.
 - If observations are missing, confirm the plugin is enabled and the server is running. See ../_shared/TROUBLESHOOTING.md.
 
 ## See also

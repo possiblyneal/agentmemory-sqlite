@@ -1,14 +1,9 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
+import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
 
 hydrateHookEnv();
-
-function isSdkChildContext(payload: unknown): boolean {
-  if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-  if (!payload || typeof payload !== "object") return false;
-  return (payload as { entrypoint?: unknown }).entrypoint === "sdk-ts";
-}
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
@@ -33,13 +28,13 @@ async function main() {
   }
 
   if (!data || typeof data !== "object") return;
-  if (isSdkChildContext(data)) return;
+  if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
-  const toolName = data.tool_name ?? data.toolName;
-  const toolInput = data.tool_input ?? data.toolArgs;
+  const sessionId = (data.session_id as string) || "unknown";
+  const toolName = data.tool_name;
+  const toolInput = data.tool_input;
 
-  const { imageData, cleanOutput } = extractImageData(toolOutput(data));
+  const { imageData, cleanOutput } = extractImageData(data.tool_response);
   const cwd = hookCwd(data) || process.cwd();
 
   fetch(`${REST_URL}/agentmemory/observe`, {
@@ -61,17 +56,6 @@ async function main() {
     signal: AbortSignal.timeout(3000),
   }).catch(() => {});
   setTimeout(() => process.exit(0), 500).unref();
-}
-
-function toolOutput(data: Record<string, unknown>): unknown {
-  if (data.tool_response !== undefined) return data.tool_response;
-  if (data.tool_output !== undefined) return data.tool_output;
-  const result = data.tool_result ?? data.toolResult;
-  if (typeof result === "object" && result !== null) {
-    const obj = result as Record<string, unknown>;
-    return obj.text_result_for_llm ?? obj.textResultForLlm ?? result;
-  }
-  return result;
 }
 
 function isBase64Image(val: unknown): val is string {

@@ -1,11 +1,12 @@
 import type { ISdk } from "../engine/types.js";
-import type { Memory, CompressedObservation, ContextBlock } from "../types.js";
+import type { Memory } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
+import { estimateTokens } from "../utils/tokens.js";
 
 const CORE_SCOPE = "mem:core-memory";
 
@@ -17,10 +18,6 @@ interface CoreMemoryEntry {
   accessCount: number;
   lastAccessedAt: string;
   createdAt: string;
-}
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3);
 }
 
 function scoreEntry(entry: CoreMemoryEntry, now: number): number {

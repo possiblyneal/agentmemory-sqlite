@@ -24,23 +24,66 @@ function parseEnvFile(content) {
 	}
 	return vars;
 }
-function hydrateHookEnv() {
-	let content;
+function envFilePath() {
+	return join(homedir(), ".agentmemory", ".env");
+}
+function readEnvFile() {
 	try {
-		content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
-	} catch {
-		return;
+		return parseEnvFile(readFileSync(envFilePath(), "utf-8"));
+	} catch (err) {
+		if (err.code === "ENOENT") return {};
+		throw err;
 	}
-	for (const [key, value] of Object.entries(parseEnvFile(content))) if (process.env[key] === void 0) process.env[key] = value;
+}
+let envFileCache;
+function loadEnvFile() {
+	const path = envFilePath();
+	if (envFileCache?.path === path) return envFileCache.vars;
+	const vars = readEnvFile();
+	envFileCache = {
+		path,
+		vars
+	};
+	return vars;
+}
+function hydrateEnvFromFile(isUnset) {
+	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
+}
+function hydrateHookEnv() {
+	try {
+		hydrateEnvFromFile((current) => current === void 0);
+	} catch {}
+}
+//#endregion
+//#region src/hooks/sdk-guard.ts
+/**
+* Skip guard shared by every hook script.
+*
+* Two kinds of Session never reach agentmemory:
+*
+*   1. agentmemory's own summarize/compress calls. The agent-sdk provider
+*      sets AGENTMEMORY_SDK_CHILD=1 before it spawns `query()`, and the
+*      child inherits it. Capturing that child would summarize it through
+*      the same provider and recurse without bound (#149 follow-up). This
+*      skip is unconditional.
+*   2. Headless Sessions: any CLAUDE_CODE_ENTRYPOINT starting "sdk-", which
+*      today is `claude -p` ("sdk-cli"), the TS Agent SDK ("sdk-ts") and
+*      the Python Agent SDK ("sdk-py"). These are almost always scripted
+*      batches whose summaries are noise, and a batch of thousands
+*      saturates the summarizing LLM. Set AGENTMEMORY_CAPTURE_HEADLESS=1
+*      to capture them.
+*
+* Claude Code puts the entrypoint in the hook's environment, never in the
+* stdin payload.
+*/
+function shouldSkipSession() {
+	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
+	if (process.env["AGENTMEMORY_CAPTURE_HEADLESS"] === "1") return false;
+	return process.env["CLAUDE_CODE_ENTRYPOINT"]?.startsWith("sdk-") ?? false;
 }
 //#endregion
 //#region src/hooks/stop.ts
 hydrateHookEnv();
-function isSdkChildContext(payload) {
-	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-	if (!payload || typeof payload !== "object") return false;
-	return payload.entrypoint === "sdk-ts";
-}
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
 function authHeaders() {
@@ -58,12 +101,15 @@ async function main() {
 		return;
 	}
 	if (!data || typeof data !== "object") return;
-	if (isSdkChildContext(data)) return;
-	const sessionId = data.session_id || data.sessionId || data.conversation_id || "unknown";
+	if (shouldSkipSession()) return;
+	const sessionId = data.session_id || "unknown";
 	fetch(`${REST_URL}/agentmemory/session/end`, {
 		method: "POST",
 		headers: authHeaders(),
-		body: JSON.stringify({ sessionId }),
+		body: JSON.stringify({
+			sessionId,
+			turnEnd: true
+		}),
 		signal: AbortSignal.timeout(5e3)
 	}).catch(() => {});
 	setTimeout(() => process.exit(0), 1500).unref();

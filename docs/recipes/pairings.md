@@ -115,7 +115,7 @@ Four planes, four consumers, four update models. None of them try to do what the
 
 ## Suggested install order for a brand-new project
 
-1. **agentmemory** — observe and persist from day one, even before the codebase has structure. Run `npx @agentmemory/agentmemory connect` and pick your agent.
+1. **agentmemory** — observe and persist from day one, even before the codebase has structure. Run `agentmemory connect` to wire Claude Code.
 2. **codegraph** — once code lands, agent queries answer from the index instead of grepping. Run `npx @colbymchenry/codegraph`.
 3. **Understand Anything** *or* **Graphify** — when the codebase passes a few thousand LOC or starts shipping docs and PDFs alongside code, generate the graph for visual exploration and onboarding. Run `/plugin install understand-anything` or `uv tool install graphifyy && graphify install`.
 
@@ -123,6 +123,6 @@ All four are local-first (no data leaves the machine for code-graph workloads). 
 
 ## Cross-project benchmark idea
 
-`eval/runner/adapters/` accepts new adapters against the same coding-agent-life-v1 corpus and the published LongMemEval `_s` benchmark. A `codegraph` adapter or an `understand-anything` adapter or a `graphify` adapter would let us publish a side-by-side scorecard showing which project owns which question class. The win for the ecosystem is precise framing: each project gets credit for what it does best, with reproducible numbers from a shared harness.
+`eval/runner/adapters/` accepts new adapters against the same coding-agent-life-v2 corpus and the published LongMemEval `_s` benchmark. A `codegraph` adapter or an `understand-anything` adapter or a `graphify` adapter would let us publish a side-by-side scorecard showing which project owns which question class. The win for the ecosystem is precise framing: each project gets credit for what it does best, with reproducible numbers from a shared harness.
 
 If you build any of those adapters, open a PR against `agentmemory` with the adapter file under `eval/runner/adapters/` and a scorecard under `docs/benchmarks/`. The scaffold and contract live in [`eval/README.md`](../../eval/README.md).

@@ -1,3 +1,8 @@
+// #833/#1273: observation ids handed to memory_governance_delete, which only
+// deletes saved memories, used to come back as a silent deleted: 0.
+export const NOT_A_MEMORY_HINT =
+  "These ids are not saved memories. Observations are deleted with memory_forget (sessionId + observationIds).";
+
 export type McpToolDef = {
   name: string;
   description: string;
@@ -32,6 +37,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "number",
           description: "Optional token budget to trim returned results",
         },
+        project: { type: "string", description: "Filter by project" },
       },
       required: ["query"],
     },
@@ -82,6 +88,12 @@ export const CORE_TOOLS: McpToolDef[] = [
             "UUID, or registry key). Must match the value used when the session was " +
             "started. Do not use filesystem paths or ad-hoc display names — those " +
             "change across machines and will silently break project scoping.",
+        },
+        global: {
+          type: "boolean",
+          description:
+            "Save a Global Memory that Recall surfaces in every project, such as an Operator " +
+            "preference meant to apply everywhere. Cannot be combined with project.",
         },
         agentId: {
           type: "string",
@@ -165,6 +177,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           description: "Comma-separated observation IDs to expand",
         },
         limit: { type: "number", description: "Max results (default 10)" },
+        project: { type: "string", description: "Filter by project" },
       },
       required: ["query"],
     },
@@ -367,7 +380,9 @@ export const V040_TOOLS: McpToolDef[] = [
   },
   {
     name: "memory_governance_delete",
-    description: "Delete specific memories with audit trail.",
+    description:
+      "Delete specific saved memories with audit trail. Ids that are not saved memories come back in notFound; " +
+      "delete observations with memory_forget.",
     inputSchema: {
       type: "object",
       properties: {
@@ -701,7 +716,7 @@ export const V051_TOOLS: McpToolDef[] = [
   {
     name: "memory_diagnose",
     description:
-      "Run health checks across all subsystems (actions, leases, sentinels, sketches, signals, sessions, memories, mesh). Identifies stuck, orphaned, and inconsistent state.",
+      "Run health checks across all subsystems (actions, leases, sentinels, sketches, signals, sessions, observations, memories, lessons, summaries, semantic, procedural, crystals, insights, mesh, injections, injection-use, recall-coverage). Identifies stuck, orphaned, and inconsistent state, Missed Injections, injected items the Session never used, and Unrecalled Memories.",
     inputSchema: {
       type: "object",
       properties: {
@@ -827,7 +842,7 @@ export const V070_TOOLS: McpToolDef[] = [
         project: { type: "string", description: "Filter by project" },
         minConfidence: {
           type: "number",
-          description: "Minimum confidence threshold (default 0.1)",
+          description: "Minimum confidence threshold (default 0)",
         },
         limit: { type: "number", description: "Max results (default 10)" },
       },
@@ -998,7 +1013,7 @@ export function getAllTools(): McpToolDef[] {
 
 // default switched from "core" (8 essential tools) to "all" (the full
 // tool surface). The plugin manifests have always advertised every tool
-// "in proxy mode"; the old default left OpenCode / Claude Code users
+// "in proxy mode"; the old default left Claude Code users
 // seeing 8 with no indication the other tools existed.
 // Users who want the lean essentials can still set AGENTMEMORY_TOOLS=core.
 export function getVisibleTools(): McpToolDef[] {

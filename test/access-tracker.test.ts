@@ -81,6 +81,46 @@ describe("access-tracker", () => {
     expect((await getAccessLog(kv as never, "mem_c")).count).toBe(1);
   });
 
+  it("recordAccessBatch writes the whole batch in one setMany", async () => {
+    const { recordAccessBatch, getAccessLog } = await import(
+      "../src/functions/access-tracker.js"
+    );
+    const kv = mockKV();
+    const setMany = vi.fn(async (scope: string, items: Array<{ key: string; value: unknown }>) => {
+      for (const item of items) await kv.set(scope, item.key, item.value);
+    });
+    const set = vi.spyOn(kv, "set");
+    Object.assign(kv, { setMany });
+
+    await recordAccessBatch(kv as never, ["mem_a", "mem_b", "mem_a"], 5_000_000);
+
+    expect(setMany).toHaveBeenCalledTimes(1);
+    expect(setMany.mock.calls[0]![1].map((item) => item.key)).toEqual(["mem_a", "mem_b"]);
+    expect(set).toHaveBeenCalledTimes(2);
+    expect((await getAccessLog(kv as never, "mem_b")).count).toBe(1);
+  });
+
+  it("recordAccessBatch retries only the chunk that failed, counting each id once", async () => {
+    const { recordAccessBatch, getAccessLog } = await import(
+      "../src/functions/access-tracker.js"
+    );
+    const kv = mockKV();
+    let calls = 0;
+    const setMany = vi.fn(async (scope: string, items: Array<{ key: string; value: unknown }>) => {
+      if (++calls === 2) throw new Error("chunk failed");
+      for (const item of items) await kv.set(scope, item.key, item.value);
+    });
+    Object.assign(kv, { setMany });
+    const ids = Array.from({ length: 150 }, (_, i) => `mem_${i}`);
+
+    await recordAccessBatch(kv as never, ids, 5_000_000);
+
+    expect(setMany).toHaveBeenCalledTimes(2);
+    for (const id of ["mem_0", "mem_99", "mem_100", "mem_149"]) {
+      expect((await getAccessLog(kv as never, id)).count).toBe(1);
+    }
+  });
+
   it("recordAccess swallows kv.set errors (must not break reads)", async () => {
     const { recordAccess } = await import(
       "../src/functions/access-tracker.js"

@@ -1481,7 +1481,8 @@
           apiGet('procedural'),
           apiGet('relations'),
           apiGet('lessons'),
-          apiGet('crystals')
+          apiGet('crystals'),
+          apiGet('insights?limit=1')
         ]);
         state.dashboard.health = results[0];
         state.dashboard.sessions = (results[1] && results[1].sessions) || [];
@@ -1489,6 +1490,14 @@
         state.dashboard.graphStats = results[3];
         state.dashboard.recentAudit = (results[4] && results[4].entries) || [];
         state.dashboard.semantic = (results[5] && results[5].facts) || (results[5] && results[5].semantic) || [];
+        state.dashboard.semanticTotal = results[5] && results[5].total;
+        state.dashboard.insightTotal = results[10] && results[10].total;
+        // A failed request resolves to null; the count cards show a dash for
+        // it so the Operator can tell an unreachable count from an empty one.
+        state.dashboard.failed = {
+          sessions: !results[1], memories: !results[2], graph: !results[3], semantic: !results[5],
+          lessons: !results[8], crystals: !results[9], insights: !results[10]
+        };
         state.dashboard.procedural = (results[6] && results[6].procedures) || (results[6] && results[6].procedural) || [];
         state.dashboard.lessons = (results[8] && results[8].lessons) || [];
         state.dashboard.crystals = (results[9] && results[9].crystals) || [];
@@ -1536,10 +1545,12 @@
       var fMetrics = h.functionMetrics || [];
       var cb = h.circuitBreaker || null;
       var workers = snap.workers || [];
+      var failed = d.failed || {};
+      function valueOrDash(count, isFailed) { return isFailed ? '&ndash;' : count; }
 
       var html = '';
       // First-run hero: empty dashboard = guided next step
-      if (d.sessions.length === 0) {
+      if (d.sessions.length === 0 && !failed.sessions) {
         html += '<div class="card" style="margin-bottom:14px;padding:24px 28px;background:var(--bg-subtle);border-left:3px solid var(--accent);">' +
           '<div style="font-family:var(--font-ui);font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:8px;">First run &rarr; magical moment in 10 seconds</div>' +
           '<div style="font-family:var(--font-display,Lora,Georgia,serif);font-size:22px;font-weight:700;color:var(--ink);margin-bottom:8px;">Seed sample data + prove semantic recall works</div>' +
@@ -1549,13 +1560,15 @@
           '</div>';
       }
       html += '<div class="stats-grid">';
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="sessions" role="link" tabindex="0"><div class="label">Sessions</div><div class="value">' + d.sessions.length + '</div><div class="sub">' + activeSessions + ' active</div></div>';
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="memories" role="link" tabindex="0"><div class="label">Memories</div><div class="value">' + d.memories.length + '</div><div class="sub">latest versions</div></div>';
+      html += '<div class="stat-card" data-action="goto-tab" data-tab="sessions" role="link" tabindex="0"><div class="label">Sessions</div><div class="value">' + valueOrDash(d.sessions.length, failed.sessions) + '</div><div class="sub">' + valueOrDash(activeSessions, failed.sessions) + ' active</div></div>';
+      html += '<div class="stat-card" data-action="goto-tab" data-tab="memories" role="link" tabindex="0"><div class="label">Memories</div><div class="value">' + valueOrDash(d.memories.length, failed.memories) + '</div><div class="sub">latest versions</div></div>';
       var lessonCount = (d.lessons || []).length;
       var crystalCount = (d.crystals || []).length;
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="lessons" role="link" tabindex="0"><div class="label">Lessons</div><div class="value">' + lessonCount + '</div><div class="sub">confidence-scored</div></div>';
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="crystals" role="link" tabindex="0"><div class="label">Crystals</div><div class="value">' + crystalCount + '</div><div class="sub">action digests</div></div>';
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="graph" role="link" tabindex="0"><div class="label">Graph Nodes</div><div class="value">' + nodeCount + '</div><div class="sub">' + edgeCount + ' edges</div></div>';
+      html += '<div class="stat-card" data-action="goto-tab" data-tab="lessons" role="link" tabindex="0"><div class="label">Lessons</div><div class="value">' + valueOrDash(lessonCount, failed.lessons) + '</div><div class="sub">confidence-scored</div></div>';
+      html += '<div class="stat-card" data-action="goto-tab" data-tab="crystals" role="link" tabindex="0"><div class="label">Crystals</div><div class="value">' + valueOrDash(crystalCount, failed.crystals) + '</div><div class="sub">action digests</div></div>';
+      html += '<div class="stat-card"><div class="label">Semantic Facts</div><div class="value">' + valueOrDash(d.semanticTotal || 0, failed.semantic) + '</div><div class="sub">consolidated</div></div>';
+      html += '<div class="stat-card"><div class="label">Insights</div><div class="value">' + valueOrDash(d.insightTotal || 0, failed.insights) + '</div><div class="sub">reflected</div></div>';
+      html += '<div class="stat-card" data-action="goto-tab" data-tab="graph" role="link" tabindex="0"><div class="label">Graph Nodes</div><div class="value">' + valueOrDash(nodeCount, failed.graph) + '</div><div class="sub">' + valueOrDash(edgeCount, failed.graph) + ' edges</div></div>';
       html += '<div class="stat-card"><div class="label">Health</div><div class="value"><div class="health-bar"><span class="health-dot ' + dotClass + '"></span> ' + esc(healthStatus) + '</div></div>';
       html += '<div class="sub">' + esc(snap.connectionState || 'unknown') + '</div>';
       // The dot shows the verdict published to a supervisor, which only moves
@@ -1584,7 +1597,7 @@
       var costDollars = tokensSaved / 1000 * 0.3;
       var costCents = Math.round(costDollars * 100);
       var costStr = costCents >= 100 ? '$' + (costCents / 100).toFixed(2) : costCents + 'ct';
-      html += '<div class="stat-card"><div class="label">Token Savings</div><div class="value">' + savings + '%</div><div class="sub">~' + tokensSaved.toLocaleString() + ' tokens · ' + costStr + ' saved</div></div>';
+      html += '<div class="stat-card"><div class="label">Token Savings</div><div class="value">' + valueOrDash(savings + '%', failed.sessions) + '</div><div class="sub">~' + valueOrDash(tokensSaved.toLocaleString(), failed.sessions) + ' tokens · ' + valueOrDash(costStr, failed.sessions) + ' saved</div></div>';
       html += '</div>';
 
       if (snap.memory || snap.cpu) {

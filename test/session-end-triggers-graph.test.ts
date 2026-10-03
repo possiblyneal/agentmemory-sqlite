@@ -14,8 +14,9 @@ describe("api::session::end → event::session::stopped (#666)", () => {
 
   it("api::session::end fires event::session::stopped after kv.update", () => {
     expect(api).toMatch(
-      /api::session::end[\s\S]*?kv\.update\(KV\.sessions[\s\S]*?function_id:\s*"event::session::stopped"/,
+      /const finishSession[\s\S]*?kv\.update\(KV\.sessions[\s\S]*?function_id:\s*"event::session::stopped"/,
     );
+    expect(api).toMatch(/"api::session::end"[\s\S]*?await finishSession\(sessionId\)/);
   });
 
   it("event::session::stopped trigger payload includes sessionId", () => {

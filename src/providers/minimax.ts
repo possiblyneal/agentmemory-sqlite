@@ -1,6 +1,6 @@
 import type { MemoryProvider } from '../types.js'
 import { getEnvVar } from '../config.js'
-import { fetchWithTimeout } from './_fetch.js'
+import { fetchWithTimeout, ProviderHttpError } from './_fetch.js'
 
 /**
  * MiniMax provider using raw fetch to call MiniMax's Anthropic-compatible API.
@@ -10,7 +10,7 @@ import { fetchWithTimeout } from './_fetch.js'
  *
  * Required env vars (loaded from ~/.agentmemory/.env or process.env):
  *   MINIMAX_API_KEY  — your MiniMax API key
- *   MINIMAX_MODEL    — model name (default: MiniMax-M3)
+ *   MINIMAX_MODEL    — model name (default: DEFAULT_MODELS in src/config.ts)
  *   MAX_TOKENS       — max output tokens (default: 4096)
  *
  * Optional:
@@ -58,7 +58,7 @@ export class MinimaxProvider implements MemoryProvider {
 
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`MiniMax API error ${response.status}: ${text}`)
+      throw new ProviderHttpError(`MiniMax API error ${response.status}: ${text}`, response.status)
     }
 
     const data = (await response.json()) as {

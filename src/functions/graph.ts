@@ -8,6 +8,7 @@ import type {
   SnapshotEdge,
   CompressedObservation,
   MemoryProvider,
+  Session,
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
@@ -28,7 +29,7 @@ import {
   GRAPH_EXTRACTION_SYSTEM,
   buildGraphExtractionPrompt,
 } from "../prompts/graph-extraction.js";
-import { isGraphExtractionEnabled } from "../config.js";
+import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { capSourceIds } from "./graph-provenance.js";
 import { recordAudit } from "./audit.js";
@@ -735,7 +736,14 @@ export function extractGraphHeuristics(
 // than in graph-indexes.ts so config.ts stays out of that module's import
 // graph (several tests partially mock it).
 export function graphWritesDisabled(): boolean {
-  return graphLegDisabled() || !isGraphExtractionEnabled();
+  return graphWritesOffReason() !== null;
+}
+
+export function graphWritesOffReason(): string | null {
+  const reasons: string[] = [];
+  if (!isGraphExtractionEnabled()) reasons.push("GRAPH_EXTRACTION_ENABLED is not true");
+  if (graphLegDisabled()) reasons.push("AGENTMEMORY_GRAPH_LEG=off");
+  return reasons.length > 0 ? reasons.join(", ") : null;
 }
 
 export async function persistGraphDelta(
@@ -890,13 +898,215 @@ export async function persistGraphDelta(
   return { newNodeCount, newEdgeCount };
 }
 
+// A Session's head batch is skipped after this many failures in a row, so a
+// batch that can never extract does not cost an LLM call on every stop.
+const GRAPH_BATCH_MAX_FAILURES = 3;
+
+// An unreachable or overloaded provider says nothing about the batch, so it
+// does not count toward GRAPH_BATCH_MAX_FAILURES.
+function isProviderDown(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.message === "circuit_breaker_open" || err.message === "fetch failed") {
+    return true;
+  }
+  const status = (err as { status?: unknown }).status;
+  return typeof status === "number" && (status === 429 || status >= 500);
+}
+
+interface GraphExtraction {
+  result: Record<string, unknown>;
+  // How many leading observations were fully extracted, and the error that
+  // stopped the batch after them. null when nothing was persisted.
+  progress: { extracted: number; failure?: unknown } | null;
+}
+
+async function extractGraph(
+  kv: StateKV,
+  provider: MemoryProvider,
+  observations: CompressedObservation[],
+  batchSize: number,
+  stopAtFirstFailure: boolean,
+): Promise<GraphExtraction> {
+  const obsIds = observations.map((o) => o.id);
+
+  let nodes: GraphNode[] = [];
+  let edges: GraphEdge[] = [];
+  try {
+    const heuristic = extractGraphHeuristics(observations);
+    nodes = heuristic.nodes;
+    edges = heuristic.edges;
+  } catch (err) {
+    logger.warn("heuristic graph extraction failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const llmEnabled = isGraphExtractionEnabled() && !isNoopProvider(provider);
+  let extracted = observations.length;
+  let failure: unknown;
+  if (llmEnabled) {
+    extracted = 0;
+    // Map each source observation to its session so extracted nodes
+    // can be resolved back to KV.observations(sessionId) at retrieval
+    // time (#656). Skip blanks defensively.
+    const sessionByObsId = new Map<string, string>();
+    for (const o of observations) {
+      if (o.sessionId) sessionByObsId.set(o.id, o.sessionId);
+    }
+    // One prompt per batch bounds its size: a whole long Session in one
+    // prompt ran past the LLM timeout mid-prefill.
+    for (let i = 0; i < observations.length; i += batchSize) {
+      const batch = observations.slice(i, i + batchSize);
+      const prompt = buildGraphExtractionPrompt(
+        batch.map((o) => ({
+          title: o.title,
+          narrative: o.narrative,
+          concepts: o.concepts,
+          files: o.files,
+          type: o.type,
+        })),
+      );
+      const started = Date.now();
+      try {
+        const response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        const parsed = parseGraphXml(
+          response,
+          batch.map((o) => o.id),
+          sessionByObsId,
+        );
+        nodes = nodes.concat(parsed.nodes);
+        edges = edges.concat(parsed.edges);
+        if (failure === undefined) extracted = i + batch.length;
+      } catch (err) {
+        failure ??= err;
+        logger.error("LLM graph extraction failed", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: batch[0]!.sessionId,
+          sessionCount: new Set(batch.map((o) => o.sessionId)).size,
+          batchSize: batch.length,
+          promptChars: prompt.length,
+          tookMs: Date.now() - started,
+        });
+        if (stopAtFirstFailure || isProviderDown(err)) break;
+      }
+    }
+  }
+  const llmError =
+    failure === undefined
+      ? undefined
+      : failure instanceof Error
+        ? failure.message
+        : String(failure);
+
+  if (nodes.length === 0 && edges.length === 0) {
+    return {
+      result: llmError
+        ? { success: false, error: llmError }
+        : { success: true, nodesAdded: 0, edgesAdded: 0 },
+      progress: { extracted, failure },
+    };
+  }
+
+  try {
+    const { newNodeCount, newEdgeCount } = await persistGraphDelta(
+      kv,
+      nodes,
+      edges,
+      obsIds,
+    );
+
+    await recordAudit(kv, "observe", "mem::graph-extract", obsIds, {
+      nodesExtracted: nodes.length,
+      edgesExtracted: edges.length,
+    });
+
+    logger.info("Graph extraction complete", {
+      nodes: nodes.length,
+      edges: edges.length,
+      newNodes: newNodeCount,
+      newEdges: newEdgeCount,
+      llm: llmEnabled && !llmError,
+    });
+    return {
+      result: { success: true, nodesAdded: nodes.length, edgesAdded: edges.length },
+      progress: { extracted, failure },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Graph extraction failed", { error: msg });
+    return { result: { success: false, error: msg }, progress: null };
+  }
+}
+
+// Moves the Session's watermark past the observations that were extracted.
+// A failed head batch is retried on the next stop until it has failed
+// GRAPH_BATCH_MAX_FAILURES times for a reason other than the provider being
+// down; then it is skipped.
+async function advanceGraphWatermark(
+  kv: StateKV,
+  sessionId: string,
+  observations: CompressedObservation[],
+  batchSize: number,
+  progress: { extracted: number; failure?: unknown },
+): Promise<void> {
+  const session = await kv.get<Session>(KV.sessions, sessionId);
+  if (!session) return;
+
+  // The next stop takes only Observations after the watermark's timestamp,
+  // so the watermark must not fall between two that share one.
+  let through = progress.extracted;
+  const splitsTie = () =>
+    through > 0 &&
+    through < observations.length &&
+    observations[through - 1]!.timestamp === observations[through]!.timestamp;
+  while (splitsTie()) through--;
+
+  let failures = 0;
+  const skipFrom = through;
+  let skipping = false;
+  if (progress.failure !== undefined) {
+    const counted = isProviderDown(progress.failure) ? 0 : 1;
+    failures = through > 0 ? counted : (session.graphExtractFailures ?? 0) + counted;
+    if (failures >= GRAPH_BATCH_MAX_FAILURES) {
+      through = Math.min(observations.length, through + batchSize);
+      while (splitsTie()) through++;
+      failures = 0;
+      skipping = true;
+    }
+  }
+  if (skipping) {
+    logger.warn("Skipping a graph batch that keeps failing", {
+      sessionId,
+      observations: observations.slice(skipFrom, through).map((o) => o.id),
+    });
+  }
+
+  const ops: Array<{ type: "set"; path: string; value: unknown }> = [
+    { type: "set", path: "graphExtractFailures", value: failures },
+  ];
+  if (through > 0) {
+    ops.push({
+      type: "set",
+      path: "graphExtractedThrough",
+      value: observations[through - 1]!.timestamp,
+    });
+  }
+  await kv.update(KV.sessions, sessionId, ops);
+}
+
 export function registerGraphFunction(
   sdk: ISdk,
   kv: StateKV,
   provider: MemoryProvider,
 ): void {
+  // Sessions with an extraction running; a stop that lands meanwhile is
+  // skipped and its observations go out with the next stop.
+  const extracting = new Set<string>();
+
+  // With a sessionId, observations are extracted oldest first and the
+  // Session's watermark advances only past batches that succeeded.
   sdk.registerFunction("mem::graph-extract",
-    async (data: { observations: CompressedObservation[] }) => {
+    async (data: { observations: CompressedObservation[]; sessionId?: string }) => {
       if (!data.observations || data.observations.length === 0) {
         return { success: false, error: "No observations provided" };
       }
@@ -909,89 +1119,32 @@ export function registerGraphFunction(
         return { success: true, nodesAdded: 0, edgesAdded: 0, skipped: "graph-writes-off" };
       }
 
-      const obsIds = data.observations.map((o) => o.id);
-
-      let nodes: GraphNode[] = [];
-      let edges: GraphEdge[] = [];
-      try {
-        const heuristic = extractGraphHeuristics(data.observations);
-        nodes = heuristic.nodes;
-        edges = heuristic.edges;
-      } catch (err) {
-        logger.warn("heuristic graph extraction failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
+      const { sessionId } = data;
+      const batchSize = Math.max(1, getGraphBatchSize());
+      if (!sessionId) {
+        return (await extractGraph(kv, provider, data.observations, batchSize, false)).result;
       }
-
-      const llmEnabled =
-        isGraphExtractionEnabled() && !isNoopProvider(provider);
-      let llmError: string | undefined;
-      if (llmEnabled) {
-        const prompt = buildGraphExtractionPrompt(
-          data.observations.map((o) => ({
-            title: o.title,
-            narrative: o.narrative,
-            concepts: o.concepts,
-            files: o.files,
-            type: o.type,
-          })),
+      if (extracting.has(sessionId)) {
+        return { success: true, nodesAdded: 0, edgesAdded: 0, skipped: "session-extracting" };
+      }
+      extracting.add(sessionId);
+      try {
+        const observations = [...data.observations].sort((a, b) =>
+          a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0,
         );
-        try {
-          const response = await provider.compress(
-            GRAPH_EXTRACTION_SYSTEM,
-            prompt,
-          );
-          // Map each source observation to its session so extracted nodes
-          // can be resolved back to KV.observations(sessionId) at retrieval
-          // time (#656). Skip blanks defensively.
-          const sessionByObsId = new Map<string, string>();
-          for (const o of data.observations) {
-            if (o.sessionId) sessionByObsId.set(o.id, o.sessionId);
-          }
-          const parsed = parseGraphXml(response, obsIds, sessionByObsId);
-          nodes = nodes.concat(parsed.nodes);
-          edges = edges.concat(parsed.edges);
-        } catch (err) {
-          llmError = err instanceof Error ? err.message : String(err);
-          logger.error("LLM graph extraction failed", { error: llmError });
-        }
-      }
-
-      if (nodes.length === 0 && edges.length === 0) {
-        return llmError
-          ? { success: false, error: llmError }
-          : { success: true, nodesAdded: 0, edgesAdded: 0 };
-      }
-
-      try {
-        const { newNodeCount, newEdgeCount } = await persistGraphDelta(
+        const { result, progress } = await extractGraph(
           kv,
-          nodes,
-          edges,
-          obsIds,
+          provider,
+          observations,
+          batchSize,
+          true,
         );
-
-        await recordAudit(kv, "observe", "mem::graph-extract", obsIds, {
-          nodesExtracted: nodes.length,
-          edgesExtracted: edges.length,
-        });
-
-        logger.info("Graph extraction complete", {
-          nodes: nodes.length,
-          edges: edges.length,
-          newNodes: newNodeCount,
-          newEdges: newEdgeCount,
-          llm: llmEnabled && !llmError,
-        });
-        return {
-          success: true,
-          nodesAdded: nodes.length,
-          edgesAdded: edges.length,
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error("Graph extraction failed", { error: msg });
-        return { success: false, error: msg };
+        if (progress) {
+          await advanceGraphWatermark(kv, sessionId, observations, batchSize, progress);
+        }
+        return result;
+      } finally {
+        extracting.delete(sessionId);
       }
     },
   );

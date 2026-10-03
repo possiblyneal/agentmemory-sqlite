@@ -1,5 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { handleToolCall, handleToolsList } from "../src/mcp/standalone.js";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { handleToolCall, handleToolsList, hydrateMcpEnv } from "../src/mcp/standalone.js";
 import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
 import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
 
@@ -115,6 +118,19 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(calls.find((c) => c.url.endsWith("/agentmemory/smart-search"))).toBeUndefined();
   });
 
+  it("forwards project on memory_recall and memory_smart_search (#787)", async () => {
+    const bodies = new Map<string, Record<string, unknown>>();
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      bodies.set(new URL(url).pathname, JSON.parse((init?.body as string) || "{}"));
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    });
+    await handleToolCall("memory_recall", { query: "x", project: "my-project" });
+    await handleToolCall("memory_smart_search", { query: "x", project: "my-project" });
+    expect(bodies.get("/agentmemory/search")?.["project"]).toBe("my-project");
+    expect(bodies.get("/agentmemory/smart-search")?.["project"]).toBe("my-project");
+  });
+
   it("memory_recall defaults format to 'full' when omitted (#507)", async () => {
     let recallBody: Record<string, unknown> | undefined;
     installFetch((url, init) => {
@@ -180,6 +196,25 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(body.results[0].content).toBe("shape-check entry");
   });
 
+  it("local fallback drops memories saved to another project (#787)", async () => {
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const localKv = new InMemoryKV(undefined);
+    await handleToolCall("memory_save", { content: "scoped here", project: "here" }, localKv);
+    await handleToolCall("memory_save", { content: "scoped there", project: "there" }, localKv);
+    await handleToolCall("memory_save", { content: "scoped nowhere" }, localKv);
+    const res = await handleToolCall(
+      "memory_smart_search",
+      { query: "scoped", project: "here" },
+      localKv,
+    );
+    const contents = JSON.parse(res.content[0].text).results.map(
+      (r: { content: string }) => r.content,
+    );
+    expect(contents.sort()).toEqual(["scoped here", "scoped nowhere"]);
+  });
+
   it("attaches Bearer token on the proxied tool request, not just the probe", async () => {
     process.env["AGENTMEMORY_SECRET"] = "s3cret";
     const authByPath = new Map<string, string | undefined>();
@@ -237,7 +272,37 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     await expect(handleToolsList()).rejects.toThrow(/not ready \(503\)/);
   });
 
-  it("invalidates the handle on proxy failure, so the next call re-probes", async () => {
+  it("an error the server answers with is surfaced, never a local save (upstream PR #1323)", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      return new Response("boom", { status: 500, statusText: "Internal Server Error" });
+    });
+    const localKv = new InMemoryKV(undefined);
+    await expect(handleToolCall("memory_save", { content: "must not land locally" }, localKv)).rejects.toThrow(/500.*boom/);
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    resetHandleForTests();
+    const recall = await handleToolCall("memory_recall", { query: "locally" }, localKv);
+    expect(JSON.parse(recall.content[0].text).results).toHaveLength(0);
+  });
+
+  it("a gateway 502 counts as the daemon being down, so the call falls back to local", async () => {
+    let probeCount = 0;
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) {
+        probeCount++;
+        return new Response("ok", { status: 200 });
+      }
+      return new Response("upstream down", { status: 502, statusText: "Bad Gateway" });
+    });
+    const localKv = new InMemoryKV(undefined);
+    await handleToolCall("memory_save", { content: "gateway fallback" }, localKv);
+    await handleToolCall("memory_save", { content: "second gateway fallback" }, localKv);
+    expect(probeCount).toBe(2);
+  });
+
+  it("invalidates the handle when the server stops answering, so the next call re-probes", async () => {
     let probeCount = 0;
     let serverUp = true;
     installFetch((url) => {
@@ -245,7 +310,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
         probeCount++;
         return serverUp ? new Response("ok", { status: 200 }) : new Response("", { status: 500 });
       }
-      return new Response("boom", { status: 500, statusText: "Internal Server Error" });
+      throw new Error("ECONNRESET");
     });
     const localKv = new InMemoryKV(undefined);
     await handleToolCall("memory_save", { content: "first fallback" }, localKv);
@@ -400,7 +465,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
         probeStarted++;
         return new Response("ok", { status: 200 });
       }
-      return new Response("not found", { status: 404 });
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
     });
     try {
       const localKv = new InMemoryKV(undefined);
@@ -409,5 +474,44 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     } finally {
       delete process.env["AGENTMEMORY_PROBE_TIMEOUT_MS"];
     }
+  });
+});
+
+describe("@agentmemory/mcp standalone — ~/.agentmemory/.env hydration", () => {
+  const originalHome = process.env["HOME"];
+  let sandboxHome: string;
+
+  beforeEach(() => {
+    sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-mcp-env-"));
+    process.env["HOME"] = sandboxHome;
+    mkdirSync(join(sandboxHome, ".agentmemory"));
+    writeFileSync(join(sandboxHome, ".agentmemory", ".env"), "AGENTMEMORY_SECRET=from-file\n");
+  });
+
+  afterEach(() => {
+    process.env["HOME"] = originalHome;
+    delete process.env["AGENTMEMORY_SECRET"];
+    rmSync(sandboxHome, { recursive: true, force: true });
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["expanded to empty by the MCP host", ""],
+    ["an unexpanded placeholder", "${AGENTMEMORY_SECRET:-}"],
+  ])("fills the secret from the file when it is %s", (_label, value) => {
+    if (value === undefined) delete process.env["AGENTMEMORY_SECRET"];
+    else process.env["AGENTMEMORY_SECRET"] = value;
+
+    hydrateMcpEnv();
+
+    expect(process.env["AGENTMEMORY_SECRET"]).toBe("from-file");
+  });
+
+  it("keeps a real secret the MCP host passed", () => {
+    process.env["AGENTMEMORY_SECRET"] = "from-host";
+
+    hydrateMcpEnv();
+
+    expect(process.env["AGENTMEMORY_SECRET"]).toBe("from-host");
   });
 });

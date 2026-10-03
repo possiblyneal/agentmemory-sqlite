@@ -22,6 +22,7 @@ import type { MetricsStore } from "../eval/metrics-store.js";
 import { safeAudit } from "./audit.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { logger } from "../logger.js";
+import { estimateTokens } from "../utils/tokens.js";
 
 // Per-chunk prompt budget in tokens when a Session is too large to fit in
 // one LLM call. Measured on the Operator's broker: a 50k-token chunk
@@ -59,12 +60,6 @@ function getChunkConcurrency(): number {
   return Number.isFinite(n) && n > 0 ? n : CHUNK_CONCURRENCY_DEFAULT;
 }
 
-// The estimate idiom this tree already uses; it overcounts measured
-// content by ~17%, the safe direction for a budget.
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3);
-}
-
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -81,11 +76,23 @@ async function mapWithConcurrency<T, R>(
   return out;
 }
 
+function fitsOneChunk(counts: number[], budget: number): boolean {
+  const payload = counts.reduce((sum, n) => sum + n + SEPARATOR_TOKENS, 0);
+  return payload <= budget - PROMPT_OVERHEAD_TOKENS;
+}
+
+// A token is rarely shorter than one character, so a Session whose character
+// count already fits one chunk is safe to skip measuring: on a broker that queues
+// tokenize behind generation, one request per Observation is load the summary
+// itself has to wait behind.
 async function countObservationTokens(
   provider: MemoryProvider,
   texts: string[],
+  budget: number,
   sessionId: string,
 ): Promise<number[]> {
+  const estimates = texts.map(estimateTokens);
+  if (fitsOneChunk(texts.map((t) => t.length), budget)) return estimates;
   if (provider.countTokens) {
     try {
       return await mapWithConcurrency(texts, COUNT_CONCURRENCY, (t) =>
@@ -98,7 +105,7 @@ async function countObservationTokens(
       });
     }
   }
-  return texts.map(estimateTokens);
+  return estimates;
 }
 
 // Greedy in-order packing. An Observation that alone exceeds the budget
@@ -184,7 +191,7 @@ async function planChunks(
 ): Promise<CompressedObservation[][]> {
   const budget = getChunkTokens();
   const texts = compressed.map(renderSummaryObservation);
-  const counts = await countObservationTokens(provider, texts, sessionId);
+  const counts = await countObservationTokens(provider, texts, budget, sessionId);
   const chunks = packChunks(compressed, counts, budget, sessionId);
   if (chunks.length > 1) {
     logger.info("Summarize chunking session", {
@@ -459,7 +466,11 @@ export function registerSummarizeFunction(
           }
           logger.warn("Summary validation failed", {
             sessionId,
+            mode,
+            chunks,
             errors: validation.result.errors,
+            narrative: summary.narrative.slice(0, 200),
+            narrativeLength: summary.narrative.length,
           });
           return { success: false, error: "validation_failed" };
         }

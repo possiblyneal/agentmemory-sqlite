@@ -1,4 +1,4 @@
-import type { Adapter, RankedDoc, Session } from "../types.js";
+import { sessionText, type Adapter, type RankedDoc, type Session } from "../types.js";
 
 interface GrepState {
   sessions: Session[];
@@ -14,14 +14,16 @@ function tokenize(s: string): string[] {
 
 export const grepAdapter: Adapter<GrepState> = {
   name: "grep",
+  paths: ["search", "prompt-submit"],
   async init(sessions) {
     return { sessions };
   },
   async query(q, state, k) {
-    const terms = tokenize(q);
+    const terms = tokenize(q.question ?? "");
     const scored: RankedDoc[] = [];
     for (const s of state.sessions) {
-      const body = s.content.toLowerCase();
+      if (q.project && s.project !== q.project) continue;
+      const body = sessionText(s).toLowerCase();
       let hits = 0;
       for (const t of terms) {
         if (body.includes(t)) hits += 1;
@@ -31,6 +33,6 @@ export const grepAdapter: Adapter<GrepState> = {
       }
     }
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, k);
+    return { ranked: scored.slice(0, k) };
   },
 };

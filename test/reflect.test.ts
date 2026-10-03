@@ -5,6 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerReflectFunctions } from "../src/functions/reflect.js";
+import { recordProjectActivity } from "../src/state/project-time.js";
 import type { Insight, GraphNode, GraphEdge, SemanticMemory, Lesson, Crystal } from "../src/types.js";
 
 function mockKV() {
@@ -28,6 +29,19 @@ function mockKV() {
       return entries.length;
     },
     setManyCalls,
+    deleteManyIfUnchanged: async (
+      scope: string,
+      entries: Array<{ key: string; updatedAt: string }>,
+    ): Promise<string[]> => {
+      const deleted: string[] = [];
+      for (const { key, updatedAt } of entries) {
+        const row = store.get(scope)?.get(key) as { updatedAt?: string } | undefined;
+        if (row?.updatedAt !== updatedAt) continue;
+        store.get(scope)!.delete(key);
+        deleted.push(key);
+      }
+      return deleted;
+    },
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
@@ -187,6 +201,48 @@ describe("Reflect", () => {
       expect(insights[0].sourceConceptCluster.length).toBeGreaterThan(0);
     });
 
+    it("keeps seeding clusters past a seed an earlier cluster already absorbed (#1133)", async () => {
+      for (const name of ["auth", "token", "session", "cookie", "expiry", "deploy", "docker", "helm"]) {
+        await kv.set("mem:graph:nodes", `node_${name}`, makeConceptNode(name));
+      }
+      const edges: Array<[string, string]> = [
+        ["auth", "token"], ["auth", "session"], ["auth", "cookie"],
+        ["token", "expiry"], ["token", "session"],
+        ["deploy", "docker"], ["deploy", "helm"],
+      ];
+      for (const [src, tgt] of edges) {
+        await kv.set("mem:graph:edges", `edge_${src}_${tgt}`, makeEdge(src, tgt));
+      }
+
+      const result = (await sdk.trigger("mem::reflect", {})) as {
+        clustersProcessed: number;
+        clustersSkipped: number;
+      };
+
+      expect(result.clustersProcessed + result.clustersSkipped).toBe(2);
+    });
+
+    it("never puts a concept in two clusters (#1133)", async () => {
+      const chain = ["c1", "c2", "c3", "c4", "c5", "c6"];
+      for (const name of chain) {
+        await kv.set("mem:graph:nodes", `node_${name}`, makeConceptNode(name));
+      }
+      for (let i = 0; i < chain.length - 1; i++) {
+        await kv.set("mem:graph:edges", `edge_${i}`, makeEdge(chain[i]!, chain[i + 1]!));
+      }
+      for (let i = 0; i < 3; i++) {
+        await kv.set("mem:semantic", `sem_${i}`, makeSemantic(`c3 and c4 fact ${i}`));
+      }
+
+      const result = (await sdk.trigger("mem::reflect", {})) as {
+        clustersProcessed: number;
+        clustersSkipped: number;
+      };
+
+      expect(result.clustersProcessed).toBe(1);
+      expect(result.clustersSkipped).toBe(1);
+    });
+
     it("skips clusters with fewer than 3 supporting items", async () => {
       await kv.set("mem:graph:nodes", "node_sparse", makeConceptNode("sparse"));
       await kv.set("mem:graph:nodes", "node_topic", makeConceptNode("topic"));
@@ -201,6 +257,64 @@ describe("Reflect", () => {
       expect(result.clustersSkipped).toBe(1);
       expect(result.newInsights).toBe(0);
       expect(provider.summarize).not.toHaveBeenCalled();
+    });
+
+    it("fits a large cluster to its prompt budget, lessons first then the strongest facts", async () => {
+      await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
+      await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
+      await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+      for (let i = 0; i < 300; i++) {
+        await kv.set("mem:semantic", `sem_${i}`, {
+          ...makeSemantic(`security fact ${i} ${"x".repeat(400)}`, `sem_${i}`),
+          confidence: i / 300,
+        });
+      }
+      await kv.set("mem:lessons", "lsn_1", makeLesson("Use execFile for security", ["security"]));
+
+      await sdk.trigger("mem::reflect", {});
+
+      const prompt = String(provider.summarize.mock.calls[0]![1]);
+      expect(prompt.length).toBeLessThanOrEqual(24_000);
+      expect(prompt).toContain("Use execFile for security");
+      expect(prompt).toContain("security fact 299 ");
+      expect(prompt).not.toContain("security fact 0 ");
+      const [insight] = await kv.list<Insight>("mem:insights");
+      expect(insight!.sourceMemoryIds).toContain("sem_299");
+      expect(insight!.sourceMemoryIds).not.toContain("sem_0");
+    });
+
+    it("skips a cluster left with fewer than 3 items after fitting its budget", async () => {
+      await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
+      await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
+      await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+      await kv.set("mem:semantic", "sem_small", makeSemantic("security fact small", "sem_small"));
+      for (let i = 0; i < 3; i++) {
+        await kv.set("mem:semantic", `sem_big_${i}`, makeSemantic(`security fact ${i} ${"x".repeat(30_000)}`, `sem_big_${i}`));
+      }
+
+      const result = (await sdk.trigger("mem::reflect", {})) as { clustersSkipped: number };
+
+      expect(result.clustersSkipped).toBe(1);
+      expect(provider.summarize).not.toHaveBeenCalled();
+    });
+
+    it("fills the budget with the newest crystals first", async () => {
+      await kv.set("mem:graph:nodes", "node_security", makeConceptNode("security"));
+      await kv.set("mem:graph:nodes", "node_validation", makeConceptNode("validation"));
+      await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+      for (let i = 0; i < 100; i++) {
+        await kv.set("mem:crystals", `crys_${i}`, {
+          ...makeCrystal(`crystal ${i} ${"y".repeat(400)}`, ["security matters"]),
+          id: `crys_${i}`,
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+        });
+      }
+
+      await sdk.trigger("mem::reflect", {});
+
+      const prompt = String(provider.summarize.mock.calls[0]![1]);
+      expect(prompt).toContain("crystal 99 ");
+      expect(prompt).not.toContain("crystal 0 ");
     });
 
     it("deduplicates insights by fingerprint", async () => {
@@ -295,6 +409,17 @@ describe("Reflect", () => {
       const result = (await sdk.trigger("mem::insight-list", { minConfidence: 0.5 })) as { insights: Insight[] };
       expect(result.insights.length).toBe(1);
     });
+
+    it("reports the filtered total beyond the limit", async () => {
+      const result = (await sdk.trigger("mem::insight-list", { limit: 1 })) as { insights: Insight[]; total: number };
+      expect(result.insights.length).toBe(1);
+      expect(result.total).toBe(2);
+    });
+
+    it("reports the total after filtering", async () => {
+      const result = (await sdk.trigger("mem::insight-list", { minConfidence: 0.5 })) as { total: number };
+      expect(result.total).toBe(1);
+    });
   });
 
   describe("mem::insight-search", () => {
@@ -324,6 +449,10 @@ describe("Reflect", () => {
   });
 
   describe("mem::insight-decay-sweep", () => {
+    beforeEach(async () => {
+      await recordProjectActivity(kv as never, "/active", new Date().toISOString());
+    });
+
     it("decays old insights incrementally", async () => {
       await kv.set("mem:insights", "ins_old", {
         id: "ins_old", title: "Old", content: "Old insight", confidence: 0.8,
@@ -342,7 +471,7 @@ describe("Reflect", () => {
       expect(after!.lastDecayedAt).toBeDefined();
     });
 
-    it("soft-deletes low-confidence unreinforced insights", async () => {
+    it("deletes low-confidence unreinforced insights", async () => {
       await kv.set("mem:insights", "ins_weak", {
         id: "ins_weak", title: "Weak", content: "Weak insight", confidence: 0.12,
         reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
@@ -352,11 +481,104 @@ describe("Reflect", () => {
         decayRate: 0.05,
       });
 
-      const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { softDeleted: number };
-      expect(result.softDeleted).toBe(1);
+      const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+      expect(result.deleted).toBe(1);
 
-      const after = await kv.get<Insight>("mem:insights", "ins_weak");
-      expect(after!.deleted).toBe(true);
+      expect(await kv.get<Insight>("mem:insights", "ins_weak")).toBeNull();
     });
+
+    it("deletes insights an earlier sweep only marked deleted", async () => {
+      await kv.set("mem:insights", "ins_tombstone", {
+        id: "ins_tombstone", title: "Tombstone", content: "Tombstone insight", confidence: 0.1,
+        reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
+        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        decayRate: 0.05,
+        deleted: true,
+      });
+
+      const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+      expect(result.deleted).toBe(1);
+
+      expect(await kv.get<Insight>("mem:insights", "ins_tombstone")).toBeNull();
+    });
+
+    it("keeps an Insight reflect rewrote after the sweep read it", async () => {
+      const tombstone = {
+        id: "ins_regen", title: "Regen", content: "Regen insight", confidence: 0.1,
+        reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
+        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        decayRate: 0.05,
+        deleted: true,
+      };
+      await kv.set("mem:insights", "ins_regen", tombstone);
+      const setMany = kv.setMany;
+      kv.setMany = async (scope, entries) => {
+        await kv.set("mem:insights", "ins_regen", {
+          ...tombstone, deleted: undefined, confidence: 0.6, updatedAt: new Date().toISOString(),
+        });
+        return setMany(scope, entries);
+      };
+
+      const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+      expect(result.deleted).toBe(0);
+
+      const after = await kv.get<Insight>("mem:insights", "ins_regen");
+      expect(after!.confidence).toBe(0.6);
+    });
+
+    it("names the deleted Insights in the audit apart from the decayed ones", async () => {
+      const old = new Date(Date.now() - 21 * 86400000).toISOString();
+      const base = {
+        sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+        tags: [], createdAt: old, updatedAt: old, decayRate: 0.05,
+      };
+      await kv.set("mem:insights", "ins_keep", {
+        ...base, id: "ins_keep", title: "Keep", content: "Keep", confidence: 0.8, reinforcements: 1,
+      });
+      await kv.set("mem:insights", "ins_drop", {
+        ...base, id: "ins_drop", title: "Drop", content: "Drop", confidence: 0.12, reinforcements: 0,
+      });
+
+      await sdk.trigger("mem::insight-decay-sweep", {});
+
+      const [entry] = await kv.list<{ targetIds: string[]; details: Record<string, unknown> }>("mem:audit");
+      expect(entry.targetIds.sort()).toEqual(["ins_drop", "ins_keep"]);
+      expect(entry.details).toMatchObject({ decayed: 1, deleted: 1, deletedIds: ["ins_drop"] });
+    });
+  });
+});
+
+describe("mem::reflect project scope (#1344)", () => {
+  it("builds a project's insights only from that project's facts, crystals and concepts", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue(XML_RESPONSE) };
+    registerReflectFunctions(sdk as never, kv as never, provider as never);
+    await kv.set("mem:sessions", "ses_a", { id: "ses_a", project: "alpha" });
+    await kv.set("mem:sessions", "ses_b", { id: "ses_b", project: "beta" });
+    for (const [name, sessionId] of [["security", "ses_a"], ["validation", "ses_a"], ["beta", "ses_b"]]) {
+      await kv.set("mem:graph:nodes", `node_${name}`, { ...makeConceptNode(name), sessionId });
+    }
+    await kv.set("mem:graph:edges", "edge_1", makeEdge("security", "validation"));
+    await kv.set("mem:graph:edges", "edge_2", makeEdge("security", "beta"));
+    const alphaFacts = ["Always validate security inputs", "Testing improves security coverage", "Validation prevents injection"];
+    for (const [i, fact] of alphaFacts.entries()) {
+      await kv.set("mem:semantic", `sem_a${i}`, { ...makeSemantic(fact, `sem_a${i}`), sourceSessionIds: ["ses_a"] });
+    }
+    await kv.set("mem:semantic", "sem_b", { ...makeSemantic("Beta security keys live in vault", "sem_b"), sourceSessionIds: ["ses_b"] });
+    await kv.set("mem:crystals", "crys_b", { ...makeCrystal("beta work", ["Beta security rotates weekly"]), project: "beta" });
+
+    await sdk.trigger("mem::reflect", { project: "alpha" });
+
+    expect(provider.summarize).toHaveBeenCalled();
+    for (const [, prompt] of provider.summarize.mock.calls) {
+      expect(String(prompt)).not.toMatch(/beta/i);
+    }
+    const insights = await kv.list<Insight>("mem:insights");
+    expect(insights.every((i) => i.project === "alpha")).toBe(true);
   });
 });

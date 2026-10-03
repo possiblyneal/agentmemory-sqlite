@@ -26,6 +26,19 @@ describe("inproc state store", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("lists the scopes under a prefix and nothing beside it", async () => {
+    const fns = stateFunctions(store);
+    for (const scope of ["mem:obs:a", "mem:obs:b", "mem:obs;x", "mem:sessions"]) {
+      await fns["state::set"]({ scope, key: "k", value: 1 });
+    }
+    await fns["state::set"]({ scope: "mem:obs:a", key: "k2", value: 2 });
+
+    expect((await fns["state::list-scopes"]({ prefix: "mem:obs:" }) as string[]).sort()).toEqual([
+      "mem:obs:a",
+      "mem:obs:b",
+    ]);
+  });
+
   it("round-trips all five operations", async () => {
     const fns = stateFunctions(store);
 
@@ -323,6 +336,30 @@ describe("inproc state store: batched writes and event-loop cooperation", () => 
       }),
     ).rejects.toThrow();
     expect(await fns["state::get"]({ scope: "s", key: "x" })).toBeNull();
+    expect(store.db.isTransaction).toBe(false);
+  });
+
+  it("state::delete-many-if-unchanged deletes only rows whose updatedAt still matches", async () => {
+    const fns = stateFunctions(store);
+    const events: StateEvent[] = [];
+    store.watchScope("s");
+    store.onEvent((e) => events.push(e));
+    await fns["state::set"]({ scope: "s", key: "same", value: { updatedAt: "t1" } });
+    await fns["state::set"]({ scope: "s", key: "rewritten", value: { updatedAt: "t2" } });
+    events.length = 0;
+
+    const deleted = await fns["state::delete-many-if-unchanged"]({
+      scope: "s",
+      entries: [
+        { key: "same", updatedAt: "t1" },
+        { key: "rewritten", updatedAt: "t1" },
+        { key: "missing", updatedAt: "t1" },
+      ],
+    });
+
+    expect(deleted).toEqual(["same"]);
+    expect(await fns["state::list"]({ scope: "s" })).toEqual([{ updatedAt: "t2" }]);
+    expect(events.map((e) => [e.event_type, e.key])).toEqual([["state:deleted", "same"]]);
     expect(store.db.isTransaction).toBe(false);
   });
 

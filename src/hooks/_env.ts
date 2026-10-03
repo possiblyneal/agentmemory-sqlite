@@ -2,11 +2,9 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// Hook scripts run as fresh Node processes that never import the Engine, so
-// a setting the Operator placed in ~/.agentmemory/.env reaches them only
-// through this loader. Same parse rules as the daemon's env file reader; a
-// key already present in process.env wins. The daemon's loader imports this
-// parser, so both read the file by the same rules.
+// The one reader of ~/.agentmemory/.env, shared by the daemon's config, the
+// hook scripts, the standalone MCP server and doctor. It lives under hooks/
+// because hook bundles must not pull in config.ts and its logger state.
 export function parseEnvFile(content: string): Record<string, string> {
   const vars: Record<string, string> = {};
   for (const line of content.split("\n")) {
@@ -29,14 +27,49 @@ export function parseEnvFile(content: string): Record<string, string> {
   return vars;
 }
 
-export function hydrateHookEnv(): void {
-  let content: string;
+export function envFilePath(): string {
+  return join(homedir(), ".agentmemory", ".env");
+}
+
+// A missing file is an empty one; any other read error reaches the caller.
+export function readEnvFile(): Record<string, string> {
   try {
-    content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
-  } catch {
-    return;
+    return parseEnvFile(readFileSync(envFilePath(), "utf-8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw err;
   }
-  for (const [key, value] of Object.entries(parseEnvFile(content))) {
-    if (process.env[key] === undefined) process.env[key] = value;
+}
+
+// Memoized per path: getMergedEnv() runs on every config getter, so the daemon
+// would otherwise reread the file dozens of times per request. Keying on the
+// path keeps a test that points HOME elsewhere from reading a stale file.
+let envFileCache: { path: string; vars: Record<string, string> } | undefined;
+
+export function loadEnvFile(): Record<string, string> {
+  const path = envFilePath();
+  if (envFileCache?.path === path) return envFileCache.vars;
+  const vars = readEnvFile();
+  envFileCache = { path, vars };
+  return vars;
+}
+
+// Test hook for a test that rewrites the file without reloading this module.
+export function __resetEnvFileCache(): void {
+  envFileCache = undefined;
+}
+
+// Copies the env file into process.env for every key the caller's isUnset
+// says has no value yet, so a value already in process.env wins.
+export function hydrateEnvFromFile(isUnset: (current: string | undefined) => boolean): void {
+  for (const [key, value] of Object.entries(loadEnvFile())) {
+    if (isUnset(process.env[key])) process.env[key] = value;
   }
+}
+
+// A hook is never on the critical path, so an unreadable file means no settings.
+export function hydrateHookEnv(): void {
+  try {
+    hydrateEnvFromFile((current) => current === undefined);
+  } catch {}
 }

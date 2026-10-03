@@ -18,7 +18,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerEventTriggers } from "../src/triggers/events.js";
-import { persistGraphDelta, registerGraphFunction } from "../src/functions/graph.js";
+import { graphWritesOffReason, persistGraphDelta, registerGraphFunction } from "../src/functions/graph.js";
 import { registerExportImportFunction } from "../src/functions/export-import.js";
 import { KV } from "../src/state/schema.js";
 import type { CompressedObservation } from "../src/types.js";
@@ -41,11 +41,12 @@ const OBS: CompressedObservation = {
   importance: 7,
 };
 
-// Spy KV: serves the seeded observation, records every set as [scope, key].
+// Spy KV: serves the seeded Session and observation, records every set as [scope, key].
 function spyKV() {
   const store = new Map<string, Map<string, unknown>>();
   const sets: Array<[string, string]> = [];
   store.set(KV.observations(SESSION), new Map([[OBS.id, OBS]]));
+  store.set(KV.sessions, new Map([[SESSION, { id: SESSION }]]));
   return {
     sets,
     get: async <T>(scope: string, key: string): Promise<T | null> =>
@@ -189,5 +190,18 @@ describe("graph write posture (graph-off fork)", () => {
     const scopes = new Set(graphWrites(kv).map(([scope]) => scope));
     expect(scopes.has(KV.graphNodes)).toBe(true);
     expect(scopes.has(KV.graphNameIndex)).toBe(true);
+  });
+
+  it.each([
+    [{ GRAPH_EXTRACTION_ENABLED: "true" }, null],
+    [{ GRAPH_EXTRACTION_ENABLED: "false" }, "GRAPH_EXTRACTION_ENABLED is not true"],
+    [{ GRAPH_EXTRACTION_ENABLED: "true", AGENTMEMORY_GRAPH_LEG: "off" }, "AGENTMEMORY_GRAPH_LEG=off"],
+    [
+      { GRAPH_EXTRACTION_ENABLED: "false", AGENTMEMORY_GRAPH_LEG: "off" },
+      "GRAPH_EXTRACTION_ENABLED is not true, AGENTMEMORY_GRAPH_LEG=off",
+    ],
+  ])("names every gate that keeps graph writes off: %o", (env, reason) => {
+    setEnv(env);
+    expect(graphWritesOffReason()).toBe(reason);
   });
 });

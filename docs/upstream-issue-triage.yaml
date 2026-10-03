@@ -61,7 +61,8 @@ issues:
     difficulty: med
     kind: bug
     note: "OpenClaw plugin hook signatures do not match the SDK, so chat capture is a no-op."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/262
   - number: 263
     title: "Consider implementing regex safety for Sentinels pattern matching"
@@ -69,7 +70,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Sentinel patterns compile user regex directly; ReDoS on the observation path."
-    disposition: candidate
+    disposition: wont-fix
+    status: "partly-present-here — 7a61eaa, d2af32a: create rejects an invalid or >500-char pattern and sentinel-check logs and skips a stored bad pattern (src/functions/sentinels.ts compilePattern). Catastrophic backtracking within 500 chars is still possible."
+    wont_fix_reason: "mem::sentinel-check runs only through an authenticated POST /agentmemory/sentinels/check that nothing in this tree calls — no MCP tool, hook or timer — so a slow pattern stalls only the caller who wrote it; a linear-time engine is a new dependency for no reachable path."
     url: https://github.com/rohitg00/agentmemory/issues/263
     fix_prs: [297]
   - number: 274
@@ -87,7 +90,9 @@ issues:
     difficulty: low
     kind: bug
     note: "summary and firstPrompt written to the same truncated title (api.ts:542)."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "4b995fa"
+    status: "fixed-here — 4b995fa: session/start records the title as firstPrompt only; summary is left to the summarizer (src/triggers/api.ts api::session::start). test/session-start-title.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/276
   - number: 299
     title: "Viewer UI shows empty state when fronted by a reverse proxy on standard ports (80/443) — JS hardcodes :3113"
@@ -179,7 +184,7 @@ issues:
     kind: bug
     note: "Codex plugin starts the shim without env, so only core tools are exposed."
     disposition: wont-fix
-    wont_fix_reason: "unsupported host — Codex and Cursor are not supported here"
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/400
   - number: 420
     title: "Feature: memory_signal_peek tool (read-only signal listing, no readAt mark)"
@@ -222,7 +227,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Native hooks / auto context injection for OpenCode."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/431
   - number: 433
     title: "Expose agent_id / session_id in /agentmemory/audit so external rate-limiters can scope per-agent"
@@ -293,7 +299,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Eviction timer plus env toggle for mem::evict, matching mem::auto-forget."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "EVICTION_ENABLED gates a sweep 5 min after boot, then every 24h (src/index.ts:614-624)."
     url: https://github.com/rohitg00/agentmemory/issues/480
     fix_prs: [490]
   - number: 483
@@ -466,7 +473,8 @@ issues:
     difficulty: med
     kind: bug
     note: "OpenClaw integration has no session/user scoping; cross-user memory leakage."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/596
     mentioned_by_prs: [598]
   - number: 600
@@ -561,7 +569,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Hermes saved plugin config is written but never read at runtime."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/658
     fix_prs: [663]
   - number: 668
@@ -638,7 +647,8 @@ issues:
     difficulty: med
     kind: feature
     note: "OpenClaw plugin with hook-based auto-capture, not just MCP tools."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/714
   - number: 715
     title: "Bug: `crypto.randomUUID()` breaks on Node.js < 19"
@@ -699,7 +709,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Hook resolveProject is not worktree-aware, so each worktree is its own memory silo."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 1dc4d43: resolveProject names a linked worktree after its main checkout (parent of --git-common-dir when it is a .git folder), falling back to the toplevel basename. Sessions already filed under a worktree name are not migrated."
+    fixed_by: "1dc4d43"
     url: https://github.com/rohitg00/agentmemory/issues/728
   - number: 730
     title: "feat: add Nix flake support for one-command installation"
@@ -733,7 +745,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Support the Hermes Agent JSONL schema in import-jsonl."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/736
   - number: 737
     title: "feat(recovery): abandoned session detection and backfill for abruptly terminated sessions"
@@ -757,7 +770,8 @@ issues:
     difficulty: low
     kind: bug
     note: "stop hook ends the session on every assistant pause, marking live sessions completed."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "stop hook sends turnEnd (src/hooks/stop.ts:49-53); api.ts:723-762 defers end via endWhenIdle (30 min, re-armed on new observations)."
     url: https://github.com/rohitg00/agentmemory/issues/745
     fix_prs: [1288]
   - number: 747
@@ -841,8 +855,9 @@ issues:
     difficulty: low
     kind: bug
     note: "MCP search tools and /smart-search ignore project, so reads are unscoped."
-    disposition: candidate
-    status: "present-here — mem::search accepts project (src/functions/search.ts:514) and mem::smart-search accepts it too (src/functions/smart-search.ts:88), but neither MCP handler forwards args.project — memory_recall sends only query/limit/format/token_budget/agentId (src/mcp/server.ts:145) and memory_smart_search only query/expandIds/limit (src/mcp/server.ts:346). Every MCP read is cross-project."
+    disposition: already-fixed
+    fixed_by: "memory_recall and memory_smart_search advertise and forward project on both MCP surfaces (src/mcp/server.ts, src/mcp/standalone.ts), and mem::smart-search filters its hybrid results through createProjectMatcher, the rule mem::search uses (src/functions/search.ts)."
+    status: "fixed-here — memory_recall and memory_smart_search advertise and forward project on both MCP surfaces (src/mcp/server.ts, src/mcp/standalone.ts), and mem::smart-search filters its hybrid results through createProjectMatcher, the rule mem::search uses (src/functions/search.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/787
     fix_prs: [869]
     mentioned_by_prs: [1195]
@@ -870,7 +885,8 @@ issues:
     difficulty: low
     kind: bug
     note: "OpenRouterEmbeddingProvider hardcodes 1536 dimensions."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "resolveDimensions with OPENROUTER_EMBEDDING_DIMENSIONS, unknown models throw (src/providers/embedding/openrouter.ts:20-23, _dimensions.ts:46-55)."
     url: https://github.com/rohitg00/agentmemory/issues/809
     fix_prs: [811, 856]
   - number: 817
@@ -898,7 +914,9 @@ issues:
     difficulty: med
     kind: bug
     note: "memory_governance_delete returns deleted:0 for valid memory_save ids."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "memory_save stores through mem::remember into KV.memories, the scope governance delete reads; test/forget-by-id-surfaces.test.ts deletes a memory_save id with deleted:1."
+    status: "fixed-here — memory_save stores through mem::remember into KV.memories, the scope governance delete reads; test/forget-by-id-surfaces.test.ts deletes a memory_save id with deleted:1."
     url: https://github.com/rohitg00/agentmemory/issues/820
   - number: 825
     title: "Bug: no path to rebuild or reset a >25K legacy graph — snapshot-rebuild + graph-reset both heartbeat-crash on state::list (follow-up to #816)"
@@ -914,7 +932,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Expose post-tool-use and TaskCompleted hooks to the Python/Hermes plugin."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/826
   - number: 828
     title: "Bug: entity-graph query/traversal (graph-query query + startNodeId) heartbeat-crashes past ~25K nodes on FRESH corpora — needs the per-node edge index #816 references"
@@ -931,7 +950,9 @@ issues:
     difficulty: med
     kind: bug
     note: "forget reports success while deleting nothing; governance delete never targets observations."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
+    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
     url: https://github.com/rohitg00/agentmemory/issues/833
   - number: 834
     title: "on_memory_write hook: smarter sync — skip add/update, archive on remove"
@@ -995,7 +1016,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Agent picker selection of OpenCode resolves to Claude Code."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/873
   - number: 874
     title: "doctor: \"iii-on-path-not-local-bin\" and fixes is a no-op -- install succeeds but check still finds other binary first"
@@ -1154,7 +1176,8 @@ issues:
     difficulty: low
     kind: bug
     note: "connect opencode fails with Unknown agent despite appearing in the picker."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/912
   - number: 913
     title: "Windows: engine state store silently falls back to in-memory (total data loss on restart) — relative `./data/` path + detached spawn without `cwd`"
@@ -1179,7 +1202,9 @@ issues:
     difficulty: low
     kind: bug
     note: "GET /agentmemory/memories ignores the project query param."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "b6e756f"
+    status: "fixed-here — b6e756f: api::memories filters on the project query param, matching it exactly, before counting and paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/918
     fix_prs: [988]
   - number: 919
@@ -1242,7 +1267,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Replace-import wipes KV but leaves the search indices stale until restart."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Replace-import deletes through deleteIndexed and merge/replace index what they write via indexRecords (src/functions/export-import.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/938
   - number: 944
     title: "[viewer] Agentmemory Token Savings always 0% — estInjected counts all sessions, not just active"
@@ -1292,8 +1318,8 @@ issues:
     difficulty: low
     kind: bug
     note: "connect zed overwrites the user's entire settings.json instead of merging."
-    disposition: already-fixed
-    fixed_by: "connect zed merges into context_servers (src/cli/connect/zed.ts:18)."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/952
     fix_prs: [966]
   - number: 964
@@ -1320,7 +1346,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Observations containing CJK text hang import and live ingestion indefinitely."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — no hang found: the CJK tokenizer makes one forward-only pass (src/state/cjk-segmenter.ts) and truncation cuts by string length; no loop over text can stall."
+    fixed_by: "src/state/cjk-segmenter.ts makes one forward-only pass; no loop over text can stall."
     url: https://github.com/rohitg00/agentmemory/issues/969
   - number: 972
     title: "Add an optional HVTracker trust badge to the README"
@@ -1391,7 +1419,8 @@ issues:
     difficulty: low
     kind: bug
     note: "opencode plugin falls back to a hash project id when ctx.worktree is null."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/987
   - number: 990
     title: "GET /agentmemory/memories?latest=true returns oldest memories first — viewer shows stale data when corpus > limit"
@@ -1399,7 +1428,9 @@ issues:
     difficulty: low
     kind: bug
     note: "memories?latest=true returns the oldest rows, so the viewer shows stale data."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "b6e756f"
+    status: "fixed-here — b6e756f: api::memories sorts newest first on createdAt (fallback updatedAt for rows without one) before paging (src/triggers/api.ts); test/list-routes-paging.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/990
   - number: 991
     title: "SessionEnd hook reports \"Hook cancelled\" on exit (1.5s deferred exit outlives shutdown grace)"
@@ -1416,7 +1447,9 @@ issues:
     difficulty: low
     kind: bug
     note: "post-tool-use records agentmemory's own MCP calls, polluting recall."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — b082b94: AGENTMEMORY_INDEX_EXCLUDE_TOOL_PREFIXES defaults to mcp__plugin_agentmemory_agentmemory__,mcp__agentmemory__, so agentmemory's own MCP calls are stored but not indexed; set it empty to index everything."
+    fixed_by: "b082b94"
     url: https://github.com/rohitg00/agentmemory/issues/993
     fix_prs: [994, 1044]
   - number: 996
@@ -1434,7 +1467,7 @@ issues:
     kind: docs
     note: "Hook skill wording misleads Codex users about which hooks exist."
     disposition: wont-fix
-    wont_fix_reason: "unsupported host — Codex and Cursor are not supported here"
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/998
   - number: 1003
     title: "Graph extraction always 404s: requests retired model `claude-3-haiku-20240307`, ignores ANTHROPIC_MODEL"
@@ -1459,7 +1492,9 @@ issues:
     difficulty: low
     kind: bug
     note: "POST /agentmemory/consolidate 500s with an unhandled [object Object] error."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "3c2660c, 804d01d"
+    status: "fixed-here — 3c2660c, 804d01d: api::consolidate, api::patterns and api::generate-rules whitelist their fields from req.body ?? {}, so a bodyless POST reaches the function as {}, and /consolidate answers 400 to a minObservations that is not a positive integer (src/triggers/api.ts); test/api-bodyless-post.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1008
     fix_prs: [1041]
   - number: 1009
@@ -1503,7 +1538,8 @@ issues:
     difficulty: low
     kind: bug
     note: "ResilientProvider renames noop, so the summarize short-circuit can never fire."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "isNoopProvider unwraps resilient(...) names (src/providers/noop.ts:22-34), and the summarize and graph gates use it."
     url: https://github.com/rohitg00/agentmemory/issues/1020
     fix_prs: [1040]
   - number: 1022
@@ -1578,7 +1614,8 @@ issues:
     difficulty: low
     kind: bug
     note: "connect antigravity cannot detect the agy CLI v1.1.0 on PATH."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1031
   - number: 1035
     title: "pi: extension throws stale ctx after await getHealth() in refreshStatus"
@@ -1586,7 +1623,8 @@ issues:
     difficulty: low
     kind: bug
     note: "pi extension throws on stale ctx after awaiting getHealth in refreshStatus."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1035
     fix_prs: [1036]
   - number: 1047
@@ -1595,7 +1633,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Hooks crash with exit 1 when the payload JSON is literal null (unguarded data access)."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Every hook returns on a null or non-object payload right after parsing (e.g. src/hooks/post-tool-use.ts:30, src/hooks/prompt-submit.ts:33)."
     url: https://github.com/rohitg00/agentmemory/issues/1047
   - number: 1048
     title: "feat: add support for gemini-embedding-2 and make Gemini embedding model configurable"
@@ -1620,7 +1659,8 @@ issues:
     difficulty: med
     kind: bug
     note: "OpenClaw agent_end omits project/cwd, so turns are never persisted and sessions stay active."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1058
     mentioned_by_prs: [1252]
   - number: 1059
@@ -1637,7 +1677,8 @@ issues:
     difficulty: low
     kind: bug
     note: "getVisibleTools reads process.env directly, ignoring ~/.agentmemory/.env."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "The daemon hydrates ~/.agentmemory/.env into process.env at boot (src/index.ts:169, src/config.ts:63-68) before getVisibleTools runs (src/mcp/server.ts:78); the proxy shim takes its list from the daemon."
     url: https://github.com/rohitg00/agentmemory/issues/1060
   - number: 1062
     title: "Session stop triggers mem::summarize twice; unchanged sessions are fully re-summarized on every stop"
@@ -1645,8 +1686,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Session stop dispatches mem::summarize twice, each re-summarizing from scratch."
-    disposition: candidate
-    status: "partly-present-here — The double dispatch is fixed: the Stop hook posts only /session/end and cites this class of bug (src/hooks/stop.ts:43). The re-summarize half is live — mem::summarize never reads KV.summaries before running (src/functions/summarize.ts:235-360), so every stop is a full LLM pass over every compressed observation."
+    disposition: already-fixed
+    fixed_by: "The Stop hook posts only /session/end (src/hooks/stop.ts), and mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
+    status: "fixed-here — The Stop hook posts only /session/end (src/hooks/stop.ts), and mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
     url: https://github.com/rohitg00/agentmemory/issues/1062
     fix_prs: [1061]
   - number: 1063
@@ -1656,6 +1698,7 @@ issues:
     kind: bug
     note: "Session stop re-extracts the full observation set with no change detection."
     disposition: candidate
+    status: "present-here — event::session::stopped sends every session observation to mem::graph-extract with no watermark (src/triggers/events.ts:116-124, src/functions/graph.ts:898-958); gated off by default."
     url: https://github.com/rohitg00/agentmemory/issues/1063
     fix_prs: [1061, 1280]
   - number: 1064
@@ -1664,7 +1707,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Claude Code summarizer and Warmup transcripts ingested as real phantom sessions."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 2f99c65: import-jsonl skips a transcript whose first prompt is Warmup or the conversation-list summary instruction. Live store had 0 such sessions; hooks already drop SDK child runs via isSdkChildContext."
+    fixed_by: "2f99c65"
     url: https://github.com/rohitg00/agentmemory/issues/1064
   - number: 1065
     title: "lesson-recall default minConfidence (0.1) + decay + auto-prune make most auto-consolidated lessons invisible, with no config override"
@@ -1672,8 +1717,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Default minConfidence plus decay hides 438 of 439 lessons from recall, with no override."
-    disposition: candidate
-    status: "present-here — mem::lesson-recall defaults minConfidence to 0.1 and drops anything below it (src/functions/lessons.ts:159,173). The decay sweep floors confidence at 0.05 (src/functions/lessons.ts:320), so a decayed lesson lands in 0.05-0.1 and is invisible at the default. Upstream's \"no override\" is wrong — the param is exposed."
+    disposition: already-fixed
+    status: "fixed-here — 98d246c: mem::lesson-recall defaults minConfidence to 0, so a lesson decayed to the 0.05 floor is still recalled."
+    fixed_by: "98d246c"
     url: https://github.com/rohitg00/agentmemory/issues/1065
   - number: 1066
     title: "memory_heal claims \"fixable\": true for project-scope backfill but the heal step does nothing ({\"fixed\":0,\"skipped\":0})"
@@ -1775,7 +1821,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Droid MCP tools lack risk annotations, forcing approval at every autonomy level."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1097
     fix_prs: [1098]
   - number: 1103
@@ -1793,7 +1840,7 @@ issues:
     kind: feature
     note: "Community Windows + Codex Desktop plugin with autostart, MCP, hooks and a troubleshooting skill."
     disposition: wont-fix
-    wont_fix_reason: "unsupported host — Codex and Cursor are not supported here"
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1104
   - number: 1105
     title: "memory_action_create MCP tool drops createdBy, unlike lease/frontier tools which correctly pass agentId"
@@ -1810,7 +1857,8 @@ issues:
     difficulty: low
     kind: bug
     note: "AGENTMEMORY_TOOLS in ~/.agentmemory/.env ignored; duplicate of 1060."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Duplicate of #1060. The daemon hydrates ~/.agentmemory/.env into process.env at boot (src/index.ts:169, src/config.ts:63-68) before getVisibleTools runs (src/mcp/server.ts:78); the proxy shim takes its list from the daemon."
     url: https://github.com/rohitg00/agentmemory/issues/1106
   - number: 1108
     title: "\"project\"-scoped memory slots (project_context, pending_items, self_notes, session_patterns) are actually global, not per-project"
@@ -1827,7 +1875,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Summary concepts are concatenated without dedupe and silently emitted empty when chunks fail."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Chunks merge via an LLM reduce told to dedupe concepts (src/functions/summarize.ts:278-282, prompts/summary.ts); >50% skipped chunks throws, fewer logs a warning (summarize.ts:248-258)."
     url: https://github.com/rohitg00/agentmemory/issues/1114
   - number: 1115
     title: "Orphaned index generations accumulate when the previous manifest read fails — store grows until the server pegs a core while idle"
@@ -1887,7 +1936,9 @@ issues:
     difficulty: med
     kind: bug
     note: "The Stop hook re-summarizes the whole session every assistant turn; cost is quadratic."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Stop posts a turn end, and api::session::end holds it until the Session has gone 30 minutes with no turn and no new Observation; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
+    status: "fixed-here — Stop posts a turn end, and api::session::end holds it until the Session has gone 30 minutes with no turn and no new Observation; SessionEnd ends at once (src/triggers/api.ts, src/hooks/stop.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1131
     fix_prs: [1269]
   - number: 1133
@@ -1896,7 +1947,9 @@ issues:
     difficulty: low
     kind: bug
     note: "buildGraphClusters breaks instead of continuing on a visited seed, collapsing insights into mega-clusters."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "b77978f, f7b3d5f"
+    status: "fixed-here — b77978f, f7b3d5f: a visited seed now continues and only the cap breaks, the BFS skips concepts an earlier cluster took so no concept lands in two clusters, and nodes are looked up by id instead of a linear find (src/functions/reflect.ts buildGraphClusters); test/reflect.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1133
     fix_prs: [1243, 1343]
   - number: 1140
@@ -1990,7 +2043,8 @@ issues:
     difficulty: med
     kind: bug
     note: "OpenClaw recall hook never fires: before_agent_start is not a typed plugin hook."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1161
   - number: 1162
     title: "Engine SDK port 49134 is inside the Linux ephemeral range — silent bind failure, infinite worker retry loop"
@@ -2007,7 +2061,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Imported observations are never added to the BM25 index and have no reindex path."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Imports index what they write via indexRecords (src/functions/export-import.ts, src/functions/replay.ts); BM25 is rebuilt from content rows on every boot."
     url: https://github.com/rohitg00/agentmemory/issues/1163
     mentioned_by_prs: [1187]
   - number: 1165
@@ -2016,7 +2071,8 @@ issues:
     difficulty: low
     kind: bug
     note: "connect cannot reach the antigravity agy CLI."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1165
   - number: 1166
     title: "memory_diagnose reports all checks PASS on a completely empty store — data loss is indistinguishable from a healthy store"
@@ -2024,7 +2080,9 @@ issues:
     difficulty: low
     kind: bug
     note: "memory_diagnose reports 15/15 PASS on an empty store, so data loss looks healthy."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "6b5c13e, c7d0c66"
+    status: "fixed-here — 6b5c13e, c7d0c66: mem::diagnose FAILs store-unwritable when a write to the store is rejected or not read back, and warns sessions-empty when no Session is recorded, so a broken or empty store no longer reports all PASS (src/functions/diagnostics.ts); test/diagnostics.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1166
   - number: 1167
     title: "The \"backups\" feature never backs up memory — ~/.agentmemory/backups/ holds only connect config snapshots; no memory backup/restore command exists"
@@ -2079,7 +2137,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Tests read the developer's real ~/.agentmemory/.env; 14 fail on any machine with an install."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "vitest.config.ts points HOME/USERPROFILE at a mkdtemp dir; config.ts:22-23 resolves .env via homedir()."
     url: https://github.com/rohitg00/agentmemory/issues/1178
   - number: 1179
     title: "No way to rebuild the search index without restarting: rebuildIndex only runs when the index is empty"
@@ -2095,7 +2154,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Nothing schedules an index save after boot, so runtime indexing is lost unless the process exits cleanly."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Vectors are SQLite rows written in the store transaction, and BM25 is rebuilt from content rows at boot (src/index.ts), so no index save is needed (ADR 0001)."
     url: https://github.com/rohitg00/agentmemory/issues/1180
   - number: 1181
     title: "mem:audit is 71% index_persist rows the audit policy does not cover"
@@ -2103,7 +2163,8 @@ issues:
     difficulty: low
     kind: bug
     note: "index_persist rows are 71% of the audit store, slowing memory_audit and every startup read."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "No recordAudit call emits index_persist, and 5311cb4 drops the dead union member; import skips old rows (ops/import-state-store.ts:761); audit capped by AGENTMEMORY_AUDIT_MAX (audit.ts:132-153)."
     url: https://github.com/rohitg00/agentmemory/issues/1181
     fix_prs: [1182]
   - number: 1183
@@ -2120,8 +2181,8 @@ issues:
     difficulty: low
     kind: bug
     note: "OpenCode auto-title generation consumes the once-per-session injection, so the real conversation gets no context."
-    disposition: candidate
-    status: "unresolved — contextInjectedSessions is keyed by session id and set on the first experimental.chat.system.transform call (plugin/opencode/agentmemory-capture.ts:665-684). No guard distinguishes a title-generation pass from the real conversation. Whether the title pass shares the session id is an OpenCode runtime question this tree cannot answer."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1184
     fix_prs: [1281]
   - number: 1188
@@ -2130,8 +2191,8 @@ issues:
     difficulty: low
     kind: bug
     note: "OpenCode plugin keeps project and cwd in module state, recording sessions under another repository."
-    disposition: already-fixed
-    fixed_by: "Attribution is per-session via sessionProjects, resolved from each session's own directory; module-level defaults are only a fallback, and the comment names this bug (plugin/opencode/agentmemory-capture.ts:66-81)."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1188
     fix_prs: [1281]
   - number: 1189
@@ -2199,7 +2260,7 @@ issues:
     kind: bug
     note: "Two concurrent mem::summarize runs per Stop hook with no lease; duplicate of 1062."
     disposition: already-fixed
-    fixed_by: "The Stop hook makes one call — /session/end — and session/end fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
+    status: "fixed-here — the Stop hook makes one call, /session/end, which fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
     url: https://github.com/rohitg00/agentmemory/issues/1203
     mentioned_by_prs: [1269]
   - number: 1204
@@ -2234,8 +2295,9 @@ issues:
     difficulty: low
     kind: bug
     note: "0.9.29's default OpenAI model is a reasoning model but the provider still sends max_tokens; every compress and summarize 400s."
-    disposition: candidate
-    status: "present-here — Default model is gpt-5.6-luna (src/providers/openai.ts:12, src/config.ts:95) and the chat body always sends max_tokens (src/providers/openai.ts:82) while also sending reasoning_effort (src/providers/openai.ts:95) — the two are mutually exclusive on OpenAI's chat-completions API. Nothing maps to max_completion_tokens."
+    disposition: already-fixed
+    status: "fixed-here — b0b25f9: OpenAIProvider sends max_completion_tokens when the base URL is api.openai.com and max_tokens to compatible servers."
+    fixed_by: "b0b25f9"
     url: https://github.com/rohitg00/agentmemory/issues/1219
     fix_prs: [1275]
   - number: 1221
@@ -2317,7 +2379,8 @@ issues:
     difficulty: low
     kind: bug
     note: "GRAPH_EXTRACTION_ENABLED=false still runs structural extraction and writes graph rows."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "graphWritesDisabled() includes !isGraphExtractionEnabled() and persistGraphDelta returns early on it (src/functions/graph.ts:737-747); the boot log at src/index.ts:280 still says structural extraction is on."
     url: https://github.com/rohitg00/agentmemory/issues/1238
   - number: 1239
     title: "`POST /agentmemory/graph/reset` reports success while leaving nodes and edges untouched"
@@ -2342,7 +2405,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Summarisation re-runs on already-summarised sessions, 954x on one session, each a paid call."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
+    status: "fixed-here — mem::summarize reuses the stored Session Summary while the Observation count and last Observation id still match (src/functions/summarize.ts, 90b3d40)."
     url: https://github.com/rohitg00/agentmemory/issues/1244
   - number: 1245
     title: "--instance / --port never reach the generated engine config, so a second daemon always binds instance-0 ports"
@@ -2399,7 +2464,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Payload-free hooks build empty compression prompts, burning LLM calls on nothing."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "4a88066"
+    status: "fixed-here — 4a88066: with auto-compress on, an Observation with no tool input, output, prompt or image takes the LLM-free synthetic path instead of mem::compress (src/functions/observe.ts hasCompressibleContent). Re-summarize on unchanged count was already fixed (summarize.ts:366-377)."
     url: https://github.com/rohitg00/agentmemory/issues/1270
   - number: 1271
     title: "`getXmlTag` is a first-match unanchored regex, so any text before the payload can be parsed as the payload -- and `compressWithRetry` commits a response its own validator rejected"
@@ -2415,7 +2482,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Governance delete finds a captured observation and deletes nothing."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
+    status: "fixed-here — 66a9c71: memory_forget deletes observations by sessionId plus observationIds, and the forget skill routes observations there; governance delete stays memories-only and, since PR #53, returns ids it did not delete in notFound with a pointer to memory_forget."
     url: https://github.com/rohitg00/agentmemory/issues/1273
   - number: 1274
     title: "Feature: deprecate / supersede observations (invalidate bad captures) with audit trail"
@@ -2431,7 +2500,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Content-filter rejections count as provider failures and open the circuit breaker for unrelated work."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "87a1b99"
+    status: "fixed-here — 87a1b99: isContentFilterRejection (src/providers/_fetch.ts) keeps a content_filter rejection from counting toward the breaker (src/providers/resilient.ts); OpenAI names a filtered empty completion instead of reporting an unexpected response. test/resilient-provider.test.ts covers both."
     url: https://github.com/rohitg00/agentmemory/issues/1276
     fix_prs: [1277]
   - number: 1278
@@ -2440,7 +2511,8 @@ issues:
     difficulty: med
     kind: bug
     note: "PreToolUse injection uses raw stdout instead of the hook envelope, against a 2s budget on a 6-29s endpoint."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "per-tool-call Injection, its pre-tool-use hook and /agentmemory/enrich were removed (#108)"
     url: https://github.com/rohitg00/agentmemory/issues/1278
   - number: 1279
     title: "[viewer] Dashboard \"Memories\" stat card caps at 500 — uses .length of a limited fetch instead of the total field"
@@ -2457,7 +2529,9 @@ issues:
     difficulty: med
     kind: bug
     note: "deriveCrystalAndLessons slices lessons mid-sentence; 775 of 981 unusable and some invert meaning."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — 0a4874a: lessons are whole sentences that open with a trigger, have balanced markup and fit 220 chars; a re-import no longer bumps reinforcements or lastReinforcedAt, so a re-derived lesson can still decay out."
+    fixed_by: "0a4874a"
     url: https://github.com/rohitg00/agentmemory/issues/1292
   - number: 1297
     title: "Feature request: signal deletion / TTL for signals"
@@ -2518,7 +2592,7 @@ issues:
     kind: bug
     note: "Same-turn recall can return the prompt the hook just persisted."
     disposition: wont-fix
-    wont_fix_reason: "unsupported host — Codex and Cursor are not supported here"
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1321
   - number: 1326
     title: "/sessions endpoint still hangs indefinitely in v0.9.29 (fix #1136 installed) — kv.list(KV.sessions) never resolves, breaks viewer dashboard + MCP memory_sessions"
@@ -2560,7 +2634,9 @@ issues:
     difficulty: low
     kind: bug
     note: "The pinned-slot block is dropped whole and silently when it exceeds the token budget."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "bb4b6fd"
+    status: "fixed-here — bb4b6fd: an over-budget pinned-slot block is truncated to the remaining budget with a marker and a warn log instead of skipped whole (src/functions/context.ts truncatePinned); test/context-slots.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1333
   - number: 1334
     title: "/agentmemory/export returns the oversized refusal under HTTP 200, and materialises the payload before refusing it (18.5 GB RSS)"
@@ -2576,7 +2652,8 @@ issues:
     difficulty: med
     kind: bug
     note: "The shutdown index save is lost to a teardown race and boot only reconciles a fully empty index."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "No shutdown index save exists to lose: vectors persist per write and BM25 is rebuilt at boot; a boot and hourly fill pass repairs a partial vector index (src/index.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1335
   - number: 1338
     title: "fix(providers): createFallbackProvider drops baseURL — custom-endpoint fallbacks (DeepSeek/Kimi/etc.) hit the wrong API host"
@@ -2584,7 +2661,8 @@ issues:
     difficulty: low
     kind: bug
     note: "createFallbackProvider drops baseURL, so custom-endpoint fallbacks hit the vendor's host."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "A fallback built without baseURL still reaches the configured endpoint: OpenAIProvider falls back to OPENAI_BASE_URL (src/providers/openai.ts:68) and the Anthropic SDK reads ANTHROPIC_BASE_URL itself; the daemon hydrates .env into process.env at boot. test/anthropic-base-url.test.ts guards it."
     url: https://github.com/rohitg00/agentmemory/issues/1338
     fix_prs: [1345]
   - number: 1339
@@ -2611,7 +2689,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Dead noop gate causes a summarize failure storm when no LLM key is set."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "isNoopProvider unwraps resilient(...) names (src/providers/noop.ts:22-34), and the summarize and graph gates use it."
     url: https://github.com/rohitg00/agentmemory/issues/1341
     mentioned_by_prs: [1342]
   - number: 1360
@@ -2646,7 +2725,9 @@ issues:
     difficulty: low
     kind: bug
     note: "extractTranscriptPrompts matches no Claude Code transcript shape, so prompt backfill posts nothing."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "52b6aec"
+    status: "fixed-here — 52b6aec: the Cursor-only backfill is deleted; Cursor is unsupported and every wired host records prompts via prompt-submit, so nothing is lost."
     url: https://github.com/rohitg00/agentmemory/issues/1365
     fix_prs: [1366]
   - number: 1370

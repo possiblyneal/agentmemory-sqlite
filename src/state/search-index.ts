@@ -7,6 +7,7 @@ interface IndexEntry {
   obsId: string;
   sessionId: string;
   termCount: number;
+  files: string[];
 }
 
 export class SearchIndex {
@@ -40,6 +41,7 @@ export class SearchIndex {
       obsId: obs.id,
       sessionId: obs.sessionId,
       termCount,
+      files: obs.files ?? [],
     });
     this.docTermCounts.set(obs.id, termFreq);
     this.totalDocLength += termCount;
@@ -61,6 +63,20 @@ export class SearchIndex {
   // Indexed document ids, for the importer's corpus delta.
   ids(): IterableIterator<string> {
     return this.entries.keys();
+  }
+
+  // Indexed documents from the given Sessions that name at least one file,
+  // so a file lookup need not read every Observation of those Sessions.
+  withFilesIn(
+    sessionIds: ReadonlySet<string>,
+  ): Array<{ obsId: string; sessionId: string; files: string[] }> {
+    const out: Array<{ obsId: string; sessionId: string; files: string[] }> = [];
+    for (const entry of this.entries.values()) {
+      if (entry.files?.length && sessionIds.has(entry.sessionId)) {
+        out.push({ obsId: entry.obsId, sessionId: entry.sessionId, files: entry.files });
+      }
+    }
+    return out;
   }
 
   remove(id: string): void {

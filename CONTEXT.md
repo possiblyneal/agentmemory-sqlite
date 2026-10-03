@@ -18,8 +18,14 @@ An AI coding assistant whose activity is being remembered. The Agent is a source
 Observations and a consumer of Recall, never a decision-maker about the store itself.
 
 **Session**:
-One continuous stretch of an Agent's work, bounded by a start and an end hook. The unit that
-Observations are attributed to and that Recall is scoped by.
+One continuous stretch of an Agent's work, bounded by a start hook and either an end hook or
+going idle after a turn end. The unit that Observations are attributed to and that Recall is
+scoped by.
+
+**Abandoned Session**:
+A Session still marked active with no activity for 24 hours. Heal closes it with status
+`abandoned` at its last activity; it is not summarized, and the next Observation or session
+start on it reopens it.
 
 ### What is stored
 
@@ -33,12 +39,39 @@ A durable distilled record derived from Observations, intended to be recalled la
 are content-addressed, so the same content captured twice is one Memory.
 _Avoid_: note, fact, item
 
+**Global Memory**:
+A Memory deliberately marked to apply in every project, such as an Operator preference. It
+has no project, and Recall surfaces it in every project whichever Session it was saved in. A
+Memory that merely lacks a project is unscoped, not global.
+_Avoid_: shared memory, unscoped memory
+
 **Session Summary**:
 The distilled account of one Session, produced from its Observations each time the Session
 stops.
 A Session Summary is current until an Observation arrives after it was written, and a
 current one is reused rather than reproduced.
 _Avoid_: session digest, recap
+
+**Lesson**:
+A short, reusable rule learned from experience — a correction or practice worth applying in
+later Sessions. Its confidence rises when reinforced and decays when unused.
+_Avoid_: rule, tip, learning
+
+**Crystal**:
+A narrative digest of a finished piece of tracked work: what was done, its key outcomes, the
+files it touched and the Lessons it yielded.
+_Avoid_: digest, recap
+
+**Semantic Fact**:
+A standalone claim distilled by consolidation from Session Summaries across many Sessions, with
+a confidence and the Sessions it came from. Unlike a Memory, it is produced by the store, not
+saved by an Agent.
+_Avoid_: fact, knowledge
+
+**Insight**:
+A higher-order conclusion synthesized from a cluster of related Memories, Lessons and Crystals
+that share concepts in the graph. Its confidence rises when reinforced and decays when unused.
+_Avoid_: reflection, takeaway, pattern
 
 **Entity**:
 A named thing the Agent worked with — a file, a symbol, a service, a concept — held as a node
@@ -72,6 +105,41 @@ _Avoid_: ingestion, parsing, distillation
 Retrieving Memories relevant to an Agent's current work and returning them for injection into
 its context.
 _Avoid_: search, query, lookup, retrieval
+
+**Injection**:
+Recall delivered into an Agent's context at a hook boundary — session start, on a user
+prompt, before compaction — without the Agent asking for it.
+_Avoid_: enrichment, context push
+
+**Missed Injection**:
+An Injection that never happened because the hook got no answer from the daemon — it was
+down, too slow, or refused. The daemon cannot see a Missed Injection; only the hook can.
+_Avoid_: hook failure, dropped context
+
+**Empty Injection**:
+An Injection the daemon answered with nothing to inject. The daemon was reachable; Recall
+found nothing that bore on the work.
+_Avoid_: miss, no-op
+
+**Injection Record**:
+The daemon's note of one answered Injection: the path that served it (session start, context,
+or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,
+Insights and Session Summaries it carried. An Empty Injection
+leaves a record with no identifiers; a Missed Injection leaves none, because the daemon never
+answered. Session start leaves none while context injection is off, because the hook discards
+that reply. Kept for seven days.
+_Avoid_: injection log, context log
+
+**Unrecalled Memory**:
+A Memory older than its grace period that no Recall has ever returned. Evidence that the
+Memory was not worth storing, or that Recall cannot reach it.
+_Avoid_: dead memory, orphan, unused memory
+
+**Project Time**:
+Time that counts only while a project is being worked on — a week counts when the project had
+at least one Session in it. Decay and grace periods run on Project Time, so a project left
+alone for months comes back as it was left.
+_Avoid_: active time, wall-clock age
 
 **Eviction**:
 Deliberately removing Memories that have aged out or lost relevance, under a policy. Distinct

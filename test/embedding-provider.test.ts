@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createEmbeddingProvider,
-  withDimensionGuard,
+  withEmbeddingGuards,
 } from "../src/providers/embedding/index.js";
 import { GeminiEmbeddingProvider } from "../src/providers/embedding/gemini.js";
 import { OpenAIEmbeddingProvider } from "../src/providers/embedding/openai.js";
@@ -158,7 +158,7 @@ describe("OpenAIEmbeddingProvider", () => {
   });
 });
 
-describe("withDimensionGuard", () => {
+describe("withEmbeddingGuards", () => {
   function fakeProvider(opts: {
     dimensions: number;
     embed: () => Float32Array;
@@ -186,14 +186,29 @@ describe("withDimensionGuard", () => {
         return [new Float32Array([1, 2, 3, 4])];
       }
     }
-    const guarded = withDimensionGuard(new FakeProvider());
+    const guarded = withEmbeddingGuards(new FakeProvider());
     expect(guarded).toBeInstanceOf(FakeProvider);
     expect(guarded.name).toBe("fake-class");
     expect(guarded.dimensions).toBe(4);
   });
 
+  it("replaces a lone surrogate before the text reaches the provider", async () => {
+    const seen: string[] = [];
+    const guarded = withEmbeddingGuards({
+      name: "fake",
+      dimensions: 1,
+      embed: async (t) => { seen.push(t); return new Float32Array([1]); },
+      embedBatch: async (ts) => { seen.push(...ts); return ts.map(() => new Float32Array([1])); },
+    });
+
+    await guarded.embed("Bash \uDC00 ls");
+    await guarded.embedBatch(["cut mid-pair \uD83D", "smile \uD83D\uDE00"]);
+
+    expect(seen).toEqual(["Bash \uFFFD ls", "cut mid-pair \uFFFD", "smile \uD83D\uDE00"]);
+  });
+
   it("passes through vectors that match the declared dimensions", async () => {
-    const guarded = withDimensionGuard(
+    const guarded = withEmbeddingGuards(
       fakeProvider({
         dimensions: 4,
         embed: () => new Float32Array([1, 2, 3, 4]),
@@ -205,7 +220,7 @@ describe("withDimensionGuard", () => {
   });
 
   it("throws when embed() returns the wrong dimension", async () => {
-    const guarded = withDimensionGuard(
+    const guarded = withEmbeddingGuards(
       fakeProvider({
         dimensions: 4,
         embed: () => new Float32Array([1, 2, 3]),
@@ -217,7 +232,7 @@ describe("withDimensionGuard", () => {
   });
 
   it("throws when any vector in embedBatch() returns the wrong dimension", async () => {
-    const guarded = withDimensionGuard(
+    const guarded = withEmbeddingGuards(
       fakeProvider({
         dimensions: 4,
         embed: () => new Float32Array([1, 2, 3, 4]),
@@ -230,7 +245,7 @@ describe("withDimensionGuard", () => {
   });
 
   it("guards embedImage when present and omits it when absent", async () => {
-    const withImage = withDimensionGuard(
+    const withImage = withEmbeddingGuards(
       fakeProvider({
         dimensions: 4,
         embed: () => new Float32Array([1, 2, 3, 4]),
@@ -242,7 +257,7 @@ describe("withDimensionGuard", () => {
       /dimension mismatch in fake\.embedImage: expected 4, got 2/,
     );
 
-    const withoutImage = withDimensionGuard(
+    const withoutImage = withEmbeddingGuards(
       fakeProvider({
         dimensions: 4,
         embed: () => new Float32Array([1, 2, 3, 4]),

@@ -1,6 +1,6 @@
 import type { MemoryProvider } from "../types.js";
 import { getEnvVar } from "../config.js";
-import { fetchWithTimeout } from "./_fetch.js";
+import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
 import {
   DEFAULT_AZURE_API_VERSION,
   buildAuthHeaders,
@@ -9,7 +9,6 @@ import {
   normalizeBaseUrl,
 } from "./_openai-shared.js";
 
-const DEFAULT_MODEL = "gpt-5.6-luna";
 const DEFAULT_TIMEOUT_MS = 60_000;
 const TOKENIZE_TIMEOUT_MS = 10_000;
 
@@ -30,7 +29,7 @@ const TOKENIZE_TIMEOUT_MS = 10_000;
  * Optional:
  *   OPENAI_BASE_URL          — base URL without path (default: https://api.openai.com).
  *                              Azure: https://<resource>.openai.azure.com/openai/deployments/<deployment>
- *   OPENAI_MODEL             — model name (default: gpt-5.6-luna)
+ *   OPENAI_MODEL             — model name (default: DEFAULT_MODELS in src/config.ts)
  *   OPENAI_API_VERSION       — Azure api-version query param (default: 2024-08-01-preview)
  *   OPENAI_TIMEOUT_MS        — outbound fetch timeout in ms (OpenAI-scoped alias,
  *                              takes precedence over AGENTMEMORY_LLM_TIMEOUT_MS
@@ -56,6 +55,10 @@ export class OpenAIProvider implements MemoryProvider {
   private isAzure: boolean;
   private azureApiVersion: string;
   private tokenizeUnavailable = false;
+  // api.openai.com rejects max_tokens on reasoning models and accepts
+  // max_completion_tokens on every model; compatible servers may only know
+  // max_tokens (#1219).
+  private outputTokenParam: "max_tokens" | "max_completion_tokens";
 
   constructor(apiKey: string, model: string, maxTokens: number, baseURL?: string) {
     this.apiKey = apiKey;
@@ -67,6 +70,9 @@ export class OpenAIProvider implements MemoryProvider {
     this.azureApiVersion =
       getEnvVar("OPENAI_API_VERSION") || DEFAULT_AZURE_API_VERSION;
     this.isAzure = detectAzure(this.baseUrl);
+    this.outputTokenParam = /^https:\/\/api\.openai\.com(\/|$)/.test(this.baseUrl)
+      ? "max_completion_tokens"
+      : "max_tokens";
   }
 
   async compress(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -112,7 +118,7 @@ export class OpenAIProvider implements MemoryProvider {
     const url = buildChatUrl(this.baseUrl, this.isAzure, this.azureApiVersion);
     const body: Record<string, unknown> = {
       model: this.model,
-      max_tokens: this.maxTokens,
+      [this.outputTokenParam]: this.maxTokens,
       // OpenAI API spec defines `stream` as defaulting to false, so omitting
       // it should yield a JSON response. Some OpenAI-compatible proxies
       // (notably 9Router < 0.4.56 — see decolua/9router#1260) default to
@@ -158,11 +164,12 @@ export class OpenAIProvider implements MemoryProvider {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`OpenAI API error (${response.status}): ${text}`);
+      throw new ProviderHttpError(`OpenAI API error (${response.status}): ${text}`, response.status);
     }
 
     const data = (await response.json()) as {
       choices?: Array<{
+        finish_reason?: string;
         message?: { content?: string; reasoning?: string; reasoning_content?: string };
       }>;
     };
@@ -177,6 +184,9 @@ export class OpenAIProvider implements MemoryProvider {
     const reasoning = message?.reasoning ?? message?.reasoning_content;
     if (reasoning) {
       return reasoning;
+    }
+    if (data.choices?.[0]?.finish_reason === "content_filter") {
+      throw new Error("OpenAI finish_reason content_filter: completion blocked by the provider's content filter");
     }
     throw new Error(
       `OpenAI returned unexpected response: ${JSON.stringify(data).slice(0, 200)}`,

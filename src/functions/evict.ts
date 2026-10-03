@@ -11,6 +11,7 @@ import { StateKV } from "../state/kv.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { storeSyntheticCompression } from "./observe.js";
 import { logger } from "../logger.js";
 
 interface EvictionConfig {
@@ -154,19 +155,31 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               });
             if (!observations) continue;
 
+            // A raw row this old is a compression that never ran, so it is
+            // compressed synthetically here; otherwise the Session could
+            // never be summarized and would be retried on every run.
             let recovered = false;
-            const hasCompressedObservations = observations.some(
-              isCompressedObservation,
-            );
-            if (hasCompressedObservations) {
+            if (observations.length > 0) {
+              const raw = observations.filter(
+                (o): o is RawObservation => !isCompressedObservation(o),
+              );
+              try {
+                for (const o of raw) {
+                  await storeSyntheticCompression(kv, {
+                    ...o,
+                    sessionId: session.id,
+                  });
+                }
+              } catch (err) {
+                logger.warn("Stale session compression failed", {
+                  sessionId: session.id,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+                continue;
+              }
               recovered = await recoverStaleSession(sdk, session.id);
               if (!recovered) continue;
               recoveredStaleSessions++;
-            } else if (observations.length > 0) {
-              logger.warn("Stale session has no compressed observations", {
-                sessionId: session.id,
-              });
-              continue;
             }
 
             try {

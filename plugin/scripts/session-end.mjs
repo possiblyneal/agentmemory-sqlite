@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
-import { execSync } from "node:child_process";
+import { join } from "node:path";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
 	const vars = {};
@@ -25,88 +24,72 @@ function parseEnvFile(content) {
 	}
 	return vars;
 }
-function hydrateHookEnv() {
-	let content;
+function envFilePath() {
+	return join(homedir(), ".agentmemory", ".env");
+}
+function readEnvFile() {
 	try {
-		content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
-	} catch {
-		return;
+		return parseEnvFile(readFileSync(envFilePath(), "utf-8"));
+	} catch (err) {
+		if (err.code === "ENOENT") return {};
+		throw err;
 	}
-	for (const [key, value] of Object.entries(parseEnvFile(content))) if (process.env[key] === void 0) process.env[key] = value;
+}
+let envFileCache;
+function loadEnvFile() {
+	const path = envFilePath();
+	if (envFileCache?.path === path) return envFileCache.vars;
+	const vars = readEnvFile();
+	envFileCache = {
+		path,
+		vars
+	};
+	return vars;
+}
+function hydrateEnvFromFile(isUnset) {
+	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
+}
+function hydrateHookEnv() {
+	try {
+		hydrateEnvFromFile((current) => current === void 0);
+	} catch {}
 }
 //#endregion
-//#region src/hooks/_project.ts
-function resolveProject(cwd) {
-	const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
-	if (explicit && explicit.trim()) return explicit.trim();
-	const dir = cwd && cwd.trim() ? cwd : process.cwd();
-	try {
-		const top = execSync("git rev-parse --show-toplevel", {
-			cwd: dir,
-			stdio: [
-				"ignore",
-				"pipe",
-				"ignore"
-			],
-			timeout: 500
-		}).toString().trim();
-		if (top) return basename(top);
-	} catch {}
-	return basename(dir);
-}
-function hookCwd(data) {
-	if (!data || typeof data !== "object") return void 0;
-	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
-	const roots = data.workspace_roots;
-	if (Array.isArray(roots)) {
-		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
-	}
-	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
-	if (projectDir && projectDir.trim()) return projectDir;
+//#region src/hooks/sdk-guard.ts
+/**
+* Skip guard shared by every hook script.
+*
+* Two kinds of Session never reach agentmemory:
+*
+*   1. agentmemory's own summarize/compress calls. The agent-sdk provider
+*      sets AGENTMEMORY_SDK_CHILD=1 before it spawns `query()`, and the
+*      child inherits it. Capturing that child would summarize it through
+*      the same provider and recurse without bound (#149 follow-up). This
+*      skip is unconditional.
+*   2. Headless Sessions: any CLAUDE_CODE_ENTRYPOINT starting "sdk-", which
+*      today is `claude -p` ("sdk-cli"), the TS Agent SDK ("sdk-ts") and
+*      the Python Agent SDK ("sdk-py"). These are almost always scripted
+*      batches whose summaries are noise, and a batch of thousands
+*      saturates the summarizing LLM. Set AGENTMEMORY_CAPTURE_HEADLESS=1
+*      to capture them.
+*
+* Claude Code puts the entrypoint in the hook's environment, never in the
+* stdin payload.
+*/
+function shouldSkipSession() {
+	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
+	if (process.env["AGENTMEMORY_CAPTURE_HEADLESS"] === "1") return false;
+	return process.env["CLAUDE_CODE_ENTRYPOINT"]?.startsWith("sdk-") ?? false;
 }
 //#endregion
 //#region src/hooks/session-end.ts
 hydrateHookEnv();
-function isSdkChildContext(payload) {
-	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-	if (!payload || typeof payload !== "object") return false;
-	return payload.entrypoint === "sdk-ts";
-}
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
 function authHeaders() {
 	const h = { "Content-Type": "application/json" };
 	if (SECRET) h["Authorization"] = `Bearer ${SECRET}`;
 	return h;
-}
-function extractTranscriptPrompts(data) {
-	const path = data.transcript_path;
-	if (typeof path !== "string" || !path.endsWith(".jsonl")) return [];
-	let raw;
-	try {
-		raw = readFileSync(path, "utf-8");
-	} catch {
-		return [];
-	}
-	const prompts = [];
-	for (const line of raw.split("\n")) {
-		if (!line.trim()) continue;
-		let msg;
-		try {
-			msg = JSON.parse(line);
-		} catch {
-			continue;
-		}
-		if (msg.role !== "user") continue;
-		for (const block of msg.message?.content ?? []) {
-			if (prompts.length >= 50) return prompts;
-			if (block.type !== "text" || typeof block.text !== "string") continue;
-			const m = block.text.match(/<user_query>\n?([\s\S]*?)\n?<\/user_query>/);
-			const text = (m ? m[1] : block.text).trim();
-			if (text) prompts.push(text.slice(0, 8e3));
-		}
-	}
-	return prompts;
 }
 async function main() {
 	let input = "";
@@ -118,27 +101,8 @@ async function main() {
 		return;
 	}
 	if (!data || typeof data !== "object") return;
-	if (isSdkChildContext(data)) return;
-	const sessionId = data.session_id || data.sessionId || data.conversation_id || "unknown";
-	const transcriptPrompts = extractTranscriptPrompts(data);
-	if (transcriptPrompts.length > 0) {
-		const cwd = hookCwd(data) || process.cwd();
-		const project = resolveProject(cwd);
-		const timestamp = (/* @__PURE__ */ new Date()).toISOString();
-		await Promise.allSettled(transcriptPrompts.map((prompt) => fetch(`${REST_URL}/agentmemory/observe`, {
-			method: "POST",
-			headers: authHeaders(),
-			body: JSON.stringify({
-				hookType: "prompt_submit",
-				sessionId,
-				project,
-				cwd,
-				timestamp,
-				data: { prompt }
-			}),
-			signal: AbortSignal.timeout(3e3)
-		})));
-	}
+	if (shouldSkipSession()) return;
+	const sessionId = data.session_id || "unknown";
 	fetch(`${REST_URL}/agentmemory/session/end`, {
 		method: "POST",
 		headers: authHeaders(),

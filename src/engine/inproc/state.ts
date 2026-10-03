@@ -276,6 +276,16 @@ export class SqliteState {
     return rows.map((r) => JSON.parse(r.value));
   }
 
+  // A half-open range over the (scope, seq) index, so the prefix needs no
+  // LIKE escaping.
+  listScopes(prefix: string): string[] {
+    const hi = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+    const rows = this.db
+      .prepare("SELECT DISTINCT scope FROM kv WHERE scope >= ? AND scope < ?")
+      .all(prefix, hi) as Array<{ scope: string }>;
+    return rows.map((r) => r.scope);
+  }
+
   // Raw upsert used by set/update. Keeps the existing row's `seq`. Returns the
   // stored encoding so callers can hand back exactly what landed in the row
   // instead of the caller's own object.
@@ -330,6 +340,26 @@ export class SqliteState {
     return this.transaction(() => {
       for (const { key, value } of entries) this.set(scope, key, value);
       return entries.length;
+    });
+  }
+
+  // delete() per row in one transaction, like setMany, but only where the
+  // stored row's updatedAt still equals the one the caller read: a row
+  // rewritten since then (reflect regenerating a decayed Insight mid-sweep) is
+  // kept. Returns the keys actually deleted.
+  deleteManyIfUnchanged(
+    scope: string,
+    entries: Array<{ key: string; updatedAt: string }>,
+  ): string[] {
+    return this.transaction(() => {
+      const deleted: string[] = [];
+      for (const { key, updatedAt } of entries) {
+        const prev = this.read(scope, key);
+        if ((prev.value as { updatedAt?: unknown } | null)?.updatedAt !== updatedAt) continue;
+        this.delete(scope, key);
+        deleted.push(key);
+      }
+      return deleted;
     });
   }
 
@@ -407,8 +437,8 @@ async function cooperate<T>(result: T): Promise<T> {
 }
 
 // The function handlers, in the exact shapes `src/state/kv.ts` sends and the
-// engine returns (`state::set-many` is inproc-only; kv.ts never sends it to
-// iii). Registered on the shim by `sdk.ts`.
+// engine returns (`state::set-many` and `state::delete-many-if-unchanged` are
+// inproc-only; kv.ts never sends them to iii). Registered on the shim by `sdk.ts`.
 export function stateFunctions(
   store: SqliteState,
 ): Record<string, (payload: any) => Promise<unknown>> {
@@ -418,6 +448,9 @@ export function stateFunctions(
     "state::update": async (p) => cooperate(store.update(p.scope, p.key, p.ops ?? [])),
     "state::delete": async (p) => cooperate(store.delete(p.scope, p.key)),
     "state::list": async (p) => cooperate(store.list(p.scope)),
+    "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
+    "state::delete-many-if-unchanged": async (p) =>
+      cooperate(store.deleteManyIfUnchanged(p.scope, p.entries ?? [])),
   };
 }

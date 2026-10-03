@@ -217,6 +217,28 @@ describe("Sentinels Functions", () => {
       expect(result.error).toContain("pattern config requires");
     });
 
+    it("rejects a pattern that is not a valid regular expression (#263)", async () => {
+      const result = (await sdk.trigger("mem::sentinel-create", {
+        name: "broken-regex",
+        type: "pattern",
+        config: { pattern: "([unclosed" },
+      })) as { success: boolean; error: string };
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not a valid regular expression");
+    });
+
+    it("rejects an overlong pattern (#263)", async () => {
+      const result = (await sdk.trigger("mem::sentinel-create", {
+        name: "long-regex",
+        type: "pattern",
+        config: { pattern: "a".repeat(501) },
+      })) as { success: boolean; error: string };
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("at most 500 characters");
+    });
+
     it("returns error for webhook config missing path", async () => {
       const result = (await sdk.trigger("mem::sentinel-create", {
         name: "bad-webhook",
@@ -587,6 +609,32 @@ describe("Sentinels Functions", () => {
       expect(result.success).toBe(true);
       expect(result.triggered.length).toBe(1);
       expect(result.checkedCount).toBe(1);
+    });
+
+    it("skips a stored pattern sentinel with an invalid regex and checks the rest (#263)", async () => {
+      await kv.set("mem:sentinels", "snt_legacy", {
+        id: "snt_legacy",
+        name: "legacy",
+        type: "pattern",
+        status: "watching",
+        config: { pattern: "([unclosed" },
+        createdAt: new Date().toISOString(),
+        linkedActionIds: [],
+      });
+      await kv.set("mem:metrics", "api_calls", { totalCalls: 150, errorCount: 0, avgDurationMs: 50 });
+      await sdk.trigger("mem::sentinel-create", {
+        name: "high-traffic",
+        type: "threshold",
+        config: { metric: "api_calls", operator: "gt", value: 100 },
+      });
+
+      const result = (await sdk.trigger("mem::sentinel-check", {})) as {
+        success: boolean;
+        triggered: string[];
+      };
+
+      expect(result.success).toBe(true);
+      expect(result.triggered).toHaveLength(1);
     });
 
     it("does not trigger threshold sentinel when condition is not met", async () => {

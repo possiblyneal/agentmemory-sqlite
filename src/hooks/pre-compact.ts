@@ -1,14 +1,10 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
+import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
+import { recordMissedInjection, missReason } from "./_missed-injection.js";
 
 hydrateHookEnv();
-
-function isSdkChildContext(payload: unknown): boolean {
-  if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-  if (!payload || typeof payload !== "object") return false;
-  return (payload as { entrypoint?: unknown }).entrypoint === "sdk-ts";
-}
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
@@ -33,9 +29,9 @@ async function main() {
   }
 
   if (!data || typeof data !== "object") return;
-  if (isSdkChildContext(data)) return;
+  if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
+  const sessionId = (data.session_id as string) || "unknown";
   const project = resolveProject(hookCwd(data));
 
   if (process.env["CLAUDE_MEMORY_BRIDGE"] === "true") {
@@ -64,8 +60,11 @@ async function main() {
       if (result.context) {
         process.stdout.write(result.context);
       }
+    } else {
+      recordMissedInjection("pre-compact", `http_${res.status}`);
     }
-  } catch {
+  } catch (err) {
+    recordMissedInjection("pre-compact", missReason(err));
     // best effort -- don't block compaction
   }
 }

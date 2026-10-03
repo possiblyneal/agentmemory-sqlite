@@ -89,27 +89,6 @@ const PROVIDER_KEY_NAMES = [
   "MINIMAX_API_KEY",
 ] as const;
 
-export function parseEnvFile(content: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    // Strip surrounding quotes.
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
-  }
-  return out;
-}
-
 /** Returns the list of provider keys that look real (non-placeholder). */
 export function realProviderKeys(env: Record<string, string>): string[] {
   return PROVIDER_KEY_NAMES.filter((k) => {

@@ -194,6 +194,84 @@ describe("Smart Search Function", () => {
     expect(log?.count).toBe(1);
   });
 
+  describe("project scoping (#787)", () => {
+    beforeEach(async () => {
+      const other = makeObs({ id: "obs_other", sessionId: "ses_other", title: "Auth in other repo" });
+      const savedHere = makeObs({ id: "mem_here", sessionId: "memory", title: "Saved here" });
+      const savedElsewhere = makeObs({ id: "mem_elsewhere", sessionId: "memory", title: "Saved elsewhere" });
+      const unknownSession = makeObs({ id: "obs_orphan", sessionId: "ses_evicted", title: "Orphan" });
+      const evictedHere = makeObs({ id: "obs_evicted_here", sessionId: "ses_gone_here", title: "Evicted here" });
+      const evictedElsewhere = makeObs({ id: "obs_evicted_elsewhere", sessionId: "ses_gone_elsewhere", title: "Evicted elsewhere" });
+      await kv.set("mem:summaries", "ses_gone_here", { sessionId: "ses_gone_here", project: "my-project" });
+      await kv.set("mem:summaries", "ses_gone_elsewhere", { sessionId: "ses_gone_elsewhere", project: "other-project" });
+      const savedInEvicted = makeObs({ id: "mem_saved_in_gone", sessionId: "ses_gone_elsewhere", title: "Saved in evicted" });
+      await kv.set("mem:memories", "mem_saved_in_gone", { id: "mem_saved_in_gone", project: "my-project" });
+      const blankSummary = makeObs({ id: "obs_blank_summary", sessionId: "ses_blank", title: "Blank summary" });
+      await kv.set("mem:summaries", "ses_blank", { sessionId: "ses_blank", project: "" });
+      await kv.set("mem:sessions", "ses_other", {
+        id: "ses_other",
+        project: "other-project",
+        cwd: "/other",
+        startedAt: "2026-02-01T00:00:00Z",
+        status: "completed",
+        observationCount: 1,
+      });
+      await kv.set("mem:memories", "mem_here", { id: "mem_here", project: "my-project" });
+      await kv.set("mem:memories", "mem_elsewhere", { id: "mem_elsewhere", project: "other-project" });
+      searchResults.unshift(
+        ...[other, savedHere, savedElsewhere, unknownSession, evictedHere, evictedElsewhere, savedInEvicted, blankSummary].map((observation) => ({
+          observation,
+          bm25Score: 0.9,
+          vectorScore: 0,
+          combinedScore: 0.9,
+          sessionId: observation.sessionId,
+        })),
+      );
+    });
+
+    it("drops results whose session, Session Summary or saved memory belongs to another project", async () => {
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "my-project",
+      })) as { results: CompactSearchResult[] };
+
+      expect(result.results.map((r) => r.obsId)).toEqual([
+        "mem_here",
+        "obs_orphan",
+        "obs_evicted_here",
+        "mem_saved_in_gone",
+        "obs_blank_summary",
+        "obs_1",
+        "obs_2",
+      ]);
+    });
+
+    it("returns every project when none is given", async () => {
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+      })) as { results: CompactSearchResult[] };
+
+      expect(result.results).toHaveLength(10);
+    });
+
+    it("over-fetches so filtered-out rows do not underfill the page", async () => {
+      let requested = 0;
+      registerSmartSearchFunction(sdk as never, kv as never, async (_q, limit) => {
+        requested = limit;
+        return searchResults;
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "my-project",
+        limit: 2,
+      })) as { results: CompactSearchResult[] };
+
+      expect(requested).toBe(100);
+      expect(result.results.map((r) => r.obsId)).toEqual(["mem_here", "obs_orphan"]);
+    });
+  });
+
   describe("lesson inclusion (#lesson-visibility)", () => {
     it("compact mode returns lessons array alongside observation results", async () => {
       sdk.registerFunction("mem::lesson-recall", async (payload: any) => ({
@@ -289,6 +367,69 @@ describe("Smart Search Function", () => {
 
       expect(result.results.length).toBe(2);
       expect(result.lessons).toEqual([]);
+    });
+  });
+
+  describe("insight inclusion (PR 615)", () => {
+    it("returns Insights for the query and project, trimmed for preview", async () => {
+      let receivedPayload: any = null;
+      sdk.registerFunction("mem::insight-search", async (payload: any) => {
+        receivedPayload = payload;
+        return {
+          success: true,
+          insights: [
+            { id: "ins_a", title: "Auth retries", content: "x".repeat(1000), confidence: 0.7, score: 0.5, createdAt: "2026-01-01", project: "p", tags: ["auth"] },
+          ],
+        };
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "p",
+        limit: 50,
+      })) as { insights?: any[] };
+
+      expect(receivedPayload).toMatchObject({ query: "auth", project: "p", limit: 10 });
+      expect(result.insights).toHaveLength(1);
+      expect(result.insights![0]).toMatchObject({
+        insightId: "ins_a",
+        title: "Auth retries",
+        confidence: 0.7,
+        score: 0.5,
+        project: "p",
+        tags: ["auth"],
+      });
+      expect(result.insights![0].content).toMatch(/…$/);
+      expect(result.insights![0].content.length).toBeLessThan(1000);
+    });
+
+    it("includeInsights:false omits the insights array", async () => {
+      let called = false;
+      sdk.registerFunction("mem::insight-search", async () => {
+        called = true;
+        return { success: true, insights: [] };
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        includeInsights: false,
+      })) as { insights?: unknown };
+
+      expect(called).toBe(false);
+      expect(result.insights).toBeUndefined();
+    });
+
+    it("tolerates mem::insight-search failure", async () => {
+      sdk.registerFunction("mem::insight-search", async () => {
+        throw new Error("insights unavailable");
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+      })) as { results: CompactSearchResult[]; insights: any[] };
+
+      expect(result.results.length).toBe(2);
+      expect(result.insights).toEqual([]);
     });
   });
 });

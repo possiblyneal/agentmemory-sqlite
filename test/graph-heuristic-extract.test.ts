@@ -113,7 +113,7 @@ describe("keyless graph extraction wiring", () => {
 
   it("mem::graph-extract gates the LLM pass, not the heuristic pass", () => {
     const graph = readFileSync("src/functions/graph.ts", "utf-8");
-    expect(graph).toMatch(/extractGraphHeuristics\(data\.observations\)/);
+    expect(graph).toMatch(/extractGraphHeuristics\(observations\)/);
     expect(graph).toMatch(
       /isGraphExtractionEnabled\(\) && !isNoopProvider\(provider\)/,
     );

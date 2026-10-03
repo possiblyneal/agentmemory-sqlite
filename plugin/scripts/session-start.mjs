@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
@@ -25,14 +25,62 @@ function parseEnvFile(content) {
 	}
 	return vars;
 }
-function hydrateHookEnv() {
-	let content;
+function envFilePath() {
+	return join(homedir(), ".agentmemory", ".env");
+}
+function readEnvFile() {
 	try {
-		content = readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8");
-	} catch {
-		return;
+		return parseEnvFile(readFileSync(envFilePath(), "utf-8"));
+	} catch (err) {
+		if (err.code === "ENOENT") return {};
+		throw err;
 	}
-	for (const [key, value] of Object.entries(parseEnvFile(content))) if (process.env[key] === void 0) process.env[key] = value;
+}
+let envFileCache;
+function loadEnvFile() {
+	const path = envFilePath();
+	if (envFileCache?.path === path) return envFileCache.vars;
+	const vars = readEnvFile();
+	envFileCache = {
+		path,
+		vars
+	};
+	return vars;
+}
+function hydrateEnvFromFile(isUnset) {
+	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
+}
+function hydrateHookEnv() {
+	try {
+		hydrateEnvFromFile((current) => current === void 0);
+	} catch {}
+}
+//#endregion
+//#region src/hooks/sdk-guard.ts
+/**
+* Skip guard shared by every hook script.
+*
+* Two kinds of Session never reach agentmemory:
+*
+*   1. agentmemory's own summarize/compress calls. The agent-sdk provider
+*      sets AGENTMEMORY_SDK_CHILD=1 before it spawns `query()`, and the
+*      child inherits it. Capturing that child would summarize it through
+*      the same provider and recurse without bound (#149 follow-up). This
+*      skip is unconditional.
+*   2. Headless Sessions: any CLAUDE_CODE_ENTRYPOINT starting "sdk-", which
+*      today is `claude -p` ("sdk-cli"), the TS Agent SDK ("sdk-ts") and
+*      the Python Agent SDK ("sdk-py"). These are almost always scripted
+*      batches whose summaries are noise, and a batch of thousands
+*      saturates the summarizing LLM. Set AGENTMEMORY_CAPTURE_HEADLESS=1
+*      to capture them.
+*
+* Claude Code puts the entrypoint in the hook's environment, never in the
+* stdin payload.
+*/
+function shouldSkipSession() {
+	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
+	if (process.env["AGENTMEMORY_CAPTURE_HEADLESS"] === "1") return false;
+	return process.env["CLAUDE_CODE_ENTRYPOINT"]?.startsWith("sdk-") ?? false;
 }
 //#endregion
 //#region src/hooks/_project.ts
@@ -41,7 +89,7 @@ function resolveProject(cwd) {
 	if (explicit && explicit.trim()) return explicit.trim();
 	const dir = cwd && cwd.trim() ? cwd : process.cwd();
 	try {
-		const top = execSync("git rev-parse --show-toplevel", {
+		const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
 			cwd: dir,
 			stdio: [
 				"ignore",
@@ -49,7 +97,8 @@ function resolveProject(cwd) {
 				"ignore"
 			],
 			timeout: 500
-		}).toString().trim();
+		}).toString().trim().split("\n");
+		if (commonDir && basename(commonDir) === ".git") return basename(dirname(resolve(dir, commonDir)));
 		if (top) return basename(top);
 	} catch {}
 	return basename(dir);
@@ -57,21 +106,35 @@ function resolveProject(cwd) {
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
 	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
-	const roots = data.workspace_roots;
-	if (Array.isArray(roots)) {
-		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
-	}
-	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
+	const projectDir = process.env["CLAUDE_PROJECT_DIR"];
 	if (projectDir && projectDir.trim()) return projectDir;
+}
+//#endregion
+//#region src/hooks/_missed-injection.ts
+const MAX_BYTES = 256 * 1024;
+const KEEP_ENTRIES = 1e3;
+function missedInjectionsPath() {
+	return join(homedir(), ".agentmemory", "missed-injections.jsonl");
+}
+function missReason(err) {
+	return err instanceof Error && err.name === "TimeoutError" ? "timeout" : "connection";
+}
+function recordMissedInjection(hook, reason) {
+	try {
+		const path = missedInjectionsPath();
+		mkdirSync(join(homedir(), ".agentmemory"), { recursive: true });
+		const entry = {
+			at: (/* @__PURE__ */ new Date()).toISOString(),
+			hook,
+			reason
+		};
+		appendFileSync(path, JSON.stringify(entry) + "\n");
+		if (statSync(path).size > MAX_BYTES) writeFileSync(path, readFileSync(path, "utf-8").trimEnd().split("\n").slice(-KEEP_ENTRIES).join("\n") + "\n");
+	} catch {}
 }
 //#endregion
 //#region src/hooks/session-start.ts
 hydrateHookEnv();
-function isSdkChildContext(payload) {
-	if (process.env["AGENTMEMORY_SDK_CHILD"] === "1") return true;
-	if (!payload || typeof payload !== "object") return false;
-	return payload.entrypoint === "sdk-ts";
-}
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
@@ -83,8 +146,7 @@ function authHeaders() {
 	return h;
 }
 function contextPayload(data, context) {
-	if (typeof data.cursor_version === "string" || data.hook_event_name === "sessionStart") return JSON.stringify({ additional_context: context });
-	if (process.env["DEVIN_PROJECT_DIR"] || data.prompt_id !== void 0) return JSON.stringify({ hookSpecificOutput: {
+	if (data.prompt_id !== void 0) return JSON.stringify({ hookSpecificOutput: {
 		hookEventName: "SessionStart",
 		additionalContext: context
 	} });
@@ -100,8 +162,9 @@ async function main() {
 		return;
 	}
 	if (!data || typeof data !== "object") return;
-	if (isSdkChildContext(data)) return;
-	const sessionId = data.session_id || data.sessionId || data.conversation_id || `ses_${Date.now().toString(36)}`;
+	if (shouldSkipSession()) return;
+	if (typeof data.agent_id === "string" && data.agent_id) return;
+	const sessionId = data.session_id || `ses_${Date.now().toString(36)}`;
 	const cwd = hookCwd(data) || process.cwd();
 	const project = resolveProject(cwd);
 	const url = `${REST_URL}/agentmemory/session/start`;
@@ -129,8 +192,10 @@ async function main() {
 		if (res.ok) {
 			const result = await res.json();
 			if (result.context) process.stdout.write(contextPayload(data, result.context));
-		}
-	} catch {}
+		} else recordMissedInjection("session-start", `http_${res.status}`);
+	} catch (err) {
+		recordMissedInjection("session-start", missReason(err));
+	}
 }
 main().catch(() => process.exit(0));
 //#endregion

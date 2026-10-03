@@ -8,7 +8,6 @@ import {
   loadClaudeBridgeConfig,
   loadTeamConfig,
   loadSnapshotConfig,
-  isGraphExtractionEnabled,
   isAutoCompressEnabled,
   isConsolidationEnabled,
   isContextInjectionEnabled,
@@ -59,16 +58,19 @@ import { registerConsolidateFunction } from "./functions/consolidate.js";
 import { registerPatternsFunction } from "./functions/patterns.js";
 import { registerRememberFunction } from "./functions/remember.js";
 import { registerEvictFunction } from "./functions/evict.js";
+import { evictOldestAudit } from "./functions/audit.js";
 import { registerRelationsFunction } from "./functions/relations.js";
 import { registerTimelineFunction } from "./functions/timeline.js";
 import { registerSmartSearchFunction } from "./functions/smart-search.js";
 import { registerRecentSearchesSweepFunction } from "./functions/recent-searches-sweep.js";
+import { registerInjectionsFunction } from "./functions/injections.js";
 import { registerProfileFunction } from "./functions/profile.js";
 import { registerAutoForgetFunction } from "./functions/auto-forget.js";
 import { registerExportImportFunction } from "./functions/export-import.js";
-import { registerEnrichFunction } from "./functions/enrich.js";
+import { registerPromptContextFunction } from "./functions/prompt-context.js";
 import { registerClaudeBridgeFunction } from "./functions/claude-bridge.js";
-import { registerGraphFunction } from "./functions/graph.js";
+import { registerGraphFunction, graphWritesOffReason } from "./functions/graph.js";
+import { isNoopProvider } from "./providers/noop.js";
 import { registerGraphImportFunction } from "./functions/graph-import.js";
 import { registerConsolidationPipelineFunction } from "./functions/consolidation-pipeline.js";
 import { registerTeamFunction } from "./functions/team.js";
@@ -118,6 +120,8 @@ import { bootLog } from "./logger.js";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+
+const FIRST_SWEEP_DELAY_MS = 5 * 60_000;
 
 // #640 + #474: record this process's pid so `agentmemory stop` and
 // `agentmemory doctor` can identify the daemon. Without it they can only
@@ -261,7 +265,7 @@ async function main() {
   registerProfileFunction(sdk, kv);
   registerAutoForgetFunction(sdk, kv);
   registerExportImportFunction(sdk, kv);
-  registerEnrichFunction(sdk, kv);
+  registerPromptContextFunction(sdk, kv);
 
   const claudeBridgeConfig = loadClaudeBridgeConfig();
   if (claudeBridgeConfig.enabled) {
@@ -273,12 +277,15 @@ async function main() {
 
   registerGraphFunction(sdk, kv, provider);
   registerGraphImportFunction(sdk, kv);
+  const graphOffReason = graphWritesOffReason();
   bootLog(
-    `Knowledge graph: structural extraction on (LLM relations ${isGraphExtractionEnabled() ? "enabled" : "off"})`,
+    graphOffReason
+      ? `Knowledge graph: writes off (${graphOffReason})`
+      : `Knowledge graph: writes on (LLM relations ${isNoopProvider(provider) ? "off, no LLM provider" : "on"})`,
   );
 
   registerConsolidationPipelineFunction(sdk, kv, provider);
-  bootLog(`Consolidation pipeline: registered (CONSOLIDATION_ENABLED=${isConsolidationEnabled() ? "true" : "false"})`);
+  bootLog(`Consolidation pipeline: ${isConsolidationEnabled() ? "enabled" : "disabled"}`);
 
   if (isAutoCompressEnabled()) {
     bootLog(
@@ -292,11 +299,11 @@ async function main() {
 
   if (isContextInjectionEnabled()) {
     bootLog(
-      `WARNING: AGENTMEMORY_INJECT_CONTEXT=true — the PreToolUse and SessionStart hooks will inject up to ~4000 chars of memory context into every tool turn. On Claude Pro this burns session tokens proportional to your tool-call frequency. Set AGENTMEMORY_INJECT_CONTEXT=false to disable.`,
+      `Context injection: session start and per prompt (AGENTMEMORY_INJECT_CONTEXT=true).`,
     );
   } else {
     bootLog(
-      `Context injection: OFF (default) — hooks capture observations but do not inject context into Claude Code's conversation. Set AGENTMEMORY_INJECT_CONTEXT=true to opt-in (warning: expect your Claude Pro allocation to drain faster).`,
+      `Context injection: OFF (default) — hooks capture observations but do not inject context into Claude Code's conversation. Set AGENTMEMORY_INJECT_CONTEXT=true to inject recalled context at session start and per prompt.`,
     );
   }
 
@@ -408,6 +415,7 @@ async function main() {
       : hybridSearch.search(query, limit),
   );
   registerRecentSearchesSweepFunction(sdk, kv);
+  registerInjectionsFunction(sdk, kv);
 
   registerApiTriggers(sdk, kv, secret, metricsStore, provider);
   registerEventTriggers(sdk, kv);
@@ -570,7 +578,7 @@ async function main() {
     `Ready. ${embeddingProvider ? "Triple-stream (BM25+Vector+Graph)" : "BM25+Graph"} search active.`,
   );
   bootLog(
-    `REST API: 132 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
+    `REST API: 133 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
   );
   bootLog(
     `MCP surface (opt-in via \`npx @agentmemory/mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,
@@ -608,6 +616,27 @@ async function main() {
     bootLog(`Lesson decay sweep: enabled (every 24h)`);
   }
 
+  if (process.env.EVICTION_ENABLED !== "false") {
+    // First sweep shortly after boot: a daemon restarted more often than daily
+    // would otherwise never reach its first 24h tick.
+    const runEviction = async () => {
+      try {
+        await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: false } });
+      } catch {}
+    };
+    setTimeout(runEviction, FIRST_SWEEP_DELAY_MS).unref();
+    setInterval(runEviction, 86400000).unref();
+    bootLog(`Eviction sweep: enabled (5 min after boot, then every 24h)`);
+  }
+
+  const runAuditEviction = async () => {
+    try {
+      await evictOldestAudit(kv);
+    } catch {}
+  };
+  setTimeout(runAuditEviction, FIRST_SWEEP_DELAY_MS).unref();
+  setInterval(runAuditEviction, 86400000).unref();
+
   if (process.env.INSIGHT_DECAY_ENABLED !== "false") {
     const insightDecayTimer = setInterval(async () => {
       try {
@@ -630,6 +659,13 @@ async function main() {
     } catch {}
   }, 60 * 60 * 1000);
   recentSearchesSweepTimer.unref();
+
+  const injectionsSweepTimer = setInterval(async () => {
+    try {
+      await sdk.trigger({ function_id: "mem::injections-sweep", payload: {} });
+    } catch {}
+  }, 60 * 60 * 1000);
+  injectionsSweepTimer.unref();
 
   if (isConsolidationEnabled()) {
     const consolidationTimer = setInterval(async () => {

@@ -145,8 +145,9 @@ prs:
       - src/functions/context.ts
       - src/functions/smart-search.ts
     note: "mem::context and smart-search load lessons but skip insights, so mem::reflect output is reachable only by explicit tool call."
-    disposition: candidate
-    status: "present-here — KV.insights (src/state/schema.ts:88) is written by reflect.ts and read only by diagnostics.ts and export-import.ts. mem::context loads slots, profile and lessons and never insights (src/functions/context.ts:73-161); smart-search has no reference either."
+    disposition: already-fixed
+    fixed_by: "9f6b46c, 8ee9946, e1b16c4"
+    status: "fixed-here — 9f6b46c, 8ee9946, e1b16c4: mem::context injects the top 5 Insights of the Session's own project at session start (src/functions/context.ts), and smart-search returns matching Insights beside Lessons, capped and project-filtered the same way, with includeInsights:false to opt out (src/functions/smart-search.ts recallInsights)."
     url: https://github.com/rohitg00/agentmemory/pull/615
   - number: 667
     title: "fix(cli): status uses /memories?count=true instead of /export"
@@ -157,7 +158,8 @@ prs:
     paths:
       - src/cli.ts
     note: "agentmemory status calls unbounded /export to get two counts and times out on any grown install."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — status reads memories?count=true, never /export (src/cli.ts:516)."
     url: https://github.com/rohitg00/agentmemory/pull/667
   - number: 757
     title: "fix(compression): fallback to synthetic compression when memory provider is noop"
@@ -287,8 +289,8 @@ prs:
     paths:
       - src/functions/evict.ts
     note: "Evicted observations are never removed from the BM25 or vector index, so search returns ids whose KV lookup is null and silently under-fills pages."
-    disposition: candidate
-    status: "present-here — src/functions/evict.ts deletes from KV without touching the BM25 or vector index."
+    disposition: already-fixed
+    fixed_by: "Every evict.ts delete goes through deleteIndexed, which removes the row, its vector and its BM25 entry (src/functions/search.ts:153-174)."
     url: https://github.com/rohitg00/agentmemory/pull/1005
   - number: 1039
     title: "fix: schedule periodic snapshot timer (#1006)"
@@ -311,8 +313,9 @@ prs:
     paths:
       - src/functions/observe.ts
     note: "At MAX_OBS_PER_SESSION every further observation is discarded; evicts the lowest-value one instead of dropping the newest."
-    disposition: candidate
-    status: "present-here — At MAX_OBS_PER_SESSION mem::observe refuses every further observation outright (src/functions/observe.ts:147-154). The newest work is dropped rather than the least valuable one evicted."
+    disposition: already-fixed
+    status: "fixed-here — db9f5db: at the cap mem::observe evicts the lowest-importance observation, oldest first on a tie, from KV and both indexes, and admits the new one."
+    fixed_by: "db9f5db"
     url: https://github.com/rohitg00/agentmemory/pull/1174
   - number: 1175
     title: "feat(slots): reject stale slot overwrites, keep an undo copy, report headroom"
@@ -338,8 +341,9 @@ prs:
     paths:
       - src/functions/audit.ts
     note: "recordAudit has no retention and the KV adapter rewrites the whole scope per write, so audit cost compounds on long-lived installs."
-    disposition: candidate
-    status: "present-here — recordAudit has no retention bound."
+    disposition: already-fixed
+    status: "fixed-here — cc30b8e: pruneAudit keeps the newest AGENTMEMORY_AUDIT_MAX rows (default 50000), run daily."
+    fixed_by: "cc30b8e"
     url: https://github.com/rohitg00/agentmemory/pull/1176
   - number: 1210
     title: "fix(providers): replace retired Anthropic default model identifiers"
@@ -365,8 +369,8 @@ prs:
       - plugin/scripts/pre-tool-use.mjs
       - src/hooks/pre-tool-use.ts
     note: "PreToolUse carries no project field, so hook enrichment is always unscoped and pulls context across projects."
-    disposition: already-fixed
-    status: "fixed-here — pre-tool-use resolves project and forwards it on the enrich call (src/hooks/pre-tool-use.ts:97-111)."
+    disposition: wont-fix
+    wont_fix_reason: "per-tool-call Injection, its pre-tool-use hook and /agentmemory/enrich were removed (#108)"
     url: https://github.com/rohitg00/agentmemory/pull/1220
   - number: 1247
     title: "feat(api): add /agentmemory/memories/search"
@@ -389,8 +393,9 @@ prs:
     paths:
       - src/providers/resilient.ts
     note: "No concurrency bound on the provider path and 429s count as circuit-breaker failures, so load trips the breaker."
-    disposition: candidate
-    status: "partly-present-here — 429 and 503 are already retried with Retry-After before reaching the breaker (src/providers/_fetch.ts:13,76-82). A concurrency cap exists, but only on the agent-sdk provider (src/providers/agent-sdk.ts:99) — the HTTP providers have none."
+    disposition: already-fixed
+    status: "fixed-here — 042f3a1: a 429/503 that exhausts its retries no longer opens the breaker, Retry-After is honoured uncapped within the timeout budget, and AGENTMEMORY_LLM_MAX_CONCURRENCY (default 4) bounds in-flight LLM calls."
+    fixed_by: "042f3a1"
     url: https://github.com/rohitg00/agentmemory/pull/1259
   - number: 1260
     title: "fix(mcp): read graph stats from the snapshot instead of enumerating the graph"
@@ -418,8 +423,9 @@ prs:
       - src/index.ts
       - test/evict.test.ts
     note: "mem::evict is fully implemented but nothing schedules it — Eviction never runs."
-    disposition: candidate
-    status: "present-here — mem::evict is registered (src/functions/evict.ts:109) but src/index.ts schedules only auto-forget and consolidate-pipeline."
+    disposition: already-fixed
+    status: "fixed-here — 3b2545e: src/index.ts runs mem::evict every 24h unless EVICTION_ENABLED=false."
+    fixed_by: "3b2545e"
     url: https://github.com/rohitg00/agentmemory/pull/1287
   - number: 1307
     title: "fix(sessions): close idle sessions no client ever ended"
@@ -528,8 +534,9 @@ prs:
       - test/consolidation-pipeline.test.ts
       - test/reflect.test.ts
     note: "Reflection and consolidation are not project-scoped, so concept clusters and insights cross-contaminate between repos."
-    disposition: candidate
-    status: "partly-present-here — mem::reflect accepts and filters on project (src/functions/reflect.ts:187,354,385), so the capability is present; it is opt-in, and the scheduled run passes no project."
+    disposition: already-fixed
+    status: "fixed-here — 6575de0: an unscoped consolidation run merges and reflects each project with new summaries separately, and mem::reflect with a project reads only that project's facts, crystals, lessons and graph concepts. Existing unscoped insights are left as they are."
+    fixed_by: "6575de0"
     url: https://github.com/rohitg00/agentmemory/pull/1344
   - number: 1350
     title: "fix(providers): clear the circuit breaker failure count on success"
@@ -641,7 +648,8 @@ prs:
     paths:
       - src/state/keyed-mutex.ts
     note: "Floating promise in withKeyedLock can raise unhandled-rejection warnings."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — cleanup swallows both outcomes, so the unawaited chain cannot reject (src/state/keyed-mutex.ts:9-16)."
     url: https://github.com/rohitg00/agentmemory/pull/266
   - number: 273
     title: "feat: opt-in fail-loud when AGENTMEMORY_URL is unreachable"
@@ -690,7 +698,8 @@ prs:
       - src/cli/connect/util.ts
       - test/cli-connect.test.ts
     note: "Turns the Hermes connect stub into a real ~/.hermes/config.yaml merge."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/465
   - number: 467
     title: "fix(embeddings): allow custom OpenAI embedding path"
@@ -806,7 +815,8 @@ prs:
       - test/agent-id-scope.test.ts
       - test/openclaw-plugin.test.ts
     note: "Integrations send no agentId, so every memory lands unscoped even with multi-agent isolation on."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/665
   - number: 689
     title: "feat(team): per-request userId + TEAM_MODE=private enforcement"
@@ -908,7 +918,8 @@ prs:
       - src/cli/connect/zed.ts
       - test/connect-new-agents.test.ts
     note: "connect zed overwrites existing settings.json instead of merging JSONC."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/953
   - number: 970
     title: "fix: make consolidation timeouts configurable"
@@ -993,7 +1004,7 @@ prs:
       - src/triggers/events.ts
       - test/agent-id-scope.test.ts
       # +2 more
-    note: "remember and memory_save drop agentId, and standalone MCP drops project despite advertising it."
+    note: "remember and memory_save drop agentId, and standalone MCP drops project despite advertising it. Only that half applies here; the Hermes profile tagging is for an unsupported host."
     disposition: candidate
     url: https://github.com/rohitg00/agentmemory/pull/1089
   - number: 1177
@@ -1046,7 +1057,9 @@ prs:
     paths:
       - src/eval/metrics-store.ts
     note: "MetricsStore.record() loses updates: concurrent callers meet in the kv.get() gap."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "c075a0e"
+    status: "fixed-here — c075a0e: MetricsStore.record runs under withKeyedLock(metrics:<functionId>), so concurrent first records no longer each load a fresh zero row and overwrite one another (src/eval/metrics-store.ts); test/metrics-store.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/pull/1291
   - number: 1293
     title: "fix(hooks): retry a failed observe POST instead of dropping it"
@@ -1096,7 +1109,8 @@ prs:
     paths:
       - plugin/opencode/agentmemory-capture.ts
     note: "Forking an OpenCode session re-observes the whole conversation history as new observations."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1311
   - number: 1318
     title: "fix(replay): reinforce lesson confidence on JSONL re-import"
@@ -1133,7 +1147,9 @@ prs:
       - src/mcp/standalone.ts
       - test/mcp-standalone-proxy.test.ts
     note: "Any non-ok proxy response is treated as unreachable, hiding real tool errors behind an unknown-tool fallback."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "778f81d, 2b2f838"
+    status: "fixed-here — 778f81d, 2b2f838: the standalone MCP falls back to local KV and invalidates the handle only when the daemon could not be reached (a thrown fetch or a gateway 502/504); any other HTTP error is rethrown with the server's response text (src/mcp/standalone.ts serverAnswered, src/mcp/rest-proxy.ts), and the daemon logs the real cause behind its generic 500 (src/mcp/server.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/1323
   - number: 1327
     title: "fix(clip): encode text with CLIP text tower so text→image vision-search works"
@@ -1200,7 +1216,9 @@ prs:
       - src/providers/embedding/openai.ts
       - test/embedding-provider.test.ts
     note: "OPENAI_EMBEDDING_DIMENSIONS is read into the provider but never sent in the request body, breaking matryoshka models."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "fca353f, 4c65822"
+    status: "fixed-here — fca353f, 4c65822: OpenAI and OpenRouter send dimensions when the configured width shortens a known model, including the nomic-embed-text-v1.5 and Qwen3-Embedding Matryoshka families matched case-insensitively across provider/ prefixes (requestedDimensions, src/providers/embedding/_dimensions.ts); an unknown model keeps the field off, since there the env var declares the native width and non-Matryoshka servers reject it."
     url: https://github.com/rohitg00/agentmemory/pull/1369
   - number: 194
     title: "feat: add --host flag and AGENTMEMORY_HOST for configurable bind address"
@@ -1324,7 +1342,8 @@ prs:
       - integrations/openclaw/README.md
       - integrations/openclaw/plugin.mjs
     note: "OpenClaw memory-slot capability registration."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/302
   - number: 333
     title: "Refactor health monitoring logic and snapshot collection"
@@ -1387,7 +1406,8 @@ prs:
       - integrations/hermes/plugin.yaml
       - test/consistency.test.ts
     note: "Hermes plugin.yaml missing hook names, plus a manifest consistency guard."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/488
   - number: 528
     title: "fix(cli): tie iii engine lifecycle and skip prompts in non-TTY context"
@@ -1503,7 +1523,8 @@ prs:
     paths:
       - integrations/pi/index.ts
     note: "pi integration from 3 to 6 lifecycle hooks."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/604
   - number: 606
     title: "feat(providers): add DeepSeek provider"
@@ -1759,7 +1780,8 @@ prs:
       - integrations/openclaw/plugin.mjs
       - test/openclaw-plugin.test.ts
     note: "DRAFT. OpenClaw terminal capture through llm_output/agent_end."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/860
   - number: 891
     title: "Hermes plugin: stable project scoping + close sessions on process exit"
@@ -1770,7 +1792,8 @@ prs:
     paths:
       - integrations/hermes/__init__.py
     note: "Hermes project scoping under ephemeral worktrees, plus session close on exit."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/891
   - number: 914
     title: "Add configurable prompt output language"
@@ -1862,7 +1885,8 @@ prs:
       - integrations/hermes/__init__.py
       - test/hermes-plugin.test.ts
     note: "Hermes sync_turn truncates tool_input/tool_output and collapses tool calls."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1012
   - number: 1016
     title: "Support Codex pre-tool-use targets"
@@ -2113,7 +2137,8 @@ prs:
     paths:
       - integrations/pi/index.ts
     note: "pi memory_save had no project, so its memories landed global."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1185
   - number: 1186
     title: "feat(pi): summarize and end the session on quit"
@@ -2124,7 +2149,8 @@ prs:
     paths:
       - integrations/pi/index.ts
     note: "pi never ended sessions, leaving zombies with no summary."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1186
   - number: 1206
     title: "feat(pi): observe per-tool results (PostToolUse parity)"
@@ -2135,7 +2161,8 @@ prs:
     paths:
       - integrations/pi/index.ts
     note: "pi per-tool observations for PostToolUse parity."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1206
   - number: 1207
     title: "feat(pi): robustness — client dedup, session/start, prompt_submit, larger turn capture"
@@ -2146,7 +2173,8 @@ prs:
     paths:
       - integrations/pi/index.ts
     note: "pi client-side dedup, session/start, prompt_submit, larger turn capture."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1207
   - number: 1222
     title: "feat: klaatcode support (cli adapter, native hooks)"
@@ -2180,7 +2208,8 @@ prs:
       - integrations/pi/index.ts
       - test/connect-pi.test.ts
     note: "pi attributes sessions to ctx.cwd."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1227
   - number: 1234
     title: "fix: reject state reads without keys"
@@ -2274,7 +2303,8 @@ prs:
     paths:
       - plugin/opencode/agentmemory-capture.ts
     note: "OpenCode resolves the project directory once at startup and stays locked to it."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1301
   - number: 1320
     title: "feat: Kimi Code CLI plugin support"
@@ -2384,5 +2414,6 @@ prs:
     paths:
       - website/package.json
     note: "dependabot: website @types/node 25 to 26."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
     url: https://github.com/rohitg00/agentmemory/pull/1380
