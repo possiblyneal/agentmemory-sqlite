@@ -34,6 +34,13 @@ A single raw thing that happened during a Session — a tool call, a prompt, a f
 atomic, append-only input to everything else.
 _Avoid_: event, log entry
 
+**Harness Message**:
+A user turn that Claude Code writes and the Operator does not: a background-task result or
+a message from another Session, delivered as one or more `<task-notification>`,
+`<teammate-message>`, `<cross-session-message>` or `<agent-message>` elements. It is never
+stored as an Observation, never searched on for an Injection, and dropped on import.
+_Avoid_: notification (alone)
+
 **Memory**:
 A durable distilled record derived from Observations, intended to be recalled later. Memories
 are content-addressed, so the same content captured twice is one Memory.

@@ -19,6 +19,7 @@ import { safeAudit } from "./audit.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { indexRecords } from "./search.js";
 import { logger } from "../logger.js";
+import { isHarnessPrompt } from "../utils/harness-message.js";
 
 export const MAX_FILES_DEFAULT = 200;
 export const MAX_FILES_UPPER_BOUND = 1000;
@@ -34,15 +35,6 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /(^|[\\/])access[_-]?token([\\/_.-]|$)/i,
   /(^|[\\/])api[_-]?token([\\/_.-]|$)/i,
 ];
-
-// Claude Code writes its own background jobs to ~/.claude/projects beside
-// real work: a Warmup probe and the conversation-list summary job (#1064).
-function isHarnessPrompt(firstPrompt: string): boolean {
-  return (
-    firstPrompt === "Warmup" ||
-    firstPrompt.startsWith("Context: This summary will be shown in a list")
-  );
-}
 
 export function isSensitive(path: string): boolean {
   return SENSITIVE_PATH_PATTERNS.some((re) => re.test(path));

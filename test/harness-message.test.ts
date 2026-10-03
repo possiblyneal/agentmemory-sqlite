@@ -8,6 +8,7 @@ import { registerObserveFunction } from "../src/functions/observe.js";
 import { registerPromptContextFunction } from "../src/functions/prompt-context.js";
 import { parseJsonlText } from "../src/replay/jsonl-parser.js";
 import { KV } from "../src/state/schema.js";
+import { isHarnessMessage } from "../src/utils/harness-message.js";
 import { mockKV, mockSdk } from "./helpers/mocks.js";
 
 const NOTIFICATIONS = [
@@ -36,7 +37,7 @@ describe("harness messages delivered as user turns", () => {
 
     const result = await sdk.trigger("mem::observe", prompt(text));
 
-    expect(result).toEqual({ skipped: "harness-message", sessionId: "ses_1" });
+    expect(result).toEqual({ skipped: true, reason: "harness-message", sessionId: "ses_1" });
     expect(await kv.list(KV.observations("ses_1"))).toEqual([]);
   });
 
@@ -51,6 +52,15 @@ describe("harness messages delivered as user turns", () => {
     )) as { observationId?: string };
 
     expect(result.observationId).toBeTruthy();
+  });
+
+  it.each([
+    ["Operator text after the element", `${NOTIFICATIONS[0]}\nnow rebase onto main`, false],
+    ["a tag that only starts with a harness tag's name", "<task-notification-log>rerun it</task-notification-log>", false],
+    ["several elements in one turn", `${NOTIFICATIONS[1]}\n${NOTIFICATIONS[2]}`, true],
+    ["an element truncated before its closing tag", "<task-notification>\n<task-id>a1</task-id>\n<summary>Backgro", true],
+  ])("tell %s", (_, text, harness) => {
+    expect(isHarnessMessage(text)).toBe(harness);
   });
 
   it.each(NOTIFICATIONS)("do not trigger a per-prompt search: %s", async (text) => {

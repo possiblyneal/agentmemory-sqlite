@@ -165,7 +165,7 @@ export function registerObserveFunction(
       }
 
       if (payload.hookType === "prompt_submit" && isHarnessMessage(promptOf(payload.data))) {
-        return { skipped: "harness-message", sessionId: payload.sessionId };
+        return { skipped: true, reason: "harness-message", sessionId: payload.sessionId };
       }
 
       const obsId = generateId("obs");
