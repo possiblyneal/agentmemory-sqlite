@@ -18,12 +18,12 @@ Restart the session, then confirm Claude Code lists agentmemory's tools under `/
 ## Workflow
 
 1. Prefer the plugin. It is the only path that installs the hooks, so it is the only path that captures memory automatically.
-2. Without the plugin, `agentmemory connect claude-code` merges the MCP server into `~/.claude.json` and preserves any existing servers. It wires tools only: no hooks, no skills.
+2. Without the plugin, `agentmemory connect` merges the MCP server into `~/.claude.json`, backs the file up first and preserves any existing servers. It wires tools only: no hooks, no skills. `--dry-run` previews the change and `--force` rewrites an existing entry.
 3. Verify: with a server running, Claude Code shows the full tool set. Only 7 tools means the MCP shim could not reach a server (see ../_shared/TROUBLESHOOTING.md).
 
 ## Notes
 
-- Other agents are not supported. `connect` has no adapter for them and the plugin ships no hook manifest for them.
+- Other agents are not supported. `connect` rejects any agent name other than `claude-code`, and the plugin ships no hook manifest for them.
 - Windows: use WSL2. Native Windows runs the server but `connect` is not supported there.
 
 ## See also
@@ -32,4 +32,4 @@ Restart the session, then confirm Claude Code lists agentmemory's tools under `/
 
 ## Reference
 
-The adapter list lives in REFERENCE.md, generated from `src/cli/connect/`.
+The `connect` flags live in REFERENCE.md, generated from `src/cli/connect/index.ts`.

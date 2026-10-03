@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAllTools, ESSENTIAL_TOOLS } from "../../src/mcp/tools-registry.js";
-import { ADAPTERS } from "../../src/cli/connect/index.js";
+import { CONNECT_ALIAS, CONNECT_FLAGS, CONNECT_USAGE } from "../../src/cli/connect/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -139,15 +139,12 @@ function env(): string {
 
 function agents(): string {
   const lines = [
-    `\`agentmemory connect <agent>\` wires the memory server into a host agent. ${ADAPTERS.length} adapter${ADAPTERS.length === 1 ? "" : "s"}:`,
+    `\`${CONNECT_USAGE}\` wires agentmemory's MCP server into Claude Code (\`~/.claude.json\`). \`agentmemory connect ${CONNECT_ALIAS}\` is accepted as an alias. Any other flag or argument exits 1.`,
     "",
-    "| Agent | Name | Protocol |",
-    "| --- | --- | --- |",
+    "| Flag | Effect |",
+    "| --- | --- |",
+    ...Object.entries(CONNECT_FLAGS).map(([flag, text]) => `| \`${flag}\` | ${mdEscape(text)} |`),
   ];
-  for (const a of [...ADAPTERS].sort((x, y) => x.name.localeCompare(y.name))) {
-    const note = (a.protocolNote ?? "").replace(/^[→\s]+/, "");
-    lines.push(`| ${mdEscape(a.displayName)} | \`${a.name}\` | ${mdEscape(note) || "MCP"} |`);
-  }
   return lines.join("\n");
 }
 

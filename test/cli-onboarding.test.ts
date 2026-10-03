@@ -15,6 +15,8 @@ const prompts = vi.hoisted(() => ({
   isCancel: vi.fn(() => false),
   cancel: vi.fn(),
   log: {
+    info: vi.fn(),
+    success: vi.fn(),
     warn: vi.fn(),
     step: vi.fn(),
     error: vi.fn(),
@@ -22,10 +24,8 @@ const prompts = vi.hoisted(() => ({
 }));
 
 vi.mock("@clack/prompts", () => prompts);
-vi.mock("../src/cli/connect/index.js", () => ({
-  resolveAdapter: vi.fn(),
-  runAdapter: vi.fn(),
-}));
+const installClaudeCode = vi.hoisted(() => vi.fn(async () => ({ kind: "installed" })));
+vi.mock("../src/cli/connect/claude-code.js", () => ({ installClaudeCode }));
 
 const ORIGINAL_HOME = process.env["HOME"];
 const ORIGINAL_USERPROFILE = process.env["USERPROFILE"];
@@ -74,7 +74,7 @@ describe("cli onboarding", () => {
 
     const result = await runOnboarding();
 
-    expect(result).toEqual({ agents: [], provider: null });
+    expect(result).toEqual({ provider: null });
     expect(prompts.multiselect).not.toHaveBeenCalled();
     expect(prompts.select).not.toHaveBeenCalled();
     expect(prompts.confirm).not.toHaveBeenCalled();
@@ -90,5 +90,29 @@ describe("cli onboarding", () => {
       skipSplash: true,
     });
     expect(typeof preferences.firstRunAt).toBe("string");
+  });
+
+  it("offers to wire Claude Code without asking which agents to use", async () => {
+    setTTY(true);
+    prompts.select.mockResolvedValueOnce("skip");
+    const { runOnboarding } = await freshOnboarding();
+
+    const result = await runOnboarding();
+
+    expect(result).toEqual({ provider: null });
+    expect(prompts.multiselect).not.toHaveBeenCalled();
+    expect(installClaudeCode).toHaveBeenCalledOnce();
+    expect(installClaudeCode).toHaveBeenCalledWith({ dryRun: false, force: false });
+  });
+
+  it("leaves Claude Code unwired when the offer is declined", async () => {
+    setTTY(true);
+    prompts.select.mockResolvedValueOnce("skip");
+    prompts.confirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    const { runOnboarding } = await freshOnboarding();
+
+    await runOnboarding();
+
+    expect(installClaudeCode).not.toHaveBeenCalled();
   });
 });

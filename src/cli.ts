@@ -55,7 +55,7 @@ import { setBootVerbose } from "./logger.js";
 import { hydrateProcessEnvFromFile } from "./config.js";
 import { VERSION } from "./version.js";
 import { getAllTools, ESSENTIAL_TOOLS } from "./mcp/tools-registry.js";
-import { knownAgents } from "./cli/connect/index.js";
+import { CONNECT_ALIAS, CONNECT_FLAGS } from "./cli/connect/index.js";
 
 const ALL_TOOLS_COUNT = getAllTools().length;
 const CORE_TOOLS_COUNT = getAllTools().filter((t) => ESSENTIAL_TOOLS.has(t.name)).length;
@@ -96,22 +96,6 @@ function vlog(msg: string): void {
   if (IS_VERBOSE) p.log.info(`[verbose] ${msg}`);
 }
 
-function wrapList(items: readonly string[], indent: number, width = 78): string {
-  const lines: string[] = [];
-  let line = "";
-  for (const item of items) {
-    const joined = line ? `${line}, ${item}` : item;
-    if (line && indent + joined.length > width) {
-      lines.push(`${line},`);
-      line = item;
-    } else {
-      line = joined;
-    }
-  }
-  lines.push(line);
-  return lines.join(`\n${" ".repeat(indent)}`);
-}
-
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
 agentmemory — persistent memory for AI coding agents
@@ -121,10 +105,11 @@ Usage: agentmemory [command] [options]
 Commands:
   (default)          Start agentmemory worker
   init               Copy bundled .env.example to ~/.agentmemory/.env if absent
-  connect [agent]    Wire agentmemory into an installed agent
-                     (${wrapList(knownAgents(), 21)}).
-                     No arg = interactive picker. --all wires every detected agent.
-                     --dry-run shows what would change. --force re-installs.
+  connect            Wire agentmemory's MCP server into Claude Code.
+                     \`connect ${CONNECT_ALIAS}\` is accepted as an alias.
+${Object.entries(CONNECT_FLAGS)
+  .map(([flag, text]) => `                     ${flag}: ${text}`)
+  .join("\n")}
   status             Show connection status, memory count, flags, and health
   doctor             Interactive diagnostic + fixer. [F]ix · [S]kip · [?]more · [Q]uit
                      --all: apply every fix without prompting (CI)

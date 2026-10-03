@@ -4,49 +4,48 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
-  ADAPTERS,
-  knownAgents,
-  resolveAdapter,
+  CONNECT_USAGE,
+  parseConnectArgs,
+  runConnect,
 } from "../src/cli/connect/index.js";
-import type { ConnectAdapter } from "../src/cli/connect/types.js";
+import type { installClaudeCode } from "../src/cli/connect/claude-code.js";
 
-describe("agentmemory connect — dispatcher", () => {
-  it("resolves every known agent by lowercase name", () => {
-    for (const name of knownAgents()) {
-      const a = resolveAdapter(name);
-      expect(a, `expected adapter for ${name}`).not.toBeNull();
-      expect(a!.name).toBe(name);
-    }
+describe("agentmemory connect — argument parsing", () => {
+  it("defaults to a real, non-forced write", () => {
+    expect(parseConnectArgs([])).toEqual({ dryRun: false, force: false });
   });
 
-  it("resolves case-insensitively", () => {
-    expect(resolveAdapter("Claude-Code")?.name).toBe("claude-code");
+  it("accepts --dry-run and --force", () => {
+    expect(parseConnectArgs(["--dry-run", "--force"])).toEqual({ dryRun: true, force: true });
   });
 
-  it("returns null for unknown agents", () => {
-    expect(resolveAdapter("nonexistent-agent")).toBeNull();
-    expect(resolveAdapter("")).toBeNull();
+  it("accepts claude-code as an alias, case-insensitively", () => {
+    expect(parseConnectArgs(["claude-code"])).toEqual({ dryRun: false, force: false });
+    expect(parseConnectArgs(["Claude-Code", "--force"])).toEqual({ dryRun: false, force: true });
   });
 
-  it("ships Claude Code as the only agent", () => {
-    expect(knownAgents()).toEqual(["claude-code"]);
+  it.each(["--all", "--with-hooks", "--no-guidelines", "-x"])("rejects the unknown flag %s", (flag) => {
+    expect(() => parseConnectArgs([flag])).toThrow(`Unknown flag: ${flag}`);
   });
 
-  it("every adapter exposes detect() and install()", () => {
-    for (const a of ADAPTERS) {
-      expect(typeof a.detect).toBe("function");
-      expect(typeof a.install).toBe("function");
-      expect(typeof a.name).toBe("string");
-      expect(typeof a.displayName).toBe("string");
-    }
+  it("rejects any other agent name and names Claude Code as the only host", () => {
+    expect(() => parseConnectArgs(["cursor"])).toThrow(
+      "Unknown agent: cursor. Claude Code is the only supported host.",
+    );
   });
 
-  it("every adapter declares a category so onboarding never needs a separate list (#872)", () => {
-    for (const a of ADAPTERS) {
-      expect(
-        ["native", "mcp"].includes(a.category as string),
-        `adapter ${a.name} must set category to "native" or "mcp"`,
-      ).toBe(true);
+  it("documents both flags in the usage line", () => {
+    expect(CONNECT_USAGE).toBe("agentmemory connect [--dry-run] [--force]");
+  });
+
+  it("exits 1 on an unknown flag without touching ~/.claude.json", async () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as never);
+    try {
+      await expect(runConnect(["--all"])).rejects.toThrow("exit 1");
+    } finally {
+      exit.mockRestore();
     }
   });
 });
@@ -75,14 +74,18 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     vi.resetModules();
   });
 
-  async function loadAdapter(): Promise<ConnectAdapter> {
+  async function loadInstall(): Promise<typeof installClaudeCode> {
     const mod = await import("../src/cli/connect/claude-code.js?t=" + Date.now());
-    return (mod as { adapter: ConnectAdapter }).adapter;
+    return (mod as { installClaudeCode: typeof installClaudeCode }).installClaudeCode;
   }
 
-  it("detect() returns false when ~/.claude doesn't exist", async () => {
-    const a = await loadAdapter();
-    expect(a.detect()).toBe(false);
+  it("skips with not-detected when ~/.claude doesn't exist", async () => {
+    const install = await loadInstall();
+    expect(await install({ dryRun: false, force: false })).toEqual({
+      kind: "skipped",
+      reason: "not-detected",
+    });
+    expect(existsSync(join(tmpHome, ".claude.json"))).toBe(false);
   });
 
   it("install() writes mcpServers.agentmemory into ~/.claude.json and is idempotent", async () => {
@@ -93,10 +96,9 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
       JSON.stringify({ mcpServers: { other: { command: "x" } } }),
     );
 
-    const a = await loadAdapter();
-    expect(a.detect()).toBe(true);
+    const install = await loadInstall();
 
-    const first = await a.install({ dryRun: false, force: false });
+    const first = await install({ dryRun: false, force: false });
     expect(first.kind).toBe("installed");
 
     const config = JSON.parse(readFileSync(join(tmpHome, ".claude.json"), "utf-8"));
@@ -104,7 +106,7 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     expect(config.mcpServers.agentmemory.args).toContain("@agentmemory/mcp");
     expect(config.mcpServers.other.command).toBe("x");
 
-    const second = await a.install({ dryRun: false, force: false });
+    const second = await install({ dryRun: false, force: false });
     expect(second.kind).toBe("already-wired");
   });
 
@@ -118,8 +120,8 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     require("node:fs").mkdirSync(claudeDir, { recursive: true });
     writeFileSync(join(tmpHome, ".claude.json"), JSON.stringify({}));
 
-    const a = await loadAdapter();
-    const result = await a.install({ dryRun: false, force: false });
+    const install = await loadInstall();
+    const result = await install({ dryRun: false, force: false });
     expect(result.kind).toBe("installed");
 
     const config = JSON.parse(readFileSync(join(tmpHome, ".claude.json"), "utf-8"));
@@ -147,8 +149,8 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
       }),
     );
 
-    const a = await loadAdapter();
-    const result = await a.install({ dryRun: false, force: true });
+    const install = await loadInstall();
+    const result = await install({ dryRun: false, force: true });
     expect(result.kind).toBe("installed");
   });
 
@@ -157,8 +159,8 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     const before = JSON.stringify({ mcpServers: {} });
     writeFileSync(join(tmpHome, ".claude.json"), before);
 
-    const a = await loadAdapter();
-    const result = await a.install({ dryRun: true, force: false });
+    const install = await loadInstall();
+    const result = await install({ dryRun: true, force: false });
     expect(result.kind).toBe("installed");
 
     const after = readFileSync(join(tmpHome, ".claude.json"), "utf-8");
@@ -172,8 +174,8 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
       JSON.stringify({ mcpServers: {} }),
     );
 
-    const a = await loadAdapter();
-    const result = await a.install({ dryRun: false, force: false });
+    const install = await loadInstall();
+    const result = await install({ dryRun: false, force: false });
     expect(result.kind).toBe("installed");
     if (result.kind === "installed") {
       expect(result.backupPath).toBeDefined();
