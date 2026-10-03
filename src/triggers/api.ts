@@ -968,13 +968,12 @@ export function registerApiTriggers(
       });
 
       if (sessionId) {
-        await withKeyedLock(`session:${sessionId}`, async () => {
+        await withKeyedLock(`obs:${sessionId}`, async () => {
           const session = await kv.get<Session>(KV.sessions, sessionId);
-          if (!session) return;
-          const shaSet = new Set<string>(session.commitShas ?? []);
-          shaSet.add(sha);
-          session.commitShas = Array.from(shaSet);
-          await kv.set(KV.sessions, sessionId, session);
+          if (!session || session.commitShas?.includes(sha)) return;
+          await kv.update(KV.sessions, sessionId, [
+            { type: "set", path: "commitShas", value: [...(session.commitShas ?? []), sha] },
+          ]);
         });
       }
 

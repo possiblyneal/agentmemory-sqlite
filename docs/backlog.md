@@ -56,15 +56,14 @@ other consolidation calls still send whatever their inputs add up to.
 - **Done when.** Both prompts are bounded the way reflect's is, before either input grows
   enough to starve sibling slots on the broker.
 
-## Put Session writers on one lock
+## Lock replay's Session write
 
-Commit-link writes a Session under `session:${id}` (`src/triggers/api.ts:969`), while observe
-(`src/functions/observe.ts:243`) and the abandoned-Session heal
-(`src/functions/diagnostics.ts:1087`) take `obs:${id}`. Commit-link reads, edits and replaces
-the whole record, so a concurrent observe can lose its count or a commit SHA can be dropped.
+JSONL replay reads a Session, edits `observationCount` and the rest of the record, and writes
+it back whole with `kv.set` (`src/functions/replay.ts:427-452`) without taking `obs:${id}`, the
+key every other Session writer holds. A replay running against a live Session can drop an
+observe's count or a commit-link's `commitShas`.
 
-- **Done when.** Every read-modify-write of `mem:sessions` holds the same key, or commit-link
-  appends `commitShas` with a field-level `kv.update` and needs no lock.
+- **Done when.** Replay's read-modify-write of `mem:sessions` holds `obs:${id}`.
 
 ## Rank session-start Observations by something that varies
 
