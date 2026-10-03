@@ -4,10 +4,16 @@ import { installClaudeCode, type ConnectOptions } from "./claude-code.js";
 
 export const CONNECT_ALIAS = "claude-code";
 
-export const CONNECT_FLAGS: Record<string, string> = {
-  "--dry-run": "show what would change in ~/.claude.json, write nothing",
-  "--force": "rewrite the agentmemory entry even if already wired",
-};
+export const CONNECT_FLAGS = {
+  "--dry-run": { option: "dryRun", help: "show what would change in ~/.claude.json, write nothing" },
+  "--force": { option: "force", help: "rewrite the agentmemory entry even if already wired" },
+} as const satisfies Record<string, { option: keyof ConnectOptions; help: string }>;
+
+type ConnectFlag = keyof typeof CONNECT_FLAGS;
+
+function isConnectFlag(arg: string): arg is ConnectFlag {
+  return Object.hasOwn(CONNECT_FLAGS, arg);
+}
 
 export const CONNECT_USAGE = `agentmemory connect ${Object.keys(CONNECT_FLAGS)
   .map((f) => `[${f}]`)
@@ -16,11 +22,10 @@ export const CONNECT_USAGE = `agentmemory connect ${Object.keys(CONNECT_FLAGS)
 export function parseConnectArgs(args: string[]): ConnectOptions {
   const opts: ConnectOptions = { dryRun: false, force: false };
   for (const a of args) {
-    if (a === "--dry-run") opts.dryRun = true;
-    else if (a === "--force") opts.force = true;
+    if (isConnectFlag(a)) opts[CONNECT_FLAGS[a].option] = true;
     else if (a.startsWith("-")) {
       throw new Error(
-        `Unknown flag: ${a}. \`agentmemory connect\` accepts only ${Object.keys(CONNECT_FLAGS).join(" and ")}.`,
+        `Unknown flag: ${a}. \`agentmemory connect\` accepts only ${Object.keys(CONNECT_FLAGS).join(", ")}.`,
       );
     } else if (a.toLowerCase() !== CONNECT_ALIAS) {
       throw new Error(`Unknown agent: ${a}. Claude Code is the only supported host.`);
