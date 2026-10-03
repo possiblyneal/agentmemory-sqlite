@@ -843,20 +843,21 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         const tooUnused =
           total.scored >= UNUSED_INJECTION_MIN_ITEMS &&
           total.unused / total.scored > UNUSED_INJECTION_WARN_SHARE;
+        const injectedItemsNote =
+          total.scored === 0
+            ? `No scorable injected items${insights.scored > 0 ? " other than Insights" : ""} between 1h and 24h ago.`
+            : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
+              `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
+              "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
+              "and items with no files are not scored.";
+        const insightNote =
+          insights.scored > 0 &&
+          `Insights ${share(insights)}% of ${insights.scored} unused, scored apart by their source Crystals' files and never warned on.`;
         checks.push({
           name: tooUnused ? "unused-injections" : "injection-use-ok",
           category: "injection-use",
           status: tooUnused ? "warn" : "pass",
-          message:
-            (total.scored === 0
-              ? "No scorable injected items between 1h and 24h ago"
-              : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
-                `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
-                "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
-                "and items with no files are not scored.") +
-            (insights.scored === 0
-              ? ""
-              : ` Insights ${share(insights)}% of ${insights.scored} unused, scored apart by their source Crystals' files and never warned on.`),
+          message: insightNote ? `${injectedItemsNote} ${insightNote}` : injectedItemsNote,
           fixable: false,
         });
       }

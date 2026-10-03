@@ -789,7 +789,14 @@ describe("Diagnostics Functions", () => {
         await seedInsight("ins_ab", { crystals: ["cry_a", "cry_b"] });
         await seedRecord("r1", "session-start", "s1", insightRefs(["ins_ab"]));
         await seedTouch("s1", "obs_1", ["src/b.ts"]);
-        expect((await useCheck()).message).toContain("Insights 0% of 1 unused");
+        const message = (await useCheck()).message;
+        expect(message).toContain("No scorable injected items other than Insights between 1h and 24h ago. Insights 0% of 1 unused");
+      });
+
+      it("tolerates an imported Insight with no source Crystal list", async () => {
+        await kv.set(KV.insights, "ins_bare", { id: "ins_bare", title: "t", content: "c" });
+        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_bare"]));
+        expect((await useCheck()).message).toContain("No scorable injected items");
       });
 
       it("scores an Insight as unused when no later Observation touches its source Crystals' files", async () => {

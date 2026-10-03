@@ -59,11 +59,11 @@ export async function resolveInsightFiles(
 ): Promise<Map<string, string[]>> {
   const insightIds = records.flatMap((r) => r.injected.filter((ref) => ref.kind === "insight").map((ref) => ref.id));
   const insights = [...(await getExisting<Insight>(kv, KV.insights, insightIds)).values()];
-  const crystals = await getExisting<Crystal>(kv, KV.crystals, insights.flatMap((i) => i.sourceCrystalIds));
+  const crystals = await getExisting<Crystal>(kv, KV.crystals, insights.flatMap((i) => i.sourceCrystalIds ?? []));
   return new Map(
     insights.map((insight) => [
       insight.id,
-      [...new Set(insight.sourceCrystalIds.flatMap((id) => crystals.get(id)?.filesAffected ?? []))],
+      [...new Set((insight.sourceCrystalIds ?? []).flatMap((id) => crystals.get(id)?.filesAffected ?? []))],
     ]),
   );
 }
