@@ -5,6 +5,7 @@ import type { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
+import { isHarnessMessage } from "../utils/harness-message.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
@@ -50,7 +51,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
     "mem::prompt-context",
     async (data: { sessionId: string; prompt: string; project?: string }): Promise<PromptContextResult> => {
       const prompt = data.prompt.trim();
-      if (wordCount(prompt) < MIN_PROMPT_WORDS) return EMPTY;
+      if (wordCount(prompt) < MIN_PROMPT_WORDS || isHarnessMessage(prompt)) return EMPTY;
 
       const [search, seen] = await Promise.all([
         sdk

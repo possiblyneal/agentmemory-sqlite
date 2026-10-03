@@ -16,6 +16,7 @@ import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
+import { isHarnessMessage } from "../utils/harness-message.js";
 
 export function extractImage(d: unknown): string | undefined {
   if (!d) return undefined;
@@ -134,6 +135,11 @@ function hasCompressibleContent(raw: RawObservation): boolean {
   );
 }
 
+function promptOf(data: unknown): string {
+  const prompt = (data as { prompt?: unknown } | null)?.prompt;
+  return typeof prompt === "string" ? prompt : "";
+}
+
 export function registerObserveFunction(
   sdk: ISdk,
   kv: StateKV,
@@ -156,6 +162,10 @@ export function registerObserveFunction(
           error:
             "Invalid payload: sessionId, hookType, and timestamp are required",
         };
+      }
+
+      if (payload.hookType === "prompt_submit" && isHarnessMessage(promptOf(payload.data))) {
+        return { skipped: "harness-message", sessionId: payload.sessionId };
       }
 
       const obsId = generateId("obs");

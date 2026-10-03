@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { HookType, RawObservation } from "../types.js";
 import { generateId } from "../state/schema.js";
+import { isHarnessMessage } from "../utils/harness-message.js";
 
 interface JsonlEntry {
   type?: string;
@@ -155,7 +156,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
         }
       } else {
         const text = toText(content);
-        if (text.trim().length > 0) {
+        if (text.trim().length > 0 && !isHarnessMessage(text)) {
           observations.push({
             id: generateId("obs"),
             sessionId: sessionId || "imported",
