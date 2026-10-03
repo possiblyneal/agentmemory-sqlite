@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hydrateHookEnv, parseEnvFile } from "../src/hooks/_env.js";
+import { __resetEnvFileCache, hydrateEnvFromFile, hydrateHookEnv, parseEnvFile } from "../src/hooks/_env.js";
 
 const KEYS = ["AGENTMEMORY_INJECT_CONTEXT", "AGENTMEMORY_URL", "AGENTMEMORY_SECRET"] as const;
 const ORIGINAL_ENV = Object.fromEntries(
@@ -60,6 +60,59 @@ describe("hydrateHookEnv", () => {
     hydrateHookEnv();
 
     for (const key of KEYS) expect(process.env[key]).toBeUndefined();
+  });
+});
+
+describe("hydrateEnvFromFile", () => {
+  beforeEach(() => {
+    sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-hydrate-"));
+    process.env["HOME"] = sandboxHome;
+    process.env["USERPROFILE"] = sandboxHome;
+    __resetEnvFileCache();
+    writeEnv("AGENTMEMORY_SECRET=from-file\n");
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(sandboxHome, { recursive: true, force: true });
+  });
+
+  it("lets the caller's isUnset test decide whether the file beats process.env", () => {
+    process.env["AGENTMEMORY_SECRET"] = "";
+    hydrateEnvFromFile((current) => current === undefined);
+    const undefinedOnly = process.env["AGENTMEMORY_SECRET"];
+
+    process.env["AGENTMEMORY_SECRET"] = "";
+    hydrateEnvFromFile((current) => !current);
+    const blankToo = process.env["AGENTMEMORY_SECRET"];
+
+    expect({ undefinedOnly, blankToo }).toEqual({ undefinedOnly: "", blankToo: "from-file" });
+  });
+});
+
+describe("unreadable env file", () => {
+  beforeEach(() => {
+    sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-unreadable-"));
+    process.env["HOME"] = sandboxHome;
+    process.env["USERPROFILE"] = sandboxHome;
+    __resetEnvFileCache();
+    mkdirSync(join(sandboxHome, ".agentmemory", ".env"), { recursive: true });
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(sandboxHome, { recursive: true, force: true });
+  });
+
+  it("reaches the daemon's loader but not a hook", () => {
+    expect(() => hydrateEnvFromFile((current) => current === undefined)).toThrow();
+    expect(() => hydrateHookEnv()).not.toThrow();
   });
 });
 

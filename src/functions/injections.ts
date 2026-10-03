@@ -1,7 +1,13 @@
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
-import type { CompressedObservation, InjectedRef, InjectionRecord } from "../types.js";
+import type {
+  CompressedObservation,
+  Crystal,
+  InjectedRef,
+  InjectionRecord,
+  Insight,
+} from "../types.js";
 import { logger } from "../logger.js";
 
 export const INJECTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -37,6 +43,29 @@ export function injectedItemUse(
         `${o.subtitle ?? ""} ${o.narrative ?? ""}`.includes(ref.id)),
   );
   return used ? "used" : "unused";
+}
+
+async function getExisting<T>(kv: StateKV, scope: string, ids: Iterable<string>): Promise<Map<string, T>> {
+  const unique = [...new Set(ids)];
+  const values = await Promise.all(unique.map((id) => kv.get<T>(scope, id)));
+  return new Map(
+    unique.flatMap((id, i) => (values[i] ? [[id, values[i] as T] as const] : [])),
+  );
+}
+
+export async function resolveInsightFiles(
+  kv: StateKV,
+  records: InjectionRecord[],
+): Promise<Map<string, string[]>> {
+  const insightIds = records.flatMap((r) => r.injected.filter((ref) => ref.kind === "insight").map((ref) => ref.id));
+  const insights = [...(await getExisting<Insight>(kv, KV.insights, insightIds)).values()];
+  const crystals = await getExisting<Crystal>(kv, KV.crystals, insights.flatMap((i) => i.sourceCrystalIds ?? []));
+  return new Map(
+    insights.map((insight) => [
+      insight.id,
+      [...new Set((insight.sourceCrystalIds ?? []).flatMap((id) => crystals.get(id)?.filesAffected ?? []))],
+    ]),
+  );
 }
 
 export async function recordInjection(

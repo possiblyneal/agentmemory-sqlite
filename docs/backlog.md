@@ -40,16 +40,6 @@ work for live Sessions.
   and graph extraction), for example by capping background callers at one slot, and no
   graph batch times out during a sweep.
 
-## Merge the three env-file hydration loops
-
-`hydrateProcessEnvFromFile` (`src/config.ts`), `hydrateHookEnv` (`src/hooks/_env.ts`) and
-`hydrateMcpEnv` (`src/mcp/standalone.ts`) each parse `~/.agentmemory/.env` and fill
-`process.env`, differing only in what counts as unset. `readEnvFile()` in `_env.ts` also
-repeats `loadEnvFile()` in `config.ts` without its cache.
-
-- **Done when.** One helper, taking the "is unset" test as a parameter, serves all three,
-  and their precedence tests still pass.
-
 ## Cap the crystallize and procedural-extraction prompts
 
 Reflect's cluster prompt now fits a 24k-character budget (`src/functions/reflect.ts`). Two
@@ -66,15 +56,14 @@ other consolidation calls still send whatever their inputs add up to.
 - **Done when.** Both prompts are bounded the way reflect's is, before either input grows
   enough to starve sibling slots on the broker.
 
-## Put Session writers on one lock
+## Lock replay's Session write
 
-Commit-link writes a Session under `session:${id}` (`src/triggers/api.ts:969`), while observe
-(`src/functions/observe.ts:243`) and the abandoned-Session heal
-(`src/functions/diagnostics.ts:1087`) take `obs:${id}`. Commit-link reads, edits and replaces
-the whole record, so a concurrent observe can lose its count or a commit SHA can be dropped.
+JSONL replay reads a Session, edits `observationCount` and the rest of the record, and writes
+it back whole with `kv.set` (`src/functions/replay.ts:427-452`) without taking `obs:${id}`, the
+key every other Session writer holds. A replay running against a live Session can drop an
+observe's count or a commit-link's `commitShas`.
 
-- **Done when.** Every read-modify-write of `mem:sessions` holds the same key, or commit-link
-  appends `commitShas` with a field-level `kv.update` and needs no lock.
+- **Done when.** Replay's read-modify-write of `mem:sessions` holds `obs:${id}`.
 
 ## Rank session-start Observations by something that varies
 
@@ -86,13 +75,3 @@ Observation, so the filter keeps all of them and the top 5 are just the most rec
 - **Done when.** The cut separates Observations under synthetic compression, or it is
   removed, and `npm run eval:gate` holds.
 
-## Score insights in the injection-use check
-
-`injectedItemUse` returns `unscorable` for any item without files
-(`src/functions/injections.ts:30`). Insights carry no files, so injection-use cannot tell
-whether any of them were used.
-
-- **Evidence (2026-10-02).** All 226 insight items injected on dev in 7 days were
-  unscorable.
-- **Done when.** Insights have usage evidence, such as their concepts appearing in later
-  Observations, and the check reports a rate for them.
