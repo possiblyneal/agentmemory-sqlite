@@ -14,8 +14,8 @@ A question names the path it exercises, and each path is scored on its own:
 | Path | What the eval calls | Scored |
 |---|---|---|
 | `search` | `POST /agentmemory/smart-search` with the question's `project` | top K Sessions |
-| `pre-tool-use` | `POST /agentmemory/enrich` with the tool, file and Grep pattern — what the pre-tool-use hook injects | the whole Injection |
 | `session-start` | `POST /agentmemory/session/start` for a probe Session — what the session-start hook injects | the whole Injection |
+| `prompt-submit` | the user prompt as the question — what `POST /agentmemory/prompt-context` returns for it, the per-prompt Injection | the whole Injection |
 
 An Injection is text, so the runner maps it back to eval Sessions by finding each Observation's output in it.
 
@@ -23,7 +23,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 
 - **recall** — gold Sessions returned over gold Sessions, answerable questions only.
 - **precision** — gold Sessions over Sessions returned, averaged over every question. A near-miss costs precision even when the gold Session is also there; a no-answer question that returns anything scores 0.
-- **no-answer clean** — share of no-answer questions (`goldSessionIds: []`) that returned nothing. Every path has some: a topic never worked on, a file never touched, and one project's work asked from the other project.
+- **no-answer clean** — share of no-answer questions (`goldSessionIds: []`) that returned nothing. Every path has some: a topic never worked on and, on search and prompt-submit, one project's work asked from the other project. `prompt-submit` adds bare acknowledgements (`yes`, `continue`), which should never inject.
 - **hit** — gold in results for answerable questions, empty results for no-answer ones.
 - **chars** — mean size of the Injection, the cost the Agent pays to read it.
 
@@ -33,7 +33,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 |---|---|---|---|
 | `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on first use |
 | `agentmemory-bm25` | sandbox daemon, no embeddings | all | `npm run build` |
-| `grep` | tokenized substring match, project-filtered | search | nothing |
+| `grep` | tokenized substring match, project-filtered | search, prompt-submit | nothing |
 | `random` | k Sessions drawn per question, seeded by question id | all | nothing — the floor every path must beat |
 | `vector` | OpenAI `text-embedding-3-small` + cosine | search | `OPENAI_API_KEY` (paid) |
 
@@ -100,7 +100,7 @@ eval/
 │   ├── sandbox.ts                 throwaway daemon under tmp/eval-sandbox/
 │   ├── load.ts                    LongMemEval JSON → Question[]
 │   ├── adapters/
-│   │   ├── agentmemory.ts         capture path in; smart-search, enrich, session/start out
+│   │   ├── agentmemory.ts         capture path in; smart-search, session/start, prompt-context out
 │   │   ├── grep.ts                tokenized substring baseline
 │   │   ├── random.ts              seeded random control
 │   │   └── vector.ts              OpenAI embeddings + cosine

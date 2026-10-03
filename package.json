@@ -47,7 +47,6 @@
   "files": [
     "dist/",
     "plugin/",
-    "integrations/pi/",
     ".env.example",
     "LICENSE"
   ],

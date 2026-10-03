@@ -6,9 +6,9 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
-import { readEnvFile } from "../hooks/_env.js";
+import { hydrateEnvFromFile } from "../hooks/_env.js";
 import {
-  resolveEnvOrEmpty,
+  isBlankOrPlaceholder,
   resolveHandle,
   invalidateHandle,
   type Handle,
@@ -40,10 +40,11 @@ const SERVER_INFO = {
 // The MCP host expands `${AGENTMEMORY_SECRET:-}` in .mcp.json to an empty
 // string when the secret lives only in ~/.agentmemory/.env, so unlike the
 // hooks' loader a blank or unexpanded placeholder value counts as unset here.
+// An unreadable file leaves the server on whatever the host passed.
 export function hydrateMcpEnv(): void {
-  for (const [key, value] of Object.entries(readEnvFile())) {
-    if (!resolveEnvOrEmpty(key)) process.env[key] = value;
-  }
+  try {
+    hydrateEnvFromFile(isBlankOrPlaceholder);
+  } catch {}
 }
 
 hydrateMcpEnv();
@@ -120,6 +121,7 @@ interface Validated {
   files?: string[];
   project?: string;
   agentId?: string;
+  global?: boolean;
   query?: string;
   limit?: number;
   format?: string;
@@ -152,6 +154,13 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       if (typeof args["agentId"] === "string" && args["agentId"].trim()) {
         v.agentId = args["agentId"].trim();
       }
+      if (args["global"] !== undefined && typeof args["global"] !== "boolean") {
+        throw new Error("global must be a boolean");
+      }
+      if (args["global"] && v.project !== undefined) {
+        throw new Error("a Memory cannot have both a project and global");
+      }
+      if (args["global"] === true) v.global = true;
       return v;
     }
     case "memory_recall":
@@ -215,6 +224,7 @@ async function handleProxy(
           files: v.files,
           ...(v.project !== undefined && { project: v.project }),
           ...(v.agentId !== undefined && { agentId: v.agentId }),
+          ...(v.global && { global: true }),
         }),
       });
       return textResponse(result);
@@ -296,6 +306,7 @@ async function handleLocal(
         isLatest: true,
         sessionIds: [],
         ...(v.project !== undefined && { project: v.project }),
+        ...(v.global && { global: true }),
       });
       kvInstance.persist();
       return textResponse({ saved: id });

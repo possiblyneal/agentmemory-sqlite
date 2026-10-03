@@ -1,13 +1,12 @@
 name: CI
 
-# `paths-ignore` keeps doc-only / website churn from
+# `paths-ignore` keeps doc-only churn from
 # burning runner minutes. Source / config / workflow changes always run.
 # `workflow_dispatch` gives a manual re-run button for flake debugging.
 on:
   push:
     branches: [main]
     paths-ignore:
-      - "website/**"
       - "docs/**"
       - "assets/**"
       - "**/*.md"
@@ -15,7 +14,6 @@ on:
   pull_request:
     branches: [main]
     paths-ignore:
-      - "website/**"
       - "docs/**"
       - "assets/**"
       - "**/*.md"

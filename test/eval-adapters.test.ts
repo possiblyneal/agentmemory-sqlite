@@ -36,7 +36,7 @@ describe("scoreQuestion", () => {
     const search = scoreQuestion(question({ goldSessionIds: ["a"] }), result, 2, "x", 0);
     expect(search.recall).toBe(0);
     const injection = scoreQuestion(
-      question({ path: "pre-tool-use", goldSessionIds: ["a"] }),
+      question({ path: "prompt-submit", goldSessionIds: ["a"] }),
       result,
       2,
       "x",
@@ -53,7 +53,7 @@ describe("aggregate", () => {
       scoreQuestion(question({ id: "1", goldSessionIds: ["a"] }), ranked("a"), 5, "x", 1),
       scoreQuestion(question({ id: "2", goldSessionIds: [] }), ranked("a"), 5, "x", 1),
       scoreQuestion(
-        question({ id: "3", path: "pre-tool-use", goldSessionIds: [] }),
+        question({ id: "3", path: "prompt-submit", goldSessionIds: [] }),
         { ranked: [], chars: 0 },
         5,
         "x",
@@ -62,7 +62,7 @@ describe("aggregate", () => {
     ];
     const { byPath } = aggregate(rows);
     expect(byPath.x.search).toMatchObject({ n: 2, answerable: 1, recall: 1, noAnswerClean: 0 });
-    expect(byPath.x["pre-tool-use"]).toMatchObject({ n: 1, noAnswerClean: 1, meanChars: 0 });
+    expect(byPath.x["prompt-submit"]).toMatchObject({ n: 1, noAnswerClean: 1, meanChars: 0 });
   });
 
   it("breaks the numbers down by question type per adapter", () => {
@@ -180,8 +180,14 @@ describe("coding-agent-life-v2 dataset", () => {
     expect(hits / answerable.length).toBeGreaterThan(0.5);
   });
 
+  it("asks the prompt-submit path to stay empty on a bare acknowledgement", () => {
+    const acks = queries.filter((q) => questionPath(q) === "prompt-submit" && q.type === "acknowledgement");
+    expect(acks.length).toBeGreaterThan(0);
+    expect(acks.every((q) => q.goldSessionIds.length === 0)).toBe(true);
+  });
+
   it("has no-answer questions on every path", () => {
-    for (const path of ["search", "pre-tool-use", "session-start"]) {
+    for (const path of ["search", "session-start", "prompt-submit"]) {
       expect(queries.some((q) => questionPath(q) === path && q.goldSessionIds.length === 0)).toBe(
         true,
       );

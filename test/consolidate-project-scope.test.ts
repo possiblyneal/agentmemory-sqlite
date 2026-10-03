@@ -152,6 +152,28 @@ describe("mem::consolidate — cross-project existingMatch guard", () => {
     expect(apiMemories[0].title).toBe("synthesized memory title");
   });
 
+  it("never evolves a Global Memory, so it keeps its marker and stays out of the project", async () => {
+    const sdk = makeMockSdk();
+    const kv = makeMockKV();
+    const provider = makeProvider("synthesized memory title");
+
+    const globalMemory = { ...makeExistingMemory("mem_global", "synthesized memory title"), global: true };
+    await kv.set(KV.memories, globalMemory.id, globalMemory);
+
+    const apiSession = makeSession("sess_api", "api");
+    await kv.set(KV.sessions, apiSession.id, apiSession);
+    for (let i = 0; i < 3; i++) {
+      await kv.set(KV.observations(apiSession.id), `obs_${i}`, makeObs(`obs_${i}`, apiSession.id, "auth"));
+    }
+
+    registerConsolidateFunction(sdk as never, kv as never, provider as never);
+    await sdk.trigger("mem::consolidate", { project: "api", minObservations: 1 });
+
+    const stored = await kv.get<Memory>(KV.memories, globalMemory.id);
+    expect(stored?.isLatest).toBe(true);
+    expect(stored?.global).toBe(true);
+  });
+
   it("evolves an existing memory within the same project when titles match", async () => {
     const sdk = makeMockSdk();
     const kv = makeMockKV();

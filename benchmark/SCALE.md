@@ -102,7 +102,6 @@ agentmemory top-10 results:
 - Multiple agents work on the same codebase
 - You want semantic search ("how does auth work?") not just keyword matching
 - You need to track memory quality, decay, and lifecycle
-- You want a shared memory layer across Claude Code, Cursor, Windsurf, etc.
 
 Built-in memory is your sticky notes. agentmemory is the searchable database behind them.
 

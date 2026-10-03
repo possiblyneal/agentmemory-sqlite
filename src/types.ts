@@ -137,6 +137,7 @@ export interface Memory {
   imageData?: string;
   agentId?: string;
   project?: string;
+  global?: boolean;
   origin?: Origin;
 }
 
@@ -224,7 +225,7 @@ export interface InjectedRef {
   files?: string[];
 }
 
-export type InjectionSource = "session-start" | "context" | "enrich";
+export type InjectionSource = "session-start" | "context" | "prompt-submit";
 
 export interface InjectionRecord {
   id: string;
@@ -232,7 +233,6 @@ export interface InjectionRecord {
   sessionId: string;
   project?: string;
   injected: InjectedRef[];
-  files?: string[];
   tokens: number;
   at: string;
 }

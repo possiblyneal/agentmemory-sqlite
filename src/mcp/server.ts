@@ -213,6 +213,12 @@ export function registerMcpEndpoints(
               typeof args.agentId === "string" && args.agentId.trim().length > 0
                 ? (args.agentId as string).trim()
                 : undefined;
+            if (args.global !== undefined && typeof args.global !== "boolean") {
+              return { status_code: 400, body: { error: "global must be a boolean" } };
+            }
+            if (args.global && project !== undefined) {
+              return { status_code: 400, body: { error: "a Memory cannot have both a project and global" } };
+            }
 
             const result = await sdk.trigger({ function_id: "mem::remember", payload: {
               content: args.content,
@@ -221,6 +227,7 @@ export function registerMcpEndpoints(
               files,
               ...(project !== undefined && { project }),
               ...(saveAgentId !== undefined && { agentId: saveAgentId }),
+              ...(args.global === true && { global: true }),
             } });
             return {
               status_code: 200,

@@ -1,242 +1,70 @@
 import { platform } from "node:os";
 import * as p from "@clack/prompts";
-import pc from "picocolors";
-import type { ConnectAdapter, ConnectOptions, ConnectResult } from "./types.js";
-import { writeGuideline } from "./guidelines.js";
-import { adapter as antigravity } from "./antigravity.js";
-import { adapter as antigravityCli } from "./antigravity-cli.js";
-import { adapter as claudeCode } from "./claude-code.js";
-import { adapter as cline } from "./cline.js";
-import { adapter as copilotCli } from "./copilot-cli.js";
-import { adapter as continueDev } from "./continue.js";
-import { adapter as devin } from "./devin.js";
-import { adapter as droid } from "./droid.js";
-import { adapter as dsh } from "./dsh.js";
-import { adapter as geminiCli } from "./gemini-cli.js";
-import { adapter as hermes } from "./hermes.js";
-import { adapter as kiro } from "./kiro.js";
-import { adapter as openclaw } from "./openclaw.js";
-import { adapter as opencode } from "./opencode.js";
-import { adapter as openhuman } from "./openhuman.js";
-import { adapter as pi } from "./pi.js";
-import { adapter as qwen } from "./qwen.js";
-import { adapter as warp } from "./warp.js";
-import { adapter as zed } from "./zed.js";
+import { installClaudeCode, type ConnectOptions } from "./claude-code.js";
 
-export const ADAPTERS: readonly ConnectAdapter[] = [
-  claudeCode,
-  copilotCli,
-  devin,
-  geminiCli,
-  qwen,
-  antigravity,
-  antigravityCli,
-  kiro,
-  warp,
-  cline,
-  continueDev,
-  zed,
-  droid,
-  dsh,
-  opencode,
-  openclaw,
-  hermes,
-  pi,
-  openhuman,
-];
+export const CONNECT_ALIAS = "claude-code";
 
-export function resolveAdapter(name: string): ConnectAdapter | null {
-  const lower = name.toLowerCase();
-  return ADAPTERS.find((a) => a.name === lower) ?? null;
+export const CONNECT_FLAGS = {
+  "--dry-run": { option: "dryRun", help: "show what would change in ~/.claude.json, write nothing" },
+  "--force": { option: "force", help: "rewrite the agentmemory entry even if already wired" },
+} as const satisfies Record<string, { option: keyof ConnectOptions; help: string }>;
+
+type ConnectFlag = keyof typeof CONNECT_FLAGS;
+
+function isConnectFlag(arg: string): arg is ConnectFlag {
+  return Object.hasOwn(CONNECT_FLAGS, arg);
 }
 
-export function knownAgents(): string[] {
-  return ADAPTERS.map((a) => a.name);
-}
+export const CONNECT_USAGE = `agentmemory connect ${Object.keys(CONNECT_FLAGS)
+  .map((f) => `[${f}]`)
+  .join(" ")}`;
 
-function parseFlags(args: string[]): {
-  dryRun: boolean;
-  force: boolean;
-  all: boolean;
-  withHooks: boolean;
-  guidelines: boolean;
-  positional: string[];
-} {
-  const positional: string[] = [];
-  let dryRun = false;
-  let force = false;
-  let all = false;
-  let withHooks = false;
-  let guidelines = true; // memory-usage guideline is written by default
+export function parseConnectArgs(args: string[]): ConnectOptions {
+  const opts: ConnectOptions = { dryRun: false, force: false };
   for (const a of args) {
-    if (a === "--dry-run") dryRun = true;
-    else if (a === "--force") force = true;
-    else if (a === "--all") all = true;
-    else if (a === "--with-hooks") withHooks = true;
-    else if (a === "--no-guidelines") guidelines = false;
-    else if (!a.startsWith("-")) positional.push(a);
-  }
-  return { dryRun, force, all, withHooks, guidelines, positional };
-}
-
-export async function runAdapter(
-  adapter: ConnectAdapter,
-  opts: ConnectOptions,
-): Promise<ConnectResult> {
-  if (!adapter.detect()) {
-    p.log.warn(
-      `${adapter.displayName}: not detected on this machine (skipping).${adapter.docs ? ` Docs: ${adapter.docs}` : ""}`,
-    );
-    return { kind: "skipped", reason: "not-detected" };
-  }
-  p.log.step(`Wiring ${adapter.displayName}…`);
-  if (adapter.protocolNote) {
-    p.log.message(adapter.protocolNote);
-  }
-  try {
-    const result = await adapter.install(opts);
-    // After MCP/hooks are wired, activate memory for hook-less agents by
-    // writing a memory-usage guideline into their native rules file. Best
-    // effort: never fail the connect over the guideline.
-    if (
-      opts.guidelines !== false &&
-      (result.kind === "installed" || result.kind === "already-wired")
-    ) {
-      try {
-        const g = writeGuideline(adapter.name, {
-          cwd: process.cwd(),
-          dryRun: opts.dryRun,
-        });
-        if (g.kind === "written") {
-          p.log.message(
-            `  ${pc.dim("guideline")} ${g.scope} → ${g.path} (memory auto-use)`,
-          );
-        } else if (g.kind === "would-write") {
-          p.log.message(`  ${pc.dim("[dry-run] guideline")} → ${g.path}`);
-        }
-      } catch (gerr) {
-        p.log.warn(
-          `${adapter.displayName}: guideline not written (${gerr instanceof Error ? gerr.message : String(gerr)})`,
-        );
-      }
+    if (isConnectFlag(a)) opts[CONNECT_FLAGS[a].option] = true;
+    else if (a.startsWith("-")) {
+      throw new Error(
+        `Unknown flag: ${a}. \`agentmemory connect\` accepts only ${Object.keys(CONNECT_FLAGS).join(", ")}.`,
+      );
+    } else if (a.toLowerCase() !== CONNECT_ALIAS) {
+      throw new Error(`Unknown agent: ${a}. Claude Code is the only supported host.`);
     }
-    return result;
-  } catch (err) {
-    p.log.error(
-      `${adapter.displayName}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return { kind: "skipped", reason: "exception" };
   }
+  return opts;
 }
 
 export async function runConnect(args: string[]): Promise<void> {
-  const { dryRun, force, all, withHooks, guidelines, positional } =
-    parseFlags(args);
-  const allowWindowsAdapter =
-    positional.length === 1 && positional[0]?.toLowerCase() === "copilot-cli";
-  if (platform() === "win32" && !allowWindowsAdapter) {
-    p.intro("agentmemory connect");
+  p.intro("agentmemory connect");
+
+  let opts: ConnectOptions;
+  try {
+    opts = parseConnectArgs(args);
+  } catch (err) {
+    p.log.error(err instanceof Error ? err.message : String(err));
+    p.outro(`Usage: ${CONNECT_USAGE}`);
+    process.exit(1);
+  }
+
+  if (platform() === "win32") {
     p.log.warn(
-      "Windows: automated `connect` is not supported yet. See https://github.com/rohitg00/agentmemory#other-agents for manual install steps.",
+      "Windows: automated `connect` is not supported yet. Install the Claude Code plugin from the possiblyneal/agentmemory-sqlite marketplace instead.",
     );
     p.outro("Windows: manual install required — see docs");
     return;
   }
 
-  const opts: ConnectOptions = { dryRun, force, withHooks, guidelines };
-
-  p.intro("agentmemory connect");
-
-  if (positional.length === 0 && !all) {
-    const detected = ADAPTERS.filter((a) => a.detect());
-    if (detected.length === 0) {
-      p.log.error("No supported agents detected on this machine.");
-      p.outro(`Supported: ${knownAgents().join(", ")}`);
-      process.exit(1);
-    }
-    const picked = await p.multiselect<string>({
-      message: "Wire agentmemory into which agents?",
-      options: detected.map((a) => ({ value: a.name, label: a.displayName })),
-      required: true,
-    });
-    if (p.isCancel(picked)) {
-      p.cancel("Cancelled.");
-      return;
-    }
-    const results: { name: string; result: ConnectResult }[] = [];
-    for (const name of picked as string[]) {
-      const adapter = resolveAdapter(name);
-      if (!adapter) continue;
-      results.push({ name, result: await runAdapter(adapter, opts) });
-    }
-    summarize(results);
-    return;
-  }
-
-  if (all) {
-    const detected = ADAPTERS.filter((a) => a.detect());
-    if (detected.length === 0) {
-      p.log.error("No supported agents detected on this machine.");
-      process.exit(1);
-    }
-    const results: { name: string; result: ConnectResult }[] = [];
-    for (const adapter of detected) {
-      results.push({
-        name: adapter.name,
-        result: await runAdapter(adapter, opts),
-      });
-    }
-    summarize(results);
-    return;
-  }
-
-  const agentName = positional[0]!;
-  const adapter = resolveAdapter(agentName);
-  if (!adapter) {
-    p.log.error(`Unknown agent: ${agentName}`);
-    p.outro(`Supported: ${knownAgents().join(", ")}`);
+  const result = await installClaudeCode(opts);
+  if (result.kind === "skipped") {
+    p.outro(`Claude Code was not wired (${result.reason}).`);
     process.exit(1);
   }
-
-  const result = await runAdapter(adapter, opts);
-  summarize([{ name: agentName, result }]);
-  if (result.kind === "skipped" && (result as { reason: string }).reason !== "not-detected") {
-    process.exit(1);
+  if (opts.dryRun) {
+    p.outro("Dry run: nothing was written.");
+    return;
   }
-}
-
-function summarize(
-  results: { name: string; result: ConnectResult }[],
-): void {
-  const lines = results.map(({ name, result }) => {
-    switch (result.kind) {
-      case "installed":
-        return `  ${pc.green("✓")} ${pc.bold(name)}${result.mutatedPath ? ` ${pc.dim("→")} ${pc.cyan(result.mutatedPath)}` : ""}`;
-      case "already-wired":
-        return `  ${pc.green("✓")} ${pc.bold(name)} ${pc.dim("(already wired)")}`;
-      case "stub":
-        return `  ${pc.yellow("⚠")} ${pc.bold(name)} ${pc.yellow(`(manual install required: ${result.reason})`)}`;
-      case "skipped":
-        return `  ${pc.red("✗")} ${pc.bold(name)} ${pc.dim(`(skipped: ${result.reason})`)}`;
-    }
-  });
-  p.note(lines.join("\n"), "summary");
-
-  const stubs = results.filter((r) => r.result.kind === "stub");
-  if (stubs.length > 0) {
-    p.log.info(
-      `${stubs.length} agent(s) require manual install — see docs links above.`,
-    );
-  }
-
-  const wiredAny = results.some(
-    (r) => r.result.kind === "installed" || r.result.kind === "already-wired",
+  p.log.info(
+    "Next: install agentmemory's 17 skills into Claude Code so it knows when to call the tools:\n  npx skills add possiblyneal/agentmemory-sqlite -y",
   );
-  if (wiredAny) {
-    p.log.info(
-      "Next: install agentmemory's 17 skills into the same agent(s) so they know when to call the tools:\n  npx skills add possiblyneal/agentmemory-sqlite -y",
-    );
-  }
-
-  p.outro("Restart any wired agent (or open a new session) to pick up agentmemory.");
+  p.outro("Restart Claude Code (or open a new session) to pick up agentmemory.");
 }

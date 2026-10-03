@@ -115,7 +115,7 @@ Four planes, four consumers, four update models. None of them try to do what the
 
 ## Suggested install order for a brand-new project
 
-1. **agentmemory** — observe and persist from day one, even before the codebase has structure. Run `npx @agentmemory/agentmemory connect` and pick your agent.
+1. **agentmemory** — observe and persist from day one, even before the codebase has structure. Run `agentmemory connect` to wire Claude Code.
 2. **codegraph** — once code lands, agent queries answer from the index instead of grepping. Run `npx @colbymchenry/codegraph`.
 3. **Understand Anything** *or* **Graphify** — when the codebase passes a few thousand LOC or starts shipping docs and PDFs alongside code, generate the graph for visual exploration and onboarding. Run `/plugin install understand-anything` or `uv tool install graphifyy && graphify install`.
 

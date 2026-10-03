@@ -26,15 +26,35 @@ function parseEnvFile(content) {
 	}
 	return vars;
 }
+function envFilePath() {
+	return join(homedir(), ".agentmemory", ".env");
+}
 function readEnvFile() {
 	try {
-		return parseEnvFile(readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8"));
-	} catch {
-		return {};
+		return parseEnvFile(readFileSync(envFilePath(), "utf-8"));
+	} catch (err) {
+		if (err.code === "ENOENT") return {};
+		throw err;
 	}
 }
+let envFileCache;
+function loadEnvFile() {
+	const path = envFilePath();
+	if (envFileCache?.path === path) return envFileCache.vars;
+	const vars = readEnvFile();
+	envFileCache = {
+		path,
+		vars
+	};
+	return vars;
+}
+function hydrateEnvFromFile(isUnset) {
+	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
+}
 function hydrateHookEnv() {
-	for (const [key, value] of Object.entries(readEnvFile())) if (process.env[key] === void 0) process.env[key] = value;
+	try {
+		hydrateEnvFromFile((current) => current === void 0);
+	} catch {}
 }
 //#endregion
 //#region src/hooks/sdk-guard.ts
@@ -68,11 +88,7 @@ function shouldSkipSession() {
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
 	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
-	const roots = data.workspace_roots;
-	if (Array.isArray(roots)) {
-		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
-	}
-	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
+	const projectDir = process.env["CLAUDE_PROJECT_DIR"];
 	if (projectDir && projectDir.trim()) return projectDir;
 }
 //#endregion

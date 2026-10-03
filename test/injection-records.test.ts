@@ -5,7 +5,6 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerContextFunction } from "../src/functions/context.js";
-import { registerEnrichFunction } from "../src/functions/enrich.js";
 import {
   registerInjectionsFunction,
   INJECTION_RETENTION_MS,
@@ -31,14 +30,6 @@ function insight(id: string, project: string): Insight {
     id, title: `insight ${id}`, content: "content", confidence: 0.7, project,
     createdAt: now, updatedAt: now,
   } as unknown as Insight;
-}
-
-function bugMemory(id: string, file: string): Memory {
-  return {
-    id, type: "bug", title: `bug ${id}`, content: "broke", concepts: [], files: [file],
-    sessionIds: [], strength: 1, version: 1, isLatest: true, project: "/p",
-    createdAt: now, updatedAt: now,
-  } as unknown as Memory;
 }
 
 async function seedSession(kv: ReturnType<typeof mockKV>, id: string, withSummary: boolean) {
@@ -94,53 +85,6 @@ describe("mem::context reports what it injected", () => {
   });
 });
 
-describe("mem::enrich reports what it injected", () => {
-  let kv: ReturnType<typeof mockKV>;
-  let sdk: ReturnType<typeof mockSdk>;
-
-  beforeEach(() => {
-    kv = mockKV();
-    sdk = mockSdk();
-    registerEnrichFunction(sdk as never, kv as never);
-  });
-
-  it("lists file-context observations, search observations and bug Memories", async () => {
-    sdk.registerFunction("mem::file-context", async () => ({
-      context: "<agentmemory-file-context>x</agentmemory-file-context>",
-      injected: [{ kind: "observation", id: "obs_file" }],
-    }));
-    sdk.registerFunction("mem::search", async () => ({
-      results: [{ observation: { id: "obs_search", narrative: "seen before" } }],
-    }));
-    await kv.set(KV.memories, "mem_bug", bugMemory("mem_bug", "src/a.ts"));
-
-    const result = await sdk.trigger("mem::enrich", {
-      sessionId: "s", files: ["src/a.ts"], project: "/p",
-    });
-
-    expect(result.injected).toEqual([
-      { kind: "observation", id: "obs_file" },
-      { kind: "observation", id: "obs_search" },
-      { kind: "memory", id: "mem_bug", files: ["src/a.ts"] },
-    ]);
-  });
-
-  it("drops the sources of every part that truncation cut into", async () => {
-    sdk.registerFunction("mem::file-context", async () => ({
-      context: "x".repeat(3900),
-      injected: [{ kind: "observation", id: "obs_file" }],
-    }));
-    sdk.registerFunction("mem::search", async () => ({
-      results: [{ observation: { id: "obs_search", narrative: "y".repeat(500) } }],
-    }));
-
-    const result = await sdk.trigger("mem::enrich", { sessionId: "s", files: ["src/a.ts"] });
-
-    expect(result.truncated).toBe(true);
-    expect(result.injected).toEqual([{ kind: "observation", id: "obs_file" }]);
-  });
-});
-
 describe("Injection records", () => {
   let kv: ReturnType<typeof mockKV>;
   let sdk: ReturnType<typeof mockSdk>;
@@ -163,7 +107,7 @@ describe("Injection records", () => {
   });
 
   it("sweeps records older than the retention window and keeps the rest", async () => {
-    const base = { source: "enrich", sessionId: "s", injected: [], tokens: 0 } as const;
+    const base = { source: "prompt-submit", sessionId: "s", injected: [], tokens: 0 } as const;
     const old = new Date(Date.now() - INJECTION_RETENTION_MS - 60_000).toISOString();
     await kv.set(KV.injections, "old", { ...base, id: "old", at: old });
     await kv.set(KV.injections, "new", { ...base, id: "new", at: new Date().toISOString() });
@@ -206,13 +150,13 @@ describe("REST Injection paths write a record", () => {
   });
 
   it("records an Empty Injection with no identifiers", async () => {
-    sdk.registerFunction("mem::enrich", async () => ({ context: "", truncated: false, injected: [] }));
+    sdk.registerFunction("mem::prompt-context", async () => ({ context: "", tokens: 0, injected: [] }));
 
-    await sdk.trigger("api::enrich", { body: { sessionId: "s1", files: ["a.ts"], project: "/p" } });
+    await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "fix it", project: "/p" } });
     await flush();
 
     const [record] = await kv.list<InjectionRecord>(KV.injections);
-    expect(record).toMatchObject({ source: "enrich", sessionId: "s1", injected: [], tokens: 0 });
+    expect(record).toMatchObject({ source: "prompt-submit", sessionId: "s1", injected: [], tokens: 0 });
   });
 
   describe("session start", () => {
@@ -316,35 +260,9 @@ describe("injectedItemUse", () => {
     const earlier = obs({ timestamp: "2025-12-31T23:59:00.000Z", files: ["src/a.ts"] });
     expect(injectedItemUse(ref, record(), [earlier])).toBe("unused");
   });
-
-  it("does not let the tool call that triggered an enrich Injection count as use", () => {
-    const ref = { kind: "observation" as const, id: "obs_1", files: ["src/a.ts", "src/b.ts"] };
-    const enrich = record({ source: "enrich", files: ["src/a.ts"] });
-    expect(injectedItemUse(ref, enrich, [obs({ files: ["src/a.ts"] })])).toBe("unused");
-    expect(injectedItemUse(ref, enrich, [obs({ files: ["src/b.ts"] })])).toBe("used");
-  });
-
-  it("does not score an item whose only files triggered the Injection", () => {
-    const ref = { kind: "observation" as const, id: "obs_1", files: ["src/a.ts"] };
-    const enrich = record({ source: "enrich", files: ["src/a.ts"] });
-    expect(injectedItemUse(ref, enrich, [])).toBe("unscorable");
-  });
 });
 
 describe("Injected refs carry their files", () => {
-  it("records the files an enrich Injection was asked about", async () => {
-    const kv = mockKV();
-    const sdk = mockSdk();
-    registerApiTriggers(sdk as never, kv as never);
-    sdk.registerFunction("mem::enrich", async () => ({ context: "x", injected: [] }));
-
-    await sdk.trigger("api::enrich", { body: { sessionId: "s1", files: ["src/a.ts"] } });
-    await new Promise((r) => setTimeout(r, 0));
-
-    const [record] = await kv.list<InjectionRecord>(KV.injections);
-    expect(record.files).toEqual(["src/a.ts"]);
-  });
-
   it("mem::context attaches observation and summary files", async () => {
     const kv = mockKV();
     const sdk = mockSdk();

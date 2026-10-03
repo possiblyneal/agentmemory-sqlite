@@ -29,7 +29,7 @@ async function main() {
   if (!data || typeof data !== "object") return;
   if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
+  const sessionId = (data.session_id as string) || "unknown";
 
   // session/end already fans out the summary server-side (#1203). Stop
   // fires after every turn, so the daemon holds the end until the Session

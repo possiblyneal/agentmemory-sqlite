@@ -517,7 +517,8 @@ export function createSessionLoader(
   }
 }
 
-// A result's project is its session's. Results with no session entry fall
+// A Global Memory matches every project, ahead of its session's project.
+// Otherwise a result's project is its session's. Results with no session entry fall
 // back to KV.memories, then to the Session Summary, and pass through when
 // neither has a project. Two cases arrive without a session:
 //   1. Synthetic sessionId: memories indexed via mem::remember use
@@ -534,15 +535,18 @@ export function createProjectMatcher(
   loadSession = createSessionLoader(kv),
 ): (sessionId: string, obsId: string) => Promise<boolean> {
   const summaryProjects = new Map<string, string | null>()
-  const memoryProjects = new Map<string, string | null>()
+  const memories = new Map<string, Memory | null>()
+  const loadMemory = async (obsId: string) => {
+    if (!memories.has(obsId)) {
+      memories.set(obsId, await kv.get<Memory>(KV.memories, obsId).catch(() => null))
+    }
+    return memories.get(obsId)!
+  }
   return async (sessionId, obsId) => {
+    if (obsId.startsWith('mem_') && (await loadMemory(obsId))?.global === true) return true
     const session = await loadSession(sessionId)
     if (session) return session.project === project
-    if (!memoryProjects.has(obsId)) {
-      const mem = await kv.get<Memory>(KV.memories, obsId).catch(() => null)
-      memoryProjects.set(obsId, mem?.project ?? null)
-    }
-    const memProject = memoryProjects.get(obsId)!
+    const memProject = (await loadMemory(obsId))?.project ?? null
     if (memProject !== null) return memProject === project
     if (!summaryProjects.has(sessionId)) {
       const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null)
