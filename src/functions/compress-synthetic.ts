@@ -10,17 +10,33 @@ import { truncate as truncateMiddleOut } from "../prompts/compression.js";
 // spend. This is the default as of 0.8.8 (#138); users who want richer
 // LLM-generated summaries set AGENTMEMORY_AUTO_COMPRESS=true.
 
+// Tool names the word matching below misreads: TaskUpdate is not a file edit,
+// ToolSearch is not a code search, and every claude-in-chrome tool is the web.
+const TOOL_TYPES: Array<[RegExp, ObservationType]> = [
+  [/^Write$/, "file_write"],
+  [/^(Agent|Task\w*|SendMessage|ListAgents)$/, "subagent"],
+  [/^AskUserQuestion$/, "decision"],
+  [/^(Skill|ToolSearch)$/, "other"],
+  [/^mcp__claude-in-chrome__/, "web_fetch"],
+];
+
 function inferType(
   toolName: string | undefined,
   hookType: string,
 ): ObservationType {
   if (hookType === "post_tool_failure") return "error";
   if (hookType === "prompt_submit") return "conversation";
-  if (hookType === "subagent_stop" || hookType === "task_completed")
+  if (
+    hookType === "subagent_start" ||
+    hookType === "subagent_stop" ||
+    hookType === "task_completed"
+  )
     return "subagent";
   if (hookType === "notification") return "notification";
 
   if (!toolName) return "other";
+  const listed = TOOL_TYPES.find(([pattern]) => pattern.test(toolName));
+  if (listed) return listed[1];
   // Normalize camelCase and kebab-case into word chunks so we can match
   // substrings like "WebFetch" -> "web" / "fetch".
   const n = toolName

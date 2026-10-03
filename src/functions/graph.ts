@@ -33,6 +33,7 @@ import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { capSourceIds } from "./graph-provenance.js";
 import { recordAudit } from "./audit.js";
+import { getSearchIndex } from "./search.js";
 import { logger } from "../logger.js";
 
 // #753: keep the response payload below the iii state channel ceiling.
@@ -529,6 +530,15 @@ function parseAttrs(raw: string): Record<string, string> {
   return attrs;
 }
 
+export const MAX_OBSERVATION_CONCEPTS = 10;
+
+// What Extraction learned about one Observation: the importance the model gave
+// it and the names of the non-file Entities it says came from it.
+interface ObservationAnnotation {
+  importance?: number;
+  concepts: string[];
+}
+
 function parseGraphXml(
   xml: string,
   observationIds: string[],
@@ -622,6 +632,86 @@ function parseGraphXml(
   }
 
   return { nodes, edges };
+}
+
+// Observations are named by their 1-based number in the batch prompt, so an
+// importance or an Entity's obs="" list maps back through observationIds.
+function parseObservationAnnotations(
+  xml: string,
+  observationIds: string[],
+): Map<string, ObservationAnnotation> {
+  const annotations = new Map<string, ObservationAnnotation>();
+  const ensureAnnotation = (n: string): ObservationAnnotation | undefined => {
+    if (!/^\d+$/.test(n.trim())) return undefined;
+    const obsId = observationIds[Number(n) - 1];
+    if (!obsId) return undefined;
+    let annotation = annotations.get(obsId);
+    if (!annotation) {
+      annotation = { concepts: [] };
+      annotations.set(obsId, annotation);
+    }
+    return annotation;
+  };
+
+  let match;
+  const observationRegex = /<observation\b([^>]*?)\/>/g;
+  while ((match = observationRegex.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1]);
+    const importance = Number(attrs["importance"]);
+    if (!Number.isInteger(importance) || importance < 1 || importance > 10) continue;
+    const annotation = ensureAnnotation(attrs["n"] ?? "");
+    if (annotation) annotation.importance = importance;
+  }
+  const entityOpenTag = /<entity\b([^>]*?)\/?>/g;
+  while ((match = entityOpenTag.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1]);
+    const name = attrs["name"];
+    if (!attrs["type"] || attrs["type"] === "file" || !name) continue;
+    for (const n of (attrs["obs"] ?? "").split(",")) {
+      ensureAnnotation(n)?.concepts.push(name);
+    }
+  }
+  return annotations;
+}
+
+// Field-level, so a concurrent writer's other fields survive. An Observation
+// gone from KV is skipped: update() would recreate it as a bare stub. Failures
+// are logged, not thrown: the graph is already written by then.
+async function writeObservationAnnotations(
+  kv: StateKV,
+  observations: CompressedObservation[],
+  annotations: Map<string, ObservationAnnotation>,
+): Promise<void> {
+  const index = getSearchIndex();
+  const results = await Promise.allSettled(
+    observations.map(async (o) => {
+      const annotation = annotations.get(o.id);
+      if (!annotation || !o.sessionId) return;
+      const scope = KV.observations(o.sessionId);
+      const current = await kv.get<CompressedObservation>(scope, o.id);
+      if (!current) return;
+      const fields: Pick<CompressedObservation, "importance" | "concepts"> = {
+        importance: annotation.importance ?? current.importance,
+        concepts: [...new Set([...(current.concepts ?? []), ...annotation.concepts])].slice(
+          0,
+          MAX_OBSERVATION_CONCEPTS,
+        ),
+      };
+      await kv.update(
+        scope,
+        o.id,
+        Object.entries(fields).map(([path, value]) => ({ type: "set", path, value })),
+      );
+      if (index.has(o.id)) index.add({ ...current, ...fields });
+    }),
+  );
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    logger.warn("Observation importance write-back failed", {
+      failed: failed.length,
+      error: String((failed[0] as PromiseRejectedResult).reason),
+    });
+  }
 }
 
 const HEURISTIC_EDGE_WEIGHT = 0.4;
@@ -931,6 +1021,7 @@ async function extractGraph(
 
   let nodes: GraphNode[] = [];
   let edges: GraphEdge[] = [];
+  const annotations = new Map<string, ObservationAnnotation>();
   try {
     const heuristic = extractGraphHeuristics(observations);
     nodes = heuristic.nodes;
@@ -976,6 +1067,12 @@ async function extractGraph(
         );
         nodes = nodes.concat(parsed.nodes);
         edges = edges.concat(parsed.edges);
+        for (const [obsId, annotation] of parseObservationAnnotations(
+          response,
+          batch.map((o) => o.id),
+        )) {
+          annotations.set(obsId, annotation);
+        }
         if (failure === undefined) extracted = i + batch.length;
       } catch (err) {
         failure ??= err;
@@ -999,6 +1096,13 @@ async function extractGraph(
         : String(failure);
 
   if (nodes.length === 0 && edges.length === 0) {
+    if (!llmError && annotations.size > 0) {
+      await writeObservationAnnotations(kv, observations, annotations);
+      await recordAudit(kv, "observe", "mem::graph-extract", obsIds, {
+        nodesExtracted: 0,
+        edgesExtracted: 0,
+      });
+    }
     return {
       result: llmError
         ? { success: false, error: llmError }
@@ -1014,6 +1118,8 @@ async function extractGraph(
       edges,
       obsIds,
     );
+
+    await writeObservationAnnotations(kv, observations, annotations);
 
     await recordAudit(kv, "observe", "mem::graph-extract", obsIds, {
       nodesExtracted: nodes.length,

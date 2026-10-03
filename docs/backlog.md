@@ -3,24 +3,6 @@
 Work the Operator has accepted but not yet scheduled. An item moves to a GitHub issue on
 `possiblyneal/agentmemory-sqlite` when work starts, and is deleted from here when it lands.
 
-## Identify a model fit for LLM Observation compression
-
-`AGENTMEMORY_AUTO_COMPRESS` stays off because the broker's `general` model is too slow to
-compress every Observation. Find a model that can keep up with it, then turn it on.
-
-- **Why it matters.** Synthetic compression (`src/functions/compress-synthetic.ts`) writes
-  `concepts: []`, `facts: []` and `importance: 5` on every Observation. As a result:
-  - consolidation never forms a concept group, so no Memories are made;
-  - session-start context and eviction rank Observations on a tie;
-  - the profile's importance-≥7 activity list is always empty.
-- **Evidence (2026-09-27).** `general` on the broker at `10.10.10.13:4010` took 30–165s to
-  first token per `graph-extract` batch, with no scheduler wait and no 429s. The model is
-  the bottleneck, not queueing. The volume to keep up with is roughly 500 Observations a
-  day, one LLM call each.
-- **Done when.** A model sustains that rate at `AGENTMEMORY_LLM_MAX_CONCURRENCY=2` without
-  starving Session summaries or graph extraction, and its output parses under
-  `src/prompts/compression.ts`.
-
 ## Keep a stale-Session recovery sweep from starving graph extraction
 
 While eviction's stale-Session recovery runs, its Summarize chunks crowd out graph
@@ -64,14 +46,3 @@ key every other Session writer holds. A replay running against a live Session ca
 observe's count or a commit-link's `commitShas`.
 
 - **Done when.** Replay's read-modify-write of `mem:sessions` holds `obs:${id}`.
-
-## Rank session-start Observations by something that varies
-
-`mem::context` keeps a Session's Observations with `importance >= 5`
-(`src/functions/context.ts:262`). Synthetic compression writes `importance: 5` on every
-Observation, so the filter keeps all of them and the top 5 are just the most recent.
-
-- **Evidence (2026-10-02).** Every devex Observation has importance ≥5.
-- **Done when.** The cut separates Observations under synthetic compression, or it is
-  removed, and `npm run eval:gate` holds.
-

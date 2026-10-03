@@ -258,13 +258,15 @@ export function registerContextFunction(
       for (let j = 0; j < sessionsNeedingObs.length; j++) {
         const i = sessionsNeedingObs[j];
         const observations = obsResults[j];
-        const important = observations.filter(
-          (o) => o.title && o.importance >= 5,
-        );
+        const titled = observations.filter((o) => o.title);
 
-        if (important.length > 0) {
-          const top = important
-            .sort((a, b) => b.importance - a.importance)
+        if (titled.length > 0) {
+          const top = titled
+            .sort(
+              (a, b) =>
+                b.importance - a.importance ||
+                new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+            )
             .slice(0, 5);
           const items = top
             .map((o) => `- [${o.type}] ${o.title}: ${o.narrative}`)
