@@ -41,12 +41,9 @@ import { deleteIndexed, indexRecords } from "./search.js";
 import { resetLessonIndex } from "./lessons.js";
 import { logger } from "../logger.js";
 
-// Bounded-concurrency chunk size for the import delete/write loops. A
-// "replace" or "merge" of a large export (up to MAX_TOTAL_OBSERVATIONS,
-// ~500k) would otherwise issue hundreds of thousands of sequential state
-// round-trips and blow the 180s function timeout, leaving partial state.
-// 20 keeps per-chunk fan-out low enough not to overwhelm the state
-// backend while collapsing wallclock by ~20x versus the serial path.
+// Chunk size for the import delete/write loops. An import can touch up to
+// MAX_TOTAL_OBSERVATIONS (~500k) records; chunking caps how many State
+// calls are in flight per step instead of creating one promise per record.
 const IMPORT_CHUNK_SIZE = 20;
 
 // Run `fn` over `items` in fixed-size chunks, awaiting each chunk before
