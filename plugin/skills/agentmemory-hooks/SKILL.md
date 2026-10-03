@@ -26,7 +26,7 @@ Watch observations land live at `http://localhost:3113`.
 
 ## Important
 
-- Capture is on by default and is zero-LLM. Turning observations into LLM summaries (`AGENTMEMORY_AUTO_COMPRESS`) and injecting them back into context are separate opt-ins because they spend tokens. `AGENTMEMORY_INJECT_CONTEXT` injects at session start and, on each user prompt, up to three memories that match it strongly; `AGENTMEMORY_INJECT_EVERY_TOOL_CALL` additionally injects before every file-touching tool call.
+- Capture is on by default and is zero-LLM. Turning observations into LLM summaries (`AGENTMEMORY_AUTO_COMPRESS`) and injecting them back into context are separate opt-ins because they spend tokens. `AGENTMEMORY_INJECT_CONTEXT` injects at session start and, on each user prompt, up to three memories that match it strongly.
 - Headless Sessions are skipped by default: every hook returns early when `CLAUDE_CODE_ENTRYPOINT` starts with `sdk-` (`claude -p`, TS and Python Agent SDK). Set `AGENTMEMORY_CAPTURE_HEADLESS=1` to capture them. `AGENTMEMORY_SDK_CHILD=1` (agentmemory's own summarize calls) is skipped regardless.
 - If observations are missing, confirm the plugin is enabled and the server is running. See ../_shared/TROUBLESHOOTING.md.
 

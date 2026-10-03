@@ -11,16 +11,16 @@ hydrateHookEnv();
 // `command` targets: only five events exist (no SessionStart/SessionEnd/
 // UserPromptSubmit, so the lifecycle is synthesized from PreInvocation and
 // Stop); the payload is camelCase and nests tool calls under `toolCall`; and
-// stdout must be a JSON object, which `pre-tool-use.mjs` breaks when
-// tool-call Injection is on and it writes raw context text.
+// stdout must be a JSON object, which the hooks break when context injection
+// is on and they write raw context text.
 //
-// Invoked as: node antigravity-bridge.mjs <PreInvocation|PreToolUse|PostToolUse|Stop>
+// Invoked as: node antigravity-bridge.mjs <PreInvocation|PostToolUse|Stop>
 // Sources: antigravity.google/docs/hooks, antigravity.google/docs/cli/using
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
 // Antigravity inherits Cascade-style tool names. Map them onto the tool
-// vocabulary pre-tool-use.ts / post-tool-use.ts already understand so the
+// vocabulary post-tool-use.ts already understands so the
 // existing file-activity heuristics keep working unchanged.
 const TOOL_NAME_MAP: Record<string, string> = {
   view_file: "read",
@@ -144,8 +144,6 @@ export function targetsFor(event: string, raw: Json): string[] {
         ? ["session-start.mjs", "prompt-submit.mjs"]
         : ["prompt-submit.mjs"];
     }
-    case "PreToolUse":
-      return ["pre-tool-use.mjs"];
     case "PostToolUse":
       return ["post-tool-use.mjs"];
     case "Stop":

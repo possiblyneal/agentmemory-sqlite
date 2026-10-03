@@ -271,7 +271,6 @@ describe("connect: Droid (Factory.ai)", () => {
     for (const event of [
       "SessionStart",
       "UserPromptSubmit",
-      "PreToolUse",
       "PostToolUse",
       "SessionEnd",
     ]) {

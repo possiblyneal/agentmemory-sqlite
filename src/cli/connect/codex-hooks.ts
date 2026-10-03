@@ -68,7 +68,7 @@ export function findPluginRoot(startUrl: string = import.meta.url): string {
  *      without leaving stale references.
  *   2. Append fresh entries from the bundled Codex manifest with
  *      `${CLAUDE_PLUGIN_ROOT}` rewritten to the absolute plugin path.
- *      Matcher values from the bundled manifest are preserved so PreToolUse
+ *      Matcher values from the bundled manifest are preserved so tool
  *      event routing keeps working.
  */
 export function buildMergedHooks(

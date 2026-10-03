@@ -128,7 +128,6 @@ describe("guidelineTargets coverage", () => {
         "droid",
         "gemini-cli",
         "kiro",
-        "opencode",
         "qwen",
         "warp",
         "zed",

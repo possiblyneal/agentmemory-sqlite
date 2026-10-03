@@ -73,7 +73,7 @@ describe("buildMergedAntigravityHooks", () => {
     // lifecycle event makes agy reject the entire file, which silently
     // disables every other bundle in it too. Verified on agy 1.0.15.
     const bundle = build()["agentmemory"]!;
-    for (const event of ["PreToolUse", "PostToolUse"]) {
+    for (const event of ["PostToolUse"]) {
       for (const entry of eventEntries(bundle, event)) {
         expect(Array.isArray(entry.hooks), event).toBe(true);
         expect(entry, event).not.toHaveProperty("command");
@@ -108,19 +108,8 @@ describe("buildMergedAntigravityHooks", () => {
     // PostInvocation is intentionally unwired: PostToolUse already captures
     // the work, so firing both would double-record every turn.
     expect(events.sort()).toEqual(
-      ["PreInvocation", "PreToolUse", "PostToolUse", "Stop"].sort(),
+      ["PreInvocation", "PostToolUse", "Stop"].sort(),
     );
-  });
-
-  it("scopes PreToolUse to the file tools agy actually exposes", () => {
-    const matcher = eventEntries(build()["agentmemory"], "PreToolUse")[0]!
-      .matcher!;
-    for (const tool of ["view_file", "edit_file", "write_to_file", "grep_search"]) {
-      expect(matcher.split("|")).toContain(tool);
-    }
-    // run_command is deliberately excluded — shell invocations are captured
-    // on PostToolUse, and matching them here would fire on every command.
-    expect(matcher.split("|")).not.toContain("run_command");
   });
 
   it("keeps user-authored hook bundles untouched", () => {
@@ -224,7 +213,7 @@ describe("antigravity bridge payload normalization", () => {
   });
 
   it("flattens toolCall into tool_name/tool_input with Cascade names mapped", () => {
-    const out = normalizePayload("PreToolUse", {
+    const out = normalizePayload("PostToolUse", {
       conversationId: "c1",
       toolCall: {
         name: "view_file",
@@ -244,7 +233,7 @@ describe("antigravity bridge payload normalization", () => {
     // Recorded by pointing a probe hook at a live `agy --print` run. Note
     // there is no `cwd` key at all, and `workspacePaths` came back empty in
     // headless mode — the session id has to come from `conversationId`.
-    const out = normalizePayload("PreToolUse", {
+    const out = normalizePayload("PostToolUse", {
       artifactDirectoryPath:
         "C:/Users/u/.gemini/antigravity-cli/brain/53642203-62f2-45e9-bda3-b1304c61bc99",
       conversationId: "53642203-62f2-45e9-bda3-b1304c61bc99",
@@ -282,7 +271,7 @@ describe("antigravity bridge payload normalization", () => {
       ["CommandLine", "command", "npm test"],
     ];
     for (const [from, to, value] of cases) {
-      const input = normalizePayload("PreToolUse", {
+      const input = normalizePayload("PostToolUse", {
         toolCall: { name: "view_file", args: { [from]: value } },
       })["tool_input"] as Record<string, unknown>;
       expect(input[to], `${from} -> ${to}`).toBe(value);
@@ -292,7 +281,7 @@ describe("antigravity bridge payload normalization", () => {
   });
 
   it("does not let a mapped alias clobber an explicit canonical key", () => {
-    const input = normalizePayload("PreToolUse", {
+    const input = normalizePayload("PostToolUse", {
       toolCall: {
         name: "edit_file",
         args: { TargetFile: "/repo/alias.ts", file_path: "/repo/explicit.ts" },
@@ -371,5 +360,9 @@ describe("antigravity bridge event routing", () => {
 
   it("ignores PostInvocation to avoid double-capturing a turn", () => {
     expect(targetsFor("PostInvocation", {})).toEqual([]);
+  });
+
+  it("drives no script on PreToolUse", () => {
+    expect(targetsFor("PreToolUse", {})).toEqual([]);
   });
 });

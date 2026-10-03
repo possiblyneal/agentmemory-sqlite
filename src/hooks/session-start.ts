@@ -12,8 +12,7 @@ hydrateHookEnv();
 // captured on PostToolUse get attached to the right session). Only writes
 // project context to stdout — which Claude Code prepends to the very first
 // turn — when AGENTMEMORY_INJECT_CONTEXT=true. Default off as of 0.8.10
-// (rohitg00/agentmemory#143). Per-tool-call Injection is a separate opt-in;
-// see pre-tool-use.ts.
+// (rohitg00/agentmemory#143).
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";

@@ -1007,7 +1007,7 @@ export function getAllTools(): McpToolDef[] {
 
 // default switched from "core" (8 essential tools) to "all" (the full
 // tool surface). The plugin manifests have always advertised every tool
-// "in proxy mode"; the old default left OpenCode / Claude Code users
+// "in proxy mode"; the old default left Claude Code users
 // seeing 8 with no indication the other tools existed.
 // Users who want the lean essentials can still set AGENTMEMORY_TOOLS=core.
 export function getVisibleTools(): McpToolDef[] {

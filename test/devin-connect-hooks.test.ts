@@ -12,20 +12,9 @@ const PLUGIN_ROOT = resolve(__dirname, "..", "plugin");
 const DEVIN_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
-  "PreToolUse",
   "PostToolUse",
   "Stop",
   "SessionEnd",
-];
-
-const DEVIN_TOOL_NAMES = [
-  "exec",
-  "edit",
-  "write",
-  "read",
-  "apply_patch",
-  "grep",
-  "glob",
 ];
 
 function runHook(
@@ -61,17 +50,6 @@ describe("buildMergedHooks (Devin manifest)", () => {
   it("only wires events Devin CLI actually dispatches", () => {
     const merged = buildMergedHooks(null, findPluginRoot(), "hooks.devin.json");
     expect(Object.keys(merged.hooks).sort()).toEqual([...DEVIN_EVENTS].sort());
-  });
-
-  it("matches Devin's lowercase tool names, not Claude Code's", () => {
-    const merged = buildMergedHooks(null, findPluginRoot(), "hooks.devin.json");
-    const matcher = merged.hooks["PreToolUse"]?.[0]?.matcher;
-    expect(matcher).toBeDefined();
-    const re = new RegExp(matcher!);
-    for (const tool of DEVIN_TOOL_NAMES) expect(re.test(tool)).toBe(true);
-    for (const claudeTool of ["Edit", "Write", "Bash"]) {
-      expect(re.test(claudeTool)).toBe(false);
-    }
   });
 
   it("preserves user-authored hooks when merging", () => {

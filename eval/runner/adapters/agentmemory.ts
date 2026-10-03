@@ -159,18 +159,6 @@ async function querySearch(q: Question, state: AgentMemoryState, k: number): Pro
   return { ranked };
 }
 
-async function queryPreToolUse(q: Question, state: AgentMemoryState): Promise<QueryResult> {
-  const tool = q.tool ?? "Edit";
-  const { context = "" } = await post<{ context?: string }>(state, "enrich", {
-    sessionId: probeSessionId(),
-    files: q.file ? [q.file] : [],
-    terms: isSearchTool(tool) && q.pattern ? [q.pattern] : [],
-    toolName: tool,
-    ...(q.project && { project: q.project }),
-  });
-  return { ranked: attribute(context, state.needles), chars: context.length };
-}
-
 async function querySessionStart(q: Question, state: AgentMemoryState): Promise<QueryResult> {
   const { context = "" } = await post<{ context?: string }>(state, "session/start", {
     sessionId: probeSessionId(),
@@ -193,7 +181,7 @@ async function queryPromptSubmit(q: Question, state: AgentMemoryState): Promise<
 // (the CI gate) simply passes none.
 export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = {
   name: "agentmemory",
-  paths: ["search", "pre-tool-use", "session-start", "prompt-submit"],
+  paths: ["search", "session-start", "prompt-submit"],
   async init(sessions, config = {}) {
     const sandbox = config.baseUrl
       ? undefined
@@ -226,8 +214,6 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
     switch (questionPath(q)) {
       case "search":
         return querySearch(q, state, k);
-      case "pre-tool-use":
-        return queryPreToolUse(q, state);
       case "session-start":
         return querySessionStart(q, state);
       case "prompt-submit":

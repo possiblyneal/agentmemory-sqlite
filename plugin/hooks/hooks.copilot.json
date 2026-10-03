@@ -13,13 +13,6 @@
         "command": "node ${COPILOT_PLUGIN_ROOT}/scripts/prompt-submit.mjs"
       }
     ],
-    "preToolUse": [
-      {
-        "type": "command",
-        "matcher": "edit|write|create|read|view|glob|grep",
-        "command": "node ${COPILOT_PLUGIN_ROOT}/scripts/pre-tool-use.mjs"
-      }
-    ],
     "postToolUse": [
       {
         "type": "command",

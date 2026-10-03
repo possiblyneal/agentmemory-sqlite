@@ -21,25 +21,17 @@ describe("buildMergedHooks (Droid manifest)", () => {
     }
   });
 
-  it("includes Droid's five documented lifecycle events (and nothing else)", () => {
+  it("includes four of Droid's documented lifecycle events (and nothing else)", () => {
     const merged = buildMergedHooks(null, findPluginRoot(), "hooks.droid.json");
     const expectedEvents = [
       "SessionStart",
       "UserPromptSubmit",
-      "PreToolUse",
       "PostToolUse",
       "SessionEnd",
     ];
     expect(Object.keys(merged.hooks).sort()).toEqual(
       [...expectedEvents].sort(),
     );
-  });
-
-  it("preserves the PreToolUse matcher", () => {
-    const merged = buildMergedHooks(null, findPluginRoot(), "hooks.droid.json");
-    const preToolUse = merged.hooks["PreToolUse"];
-    expect(preToolUse).toBeDefined();
-    expect(preToolUse![0]!.matcher).toBe("Edit|Create|Read|Glob|Grep");
   });
 
   it("appends to existing user hooks without dropping them", () => {

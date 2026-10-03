@@ -30,20 +30,30 @@ describe("buildMergedHooks", () => {
     }
   });
 
-  it("preserves matchers from the bundled manifest (e.g. PreToolUse)", () => {
-    const merged = buildMergedHooks(null, PLUGIN_ROOT);
-    const preToolUse = merged.hooks["PreToolUse"];
-    expect(preToolUse).toBeDefined();
-    expect(preToolUse!.length).toBeGreaterThan(0);
-    expect(preToolUse![0].matcher).toBe("Edit|Write|Read|Glob|Grep");
+  it("preserves matchers from the bundled manifest", () => {
+    const merged = buildMergedHooks(null, PLUGIN_ROOT, "hooks.devin.json");
+    expect(merged.hooks["PostToolUse"]![0]!.matcher).toBe("");
   });
 
-  it("includes all six expected lifecycle events", () => {
+  it("drops an agentmemory entry on an event the manifest no longer wires", () => {
+    const stale: HookManifest = {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Edit|Write|Read|Glob|Grep",
+            hooks: [{ type: "command", command: `node "${PLUGIN_ROOT}/scripts/pre-tool-use.mjs"` }],
+          },
+        ],
+      },
+    };
+    expect(buildMergedHooks(stale, PLUGIN_ROOT).hooks["PreToolUse"]).toBeUndefined();
+  });
+
+  it("includes all five expected lifecycle events", () => {
     const merged = buildMergedHooks(null, PLUGIN_ROOT);
     for (const event of [
       "SessionStart",
       "UserPromptSubmit",
-      "PreToolUse",
       "PostToolUse",
       "PreCompact",
       "Stop",

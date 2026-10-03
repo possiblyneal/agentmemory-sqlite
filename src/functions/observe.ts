@@ -371,8 +371,7 @@ export function registerObserveFunction(
           typeof payload.cwd === "string" &&
           payload.cwd.trim().length > 0
         ) {
-          // OpenCode (and any plugin that skips POST /session/start)
-          // can fire observations before the session record exists. Without
+          // A plugin that skips POST /session/start can fire observations before the session record exists. Without
           // an implicit create, those observations stack up but
           // `memory_sessions` never lists them, and summarize bails with
           // "Session not found for summarize". Create the session now from

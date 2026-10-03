@@ -7,7 +7,7 @@ possible to be able to do that. Every feature here is judged against that senten
 
 - **Right content** — Recall returns what bears on the work in hand, not everything that
   matched the query. A near-miss that costs the Agent a read is worse than one fewer result.
-- **Right moment** — context arrives at hook boundaries (session start, pre-tool-use,
+- **Right moment** — context arrives at hook boundaries (session start, user prompt,
   pre-compact) without the Agent having to know to ask. Memory the Agent must remember to
   query is memory that goes unused.
 - **Right scope** — results are bounded by project, branch, and Session
@@ -34,7 +34,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 - **Engine**: `createInprocSdk()` in `src/engine/inproc/sdk.ts`, over `node:sqlite`. It binds the ports itself. Engine-facing types (`ISdk`, `ApiRequest`, `TriggerAction`) come from `src/engine/types.ts` — this repository owns them; there is no external SDK package.
 - **State**: `SqliteState` (`src/engine/inproc/state.ts`), one file at `AGENTMEMORY_SQLITE_PATH` (default `<data-dir>/agentmemory.sqlite`). Reach it as `StateKV` over the scopes in `src/state/schema.ts`.
 - **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100.
-- **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 14 hook entries, to
+- **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 13 hook entries, to
   `plugin/scripts/*.mjs` — those are committed build output, and tsdown gives them mode 755 for
   their shebang. Regenerate them with `npm run build`; never hand-edit one or reset its mode.
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
@@ -143,7 +143,7 @@ case "memory_your_tool": {
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:
 
-- **Context-injecting hooks** (`pre-tool-use`, `pre-compact`, `prompt-submit`, `session-start`) write recalled context to stdout for Claude Code to inject. These MUST use `try/catch` with `await fetch(..., { signal: AbortSignal.timeout(N) })` — the script has to wait for the response before exiting, and the timeout is the only bound on hang time. `prompt-submit` injects only on Claude Code's `UserPromptSubmit` event, still sends its observe fire-and-forget, and arms the exit timer after the awaited Injection. On a timeout, connection error or non-2xx reply they call `recordMissedInjection()` (`src/hooks/_missed-injection.ts`), which appends to the size-capped `~/.agentmemory/missed-injections.jsonl` that `/diagnostics` (`injections`) reports; an empty reply is not a Missed Injection.
+- **Context-injecting hooks** (`pre-compact`, `prompt-submit`, `session-start`) write recalled context to stdout for Claude Code to inject. These MUST use `try/catch` with `await fetch(..., { signal: AbortSignal.timeout(N) })` — the script has to wait for the response before exiting, and the timeout is the only bound on hang time. `prompt-submit` injects only on Claude Code's `UserPromptSubmit` event, still sends its observe fire-and-forget, and arms the exit timer after the awaited Injection. On a timeout, connection error or non-2xx reply they call `recordMissedInjection()` (`src/hooks/_missed-injection.ts`), which appends to the size-capped `~/.agentmemory/missed-injections.jsonl` that `/diagnostics` (`injections`) reports; an empty reply is not a Missed Injection.
 - **Telemetry-only hooks** (`notification`, `post-tool-failure`, `post-tool-use`, `stop`, `session-end`, `subagent-start`, `subagent-stop`, `task-completed`) write nothing to stdout. These MUST use fire-and-forget `fetch(..., { signal: AbortSignal.timeout(N) }).catch(() => {})` paired with `setTimeout(() => process.exit(0), 500).unref()`. The unawaited fetch dispatches the request; the unref'd `setTimeout` force-exits the process after the request has been flushed to the local daemon's socket buffer (~500ms is enough for single-request hooks; use 1500ms for multi-request hooks like `stop` and `session-end` so all fetches have time to start, especially when `AGENTMEMORY_URL` points to a remote daemon). Without the `setTimeout` Node keeps the event loop alive waiting for any in-flight fetch to settle, which means the hook still blocks Claude Code's next-prompt boundary for up to the AbortSignal duration — exactly the bug fire-and-forget is meant to fix.
 
 ## Coding Standards
@@ -168,14 +168,14 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
-- Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, pre-tool-use, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
+- Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
 - CI gates Recall quality with `npm run eval:gate` (ubuntu / Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance. A PR that moves those numbers on purpose updates that file and says why
 
 ## Supported hosts
 
-19 `connect` adapters, enumerated by `ADAPTERS` in `src/cli/connect/index.ts` — that array is
+18 `connect` adapters, enumerated by `ADAPTERS` in `src/cli/connect/index.ts` — that array is
 the source of truth for the count in the generated
-`plugin/skills/agentmemory-agents/REFERENCE.md`. Cursor and Codex are not supported.
+`plugin/skills/agentmemory-agents/REFERENCE.md`. Cursor, Codex and OpenCode are not supported.
 
 Two survivors are named for Codex but are not Codex-specific — do not delete them with a host:
 `plugin/hooks/hooks.codex.json` is the manifest `connect dsh` merges (`src/cli/connect/dsh.ts`),
@@ -230,9 +230,9 @@ unchecked: the note is still upstream's claim, not a verified defect.
 ## Current Stats (v0.9.29)
 
 - 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
-- 134 REST endpoints
+- 133 REST endpoints
 - 6 MCP resources, 3 MCP prompts
-- 11 hooks, 17 skills
+- 10 hooks, 17 skills
 - 260+ registered functions
 - 2,150+ tests
 

@@ -90,13 +90,6 @@ export function guidelineTargets(
       scope: "global",
       source: "https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/memory.md",
     },
-    opencode: {
-      globalPath: join(home, ".config", "opencode", "AGENTS.md"),
-      projectPath: "AGENTS.md",
-      format: "block",
-      scope: "global",
-      source: "https://opencode.ai/docs/rules",
-    },
     droid: {
       globalPath: join(home, ".factory", "AGENTS.md"),
       projectPath: "AGENTS.md",

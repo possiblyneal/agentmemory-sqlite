@@ -129,7 +129,6 @@ function targetsFor(event, raw) {
 			const n = raw["invocationNum"];
 			return typeof n !== "number" || n <= 1 ? ["session-start.mjs", "prompt-submit.mjs"] : ["prompt-submit.mjs"];
 		}
-		case "PreToolUse": return ["pre-tool-use.mjs"];
 		case "PostToolUse": return ["post-tool-use.mjs"];
 		case "Stop": return ["stop.mjs"];
 		default: return [];

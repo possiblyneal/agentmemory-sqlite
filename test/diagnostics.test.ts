@@ -660,14 +660,14 @@ describe("Diagnostics Functions", () => {
       writeRecord([
         { at: recent, hook: "session-start", reason: "connection" },
         { at: recent, hook: "session-start", reason: "connection" },
-        { at: recent, hook: "pre-tool-use", reason: "timeout" },
+        { at: recent, hook: "prompt-submit", reason: "timeout" },
         { at: stale, hook: "pre-compact", reason: "http_500" },
       ]);
       const [check] = await injectionChecks();
       expect(check.name).toBe("missed-injections");
       expect(check.status).toBe("warn");
       expect(check.message).toBe(
-        "3 Missed Injections in the last 24h: session-start/connection 2, pre-tool-use/timeout 1",
+        "3 Missed Injections in the last 24h: session-start/connection 2, prompt-submit/timeout 1",
       );
     });
   });
@@ -681,7 +681,7 @@ describe("Diagnostics Functions", () => {
 
     async function seedRecord(
       id: string,
-      source: "session-start" | "context" | "enrich",
+      source: "session-start" | "context" | "prompt-submit",
       sessionId: string,
       injected: InjectedRef[],
       at = minutesAgo(90),

@@ -28,7 +28,6 @@ const SUPPORTED_COPILOT_EVENTS = new Set([
 const REQUIRED_MINIMUM_EVENTS = [
   "sessionStart",
   "userPromptSubmitted",
-  "preToolUse",
   "postToolUse",
   "agentStop",
 ];
@@ -163,19 +162,6 @@ describe("Copilot hooks config (hooks/hooks.copilot.json)", () => {
     }
   });
 
-  it("PreToolUse entry has the correct matcher", () => {
-    const config = loadHooks();
-    const preToolEntries = config.hooks["preToolUse"];
-    expect(preToolEntries).toBeDefined();
-    const withMatcher = preToolEntries.find(
-      (e) => e.matcher === "edit|write|create|read|view|glob|grep",
-    );
-    expect(
-      withMatcher,
-      "PreToolUse must have matcher edit|write|create|read|view|glob|grep",
-    ).toBeDefined();
-  });
-
   it("every handler has type === 'command' and exactly one of command/bash/powershell", () => {
     const config = loadHooks();
     for (const [event, entries] of Object.entries(config.hooks)) {
@@ -297,27 +283,6 @@ describe("Copilot hook scripts", () => {
       sessionId: "copilot-session",
       project: "C:\\repo",
       cwd: "C:\\repo",
-    });
-  });
-
-  it("pre-tool-use narrows Copilot sessionId to strings", async () => {
-    const result = await runHook(
-      "scripts/pre-tool-use.mjs",
-      {
-        sessionId: 123,
-        toolName: "read",
-        toolArgs: { path: "src/index.ts" },
-      },
-      { AGENTMEMORY_INJECT_CONTEXT: "true", AGENTMEMORY_INJECT_EVERY_TOOL_CALL: "true" },
-    );
-
-    expect(result.stdout).toBe("remembered context");
-    expect(result.requests[0]?.path).toBe("/agentmemory/enrich");
-    expect(result.requests[0]?.body).toMatchObject({
-      sessionId: "unknown",
-      files: ["src/index.ts"],
-      terms: [],
-      toolName: "read",
     });
   });
 

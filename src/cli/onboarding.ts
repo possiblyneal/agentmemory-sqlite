@@ -44,7 +44,6 @@ const AGENT_GLYPH: Record<string, string> = {
   "claude-code": "⟁",
   "copilot-cli": "◈",
   "gemini-cli": "✦",
-  opencode: "⬡",
 };
 
 const PROVIDERS: { value: string; label: string; envKey: string | null }[] = [
@@ -193,7 +192,7 @@ export async function runOnboarding(): Promise<OnboardingResult> {
       [
         "━ how this works ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "All selected agents share the same memory at :3111.",
-        "A memory saved by Claude Code is visible to Copilot + Gemini CLI + OpenCode instantly.",
+        "A memory saved by Claude Code is visible to Copilot + Gemini CLI instantly.",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
       ].join("\n"),
     );

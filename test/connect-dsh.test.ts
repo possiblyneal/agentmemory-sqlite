@@ -128,7 +128,7 @@ describe("connect: DeepSeek Harness", () => {
     expect(existsSync(hooksPath)).toBe(true);
     const manifest = JSON.parse(readFileSync(hooksPath, "utf-8"));
     // Bridge-supported events from the bundled Claude Code shaped manifest.
-    for (const ev of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]) {
+    for (const ev of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"]) {
       expect(manifest.hooks[ev]).toBeDefined();
     }
     // Commands are resolved to absolute paths, no env placeholders left.
