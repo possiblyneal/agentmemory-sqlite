@@ -5,18 +5,10 @@ import { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { estimateTokens } from "../utils/tokens.js";
+import { escapeXml } from "../utils/xml.js";
 import { withFiles } from "./injections.js";
 
 const MAX_CONTEXT_LENGTH = 4000;
-
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 export function registerEnrichFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::enrich",

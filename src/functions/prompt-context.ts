@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
+import { escapeXml } from "../utils/xml.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
@@ -32,15 +33,6 @@ export interface PromptContextResult {
 }
 
 const EMPTY: PromptContextResult = { context: "", tokens: 0, injected: [] };
-
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 function wordCount(prompt: string): number {
   return prompt.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
