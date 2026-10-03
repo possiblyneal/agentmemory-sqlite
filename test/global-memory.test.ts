@@ -6,7 +6,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerRememberFunction } from "../src/functions/remember.js";
 import { registerSearchFunction, getSearchIndex } from "../src/functions/search.js";
-import { registerEnrichFunction } from "../src/functions/enrich.js";
+import { registerPromptContextFunction } from "../src/functions/prompt-context.js";
 import { registerDiagnosticsFunction } from "../src/functions/diagnostics.js";
 import { inferMemoryProjects } from "../src/functions/migrate.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
@@ -35,10 +35,9 @@ describe("Global Memory (#95)", () => {
     getSearchIndex().clear();
     registerRememberFunction(sdk as never, kv as never);
     registerSearchFunction(sdk as never, kv as never);
-    registerEnrichFunction(sdk as never, kv as never);
+    registerPromptContextFunction(sdk as never, kv as never);
     registerDiagnosticsFunction(sdk as never, kv as never);
     registerApiTriggers(sdk as never, kv as never, SECRET);
-    sdk.fns.set("mem::file-context", async () => ({ context: "" }));
     await kv.set(KV.sessions, "sess-api", session("sess-api", "api"));
     await kv.set(KV.sessions, "sess-web", session("sess-web", "web"));
   });
@@ -162,11 +161,14 @@ describe("Global Memory (#95)", () => {
       expect(titles).not.toContain("tmux habit pinned to api");
     });
 
-    it("enrich from web injects a Global Memory saved in an api Session", async () => {
+    it("a prompt from web injects a Global Memory saved in an api Session", async () => {
+      for (const content of ["tmux pane layout", "postgres vacuum schedule", "docker cache busting", "ci matrix trimmed"]) {
+        await remember({ content, project: "api" });
+      }
       await savedInApiSession("express-jwt whitespace breaks auth global", { global: true });
-      const result = (await sdk.trigger("mem::enrich", {
+      const result = (await sdk.trigger("mem::prompt-context", {
         sessionId: "sess-web",
-        files: ["src/auth.ts"],
+        prompt: "why does express-jwt whitespace break auth",
         project: "web",
       })) as { context: string };
       expect(result.context).toContain("express-jwt whitespace breaks auth global");
