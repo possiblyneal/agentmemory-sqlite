@@ -327,6 +327,34 @@ describe("session-start hook — context injection gate (#143)", () => {
       await new Promise<void>((r) => server.close(() => r()));
     }
   });
+  it("ignores AGENTMEMORY_INJECT_TOOL_CONTEXT either way", async () => {
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ context: "project history" }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    const url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+    const payload = JSON.stringify({ session_id: "ses_test", cwd: "/tmp/fake-project" });
+    try {
+      const toolOnly = await runHook("session-start.mjs", payload, {
+        AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
+        AGENTMEMORY_URL: url,
+      });
+      expect(toolOnly.stdout).toBe("");
+      const both = await runHook("session-start.mjs", payload, {
+        AGENTMEMORY_INJECT_CONTEXT: "true",
+        AGENTMEMORY_INJECT_TOOL_CONTEXT: "false",
+        AGENTMEMORY_URL: url,
+      });
+      expect(both.stdout).toBe("project history");
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
 });
 
 describe("context-injecting hooks — Missed Injection record (#73)", () => {

@@ -1,10 +1,10 @@
 import type { ISdk } from "../engine/types.js";
-import type { InjectedRef, InjectionRecord } from "../types.js";
+import type { InjectedRef, Memory } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
-import { withFiles } from "./injections.js";
+import { injectedInSession, refKey, withFiles } from "./injections.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -19,8 +19,11 @@ const SEARCH_LIMIT = 10;
 
 interface SearchHit {
   score: number;
+  sessionId: string;
   observation: { id: string; narrative?: string; files?: string[] };
 }
+
+type NarratedHit = SearchHit & { observation: { narrative: string } };
 
 export interface PromptContextResult {
   context: string;
@@ -43,13 +46,11 @@ function wordCount(prompt: string): number {
   return prompt.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
-async function alreadyInjected(kv: StateKV, sessionId: string): Promise<Set<string>> {
-  const records = await kv.list<InjectionRecord>(KV.injections);
-  return new Set(
-    records
-      .filter((r) => r.sessionId === sessionId)
-      .flatMap((r) => r.injected.map((ref) => `${ref.kind}:${ref.id}`)),
-  );
+// mem::search returns Memories in the Observation shape, under the
+// Memory's own id, so only the Memory store can tell the two apart.
+async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
+  const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
+  return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
 }
 
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
@@ -68,20 +69,27 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
               limit: SEARCH_LIMIT,
               ...(data.project && { project: data.project }),
             },
-          })
-          .catch((): { results: SearchHit[] } => ({ results: [] })),
-        alreadyInjected(kv, data.sessionId),
+          }),
+        injectedInSession(kv, data.sessionId),
       ]);
 
-      const best = search.results[0]?.score ?? 0;
+      // This Session's own Observations, the prompt just observed among
+      // them, are already in the Agent's context.
+      const earlier = search.results.filter((r) => r.sessionId !== data.sessionId);
+      const best = earlier[0]?.score ?? 0;
       const floor = Math.max(MIN_SCORE, best * MIN_SCORE_RATIO_TO_BEST);
-      const chosen = search.results
-        .filter((r) => r.score >= floor && r.observation.narrative)
-        .filter((r) => !seen.has(`observation:${r.observation.id}`))
+      const strong = earlier.filter(
+        (r): r is NarratedHit =>
+          r.score >= floor && !!r.observation.narrative && !seen.has(refKey({ kind: "summary", id: r.sessionId })),
+      );
+      const refs = await Promise.all(strong.map((r) => refFor(kv, r)));
+      const chosen = strong
+        .map((hit, i) => ({ hit, ref: refs[i] }))
+        .filter(({ ref }) => !seen.has(refKey(ref)))
         .slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
-      const lines = chosen.map((r) => escapeXml(r.observation.narrative!.slice(0, MAX_NARRATIVE_CHARS)));
+      const lines = chosen.map(({ hit }) => escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
       const context = `<agentmemory-relevant-context>\n${lines.join("\n")}\n</agentmemory-relevant-context>`;
 
       logger.info("Prompt context built", {
@@ -94,7 +102,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       return {
         context,
         tokens: estimateTokens(context),
-        injected: chosen.map((r) => withFiles({ kind: "observation", id: r.observation.id }, r.observation.files)),
+        injected: chosen.map(({ ref }) => ref),
       };
     },
   );
