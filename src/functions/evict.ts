@@ -204,6 +204,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       );
       // One recovery sweep at a time, so the sweep's one-LLM-slot bound holds
       // when a second eviction is triggered while the first is still running.
+      // A second sweep skips rather than queuing behind a keyed lock: it would
+      // mostly repeat the running sweep's Sessions, and the next sweep finds
+      // any that went stale since.
       if (dryRun) {
         stats.staleSessions = staleSessions.length;
       } else if (recoveryRunning) {
