@@ -1004,7 +1004,7 @@ prs:
       - src/triggers/events.ts
       - test/agent-id-scope.test.ts
       # +2 more
-    note: "remember and memory_save drop agentId, and standalone MCP drops project despite advertising it."
+    note: "remember and memory_save drop agentId, and standalone MCP drops project despite advertising it. Only that half applies here; the Hermes profile tagging is for an unsupported host."
     disposition: candidate
     url: https://github.com/rohitg00/agentmemory/pull/1089
   - number: 1177
@@ -2415,5 +2415,5 @@ prs:
       - website/package.json
     note: "dependabot: website @types/node 25 to 26."
     disposition: wont-fix
-    wont_fix_reason: "upstream housekeeping, marketing or repo diary"
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
     url: https://github.com/rohitg00/agentmemory/pull/1380

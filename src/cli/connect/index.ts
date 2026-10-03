@@ -25,7 +25,7 @@ export function parseConnectArgs(args: string[]): ConnectOptions {
     if (isConnectFlag(a)) opts[CONNECT_FLAGS[a].option] = true;
     else if (a.startsWith("-")) {
       throw new Error(
-        `Unknown flag: ${a}. \`agentmemory connect\` accepts only ${Object.keys(CONNECT_FLAGS).join(" and ")}.`,
+        `Unknown flag: ${a}. \`agentmemory connect\` accepts only ${Object.keys(CONNECT_FLAGS).join(", ")}.`,
       );
     } else if (a.toLowerCase() !== CONNECT_ALIAS) {
       throw new Error(`Unknown agent: ${a}. Claude Code is the only supported host.`);

@@ -2511,9 +2511,8 @@ issues:
     difficulty: med
     kind: bug
     note: "PreToolUse injection uses raw stdout instead of the hook envelope, against a 2s budget on a 6-29s endpoint."
-    disposition: already-fixed
-    status: "fixed-here — 895d01c: pre-tool-use emits {hookSpecificOutput:{hookEventName: PreToolUse, additionalContext}} when the payload names PreToolUse, plain text otherwise; live /enrich answers in under 0.2s, so the 2s bound stays. Part 3 is not addressed: the hook still reads project only from the payload, so its enrich calls stay unscoped; upstream warns that scoping them must be measured first."
-    fixed_by: "895d01c"
+    disposition: wont-fix
+    wont_fix_reason: "per-tool-call Injection, its pre-tool-use hook and /agentmemory/enrich were removed (#108)"
     url: https://github.com/rohitg00/agentmemory/issues/1278
   - number: 1279
     title: "[viewer] Dashboard \"Memories\" stat card caps at 500 — uses .length of a limited fetch instead of the total field"
