@@ -368,7 +368,6 @@ function generateReport(scale: ScaleResult[], cross: CrossSessionResult[]): stri
   w("- Multiple agents work on the same codebase");
   w("- You want semantic search (\"how does auth work?\") not just keyword matching");
   w("- You need to track memory quality, decay, and lifecycle");
-  w("- You want a shared memory layer across Claude Code, Cursor, Windsurf, etc.");
   w("");
   w("Built-in memory is your sticky notes. agentmemory is the searchable database behind them.");
   w("");
