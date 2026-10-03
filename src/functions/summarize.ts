@@ -329,10 +329,10 @@ export function registerSummarizeFunction(
   metricsStore?: MetricsStore,
 ): void {
   sdk.registerFunction("mem::summarize", 
-    // sequentialChunks is for Eviction's recovery sweep, which must hold at
+    // maxChunkConcurrency is for Eviction's recovery sweep, which must hold at
     // most one LLM slot so live Sessions keep the other.
     async (
-      data: { sessionId: string; force?: boolean; sequentialChunks?: boolean } | undefined,
+      data: { sessionId: string; force?: boolean; maxChunkConcurrency?: number } | undefined,
     ) => {
       const startMs = Date.now();
       if (!data || typeof data.sessionId !== "string" || !data.sessionId.trim()) {
@@ -401,7 +401,7 @@ export function registerSummarizeFunction(
         let response = "";
         let mode = "single";
         let chunks = 1;
-        const concurrency = data.sequentialChunks ? 1 : getChunkConcurrency();
+        const concurrency = Math.min(getChunkConcurrency(), data.maxChunkConcurrency ?? Infinity);
         const planned = await planChunks(provider, compressed, sessionId, concurrency);
         for (let attempt = 1; attempt <= 2; attempt++) {
           const produced = await produceSummaryXml(

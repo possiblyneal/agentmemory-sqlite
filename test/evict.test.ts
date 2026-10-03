@@ -6,6 +6,7 @@ import type {
 } from "../src/types.js";
 import { registerEvictFunction } from "../src/functions/evict.js";
 import { KV } from "../src/state/schema.js";
+import { logger } from "../src/logger.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -270,6 +271,10 @@ describe("mem::evict stale sessions", () => {
     ]);
 
     expect(recoveries).toBe(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("recovery already running"),
+      { staleSessions: 1 },
+    );
   });
 
   it("keeps a stale observed session when recovery fails", async () => {

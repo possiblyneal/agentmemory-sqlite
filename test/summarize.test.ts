@@ -427,7 +427,7 @@ describe("mem::summarize chunking", () => {
     expect(maxInflight).toBe(2);
   });
 
-  it("runs chunks one at a time when the caller asks for sequential chunks", async () => {
+  it("runs chunks one at a time when the caller caps chunk concurrency at 1", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "2";
     let inflight = 0;
@@ -445,7 +445,7 @@ describe("mem::summarize chunking", () => {
     };
     const { handler } = await setupHandler({ sessionId: "ses_seq", obsCount: 400, provider });
 
-    const result: any = await handler({ sessionId: "ses_seq", sequentialChunks: true });
+    const result: any = await handler({ sessionId: "ses_seq", maxChunkConcurrency: 1 });
 
     expect(result.success).toBe(true);
     expect(maxInflight).toBe(1);

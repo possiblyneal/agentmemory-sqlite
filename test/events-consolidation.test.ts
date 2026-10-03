@@ -48,7 +48,7 @@ type StoppedHandler = (data: {
 
 // Builds a spy-backed sdk. `trigger` resolves for mem::summarize with a fake
 // summary; void triggers resolve unless `rejectFor` matches the function_id,
-// in which case they reject (to exercise fanOut's .catch()).
+// in which case they reject (to exercise the fan-out's .catch()).
 function mockSdk(opts?: { rejectFor?: string }) {
   const handlers = new Map<string, StoppedHandler>();
   const trigger = vi.fn(
@@ -187,7 +187,7 @@ describe("event::session::stopped consolidation fan-out", () => {
     expect(functionIds(on.trigger)).toContain("mem::slot-reflect");
   });
 
-  it("asks summarize for sequential chunks only on the recovery path", async () => {
+  it("caps summarize at one chunk at a time only on the recovery path", async () => {
     const { sdk, handlers, trigger } = mockSdk();
     registerEventTriggers(sdk as never, mockKV() as never);
     const stopped = handlers.get("event::session::stopped")!;
@@ -201,7 +201,7 @@ describe("event::session::stopped consolidation fan-out", () => {
       .map((c) => c.payload);
     expect(summarizePayloads).toEqual([
       { sessionId: "ses_1" },
-      { sessionId: "ses_2", sequentialChunks: true },
+      { sessionId: "ses_2", maxChunkConcurrency: 1 },
     ]);
   });
 

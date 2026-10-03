@@ -108,23 +108,23 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("event::session::stopped", async (data: { sessionId: string; recovery?: boolean }) => {
     const summary = await sdk.trigger({
       function_id: "mem::summarize",
-      payload: { sessionId: data.sessionId, ...(data.recovery && { sequentialChunks: true }) },
+      payload: { sessionId: data.sessionId, ...(data.recovery && { maxChunkConcurrency: 1 }) },
     });
-    const fanOut = (function_id: string, payload: unknown) =>
+    const warnOnFailure = (function_id: string) => (err: unknown) =>
+      logger.warn(function_id + " trigger failed", {
+        sessionId: data.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    const fireAndForget = (function_id: string, payload: unknown) =>
       sdk
-        .trigger({
-          function_id,
-          payload,
-          ...(!data.recovery && { action: TriggerAction.Void() }),
-        })
-        .catch((err) =>
-          logger.warn(function_id + " trigger failed", {
-            sessionId: data.sessionId,
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
+        .trigger({ function_id, payload, action: TriggerAction.Void() })
+        .catch(warnOnFailure(function_id));
+    const awaitIfRecovery = (function_id: string, payload: unknown) =>
+      data.recovery
+        ? sdk.trigger({ function_id, payload }).catch(warnOnFailure(function_id))
+        : fireAndForget(function_id, payload);
     if (isReflectEnabled()) {
-      await fanOut("mem::slot-reflect", { sessionId: data.sessionId });
+      await awaitIfRecovery("mem::slot-reflect", { sessionId: data.sessionId });
     }
     // Fork posture (graph-off). Stock 0.9.29 fires this unconditionally and
     // lets mem::graph-extract gate only its LLM pass, so a keyless install
@@ -157,7 +157,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
           (o) => o.title && (oldestPending === undefined || o.timestamp < oldestPending),
         );
         if (session && fresh.length > 0) {
-          await fanOut("mem::graph-extract", {
+          await awaitIfRecovery("mem::graph-extract", {
             observations: fresh,
             sessionId: data.sessionId,
           });
@@ -187,8 +187,8 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     // Bound the global corpus consolidation to once per cooldown window.
     if (isConsolidationEnabled() && !data.recovery) {
       if (await consolidationDue(kv)) {
-        fanOut("mem::consolidate-pipeline", { tier: "all", force: true });
-        fanOut("mem::auto-crystallize", { olderThanDays: 0 });
+        fireAndForget("mem::consolidate-pipeline", { tier: "all", force: true });
+        fireAndForget("mem::auto-crystallize", { olderThanDays: 0 });
       }
     }
     return summary;
