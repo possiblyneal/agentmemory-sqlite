@@ -6,7 +6,7 @@ import { join } from "node:path";
 // hooks record it here on the hook host. The daemon's /diagnostics and the
 // homelab check read the same file; only dev runs hooks and REST is
 // loopback-only, so the host is shared.
-export type MissedInjectionHook = "session-start" | "pre-tool-use" | "pre-compact";
+export type MissedInjectionHook = "session-start" | "pre-tool-use" | "pre-compact" | "prompt-submit";
 
 export interface MissedInjection {
   at: string;

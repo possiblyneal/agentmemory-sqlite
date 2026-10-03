@@ -224,7 +224,7 @@ export interface InjectedRef {
   files?: string[];
 }
 
-export type InjectionSource = "session-start" | "context" | "enrich";
+export type InjectionSource = "session-start" | "context" | "enrich" | "prompt-submit";
 
 export interface InjectionRecord {
   id: string;

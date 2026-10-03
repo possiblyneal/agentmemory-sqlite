@@ -16,7 +16,7 @@ A question names the path it exercises, and each path is scored on its own:
 | `search` | `POST /agentmemory/smart-search` with the question's `project` | top K Sessions |
 | `pre-tool-use` | `POST /agentmemory/enrich` with the tool, file and Grep pattern — what the pre-tool-use hook injects | the whole Injection |
 | `session-start` | `POST /agentmemory/session/start` for a probe Session — what the session-start hook injects | the whole Injection |
-| `prompt-submit` | the user prompt as the question — today the top K Sessions `smart-search` returns for it, a stand-in for the per-prompt Injection (#106) | the whole Injection |
+| `prompt-submit` | the user prompt as the question — what `POST /agentmemory/prompt-context` returns for it, the per-prompt Injection | the whole Injection |
 
 An Injection is text, so the runner maps it back to eval Sessions by finding each Observation's output in it.
 

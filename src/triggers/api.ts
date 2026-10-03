@@ -339,7 +339,7 @@ export function registerApiTriggers(
           default: false,
           affects: ["Hooks"],
           needsLlm: false,
-          description: "The session-start hook writes recalled context into Claude Code's conversation. OFF captures in the background without injecting.",
+          description: "The session-start hook writes recalled context into Claude Code's conversation, and the prompt-submit hook adds the few strong matches for each user prompt. OFF captures in the background without injecting.",
           enableHow: "Set AGENTMEMORY_INJECT_CONTEXT=true and restart.",
           docsHref: "https://github.com/rohitg00/agentmemory/issues/143",
         },
@@ -1238,6 +1238,50 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::enrich",
     config: { api_path: "/agentmemory/enrich", http_method: "POST" },
+  });
+
+  sdk.registerFunction("api::prompt-context",
+    async (
+      req: ApiRequest<{ sessionId: string; prompt: string; project?: string }>,
+    ): Promise<Response> => {
+      const authErr = checkAuth(req, secret);
+      if (authErr) return authErr;
+      if (
+        !req.body?.sessionId ||
+        typeof req.body.sessionId !== "string" ||
+        typeof req.body.prompt !== "string"
+      ) {
+        return {
+          status_code: 400,
+          body: { error: "sessionId (string) and prompt (string) are required" },
+        };
+      }
+      if (
+        req.body.project !== undefined &&
+        (typeof req.body.project !== "string" || !req.body.project.trim())
+      ) {
+        return {
+          status_code: 400,
+          body: { error: "project must be a non-empty string" },
+        };
+      }
+      const project = req.body.project?.trim();
+      const result = await sdk.trigger<unknown, InjectionResult>({
+        function_id: "mem::prompt-context",
+        payload: {
+          sessionId: req.body.sessionId,
+          prompt: req.body.prompt,
+          ...(project && { project }),
+        },
+      });
+      noteInjection(kv, { source: "prompt-submit", sessionId: req.body.sessionId, project }, result);
+      return { status_code: 200, body: withoutInjected(result) };
+    },
+  );
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::prompt-context",
+    config: { api_path: "/agentmemory/prompt-context", http_method: "POST" },
   });
 
   sdk.registerFunction("api::remember",

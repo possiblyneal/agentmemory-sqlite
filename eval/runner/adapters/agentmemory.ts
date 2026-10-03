@@ -179,11 +179,13 @@ async function querySessionStart(q: Question, state: AgentMemoryState): Promise<
   return { ranked: attribute(context, state.needles), chars: context.length };
 }
 
-// Stand-in until the per-prompt Injection exists (#106): the top k Sessions
-// smart-search returns for the raw prompt, the Injection a hook with no
-// relevance filter would make.
-async function queryPromptSubmit(q: Question, state: AgentMemoryState, k: number): Promise<QueryResult> {
-  return querySearch(q, state, k);
+async function queryPromptSubmit(q: Question, state: AgentMemoryState): Promise<QueryResult> {
+  const { context = "" } = await post<{ context?: string }>(state, "prompt-context", {
+    sessionId: probeSessionId(),
+    prompt: q.question,
+    ...(q.project && { project: q.project }),
+  });
+  return { ranked: attribute(context, state.needles), chars: context.length };
 }
 
 // The daemon to score is the caller's choice: with no `baseUrl` the adapter
@@ -229,7 +231,7 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
       case "session-start":
         return querySessionStart(q, state);
       case "prompt-submit":
-        return queryPromptSubmit(q, state, k);
+        return queryPromptSubmit(q, state);
     }
   },
   async teardown(state) {

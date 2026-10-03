@@ -69,6 +69,7 @@ import { registerProfileFunction } from "./functions/profile.js";
 import { registerAutoForgetFunction } from "./functions/auto-forget.js";
 import { registerExportImportFunction } from "./functions/export-import.js";
 import { registerEnrichFunction } from "./functions/enrich.js";
+import { registerPromptContextFunction } from "./functions/prompt-context.js";
 import { registerClaudeBridgeFunction } from "./functions/claude-bridge.js";
 import { registerGraphFunction, graphWritesOffReason } from "./functions/graph.js";
 import { isNoopProvider } from "./providers/noop.js";
@@ -267,6 +268,7 @@ async function main() {
   registerAutoForgetFunction(sdk, kv);
   registerExportImportFunction(sdk, kv);
   registerEnrichFunction(sdk, kv);
+  registerPromptContextFunction(sdk, kv);
 
   const claudeBridgeConfig = loadClaudeBridgeConfig();
   if (claudeBridgeConfig.enabled) {
@@ -304,11 +306,11 @@ async function main() {
     );
   } else if (isContextInjectionEnabled()) {
     bootLog(
-      `Context injection: session start only (AGENTMEMORY_INJECT_CONTEXT=true). Set AGENTMEMORY_INJECT_TOOL_CONTEXT=true to also inject on every file-touching tool call.`,
+      `Context injection: session start and per prompt (AGENTMEMORY_INJECT_CONTEXT=true). Set AGENTMEMORY_INJECT_TOOL_CONTEXT=true to also inject on every file-touching tool call.`,
     );
   } else {
     bootLog(
-      `Context injection: OFF (default) — hooks capture observations but do not inject context into Claude Code's conversation. Set AGENTMEMORY_INJECT_CONTEXT=true to inject recalled context at session start.`,
+      `Context injection: OFF (default) — hooks capture observations but do not inject context into Claude Code's conversation. Set AGENTMEMORY_INJECT_CONTEXT=true to inject recalled context at session start and per prompt.`,
     );
   }
 
@@ -583,7 +585,7 @@ async function main() {
     `Ready. ${embeddingProvider ? "Triple-stream (BM25+Vector+Graph)" : "BM25+Graph"} search active.`,
   );
   bootLog(
-    `REST API: 133 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
+    `REST API: 134 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
   );
   bootLog(
     `MCP surface (opt-in via \`npx @agentmemory/mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,
