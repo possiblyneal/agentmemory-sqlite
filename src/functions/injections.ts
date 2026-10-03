@@ -7,7 +7,6 @@ import type {
   InjectedRef,
   InjectionRecord,
   Insight,
-  Memory,
 } from "../types.js";
 import { logger } from "../logger.js";
 
@@ -46,7 +45,7 @@ export function injectedItemUse(
   return used ? "used" : "unused";
 }
 
-async function getEach<T>(kv: StateKV, scope: string, ids: Iterable<string>): Promise<Map<string, T>> {
+async function getExisting<T>(kv: StateKV, scope: string, ids: Iterable<string>): Promise<Map<string, T>> {
   const unique = [...new Set(ids)];
   const values = await Promise.all(unique.map((id) => kv.get<T>(scope, id)));
   return new Map(
@@ -59,21 +58,12 @@ export async function resolveInsightFiles(
   records: InjectionRecord[],
 ): Promise<Map<string, string[]>> {
   const insightIds = records.flatMap((r) => r.injected.filter((ref) => ref.kind === "insight").map((ref) => ref.id));
-  const insights = await getEach<Insight>(kv, KV.insights, insightIds);
-  const all = [...insights.values()];
-  const [memories, crystals] = await Promise.all([
-    getEach<Memory>(kv, KV.memories, all.flatMap((i) => i.sourceMemoryIds ?? [])),
-    getEach<Crystal>(kv, KV.crystals, all.flatMap((i) => i.sourceCrystalIds ?? [])),
-  ]);
+  const insights = [...(await getExisting<Insight>(kv, KV.insights, insightIds)).values()];
+  const crystals = await getExisting<Crystal>(kv, KV.crystals, insights.flatMap((i) => i.sourceCrystalIds));
   return new Map(
-    all.map((insight) => [
+    insights.map((insight) => [
       insight.id,
-      [
-        ...new Set([
-          ...(insight.sourceMemoryIds ?? []).flatMap((id) => memories.get(id)?.files ?? []),
-          ...(insight.sourceCrystalIds ?? []).flatMap((id) => crystals.get(id)?.filesAffected ?? []),
-        ]),
-      ],
+      [...new Set(insight.sourceCrystalIds.flatMap((id) => crystals.get(id)?.filesAffected ?? []))],
     ]),
   );
 }

@@ -820,14 +820,15 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         ]);
         const bySource = new Map<string, { scored: number; unused: number }>();
         const total = { scored: 0, unused: 0 };
+        const insights = { scored: 0, unused: 0 };
         for (const record of records) {
           const tally = bySource.get(record.source) ?? { scored: 0, unused: 0 };
           const observations = observationsBySession.get(record.sessionId) ?? [];
           for (const ref of record.injected) {
-            const scoredRef = ref.kind === "insight" ? withFiles(ref, insightFiles.get(ref.id)) : ref;
-            const use = injectedItemUse(scoredRef, record, observations);
+            const isInsight = ref.kind === "insight";
+            const use = injectedItemUse(isInsight ? withFiles(ref, insightFiles.get(ref.id)) : ref, record, observations);
             if (use === "unscorable") continue;
-            for (const t of [tally, total]) {
+            for (const t of isInsight ? [insights] : [tally, total]) {
               t.scored++;
               if (use === "unused") t.unused++;
             }
@@ -847,12 +848,15 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           category: "injection-use",
           status: tooUnused ? "warn" : "pass",
           message:
-            total.scored === 0
+            (total.scored === 0
               ? "No scorable injected items between 1h and 24h ago"
               : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
                 `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
                 "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
-                "an Insight's files are those of its source Memories and Crystals, and items with no files are not scored.",
+                "and items with no files are not scored.") +
+            (insights.scored === 0
+              ? ""
+              : ` Insights ${share(insights)}% of ${insights.scored} unused, scored apart by their source Crystals' files and never warned on.`),
           fixable: false,
         });
       }
