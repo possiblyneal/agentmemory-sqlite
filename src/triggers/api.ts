@@ -1565,8 +1565,8 @@ export function registerApiTriggers(
       if (authErr) return authErr;
       // mem::export already supports maxSessions/offset internally,
       // but the HTTP endpoint hardcoded an empty payload — so /export on a
-      // real corpus (40 sessions × 34K observations × 8K memories) hit the
-      // iii engine invocation timeout and `agentmemory status` reported 0.
+      // real corpus (40 sessions × 34K observations × 8K memories) had to
+      // load the whole store in one request.
       // Pass through the query-string pagination so callers can chunk.
       const rawMax = req.query_params?.["maxSessions"];
       const rawOffset = req.query_params?.["offset"];
