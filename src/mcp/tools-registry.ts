@@ -89,6 +89,12 @@ export const CORE_TOOLS: McpToolDef[] = [
             "started. Do not use filesystem paths or ad-hoc display names — those " +
             "change across machines and will silently break project scoping.",
         },
+        global: {
+          type: "boolean",
+          description:
+            "Save a Global Memory that Recall surfaces in every project, such as an Operator " +
+            "preference meant to apply everywhere. Cannot be combined with project.",
+        },
         agentId: {
           type: "string",
           description:

@@ -137,6 +137,7 @@ export interface Memory {
   imageData?: string;
   agentId?: string;
   project?: string;
+  global?: boolean;
   origin?: Origin;
 }
 

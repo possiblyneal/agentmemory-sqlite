@@ -39,6 +39,12 @@ A durable distilled record derived from Observations, intended to be recalled la
 are content-addressed, so the same content captured twice is one Memory.
 _Avoid_: note, fact, item
 
+**Global Memory**:
+A Memory deliberately marked to apply in every project, such as an Operator preference. It
+has no project, and Recall surfaces it in every project whichever Session it was saved in. A
+Memory that merely lacks a project is unscoped, not global.
+_Avoid_: shared memory, unscoped memory
+
 **Session Summary**:
 The distilled account of one Session, produced from its Observations each time the Session
 stops.

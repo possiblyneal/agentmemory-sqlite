@@ -1207,6 +1207,7 @@ export function registerApiTriggers(
         sourceObservationIds?: string[];
         project?: string;
         agentId?: string;
+        global?: boolean;
       }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
@@ -1224,6 +1225,12 @@ export function registerApiTriggers(
       ) {
         return { status_code: 400, body: { error: "project must be a non-empty string" } };
       }
+      if (req.body.global !== undefined && typeof req.body.global !== "boolean") {
+        return { status_code: 400, body: { error: "global must be a boolean" } };
+      }
+      if (req.body.global && req.body.project !== undefined) {
+        return { status_code: 400, body: { error: "a Memory cannot have both a project and global" } };
+      }
       const result = await sdk.trigger({
         function_id: "mem::remember",
         payload: {
@@ -1234,6 +1241,7 @@ export function registerApiTriggers(
           ...(req.body.ttlDays !== undefined && { ttlDays: req.body.ttlDays }),
           ...(req.body.sourceObservationIds !== undefined && { sourceObservationIds: req.body.sourceObservationIds }),
           ...(req.body.project !== undefined && { project: req.body.project }),
+          ...(req.body.global === true && { global: true }),
           ...(typeof req.body.agentId === "string" && req.body.agentId.trim()
             ? { agentId: req.body.agentId.trim() }
             : {}),
@@ -2339,7 +2347,7 @@ export function registerApiTriggers(
       const project = req.query_params?.["project"];
       let filtered = latest ? memories.filter((m) => m.isLatest) : memories;
       if (typeof project === "string" && project) {
-        filtered = filtered.filter((m) => m.project === project);
+        filtered = filtered.filter((m) => m.project === project || m.global === true);
       }
       if (filterAgentId) {
         filtered = filtered.filter(
@@ -3202,7 +3210,7 @@ export function registerApiTriggers(
       let memories = await kv.list<import("../types.js").Memory>(KV.memories);
       let actions = await kv.list<import("../types.js").Action>(KV.actions);
       if (project) {
-        memories = memories.filter((m) => m.project === project);
+        memories = memories.filter((m) => m.project === project || m.global === true);
         actions = actions.filter((a) => a.project === project);
       }
       const body: Record<string, unknown> = {
