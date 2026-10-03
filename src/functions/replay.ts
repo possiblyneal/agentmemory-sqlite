@@ -249,7 +249,7 @@ async function findJsonlFiles(
   let walked = 0;
   // Hard bound on entries visited (regardless of extension) so trees
   // dominated by non-jsonl files (node_modules, lockfiles, etc.) cannot
-  // lock the 30s function timeout. `discovered` may underrepresent the
+  // stall the request walking them. `discovered` may underrepresent the
   // true count when traversalCapped fires — callers should surface that
   // distinction to the user.
   const traversalCap = Math.max(limit * 50, 50_000);
