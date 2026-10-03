@@ -40,7 +40,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
-- **Test**: vitest (`npm test` excludes integration tests)
+- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**`, where scratch worktrees live)
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
@@ -163,7 +163,7 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 
 ## Testing
 
-- `npm run typecheck` must report 0 errors and `npm test` (2,150+ tests) must pass before a PR; CI runs both
+- `npm run typecheck` must report 0 errors and `npm test` (2,050+ tests) must pass before a PR; CI runs both
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
@@ -232,7 +232,7 @@ unchecked: the note is still upstream's claim, not a verified defect.
 - 6 MCP resources, 3 MCP prompts
 - 10 hooks, 17 skills
 - 260+ registered functions
-- 2,150+ tests
+- 2,050+ tests
 
 ## Agent skills
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -86,6 +86,26 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
       reason: "not-detected",
     });
     expect(existsSync(join(tmpHome, ".claude.json"))).toBe(false);
+  });
+
+  it("a dry run writes nothing and stops before the post-install steps", async () => {
+    mkdirSync(join(tmpHome, ".claude"), { recursive: true });
+    const { runConnect: freshRunConnect } = await import("../src/cli/connect/index.js");
+    const printed: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      printed.push(String(chunk));
+      return true;
+    }) as never);
+    try {
+      await freshRunConnect(["--dry-run"]);
+    } finally {
+      write.mockRestore();
+    }
+    const output = printed.join("");
+    expect(existsSync(join(tmpHome, ".claude.json"))).toBe(false);
+    expect(output).toContain("Dry run: nothing was written.");
+    expect(output).not.toContain("Restart Claude Code");
+    expect(output).not.toContain("skills add");
   });
 
   it("install() writes mcpServers.agentmemory into ~/.claude.json and is idempotent", async () => {

@@ -94,6 +94,29 @@ describe("cli onboarding", () => {
     expect(typeof preferences.firstRunAt).toBe("string");
   });
 
+  it.each(["true", "1"])("does not prompt on a TTY when CI=%s", async (ci) => {
+    setTTY(true);
+    process.env["CI"] = ci;
+    const { runOnboarding } = await freshOnboarding();
+
+    await runOnboarding();
+
+    expect(prompts.select).not.toHaveBeenCalled();
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(installClaudeCode).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "0", "false"])("still prompts on a TTY when CI=%j", async (ci) => {
+    setTTY(true);
+    process.env["CI"] = ci;
+    prompts.select.mockResolvedValueOnce("skip");
+    const { runOnboarding } = await freshOnboarding();
+
+    await runOnboarding();
+
+    expect(prompts.confirm).toHaveBeenCalled();
+  });
+
   it("offers to wire Claude Code without asking which agents to use", async () => {
     setTTY(true);
     prompts.select.mockResolvedValueOnce("skip");
