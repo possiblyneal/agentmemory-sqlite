@@ -81,7 +81,7 @@ beforeEach(() => {
   registerApiTriggers(sdk as never, kv as never, SECRET);
   registerSmartSearchFunction(sdk as never, kv as never, async () => searchHits);
   sdk._fns.set("mem::lesson-recall", () => ({ success: true, lessons: [] }));
-  sdk._fns.set("mem::enrich", () => ({ context: nextContext, truncated: false }));
+  sdk._fns.set("mem::prompt-context", () => ({ context: nextContext }));
   sdk._fns.set("mem::context", () => ({ context: nextContext }));
 });
 
@@ -104,9 +104,9 @@ describe("/health recall counts", () => {
 
   it("counts an Injection at each hook endpoint and an Empty Injection when nothing was found", async () => {
     nextContext = "remembered";
-    await sdk._fns.get("api::enrich")!({
+    await sdk._fns.get("api::prompt-context")!({
       headers: auth,
-      body: { sessionId: "s1", files: ["a.ts"], project: "p" },
+      body: { sessionId: "s1", prompt: "fix the auth flow", project: "p" },
     });
     nextContext = "";
     await sdk._fns.get("api::context")!({

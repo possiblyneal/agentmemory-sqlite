@@ -38,10 +38,7 @@ export function injectedItemUse(
   record: InjectionRecord,
   sessionObservations: CompressedObservation[],
 ): InjectedItemUse {
-  const triggerFiles = record.files ?? [];
-  const evidenceFiles = (ref.files ?? []).filter(
-    (f) => !triggerFiles.some((t) => sameFile(f, t)),
-  );
+  const evidenceFiles = ref.files ?? [];
   if (evidenceFiles.length === 0) return "unscorable";
   const injectedAt = Date.parse(record.at);
   const used = sessionObservations.some(

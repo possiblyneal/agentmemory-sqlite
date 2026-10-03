@@ -11,7 +11,6 @@ import {
   isAutoCompressEnabled,
   isConsolidationEnabled,
   isContextInjectionEnabled,
-  isToolContextInjectionEnabled,
   isDropStaleIndexEnabled,
   getSqlitePath,
 } from "./config.js";
@@ -68,7 +67,6 @@ import { registerInjectionsFunction } from "./functions/injections.js";
 import { registerProfileFunction } from "./functions/profile.js";
 import { registerAutoForgetFunction } from "./functions/auto-forget.js";
 import { registerExportImportFunction } from "./functions/export-import.js";
-import { registerEnrichFunction } from "./functions/enrich.js";
 import { registerPromptContextFunction } from "./functions/prompt-context.js";
 import { registerClaudeBridgeFunction } from "./functions/claude-bridge.js";
 import { registerGraphFunction, graphWritesOffReason } from "./functions/graph.js";
@@ -267,7 +265,6 @@ async function main() {
   registerProfileFunction(sdk, kv);
   registerAutoForgetFunction(sdk, kv);
   registerExportImportFunction(sdk, kv);
-  registerEnrichFunction(sdk, kv);
   registerPromptContextFunction(sdk, kv);
 
   const claudeBridgeConfig = loadClaudeBridgeConfig();
@@ -300,13 +297,9 @@ async function main() {
     );
   }
 
-  if (isToolContextInjectionEnabled()) {
+  if (isContextInjectionEnabled()) {
     bootLog(
-      `WARNING: AGENTMEMORY_INJECT_TOOL_CONTEXT=true — the PreToolUse hook will inject up to ~4000 chars of memory context into every file-touching tool turn, on top of session-start Injection. Session input tokens grow with tool-call frequency. Unset AGENTMEMORY_INJECT_TOOL_CONTEXT to disable.`,
-    );
-  } else if (isContextInjectionEnabled()) {
-    bootLog(
-      `Context injection: session start and per prompt (AGENTMEMORY_INJECT_CONTEXT=true). Set AGENTMEMORY_INJECT_TOOL_CONTEXT=true to also inject on every file-touching tool call.`,
+      `Context injection: session start and per prompt (AGENTMEMORY_INJECT_CONTEXT=true).`,
     );
   } else {
     bootLog(
@@ -585,7 +578,7 @@ async function main() {
     `Ready. ${embeddingProvider ? "Triple-stream (BM25+Vector+Graph)" : "BM25+Graph"} search active.`,
   );
   bootLog(
-    `REST API: 134 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
+    `REST API: 133 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
   );
   bootLog(
     `MCP surface (opt-in via \`npx @agentmemory/mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,

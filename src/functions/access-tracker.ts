@@ -92,7 +92,7 @@ export async function recordAccess(
 }
 
 // One transaction, one fsync, per SET_MANY_CHUNK ids. A write per id put one
-// fsync per injected item on every pre-tool-use Injection. If a chunk fails,
+// fsync per injected item on every Injection. If a chunk fails,
 // only the ids not yet written are retried alone, so none is counted twice
 // and one bad row cannot cost its siblings their access.
 export async function recordAccessBatch(

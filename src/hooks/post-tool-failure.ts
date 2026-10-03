@@ -29,12 +29,12 @@ async function main() {
 
   if (!data || typeof data !== "object") return;
   if (shouldSkipSession()) return;
-  if (data.is_interrupt || data.isInterrupt) return;
+  if (data.is_interrupt) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
-  const toolName = data.tool_name ?? data.toolName;
-  const toolInput = data.tool_input ?? data.toolArgs;
-  const error = data.error ?? data.errorMessage;
+  const sessionId = (data.session_id as string) || "unknown";
+  const toolName = data.tool_name;
+  const toolInput = data.tool_input;
+  const error = data.error;
 
   const cwd = hookCwd(data) || process.cwd();
 

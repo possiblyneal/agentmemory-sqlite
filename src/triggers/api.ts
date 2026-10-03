@@ -25,7 +25,6 @@ import {
   isConsolidationEnabled,
   isAutoCompressEnabled,
   isContextInjectionEnabled,
-  isToolContextInjectionEnabled,
   detectEmbeddingProvider,
   detectLlmProviderKind,
   getAgentId,
@@ -194,7 +193,6 @@ interface InjectionDelivery {
   source: InjectionSource;
   sessionId: string;
   project?: string;
-  files?: string[];
 }
 
 function noteInjection(
@@ -209,7 +207,6 @@ function noteInjection(
     sessionId: delivery.sessionId,
     ...(delivery.project ? { project: delivery.project } : {}),
     injected: context.trim() ? (result?.injected ?? []) : [],
-    ...(delivery.files ? { files: delivery.files } : {}),
     tokens: result?.tokens ?? 0,
   }).catch((err) => {
     logger.warn("Injection record write failed", {
@@ -342,17 +339,6 @@ export function registerApiTriggers(
           description: "The session-start hook writes recalled context into Claude Code's conversation, and the prompt-submit hook adds the few strong matches for each user prompt. OFF captures in the background without injecting.",
           enableHow: "Set AGENTMEMORY_INJECT_CONTEXT=true and restart.",
           docsHref: "https://github.com/rohitg00/agentmemory/issues/143",
-        },
-        {
-          key: "AGENTMEMORY_INJECT_TOOL_CONTEXT",
-          label: "Per-tool-call context injection",
-          enabled: isToolContextInjectionEnabled(),
-          default: false,
-          affects: ["Hooks"],
-          needsLlm: false,
-          description: "The pre-tool-use hook also injects recalled context before every file-touching tool call, so input tokens grow with tool-call frequency. Needs AGENTMEMORY_INJECT_CONTEXT=true.",
-          enableHow: "Set AGENTMEMORY_INJECT_CONTEXT=true and AGENTMEMORY_INJECT_TOOL_CONTEXT=true and restart.",
-          docsHref: "https://github.com/possiblyneal/agentmemory-sqlite/issues/103",
         },
       ];
       return {
@@ -1164,80 +1150,6 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::file-context",
     config: { api_path: "/agentmemory/file-context", http_method: "POST" },
-  });
-
-  sdk.registerFunction("api::enrich",
-    async (
-      req: ApiRequest<{
-        sessionId: string;
-        files: string[];
-        terms?: string[];
-        toolName?: string;
-        project?: string;
-      }>,
-    ): Promise<Response> => {
-      const authErr = checkAuth(req, secret);
-      if (authErr) return authErr;
-      if (
-        !req.body?.sessionId ||
-        typeof req.body.sessionId !== "string" ||
-        !Array.isArray(req.body?.files) ||
-        req.body.files.length === 0 ||
-        !req.body.files.every((f: unknown) => typeof f === "string")
-      ) {
-        return {
-          status_code: 400,
-          body: {
-            error: "sessionId (string) and files (string[]) are required",
-          },
-        };
-      }
-      if (
-        req.body.terms !== undefined &&
-        (!Array.isArray(req.body.terms) ||
-          !req.body.terms.every((t: unknown) => typeof t === "string"))
-      ) {
-        return {
-          status_code: 400,
-          body: { error: "terms must be an array of strings" },
-        };
-      }
-      if (
-        req.body.project !== undefined &&
-        (typeof req.body.project !== "string" || !req.body.project.trim())
-      ) {
-        return {
-          status_code: 400,
-          body: { error: "project must be a non-empty string" },
-        };
-      }
-      const result = await sdk.trigger<unknown, InjectionResult>({
-        function_id: "mem::enrich",
-        payload: {
-          sessionId: req.body.sessionId,
-          files: req.body.files,
-          ...(req.body.terms !== undefined && { terms: req.body.terms }),
-          ...(req.body.toolName !== undefined && { toolName: req.body.toolName }),
-          ...(req.body.project !== undefined && { project: req.body.project }),
-        },
-      });
-      noteInjection(
-        kv,
-        {
-          source: "enrich",
-          sessionId: req.body.sessionId,
-          project: typeof req.body.project === "string" ? req.body.project.trim() : undefined,
-          files: req.body.files,
-        },
-        result,
-      );
-      return { status_code: 200, body: withoutInjected(result) };
-    },
-  );
-  sdk.registerTrigger({
-    type: "http",
-    function_id: "api::enrich",
-    config: { api_path: "/agentmemory/enrich", http_method: "POST" },
   });
 
   sdk.registerFunction("api::prompt-context",

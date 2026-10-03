@@ -144,7 +144,7 @@ describe("mem::prompt-context", () => {
 
     await kv.set<InjectionRecord>(KV.injections, "inj_1", {
       id: "inj_1",
-      source: "enrich",
+      source: "context",
       sessionId: "ses_2",
       injected: [{ kind: "memory", id: "mem_a" }],
       tokens: 10,

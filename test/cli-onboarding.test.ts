@@ -15,6 +15,8 @@ const prompts = vi.hoisted(() => ({
   isCancel: vi.fn(() => false),
   cancel: vi.fn(),
   log: {
+    info: vi.fn(),
+    success: vi.fn(),
     warn: vi.fn(),
     step: vi.fn(),
     error: vi.fn(),
@@ -22,13 +24,12 @@ const prompts = vi.hoisted(() => ({
 }));
 
 vi.mock("@clack/prompts", () => prompts);
-vi.mock("../src/cli/connect/index.js", () => ({
-  resolveAdapter: vi.fn(),
-  runAdapter: vi.fn(),
-}));
+const installClaudeCode = vi.hoisted(() => vi.fn(async () => ({ kind: "installed" })));
+vi.mock("../src/cli/connect/claude-code.js", () => ({ installClaudeCode }));
 
 const ORIGINAL_HOME = process.env["HOME"];
 const ORIGINAL_USERPROFILE = process.env["USERPROFILE"];
+const ORIGINAL_CI = process.env["CI"];
 const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
 const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 
@@ -56,6 +57,7 @@ describe("cli onboarding", () => {
     sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-onboarding-"));
     process.env["HOME"] = sandboxHome;
     process.env["USERPROFILE"] = sandboxHome;
+    delete process.env["CI"];
     setTTY(false);
     vi.clearAllMocks();
   });
@@ -66,6 +68,8 @@ describe("cli onboarding", () => {
     else process.env["HOME"] = ORIGINAL_HOME;
     if (ORIGINAL_USERPROFILE === undefined) delete process.env["USERPROFILE"];
     else process.env["USERPROFILE"] = ORIGINAL_USERPROFILE;
+    if (ORIGINAL_CI === undefined) delete process.env["CI"];
+    else process.env["CI"] = ORIGINAL_CI;
     rmSync(sandboxHome, { recursive: true, force: true });
   });
 
@@ -74,7 +78,7 @@ describe("cli onboarding", () => {
 
     const result = await runOnboarding();
 
-    expect(result).toEqual({ agents: [], provider: null });
+    expect(result).toEqual({ provider: null });
     expect(prompts.multiselect).not.toHaveBeenCalled();
     expect(prompts.select).not.toHaveBeenCalled();
     expect(prompts.confirm).not.toHaveBeenCalled();
@@ -84,11 +88,45 @@ describe("cli onboarding", () => {
     const preferences = JSON.parse(readFileSync(preferencesPath, "utf-8"));
     expect(preferences).toMatchObject({
       schemaVersion: 1,
-      lastAgent: null,
-      lastAgents: [],
       lastProvider: null,
       skipSplash: true,
     });
     expect(typeof preferences.firstRunAt).toBe("string");
+  });
+
+  it("offers to wire Claude Code without asking which agents to use", async () => {
+    setTTY(true);
+    prompts.select.mockResolvedValueOnce("skip");
+    const { runOnboarding } = await freshOnboarding();
+
+    const result = await runOnboarding();
+
+    expect(result).toEqual({ provider: null });
+    expect(prompts.multiselect).not.toHaveBeenCalled();
+    expect(installClaudeCode).toHaveBeenCalledOnce();
+    expect(installClaudeCode).toHaveBeenCalledWith({ dryRun: false, force: false });
+  });
+
+  it("defaults the wiring offer to no, since the marketplace plugin registers the MCP server", async () => {
+    setTTY(true);
+    prompts.select.mockResolvedValueOnce("skip");
+    const { runOnboarding } = await freshOnboarding();
+
+    await runOnboarding();
+
+    expect(prompts.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Wire Claude Code"), initialValue: false }),
+    );
+  });
+
+  it("leaves Claude Code unwired when the offer is declined", async () => {
+    setTTY(true);
+    prompts.select.mockResolvedValueOnce("skip");
+    prompts.confirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    const { runOnboarding } = await freshOnboarding();
+
+    await runOnboarding();
+
+    expect(installClaudeCode).not.toHaveBeenCalled();
   });
 });

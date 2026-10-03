@@ -32,8 +32,6 @@ describe("cli preferences", () => {
     const { readPrefs } = await freshPrefs();
     const p = readPrefs();
     expect(p.schemaVersion).toBe(1);
-    expect(p.lastAgent).toBeNull();
-    expect(p.lastAgents).toEqual([]);
     expect(p.lastProvider).toBeNull();
     expect(p.skipSplash).toBe(false);
     expect(p.skipConsoleInstall).toBe(false);
@@ -47,21 +45,19 @@ describe("cli preferences", () => {
 
   it("writePrefs persists values and merges with existing keys", async () => {
     const { writePrefs, readPrefs, prefsPath } = await freshPrefs();
-    writePrefs({ lastAgent: "claude-code", lastAgents: ["claude-code", "cursor"] });
+    writePrefs({ lastProvider: "anthropic" });
     let p = readPrefs();
-    expect(p.lastAgent).toBe("claude-code");
-    expect(p.lastAgents).toEqual(["claude-code", "cursor"]);
-    expect(p.lastProvider).toBeNull();
+    expect(p.lastProvider).toBe("anthropic");
+    expect(p.skipSplash).toBe(false);
 
-    writePrefs({ lastProvider: "anthropic", skipSplash: true });
+    writePrefs({ skipSplash: true });
     p = readPrefs();
-    expect(p.lastAgent).toBe("claude-code");
     expect(p.lastProvider).toBe("anthropic");
     expect(p.skipSplash).toBe(true);
 
     const raw = JSON.parse(readFileSync(prefsPath(), "utf-8"));
     expect(raw.schemaVersion).toBe(1);
-    expect(raw.lastAgents).toEqual(["claude-code", "cursor"]);
+    expect(raw.lastProvider).toBe("anthropic");
   });
 
   it("isFirstRun flips to false after firstRunAt is recorded", async () => {
@@ -75,7 +71,7 @@ describe("cli preferences", () => {
     mkdirSync(prefsDir(), { recursive: true });
     writeFileSync(prefsPath(), "{not json", "utf-8");
     const p = readPrefs();
-    expect(p.lastAgent).toBeNull();
+    expect(p.lastProvider).toBeNull();
     expect(p.schemaVersion).toBe(1);
   });
 
@@ -84,12 +80,12 @@ describe("cli preferences", () => {
     mkdirSync(prefsDir(), { recursive: true });
     writeFileSync(
       prefsPath(),
-      JSON.stringify({ schemaVersion: 99, lastAgent: "cursor" }),
+      JSON.stringify({ schemaVersion: 99, lastProvider: "anthropic" }),
       "utf-8",
     );
     const p = readPrefs();
     expect(p.schemaVersion).toBe(1);
-    expect(p.lastAgent).toBe("cursor");
+    expect(p.lastProvider).toBe("anthropic");
   });
 
   it("resetPrefs removes the file", async () => {

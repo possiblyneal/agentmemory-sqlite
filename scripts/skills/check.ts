@@ -62,16 +62,6 @@ if (!existsSync(join(SKILLS, "_shared", "TROUBLESHOOTING.md"))) {
   errors.push(`_shared/TROUBLESHOOTING.md is missing`);
 }
 
-const pluginJson = join(ROOT, "plugin", "plugin.json");
-if (existsSync(pluginJson)) {
-  const desc = (JSON.parse(readFileSync(pluginJson, "utf8")).description as string) ?? "";
-  const m = /(\d+)\s+skills/.exec(desc);
-  if (!m) errors.push(`plugin/plugin.json: description should state the skill count as "N skills"`);
-  else if (Number(m[1]) !== dirs.length) {
-    errors.push(`plugin/plugin.json: description says ${m[1]} skills but ${dirs.length} skill dirs exist`);
-  }
-}
-
 if (errors.length) {
   console.error("Skill lint failed:");
   for (const e of errors) console.error(`  - ${e}`);

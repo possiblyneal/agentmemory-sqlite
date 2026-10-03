@@ -13,7 +13,7 @@ export interface Session {
   observations?: EvalObservation[];
 }
 
-export type QuestionPath = "search" | "pre-tool-use" | "session-start" | "prompt-submit";
+export type QuestionPath = "search" | "session-start" | "prompt-submit";
 
 export interface Question {
   id: string;
@@ -21,9 +21,6 @@ export interface Question {
   path?: QuestionPath;
   project?: string;
   question?: string;
-  tool?: string;
-  file?: string;
-  pattern?: string;
   answer?: string;
   goldSessionIds: string[];
   haystack: Session[];

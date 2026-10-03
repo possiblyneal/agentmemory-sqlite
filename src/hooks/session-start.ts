@@ -12,8 +12,7 @@ hydrateHookEnv();
 // captured on PostToolUse get attached to the right session). Only writes
 // project context to stdout — which Claude Code prepends to the very first
 // turn — when AGENTMEMORY_INJECT_CONTEXT=true. Default off as of 0.8.10
-// (rohitg00/agentmemory#143). Per-tool-call Injection is a separate opt-in;
-// see pre-tool-use.ts.
+// (rohitg00/agentmemory#143).
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
@@ -33,13 +32,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function contextPayload(data: Record<string, unknown>, context: string): string {
-  if (
-    typeof data.cursor_version === "string" ||
-    data.hook_event_name === "sessionStart"
-  ) {
-    return JSON.stringify({ additional_context: context });
-  }
-  if (process.env["DEVIN_PROJECT_DIR"] || data.prompt_id !== undefined) {
+  if (data.prompt_id !== undefined) {
     return JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "SessionStart",
@@ -70,7 +63,7 @@ async function main() {
   if (typeof data.agent_id === "string" && data.agent_id) return;
 
   const sessionId =
-    ((data.session_id || data.sessionId || data.conversation_id) as string) ||
+    (data.session_id as string) ||
     `ses_${Date.now().toString(36)}`;
   const cwd = hookCwd(data) || process.cwd();
   const project = resolveProject(cwd);
