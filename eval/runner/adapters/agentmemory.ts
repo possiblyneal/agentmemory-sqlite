@@ -179,12 +179,19 @@ async function querySessionStart(q: Question, state: AgentMemoryState): Promise<
   return { ranked: attribute(context, state.needles), chars: context.length };
 }
 
+// Stand-in until the per-prompt Injection exists (#106): the top k Sessions
+// smart-search returns for the raw prompt, the Injection a hook with no
+// relevance filter would make.
+async function queryPromptSubmit(q: Question, state: AgentMemoryState, k: number): Promise<QueryResult> {
+  return querySearch(q, state, k);
+}
+
 // The daemon to score is the caller's choice: with no `baseUrl` the adapter
 // starts its own sandbox, so a runner that must never touch a live store
 // (the CI gate) simply passes none.
 export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = {
   name: "agentmemory",
-  paths: ["search", "pre-tool-use", "session-start"],
+  paths: ["search", "pre-tool-use", "session-start", "prompt-submit"],
   async init(sessions, config = {}) {
     const sandbox = config.baseUrl
       ? undefined
@@ -221,6 +228,8 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
         return queryPreToolUse(q, state);
       case "session-start":
         return querySessionStart(q, state);
+      case "prompt-submit":
+        return queryPromptSubmit(q, state, k);
     }
   },
   async teardown(state) {

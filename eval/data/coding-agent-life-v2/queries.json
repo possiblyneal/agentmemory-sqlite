@@ -38,5 +38,20 @@
 
   { "id": "s-001", "path": "session-start", "project": "shipctl", "type": "project-coverage", "goldSessionIds": ["sess-001", "sess-002", "sess-003", "sess-004", "sess-005", "sess-006", "sess-007", "sess-008", "sess-009", "sess-010", "sess-011", "sess-012", "sess-013", "sess-014", "sess-015", "sess-016"] },
   { "id": "s-002", "path": "session-start", "project": "ledger-api", "type": "project-coverage", "goldSessionIds": ["ledg-001", "ledg-002", "ledg-003", "ledg-004", "ledg-005"] },
-  { "id": "s-n01", "path": "session-start", "project": "fresh-repo", "type": "no-answer", "goldSessionIds": [] }
+  { "id": "s-n01", "path": "session-start", "project": "fresh-repo", "type": "no-answer", "goldSessionIds": [] },
+  {"id": "p-001", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "staging deploys are failing auth again and SHIPCTL_TOKEN looks unset, check how we resolve the token", "goldSessionIds": ["sess-001", "sess-014", "sess-016"]},
+  {"id": "p-002", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "the arm64 docker image build broke on CI again", "goldSessionIds": ["sess-002"]},
+  {"id": "p-003", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "add retries to the webhook handler", "goldSessionIds": ["sess-003"]},
+  {"id": "p-004", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "the daemon's RSS keeps growing overnight, take a look", "goldSessionIds": ["sess-006"]},
+  {"id": "p-005", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "we're getting rate limited by the GitHub API again when listing PRs", "goldSessionIds": ["sess-007"]},
+  {"id": "p-006", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "add a status column to run_history", "goldSessionIds": ["sess-008", "sess-013"]},
+  {"id": "p-007", "path": "prompt-submit", "project": "shipctl", "type": "preference", "question": "write a new async HTTP client module for the deploy command", "goldSessionIds": ["sess-015"]},
+  {"id": "p-008", "path": "prompt-submit", "project": "ledger-api", "type": "task", "question": "JWT validation is failing again after this morning's key rotation", "goldSessionIds": ["ledg-001"]},
+  {"id": "p-009", "path": "prompt-submit", "project": "ledger-api", "type": "task", "question": "the ledger-api docker image size crept back up, slim it", "goldSessionIds": ["ledg-003"]},
+  {"id": "p-n01", "path": "prompt-submit", "project": "shipctl", "type": "acknowledgement", "question": "yes", "goldSessionIds": []},
+  {"id": "p-n02", "path": "prompt-submit", "project": "shipctl", "type": "acknowledgement", "question": "continue", "goldSessionIds": []},
+  {"id": "p-n03", "path": "prompt-submit", "project": "shipctl", "type": "acknowledgement", "question": "thanks, looks good, commit it", "goldSessionIds": []},
+  {"id": "p-n04", "path": "prompt-submit", "project": "shipctl", "type": "no-answer", "question": "add a --verbose flag to the list subcommand", "goldSessionIds": []},
+  {"id": "p-n05", "path": "prompt-submit", "project": "shipctl", "type": "no-answer", "question": "what's the capital of Portugal?", "goldSessionIds": []},
+  {"id": "p-n06", "path": "prompt-submit", "project": "ledger-api", "type": "no-answer-other-project", "question": "docker build is failing for arm64 on the M2 runner", "goldSessionIds": []}
 ]

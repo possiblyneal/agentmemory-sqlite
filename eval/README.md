@@ -4,7 +4,7 @@ Recall benchmarks for agentmemory, scored on what each Injection puts in front o
 
 Two families:
 
-- **coding-agent-life-v2** — in-house corpus of 21 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 38 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
+- **coding-agent-life-v2** — in-house corpus of 21 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 53 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
 - **LongMemEval** — public 500-question long-term memory benchmark over multi-session chat, search path only.
 
 ## Paths
@@ -16,6 +16,7 @@ A question names the path it exercises, and each path is scored on its own:
 | `search` | `POST /agentmemory/smart-search` with the question's `project` | top K Sessions |
 | `pre-tool-use` | `POST /agentmemory/enrich` with the tool, file and Grep pattern — what the pre-tool-use hook injects | the whole Injection |
 | `session-start` | `POST /agentmemory/session/start` for a probe Session — what the session-start hook injects | the whole Injection |
+| `prompt-submit` | the user prompt as the question — today the top K Sessions `smart-search` returns for it, a stand-in for the per-prompt Injection (#106) | the whole Injection |
 
 An Injection is text, so the runner maps it back to eval Sessions by finding each Observation's output in it.
 
@@ -23,7 +24,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 
 - **recall** — gold Sessions returned over gold Sessions, answerable questions only.
 - **precision** — gold Sessions over Sessions returned, averaged over every question. A near-miss costs precision even when the gold Session is also there; a no-answer question that returns anything scores 0.
-- **no-answer clean** — share of no-answer questions (`goldSessionIds: []`) that returned nothing. Every path has some: a topic never worked on, a file never touched, and one project's work asked from the other project.
+- **no-answer clean** — share of no-answer questions (`goldSessionIds: []`) that returned nothing. Every path has some: a topic never worked on, a file never touched, and one project's work asked from the other project. `prompt-submit` adds bare acknowledgements (`yes`, `continue`), which should never inject.
 - **hit** — gold in results for answerable questions, empty results for no-answer ones.
 - **chars** — mean size of the Injection, the cost the Agent pays to read it.
 
@@ -33,7 +34,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 |---|---|---|---|
 | `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on first use |
 | `agentmemory-bm25` | sandbox daemon, no embeddings | all | `npm run build` |
-| `grep` | tokenized substring match, project-filtered | search | nothing |
+| `grep` | tokenized substring match, project-filtered | search, prompt-submit | nothing |
 | `random` | k Sessions drawn per question, seeded by question id | all | nothing — the floor every path must beat |
 | `vector` | OpenAI `text-embedding-3-small` + cosine | search | `OPENAI_API_KEY` (paid) |
 
@@ -109,7 +110,7 @@ eval/
 └── data/
     └── coding-agent-life-v2/
         ├── sessions.json          21 Sessions as tool-call Observations
-        └── queries.json           38 questions with path, project and gold Session ids
+        └── queries.json           53 questions with path, project and gold Session ids
 ```
 
 Reports land in `eval/reports/<bench>/` (gitignored): `scores.ndjson` (one row per question, with the Session ids returned) and `summary.json`.

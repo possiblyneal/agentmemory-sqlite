@@ -28,7 +28,7 @@ function mulberry32(seed: number): () => number {
 // question, seeded by question id so two runs score identically.
 export const randomAdapter: Adapter<RandomState> = {
   name: "random",
-  paths: ["search", "pre-tool-use", "session-start"],
+  paths: ["search", "pre-tool-use", "session-start", "prompt-submit"],
   async init(sessions) {
     return { sessions };
   },
