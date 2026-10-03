@@ -202,7 +202,7 @@ the only install path is clone → `npm ci` → `npm run build` →
 `npm link`. Any doc that tells a user how to install must describe that path, never
 `npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. The one exception is
 the `@agentmemory/mcp` shim wherever it is invoked as a proxy — `plugin/.mcp.json` and the
-entry `connect claude-code` writes — because in proxy mode the tool surface comes from this fork's
+entry `agentmemory connect` writes — because in proxy mode the tool surface comes from this fork's
 running server, not from the shim. The translated `READMEs/` were deleted rather than kept
 stale — do not re-add translations without a way to keep them current.
 
@@ -219,7 +219,7 @@ the patch.
 Every row in both files carries a `disposition`: `already-fixed` (verified against this tree;
 `fixed_by`/`status` names the evidence), `wont-fix` (out of scope here — most often
 upstream-only housekeeping, or code this fork does not carry: the iii engine, npm publishing,
-Windows CI, the deploy tree, a host with no adapter in `src/cli/connect/`; `wont_fix_reason`
+Windows CI, the deploy tree, a host other than Claude Code; `wont_fix_reason`
 says which), or `candidate` — the working set. A row that was opened against
 this tree also carries `status`, whose leading token says what the read found
 (`fixed-here`, `present-here`, `partly-present-here`, `unresolved`). No `status` means

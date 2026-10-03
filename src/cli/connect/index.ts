@@ -54,6 +54,10 @@ export async function runConnect(args: string[]): Promise<void> {
     p.outro(`Claude Code was not wired (${result.reason}).`);
     process.exit(1);
   }
+  if (opts.dryRun) {
+    p.outro("Dry run: nothing was written.");
+    return;
+  }
   p.log.info(
     "Next: install agentmemory's 17 skills into Claude Code so it knows when to call the tools:\n  npx skills add possiblyneal/agentmemory-sqlite -y",
   );

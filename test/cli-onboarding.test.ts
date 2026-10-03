@@ -103,6 +103,18 @@ describe("cli onboarding", () => {
     expect(installClaudeCode).toHaveBeenCalledWith({ dryRun: false, force: false });
   });
 
+  it("defaults the wiring offer to no, since the marketplace plugin registers the MCP server", async () => {
+    setTTY(true);
+    prompts.select.mockResolvedValueOnce("skip");
+    const { runOnboarding } = await freshOnboarding();
+
+    await runOnboarding();
+
+    expect(prompts.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Wire Claude Code"), initialValue: false }),
+    );
+  });
+
   it("leaves Claude Code unwired when the offer is declined", async () => {
     setTTY(true);
     prompts.select.mockResolvedValueOnce("skip");
