@@ -18,9 +18,9 @@ import { logger } from "../logger.js";
 // duplicating. Provenance is kept on properties.source so imported structure
 // is distinguishable from session-derived entities.
 
-// Bounds protect the KV store and the iii invocation budget from very large
-// graphs (graphify caps graph.json at 512MiB; a 100k-node import would blow
-// the invocation window). Truncation is reported loudly in the result.
+// Bounds protect the KV store and the import request from very large graphs
+// (graphify caps graph.json at 512MiB; a 100k-node import would stall the
+// request). Truncation is reported loudly in the result.
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_NODES = 5000;
 const MAX_EDGES = 20000;

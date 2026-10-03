@@ -26,10 +26,10 @@ export const KV = {
   claudeBridge: "mem:claude-bridge",
   graphNodes: "mem:graph:nodes",
   graphEdges: "mem:graph:edges",
-  // #814: precomputed snapshot of the top-degree subgraph and aggregate
-  // type counts. Saves /graph/query and /graph/stats from a full
-  // kv.list enumeration over 75K+ node corpora, which exceeds the iii
-  // invocation timeout and surfaces as "Invocation stopped" 500s.
+  // rohitg00/agentmemory#814: precomputed snapshot of the top-degree
+  // subgraph and aggregate type counts. Saves /graph/query and
+  // /graph/stats from a full kv.list enumeration over 75K+ node corpora,
+  // too slow to run per request.
   // Single fixed key ("current") so writes are read-modify-write under
   // the same keyed mutex as graph-extract.
   graphSnapshot: "mem:graph:snapshot",

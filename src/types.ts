@@ -537,10 +537,10 @@ export interface GraphQueryResult {
   // detect when the default was applied vs an explicit `limit`.
   limit?: number;
   offset?: number;
-  // #814: indicates the response came from the precomputed top-degree
-  // snapshot rather than a live kv.list enumeration. Set only on the
-  // empty-body / nodeType-only branch on large corpora where the
-  // unbounded enumeration would exceed the iii invocation timeout.
+  // rohitg00/agentmemory#814: indicates the response came from the
+  // precomputed top-degree snapshot rather than a live kv.list
+  // enumeration. Set only on the empty-body / nodeType-only branch on
+  // large corpora where the unbounded enumeration is too slow.
   fromSnapshot?: boolean;
   // #814: when the snapshot is stale or absent and the live fallback
   // also failed, expose an explanatory note so the viewer can surface

@@ -53,11 +53,9 @@ const MAX_GRAPH_QUERY_LIMIT = 5000;
 const SNAPSHOT_TOP_NODES = DEFAULT_GRAPH_QUERY_LIMIT;
 const SNAPSHOT_KEY = "current";
 
-// `state::list` over a 75K-node scope can exceed the iii invocation
-// timeout. The query handler races the enumeration against this budget
-// and falls back to the snapshot (or a warning envelope) when the live
-// path is too slow. 6000ms leaves headroom under the default 8s engine
-// invocation deadline.
+// `state::list` over a 75K-node scope is slow. The query handler races
+// the enumeration against this budget and falls back to the snapshot (or
+// a warning envelope) when the live path is too slow.
 const LIVE_ENUMERATION_BUDGET_MS = 6000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {

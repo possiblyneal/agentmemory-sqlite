@@ -2651,8 +2651,8 @@
       var el = document.getElementById('view-memories');
       if (!state.memories.loaded) el.innerHTML = '<div class="loading">Loading memories...</div>';
       // cap at 2000 so the viewer remains responsive on large
-      // corpora. Older endpoints returned the full unbounded list which
-      // hit the iii invocation timeout and the UI fell through to 0.
+      // corpora. Older endpoints returned the full unbounded list, too
+      // slow to load on a large store.
       var result = await apiGet('memories?latest=true&limit=2000');
       var items = (result && result.memories) || [];
       // Newest first — server returns KV-insertion order.
