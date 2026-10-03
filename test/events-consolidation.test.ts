@@ -258,8 +258,7 @@ function persistentKV() {
 // Regression: the Stop hook posts /session/end on every agent turn, which fires
 // event::session::stopped. consolidate-pipeline + auto-crystallize are full
 // corpus LLM work with no internal "nothing changed" guard, so firing them per
-// turn is a cost/latency storm for connected agents (Claude/Codex/Copilot/
-// Hermes). The debounce bounds corpus consolidation to once per cooldown.
+// turn is a cost/latency storm for the connected agent. The debounce bounds corpus consolidation to once per cooldown.
 describe("session-stop consolidation debounce", () => {
   beforeEach(() => {
     vi.mocked(isConsolidationEnabled).mockReturnValue(true);

@@ -1,13 +1,28 @@
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
-import type { CompressedObservation, InjectedRef, InjectionRecord } from "../types.js";
+import type {
+  CompressedObservation,
+  Crystal,
+  InjectedRef,
+  InjectionRecord,
+  Insight,
+} from "../types.js";
 import { logger } from "../logger.js";
 
 export const INJECTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function withFiles(ref: InjectedRef, files: string[] | undefined): InjectedRef {
   return files && files.length > 0 ? { ...ref, files } : ref;
+}
+
+export function refKey(ref: Pick<InjectedRef, "kind" | "id">): string {
+  return `${ref.kind}:${ref.id}`;
+}
+
+export async function injectedInSession(kv: StateKV, sessionId: string): Promise<Set<string>> {
+  const records = await kv.list<InjectionRecord>(KV.injections);
+  return new Set(records.filter((r) => r.sessionId === sessionId).flatMap((r) => r.injected.map(refKey)));
 }
 
 function sameFile(a: string, b: string): boolean {
@@ -23,10 +38,7 @@ export function injectedItemUse(
   record: InjectionRecord,
   sessionObservations: CompressedObservation[],
 ): InjectedItemUse {
-  const triggerFiles = record.files ?? [];
-  const evidenceFiles = (ref.files ?? []).filter(
-    (f) => !triggerFiles.some((t) => sameFile(f, t)),
-  );
+  const evidenceFiles = ref.files ?? [];
   if (evidenceFiles.length === 0) return "unscorable";
   const injectedAt = Date.parse(record.at);
   const used = sessionObservations.some(
@@ -37,6 +49,29 @@ export function injectedItemUse(
         `${o.subtitle ?? ""} ${o.narrative ?? ""}`.includes(ref.id)),
   );
   return used ? "used" : "unused";
+}
+
+async function getExisting<T>(kv: StateKV, scope: string, ids: Iterable<string>): Promise<Map<string, T>> {
+  const unique = [...new Set(ids)];
+  const values = await Promise.all(unique.map((id) => kv.get<T>(scope, id)));
+  return new Map(
+    unique.flatMap((id, i) => (values[i] ? [[id, values[i] as T] as const] : [])),
+  );
+}
+
+export async function resolveInsightFiles(
+  kv: StateKV,
+  records: InjectionRecord[],
+): Promise<Map<string, string[]>> {
+  const insightIds = records.flatMap((r) => r.injected.filter((ref) => ref.kind === "insight").map((ref) => ref.id));
+  const insights = [...(await getExisting<Insight>(kv, KV.insights, insightIds)).values()];
+  const crystals = await getExisting<Crystal>(kv, KV.crystals, insights.flatMap((i) => i.sourceCrystalIds ?? []));
+  return new Map(
+    insights.map((insight) => [
+      insight.id,
+      [...new Set((insight.sourceCrystalIds ?? []).flatMap((id) => crystals.get(id)?.filesAffected ?? []))],
+    ]),
+  );
 }
 
 export async function recordInjection(

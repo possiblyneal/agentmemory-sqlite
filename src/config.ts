@@ -1,8 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { refreshBootVerbose } from "./logger.js";
-import { parseEnvFile } from "./hooks/_env.js";
+import { hydrateEnvFromFile, loadEnvFile } from "./hooks/_env.js";
 import pc from "picocolors";
 import type {
   AgentMemoryConfig,
@@ -21,35 +20,10 @@ function safeParseInt(value: string | undefined, fallback: number): number {
 }
 
 const DATA_DIR = join(homedir(), ".agentmemory");
-const ENV_FILE = join(DATA_DIR, ".env");
+
+export { __resetEnvFileCache } from "./hooks/_env.js";
 
 let warnPremiumModelShown = false;
-
-// Parsed ~/.agentmemory/.env, memoized for the process lifetime. getMergedEnv()
-// runs on every config getter (~20 of them), so without this cache a single
-// request would readFileSync + reparse the file dozens of times. The file is
-// boot-static, so read it from disk once and reuse the result. Tests that
-// mutate the file between cases reset the module (clearing this via reload) or
-// call __resetEnvFileCache().
-let envFileCache: Record<string, string> | undefined;
-
-function loadEnvFile(): Record<string, string> {
-  if (envFileCache) return envFileCache;
-  if (!existsSync(ENV_FILE)) {
-    envFileCache = {};
-    return envFileCache;
-  }
-  envFileCache = parseEnvFile(readFileSync(ENV_FILE, "utf-8"));
-  return envFileCache;
-}
-
-// Test hook: clears the memoized .env so the next loadEnvFile() re-reads disk
-// within the same module instance. vi.resetModules() reloads this module and
-// resets the cache on its own; this exists for tests that mutate the file
-// without a module reload.
-export function __resetEnvFileCache(): void {
-  envFileCache = undefined;
-}
 
 function hasRealValue(v: string | undefined): v is string {
   return typeof v === "string" && v.trim().length > 0;
@@ -62,9 +36,7 @@ function hasRealValue(v: string | undefined): v is string {
 // key is currently unset so a real process.env value still wins (this
 // preserves the {...fileEnv, ...process.env} precedence getMergedEnv uses).
 export function hydrateProcessEnvFromFile(): void {
-  for (const [k, v] of Object.entries(loadEnvFile())) {
-    if (process.env[k] === undefined) process.env[k] = v;
-  }
+  hydrateEnvFromFile((current) => current === undefined);
   refreshBootVerbose();
 }
 
@@ -529,14 +501,9 @@ export function isAutoCompressEnabled(): boolean {
 }
 
 // Hook-level context injection into Claude Code's conversation is OFF by
-// default as of 0.8.10. When disabled, pre-tool-use and
-// session-start hooks still POST observations for background capture, but
-// never write context to stdout — so Claude Code doesn't inject an extra
-// ~4000-char blob into every tool turn. 0.8.8 stopped the agentmemory-side
-// Claude calls (via ANTHROPIC_API_KEY); this stops the Claude Code-side
-// token burn where every tool call silently grew the model input window.
-// Users who want the in-conversation context injection explicitly opt in
-// with AGENTMEMORY_INJECT_CONTEXT=true and get a loud startup warning.
+// default as of 0.8.10. When disabled, hooks still POST observations for
+// background capture but never write context to stdout. Session-start and
+// per-prompt Injection opt in with AGENTMEMORY_INJECT_CONTEXT=true.
 export function isContextInjectionEnabled(): boolean {
   return getMergedEnv()["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 }

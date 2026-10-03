@@ -48,7 +48,6 @@ describe("Tool count consistency", () => {
     expect(readText("CLAUDE.md")).toContain(
       `${hookCount} hooks, ${skillCount} skills`,
     );
-    expect(readText("plugin/plugin.json")).toContain(`${skillCount} skills`);
     expect(readText("plugin/.claude-plugin/plugin.json")).toContain(
       `${skillCount} skills`,
     );

@@ -1,34 +1,35 @@
 ---
 name: agentmemory-agents
-description: How agentmemory wires into host coding agents via the connect command. Use when installing agentmemory into a specific agent, when asked which agents are supported, or when a connect adapter writes the wrong config path.
+description: How agentmemory wires into Claude Code, the only supported host agent, through the marketplace plugin or the connect command. Use when installing agentmemory, when asked which agents are supported, or when the MCP server is missing from Claude Code.
 user-invocable: false
 ---
 
-`agentmemory connect <agent>` merges the memory server into a host agent's config and preserves any existing servers. REST is the underlying protocol; for MCP-only hosts the adapter wires the stdio MCP bridge.
+Claude Code is the only supported host. The marketplace plugin is the full install: it registers the MCP server, the lifecycle hooks, and the skills in one step.
 
 ## Quick start
 
 ```bash
-agentmemory connect claude-code   # or gemini-cli, opencode, copilot-cli, ...
+/plugin marketplace add possiblyneal/agentmemory-sqlite
+/plugin install agentmemory
 ```
 
-After wiring, restart the host or run its MCP reload (for example `/mcp` in Claude Code) so it picks up the server. Then confirm the agent lists agentmemory's tools.
+Restart the session, then confirm Claude Code lists agentmemory's tools under `/mcp`.
 
 ## Workflow
 
-1. Detect the calling agent. If unknown, default to `claude-code`.
-2. Run `agentmemory connect <name>` using a name from the table in REFERENCE.md.
-3. Verify: the host should show the full tool set with a server running. Only 7 tools means the MCP shim could not reach a server (see ../_shared/TROUBLESHOOTING.md).
+1. Prefer the plugin. It is the only path that installs the hooks, so it is the only path that captures memory automatically.
+2. Without the plugin, `agentmemory connect` merges the MCP server into `~/.claude.json`, backs the file up first and preserves any existing servers. It wires tools only: no hooks, no skills. `--dry-run` previews the change and `--force` rewrites an existing entry.
+3. Verify: with a server running, Claude Code shows the full tool set. Only 7 tools means the MCP shim could not reach a server (see ../_shared/TROUBLESHOOTING.md).
 
 ## Notes
 
-- The action skills (remember, recall, and the rest) are installed separately with `npx skills add possiblyneal/agentmemory-sqlite`. `connect` makes tools available; skills teach the agent when to use them.
+- Other agents are not supported. `connect` rejects any agent name other than `claude-code`, and the plugin ships no hook manifest for them.
 - Windows: use WSL2. Native Windows runs the server but `connect` is not supported there.
 
 ## See also
 
-- agentmemory-mcp-tools, agentmemory-rest-api, agentmemory-hooks.
+- agentmemory-hooks, agentmemory-mcp-tools, agentmemory-rest-api.
 
 ## Reference
 
-The full adapter list with display names and protocol notes lives in REFERENCE.md, generated from `src/cli/connect/`.
+The `connect` flags live in REFERENCE.md, generated from `src/cli/connect/index.ts`.

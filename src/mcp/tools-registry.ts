@@ -89,6 +89,12 @@ export const CORE_TOOLS: McpToolDef[] = [
             "started. Do not use filesystem paths or ad-hoc display names — those " +
             "change across machines and will silently break project scoping.",
         },
+        global: {
+          type: "boolean",
+          description:
+            "Save a Global Memory that Recall surfaces in every project, such as an Operator " +
+            "preference meant to apply everywhere. Cannot be combined with project.",
+        },
         agentId: {
           type: "string",
           description:
@@ -1007,7 +1013,7 @@ export function getAllTools(): McpToolDef[] {
 
 // default switched from "core" (8 essential tools) to "all" (the full
 // tool surface). The plugin manifests have always advertised every tool
-// "in proxy mode"; the old default left OpenCode / Claude Code users
+// "in proxy mode"; the old default left Claude Code users
 // seeing 8 with no indication the other tools existed.
 // Users who want the lean essentials can still set AGENTMEMORY_TOOLS=core.
 export function getVisibleTools(): McpToolDef[] {

@@ -39,7 +39,7 @@ export async function inferMemoryProjects(
   let ambiguous = 0;
 
   for (const memory of memories) {
-    if (memory.project) {
+    if (memory.project || memory.global) {
       skipped++;
       continue;
     }

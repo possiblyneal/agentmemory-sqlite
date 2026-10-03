@@ -37,7 +37,6 @@ The REST API is the primary surface. All paths are under `http://localhost:3111`
 | POST | `/agentmemory/diagnostics` |
 | GET | `/agentmemory/diagnostics/followup` |
 | POST | `/agentmemory/diagnostics/heal` |
-| POST | `/agentmemory/enrich` |
 | POST | `/agentmemory/evict` |
 | POST | `/agentmemory/evolve` |
 | GET | `/agentmemory/export` |
@@ -90,6 +89,7 @@ The REST API is the primary surface. All paths are under `http://localhost:3111`
 | POST | `/agentmemory/patterns` |
 | GET | `/agentmemory/procedural` |
 | GET | `/agentmemory/profile` |
+| POST | `/agentmemory/prompt-context` |
 | POST | `/agentmemory/recompress-orphans` |
 | POST | `/agentmemory/reflect` |
 | GET | `/agentmemory/relations` |

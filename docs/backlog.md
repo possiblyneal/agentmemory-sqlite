@@ -3,6 +3,25 @@
 Work the Operator has accepted but not yet scheduled. An item moves to a GitHub issue on
 `possiblyneal/agentmemory-sqlite` when work starts, and is deleted from here when it lands.
 
+## Keep a stale-Session recovery sweep from starving graph extraction
+
+While eviction's stale-Session recovery runs, its Summarize chunks crowd out graph
+extraction on the broker. Give background recovery a smaller share of LLM capacity than
+work for live Sessions.
+
+- **What exists.** `ResilientProvider` (`src/providers/resilient.ts`) already caps every
+  generating call at one shared `AGENTMEMORY_LLM_MAX_CONCURRENCY` (2 on dev). The cap
+  bounds how many calls run at once, not who gets them: a recovery sweep can hold both
+  slots, and a graph batch sharing the GPU with a 50k-token Summarize chunk slows to under
+  1 token/s.
+- **Evidence (2026-09-28).** During the recovery sweep of 43 stale Sessions, the broker
+  mostly served ~50k-token prompts (`SUMMARIZE_CHUNK_TOKENS`, 2 chunks at a time). A
+  10-Observation graph batch timed out at 300 s at 16:46, while one slot was generating
+  6.6k tokens and another was prefilling a 45k-token prompt.
+- **Done when.** A recovery sweep leaves at least one slot for Session-stop work (Summarize
+  and graph extraction), for example by capping background callers at one slot, and no
+  graph batch times out during a sweep.
+
 ## Cap the crystallize and procedural-extraction prompts
 
 Reflect's cluster prompt now fits a 24k-character budget (`src/functions/reflect.ts`). Two
@@ -19,11 +38,11 @@ other consolidation calls still send whatever their inputs add up to.
 - **Done when.** Both prompts are bounded the way reflect's is, before either input grows
   enough to starve sibling slots on the broker.
 
-## Moved to issues
+## Lock replay's Session write
 
-- Derive Observation type, importance and concepts — #90 (also covers ranking session-start Observations)
-- Cap stale-Session recovery at one LLM slot — #91
-- Merge the three env-file hydration loops — #92
-- Put Session writers on one lock — #93
-- Score Insights in the injection-use check — #94
-- Let a Memory be global on purpose — #95
+JSONL replay reads a Session, edits `observationCount` and the rest of the record, and writes
+it back whole with `kv.set` (`src/functions/replay.ts:427-452`) without taking `obs:${id}`, the
+key every other Session writer holds. A replay running against a live Session can drop an
+observe's count or a commit-link's `commitShas`.
+
+- **Done when.** Replay's read-modify-write of `mem:sessions` holds `obs:${id}`.

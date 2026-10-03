@@ -3,7 +3,6 @@ import { defineConfig } from "tsdown";
 const hookEntries = [
   "src/hooks/session-start.ts",
   "src/hooks/prompt-submit.ts",
-  "src/hooks/pre-tool-use.ts",
   "src/hooks/post-tool-use.ts",
   "src/hooks/post-tool-failure.ts",
   "src/hooks/pre-compact.ts",
@@ -14,7 +13,6 @@ const hookEntries = [
   "src/hooks/stop.ts",
   "src/hooks/session-end.ts",
   "src/hooks/post-commit.ts",
-  "src/hooks/antigravity-bridge.ts",
 ];
 
 const shared = {

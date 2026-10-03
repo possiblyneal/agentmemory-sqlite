@@ -35,6 +35,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       sourceObservationIds?: string[];
       agentId?: string;
       project?: string;
+      global?: boolean;
     }) => {
       data = scrubFields(data, "content");
       if (
@@ -52,6 +53,9 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       }
       if (data.sourceObservationIds && !Array.isArray(data.sourceObservationIds)) {
         return { success: false, error: "sourceObservationIds must be an array" };
+      }
+      if (data.global !== undefined && typeof data.global !== "boolean") {
+        return { success: false, error: "global must be a boolean" };
       }
       const validTypes = new Set([
         "pattern",
@@ -73,6 +77,9 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         typeof data.project === "string" && data.project.trim().length > 0
           ? data.project.trim()
           : undefined;
+      if (data.global && project) {
+        return { success: false, error: "a Memory cannot have both a project and global" };
+      }
 
       return withKeyedLock("mem:remember", async () => {
         // Candidate generation: query the BM25 index with the new content
@@ -128,6 +135,9 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           if (project && existing.project && existing.project !== project) {
             continue;
           }
+          // A Global Memory and a scoped one never replace each other, so
+          // supersession can neither strip the marker nor hand it to a project.
+          if ((existing.global === true) !== (data.global === true)) continue;
           const similarity = jaccardSimilarity(
             lowerContent,
             existing.content.toLowerCase(),
@@ -191,6 +201,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           origin: { channel: "agent", capturedAt: now },
           ...(callAgentId ? { agentId: callAgentId } : {}),
           ...(project !== undefined && { project }),
+          ...(data.global === true && { global: true }),
         };
 
         if (data.ttlDays && typeof data.ttlDays === "number" && data.ttlDays > 0) {

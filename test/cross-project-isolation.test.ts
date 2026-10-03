@@ -27,7 +27,6 @@ vi.mock("../src/config.js", async (importOriginal) => ({
 
 import { registerRememberFunction } from "../src/functions/remember.js";
 import { registerSearchFunction, getSearchIndex } from "../src/functions/search.js";
-import { registerEnrichFunction } from "../src/functions/enrich.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
 
@@ -53,7 +52,6 @@ function makeMockKV() {
 
 function makeMockSdk() {
   const functions = new Map<string, Function>();
-  const triggerOverrides = new Map<string, Function>();
   return {
     registerFunction: (id: string, handler: Function) => {
       functions.set(id, handler);
@@ -65,13 +63,9 @@ function makeMockSdk() {
     ) => {
       const id = typeof idOrInput === "string" ? idOrInput : idOrInput.function_id;
       const payload = typeof idOrInput === "string" ? data : (idOrInput as { payload: unknown }).payload;
-      if (triggerOverrides.has(id)) return triggerOverrides.get(id)!(payload);
       const fn = functions.get(id);
       if (!fn) throw new Error(`No function registered: ${id}`);
       return fn(payload);
-    },
-    overrideTrigger: (id: string, handler: Function) => {
-      triggerOverrides.set(id, handler);
     },
   };
 }
@@ -110,51 +104,11 @@ describe("cross-project isolation — end-to-end", () => {
     // Clear the singleton BM25 index between tests.
     getSearchIndex().clear();
 
-    // Register all three functions against the shared KV.
+    // Register both functions against the shared KV.
     registerRememberFunction(sdk as never, kv as never);
     registerSearchFunction(sdk as never, kv as never);
 
-    // Enrich calls mem::search internally; wire the file-context trigger as a no-op.
-    registerEnrichFunction(sdk as never, kv as never);
-    sdk.overrideTrigger("mem::file-context", async () => ({ context: "" }));
-
     await seedSessions(kv);
-  });
-
-  it("bug memory scoped to api does not appear in enrich context for web project", async () => {
-    await sdk.trigger("mem::remember", {
-      content: "express-jwt throws 401 when Authorization header has extra whitespace. Call .trim() before passing to middleware.",
-      type: "bug",
-      files: ["src/middleware/auth.ts"],
-      project: "api",
-    });
-
-    const result = await sdk.trigger("mem::enrich", {
-      sessionId: "sess-web",
-      files: ["src/middleware/auth.ts"],
-      project: "web",
-    }) as { context: string };
-
-    expect(result.context).not.toContain("agentmemory-past-errors");
-    expect(result.context).not.toContain("express-jwt");
-  });
-
-  it("bug memory scoped to api appears in enrich context for api project", async () => {
-    await sdk.trigger("mem::remember", {
-      content: "express-jwt throws 401 when Authorization header has extra whitespace. Call .trim() before passing to middleware.",
-      type: "bug",
-      files: ["src/middleware/auth.ts"],
-      project: "api",
-    });
-
-    const result = await sdk.trigger("mem::enrich", {
-      sessionId: "sess-api",
-      files: ["src/middleware/auth.ts"],
-      project: "api",
-    }) as { context: string };
-
-    expect(result.context).toContain("agentmemory-past-errors");
-    expect(result.context).toContain("express-jwt");
   });
 
   it("bug memory scoped to api is excluded from search results for web project", async () => {
@@ -197,63 +151,6 @@ describe("cross-project isolation — end-to-end", () => {
       .map((r) => `${r.observation.title} ${r.observation.narrative ?? ""}`)
       .join(" ");
     expect(combined).toContain("express-jwt");
-  });
-
-  it("two projects with overlapping filenames see only their own bug memories", async () => {
-    await sdk.trigger("mem::remember", {
-      content: "express-jwt Authorization header whitespace causes 401",
-      type: "bug",
-      files: ["src/middleware/auth.ts"],
-      project: "api",
-    });
-    await sdk.trigger("mem::remember", {
-      content: "nextauth cookie domain mismatch breaks SSO on subdomains",
-      type: "bug",
-      files: ["src/middleware/auth.ts"],
-      project: "web",
-    });
-
-    const apiEnrich = await sdk.trigger("mem::enrich", {
-      sessionId: "sess-api",
-      files: ["src/middleware/auth.ts"],
-      project: "api",
-    }) as { context: string };
-
-    expect(apiEnrich.context).toContain("express-jwt");
-    expect(apiEnrich.context).not.toContain("nextauth");
-
-    const webEnrich = await sdk.trigger("mem::enrich", {
-      sessionId: "sess-web",
-      files: ["src/middleware/auth.ts"],
-      project: "web",
-    }) as { context: string };
-
-    expect(webEnrich.context).toContain("nextauth");
-    expect(webEnrich.context).not.toContain("express-jwt");
-  });
-
-  it("unscoped (legacy) bug memory is visible to both projects", async () => {
-    await sdk.trigger("mem::remember", {
-      content: "generic auth middleware always validates content-type header",
-      type: "bug",
-      files: ["src/middleware/auth.ts"],
-      // no project — legacy / unscoped
-    });
-
-    const apiResult = await sdk.trigger("mem::enrich", {
-      sessionId: "sess-api",
-      files: ["src/middleware/auth.ts"],
-      project: "api",
-    }) as { context: string };
-
-    const webResult = await sdk.trigger("mem::enrich", {
-      sessionId: "sess-web",
-      files: ["src/middleware/auth.ts"],
-      project: "web",
-    }) as { context: string };
-
-    expect(apiResult.context).toContain("generic auth middleware");
-    expect(webResult.context).toContain("generic auth middleware");
   });
 
   it("memories from different projects do not supersede each other via Jaccard dedup", async () => {

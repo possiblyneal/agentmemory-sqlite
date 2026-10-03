@@ -24,9 +24,8 @@ scoped by.
 
 **Abandoned Session**:
 A Session still marked active with no activity for 24 hours. Heal closes it with status
-`abandoned` at its last activity without summarizing it, and the next Observation or session
-start on it reopens it. Like any unsummarized Session, it is summarized before Eviction
-removes it.
+`abandoned` at its last activity; it is not summarized, and the next Observation or session
+start on it reopens it.
 
 ### What is stored
 
@@ -41,9 +40,9 @@ are content-addressed, so the same content captured twice is one Memory.
 _Avoid_: note, fact, item
 
 **Global Memory**:
-A Memory deliberately marked to apply in every project, such as an Operator preference.
-Recall surfaces it everywhere, even when it was saved during a Session in one project. A
-Memory that merely lacks a project is not global; it is unscoped.
+A Memory deliberately marked to apply in every project, such as an Operator preference. It
+has no project, and Recall surfaces it in every project whichever Session it was saved in. A
+Memory that merely lacks a project is unscoped, not global.
 _Avoid_: shared memory, unscoped memory
 
 **Session Summary**:
@@ -108,8 +107,8 @@ its context.
 _Avoid_: search, query, lookup, retrieval
 
 **Injection**:
-Recall delivered into an Agent's context at a hook boundary — session start, before a tool
-use, before compaction — without the Agent asking for it.
+Recall delivered into an Agent's context at a hook boundary — session start, on a user
+prompt, before compaction — without the Agent asking for it.
 _Avoid_: enrichment, context push
 
 **Missed Injection**:
@@ -124,8 +123,8 @@ _Avoid_: miss, no-op
 
 **Injection Record**:
 The daemon's note of one answered Injection: the path that served it (session start, context,
-or enrich, which is the pre-tool-use hook's path), the Session, and the identifiers of the
-Observations, Memories, Lessons, Insights and Session Summaries it carried. An Empty Injection
+or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,
+Insights and Session Summaries it carried. An Empty Injection
 leaves a record with no identifiers; a Missed Injection leaves none, because the daemon never
 answered. Session start leaves none while context injection is off, because the hook discards
 that reply. Kept for seven days.

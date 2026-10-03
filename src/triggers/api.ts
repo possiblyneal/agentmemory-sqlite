@@ -193,7 +193,6 @@ interface InjectionDelivery {
   source: InjectionSource;
   sessionId: string;
   project?: string;
-  files?: string[];
 }
 
 function noteInjection(
@@ -208,7 +207,6 @@ function noteInjection(
     sessionId: delivery.sessionId,
     ...(delivery.project ? { project: delivery.project } : {}),
     injected: context.trim() ? (result?.injected ?? []) : [],
-    ...(delivery.files ? { files: delivery.files } : {}),
     tokens: result?.tokens ?? 0,
   }).catch((err) => {
     logger.warn("Injection record write failed", {
@@ -338,7 +336,7 @@ export function registerApiTriggers(
           default: false,
           affects: ["Hooks"],
           needsLlm: false,
-          description: "Hooks write recalled context into Claude Code's conversation. OFF captures in the background without injecting.",
+          description: "The session-start hook writes recalled context into Claude Code's conversation, and the prompt-submit hook adds the few strong matches for each user prompt. OFF captures in the background without injecting.",
           enableHow: "Set AGENTMEMORY_INJECT_CONTEXT=true and restart.",
           docsHref: "https://github.com/rohitg00/agentmemory/issues/143",
         },
@@ -968,13 +966,12 @@ export function registerApiTriggers(
       });
 
       if (sessionId) {
-        await withKeyedLock(`session:${sessionId}`, async () => {
+        await withKeyedLock(`obs:${sessionId}`, async () => {
           const session = await kv.get<Session>(KV.sessions, sessionId);
-          if (!session) return;
-          const shaSet = new Set<string>(session.commitShas ?? []);
-          shaSet.add(sha);
-          session.commitShas = Array.from(shaSet);
-          await kv.set(KV.sessions, sessionId, session);
+          if (!session || session.commitShas?.includes(sha)) return;
+          await kv.update(KV.sessions, sessionId, [
+            { type: "set", path: "commitShas", value: [...(session.commitShas ?? []), sha] },
+          ]);
         });
       }
 
@@ -1155,40 +1152,20 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/file-context", http_method: "POST" },
   });
 
-  sdk.registerFunction("api::enrich",
+  sdk.registerFunction("api::prompt-context",
     async (
-      req: ApiRequest<{
-        sessionId: string;
-        files: string[];
-        terms?: string[];
-        toolName?: string;
-        project?: string;
-      }>,
+      req: ApiRequest<{ sessionId: string; prompt: string; project?: string }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       if (
         !req.body?.sessionId ||
         typeof req.body.sessionId !== "string" ||
-        !Array.isArray(req.body?.files) ||
-        req.body.files.length === 0 ||
-        !req.body.files.every((f: unknown) => typeof f === "string")
+        typeof req.body.prompt !== "string"
       ) {
         return {
           status_code: 400,
-          body: {
-            error: "sessionId (string) and files (string[]) are required",
-          },
-        };
-      }
-      if (
-        req.body.terms !== undefined &&
-        (!Array.isArray(req.body.terms) ||
-          !req.body.terms.every((t: unknown) => typeof t === "string"))
-      ) {
-        return {
-          status_code: 400,
-          body: { error: "terms must be an array of strings" },
+          body: { error: "sessionId (string) and prompt (string) are required" },
         };
       }
       if (
@@ -1200,33 +1177,23 @@ export function registerApiTriggers(
           body: { error: "project must be a non-empty string" },
         };
       }
+      const project = req.body.project?.trim();
       const result = await sdk.trigger<unknown, InjectionResult>({
-        function_id: "mem::enrich",
+        function_id: "mem::prompt-context",
         payload: {
           sessionId: req.body.sessionId,
-          files: req.body.files,
-          ...(req.body.terms !== undefined && { terms: req.body.terms }),
-          ...(req.body.toolName !== undefined && { toolName: req.body.toolName }),
-          ...(req.body.project !== undefined && { project: req.body.project }),
+          prompt: req.body.prompt,
+          ...(project && { project }),
         },
       });
-      noteInjection(
-        kv,
-        {
-          source: "enrich",
-          sessionId: req.body.sessionId,
-          project: typeof req.body.project === "string" ? req.body.project.trim() : undefined,
-          files: req.body.files,
-        },
-        result,
-      );
+      noteInjection(kv, { source: "prompt-submit", sessionId: req.body.sessionId, project }, result);
       return { status_code: 200, body: withoutInjected(result) };
     },
   );
   sdk.registerTrigger({
     type: "http",
-    function_id: "api::enrich",
-    config: { api_path: "/agentmemory/enrich", http_method: "POST" },
+    function_id: "api::prompt-context",
+    config: { api_path: "/agentmemory/prompt-context", http_method: "POST" },
   });
 
   sdk.registerFunction("api::remember",
@@ -1240,6 +1207,7 @@ export function registerApiTriggers(
         sourceObservationIds?: string[];
         project?: string;
         agentId?: string;
+        global?: boolean;
       }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
@@ -1257,6 +1225,12 @@ export function registerApiTriggers(
       ) {
         return { status_code: 400, body: { error: "project must be a non-empty string" } };
       }
+      if (req.body.global !== undefined && typeof req.body.global !== "boolean") {
+        return { status_code: 400, body: { error: "global must be a boolean" } };
+      }
+      if (req.body.global && req.body.project !== undefined) {
+        return { status_code: 400, body: { error: "a Memory cannot have both a project and global" } };
+      }
       const result = await sdk.trigger({
         function_id: "mem::remember",
         payload: {
@@ -1267,6 +1241,7 @@ export function registerApiTriggers(
           ...(req.body.ttlDays !== undefined && { ttlDays: req.body.ttlDays }),
           ...(req.body.sourceObservationIds !== undefined && { sourceObservationIds: req.body.sourceObservationIds }),
           ...(req.body.project !== undefined && { project: req.body.project }),
+          ...(req.body.global === true && { global: true }),
           ...(typeof req.body.agentId === "string" && req.body.agentId.trim()
             ? { agentId: req.body.agentId.trim() }
             : {}),
@@ -2372,7 +2347,7 @@ export function registerApiTriggers(
       const project = req.query_params?.["project"];
       let filtered = latest ? memories.filter((m) => m.isLatest) : memories;
       if (typeof project === "string" && project) {
-        filtered = filtered.filter((m) => m.project === project);
+        filtered = filtered.filter((m) => m.project === project || m.global === true);
       }
       if (filterAgentId) {
         filtered = filtered.filter(
@@ -3235,7 +3210,7 @@ export function registerApiTriggers(
       let memories = await kv.list<import("../types.js").Memory>(KV.memories);
       let actions = await kv.list<import("../types.js").Action>(KV.actions);
       if (project) {
-        memories = memories.filter((m) => m.project === project);
+        memories = memories.filter((m) => m.project === project || m.global === true);
         actions = actions.filter((a) => a.project === project);
       }
       const body: Record<string, unknown> = {
