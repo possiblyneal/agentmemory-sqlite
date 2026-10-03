@@ -40,16 +40,6 @@ work for live Sessions.
   and graph extraction), for example by capping background callers at one slot, and no
   graph batch times out during a sweep.
 
-## Merge the three env-file hydration loops
-
-`hydrateProcessEnvFromFile` (`src/config.ts`), `hydrateHookEnv` (`src/hooks/_env.ts`) and
-`hydrateMcpEnv` (`src/mcp/standalone.ts`) each parse `~/.agentmemory/.env` and fill
-`process.env`, differing only in what counts as unset. `readEnvFile()` in `_env.ts` also
-repeats `loadEnvFile()` in `config.ts` without its cache.
-
-- **Done when.** One helper, taking the "is unset" test as a parameter, serves all three,
-  and their precedence tests still pass.
-
 ## Cap the crystallize and procedural-extraction prompts
 
 Reflect's cluster prompt now fits a 24k-character budget (`src/functions/reflect.ts`). Two

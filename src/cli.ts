@@ -33,10 +33,10 @@ const c = {
   accent: (s: string) => pc.bold(pc.yellow(s)),
 };
 import { generateId } from "./state/schema.js";
+import { envFilePath, readEnvFile } from "./hooks/_env.js";
 import {
   buildDiagnostics,
   dryRunPlan,
-  parseEnvFile,
   type Diagnostic,
   type DiagnosticFixResult,
   type DoctorContext,
@@ -664,19 +664,17 @@ function buildDoctorContext(): DoctorContext {
   return {
     baseUrl: getBaseUrl(),
     viewerUrl: getViewerUrl(),
-    envPath: join(homedir(), ".agentmemory", ".env"),
+    envPath: envFilePath(),
     pidfilePath: workerPidfilePath(),
   };
 }
 
 function buildDoctorEffects(): DoctorEffects {
   return {
-    envFileExists: () => existsSync(join(homedir(), ".agentmemory", ".env")),
+    envFileExists: () => existsSync(envFilePath()),
     readEnvFile: () => {
       try {
-        return parseEnvFile(
-          readFileSync(join(homedir(), ".agentmemory", ".env"), "utf-8"),
-        );
+        return readEnvFile();
       } catch {
         return {};
       }
