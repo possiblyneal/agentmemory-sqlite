@@ -14,7 +14,7 @@ function tokenize(s: string): string[] {
 
 export const grepAdapter: Adapter<GrepState> = {
   name: "grep",
-  paths: ["search"],
+  paths: ["search", "prompt-submit"],
   async init(sessions) {
     return { sessions };
   },

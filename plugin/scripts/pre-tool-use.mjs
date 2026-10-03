@@ -139,7 +139,7 @@ function recordMissedInjection(hook, reason) {
 //#endregion
 //#region src/hooks/pre-tool-use.ts
 hydrateHookEnv();
-const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
+const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true" && process.env["AGENTMEMORY_INJECT_TOOL_CONTEXT"] === "true";
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
 function contextPayload(data, context) {

@@ -179,12 +179,21 @@ async function querySessionStart(q: Question, state: AgentMemoryState): Promise<
   return { ranked: attribute(context, state.needles), chars: context.length };
 }
 
+async function queryPromptSubmit(q: Question, state: AgentMemoryState): Promise<QueryResult> {
+  const { context = "" } = await post<{ context?: string }>(state, "prompt-context", {
+    sessionId: probeSessionId(),
+    prompt: q.question,
+    ...(q.project && { project: q.project }),
+  });
+  return { ranked: attribute(context, state.needles), chars: context.length };
+}
+
 // The daemon to score is the caller's choice: with no `baseUrl` the adapter
 // starts its own sandbox, so a runner that must never touch a live store
 // (the CI gate) simply passes none.
 export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = {
   name: "agentmemory",
-  paths: ["search", "pre-tool-use", "session-start"],
+  paths: ["search", "pre-tool-use", "session-start", "prompt-submit"],
   async init(sessions, config = {}) {
     const sandbox = config.baseUrl
       ? undefined
@@ -221,6 +230,8 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
         return queryPreToolUse(q, state);
       case "session-start":
         return querySessionStart(q, state);
+      case "prompt-submit":
+        return queryPromptSubmit(q, state);
     }
   },
   async teardown(state) {

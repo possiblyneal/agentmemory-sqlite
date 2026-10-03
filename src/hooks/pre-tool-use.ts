@@ -8,19 +8,20 @@ hydrateHookEnv();
 
 // Pre-tool-use enrichment hook.
 //
-// THIS HOOK IS A NO-OP BY DEFAULT AS OF 0.8.10 (#143). Previously it
-// fired /agentmemory/enrich on every Edit/Write/Read/Glob/Grep tool call
-// and wrote up to 4000 chars of context to stdout for the model's next turn, which meant
-// agentmemory was silently injecting ~1000 tokens into every tool turn
-// via the user's Claude Code session. On Claude Pro that burned entire
-// allocations in a handful of messages (@adrianricardo, #143).
+// THIS HOOK IS A NO-OP BY DEFAULT. When on, it fires /agentmemory/enrich on
+// every Edit/Write/Read/Glob/Grep tool call and writes up to 4000 chars of
+// context for the model's next turn, so session input tokens grow with the
+// number of file-touching tool calls (rohitg00/agentmemory#143).
 //
-// Users who explicitly want pre-tool enrichment opt in with:
-//   AGENTMEMORY_INJECT_CONTEXT=true   in ~/.agentmemory/.env
+// It needs its own opt-in on top of the session-start one, so an Operator
+// can keep session-start Injection without paying per tool call:
+//   AGENTMEMORY_INJECT_CONTEXT=true
+//   AGENTMEMORY_INJECT_TOOL_CONTEXT=true   in ~/.agentmemory/.env
 // (read by hydrateHookEnv above on every hook run; a shell-exported value
-// wins) and restart Claude Code. Expect your session input token count to grow
-// proportionally with the number of file-touching tool calls per turn.
-const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
+// wins) and restart Claude Code.
+const INJECT_CONTEXT =
+  process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true" &&
+  process.env["AGENTMEMORY_INJECT_TOOL_CONTEXT"] === "true";
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";

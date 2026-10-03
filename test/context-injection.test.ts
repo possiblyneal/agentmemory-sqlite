@@ -88,6 +88,40 @@ describe("pre-tool-use hook — context injection gate (#143)", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it("writes nothing when only AGENTMEMORY_INJECT_CONTEXT=true, even with context to give", async () => {
+    const server = createServer((_req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ context: "remembered about foo.ts" }));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    try {
+      const result = await runHook(
+        "pre-tool-use.mjs",
+        JSON.stringify({ session_id: "ses_test", tool_name: "Read", tool_input: { file_path: "src/foo.ts" } }),
+        { AGENTMEMORY_URL: `http://127.0.0.1:${port}`, AGENTMEMORY_INJECT_CONTEXT: "true" },
+      );
+      expect(result.stdout).toBe("");
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it("writes nothing when AGENTMEMORY_INJECT_TOOL_CONTEXT=true without AGENTMEMORY_INJECT_CONTEXT", async () => {
+    const payload = JSON.stringify({
+      session_id: "ses_test",
+      tool_name: "Read",
+      tool_input: { file_path: "src/foo.ts" },
+    });
+    const result = await runHook("pre-tool-use.mjs", payload, {
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
+    });
+    expect(result.stdout).toBe("");
+    expect(result.exitCode).toBe(0);
+  });
+
   it("exits fast when disabled (no stdin consumption, no network fetch)", async () => {
     // The disabled path must not open stdin or reach for fetch — it
     // should return immediately. A 250ms budget is generous enough to
@@ -98,7 +132,7 @@ describe("pre-tool-use hook — context injection gate (#143)", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("when AGENTMEMORY_INJECT_CONTEXT=true, hook still runs but safely errors on unreachable backend", async () => {
+  it("when both injection flags are true, hook still runs but safely errors on unreachable backend", async () => {
     // Opt-in path. We point at a port that's guaranteed closed so the
     // fetch fails fast; the hook must still exit cleanly (the whole
     // point of the try/catch is not to break Claude Code) and must not
@@ -110,6 +144,7 @@ describe("pre-tool-use hook — context injection gate (#143)", () => {
     });
     const result = await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
@@ -141,6 +176,7 @@ describe("pre-tool-use hook — context envelope (#1278)", () => {
     });
     const result = await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
       AGENTMEMORY_URL: url,
     });
     expect(JSON.parse(result.stdout)).toEqual({
@@ -159,6 +195,7 @@ describe("pre-tool-use hook — context envelope (#1278)", () => {
     });
     const result = await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
       AGENTMEMORY_URL: url,
     });
     expect(result.stdout).toBe("remembered about foo.ts");
@@ -207,6 +244,7 @@ describe("pre-tool-use hook — project scope (#71)", () => {
     });
     await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
       AGENTMEMORY_URL: url,
     });
     expect(bodies).toHaveLength(1);
@@ -224,6 +262,7 @@ describe("pre-tool-use hook — project scope (#71)", () => {
     });
     await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
       AGENTMEMORY_URL: url,
     });
     expect(bodies[0].project).toBe("named-project");
@@ -239,6 +278,7 @@ describe("pre-tool-use hook — project scope (#71)", () => {
     });
     await runHook("pre-tool-use.mjs", payload, {
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
       AGENTMEMORY_URL: url,
     });
     expect(bodies).toHaveLength(1);
@@ -287,6 +327,34 @@ describe("session-start hook — context injection gate (#143)", () => {
       await new Promise<void>((r) => server.close(() => r()));
     }
   });
+  it("ignores AGENTMEMORY_INJECT_TOOL_CONTEXT either way", async () => {
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ context: "project history" }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    const url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+    const payload = JSON.stringify({ session_id: "ses_test", cwd: "/tmp/fake-project" });
+    try {
+      const toolOnly = await runHook("session-start.mjs", payload, {
+        AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
+        AGENTMEMORY_URL: url,
+      });
+      expect(toolOnly.stdout).toBe("");
+      const both = await runHook("session-start.mjs", payload, {
+        AGENTMEMORY_INJECT_CONTEXT: "true",
+        AGENTMEMORY_INJECT_TOOL_CONTEXT: "false",
+        AGENTMEMORY_URL: url,
+      });
+      expect(both.stdout).toBe("project history");
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
 });
 
 describe("context-injecting hooks — Missed Injection record (#73)", () => {
@@ -325,6 +393,7 @@ describe("context-injecting hooks — Missed Injection record (#73)", () => {
     const result = await runHook("pre-tool-use.mjs", readPayload, {
       HOME: home,
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
@@ -371,6 +440,7 @@ describe("context-injecting hooks — Missed Injection record (#73)", () => {
       HOME: home,
       AGENTMEMORY_URL: url,
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
     });
     expect(result.exitCode).toBe(0);
     expect(existsSync(recordPath())).toBe(false);
@@ -383,6 +453,7 @@ describe("context-injecting hooks — Missed Injection record (#73)", () => {
     await runHook("pre-tool-use.mjs", readPayload, {
       HOME: home,
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
     });
     const kept = records();
     expect(kept.length).toBe(1000);
@@ -395,8 +466,98 @@ describe("context-injecting hooks — Missed Injection record (#73)", () => {
     const result = await runHook("pre-tool-use.mjs", readPayload, {
       HOME: fileAsHome,
       AGENTMEMORY_INJECT_CONTEXT: "true",
+      AGENTMEMORY_INJECT_TOOL_CONTEXT: "true",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
+  });
+});
+
+describe("prompt-submit hook — per-prompt Injection (#106)", () => {
+  let server: Server;
+  let url = "";
+  let requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let home = "";
+  const prompt = {
+    hook_event_name: "UserPromptSubmit",
+    session_id: "ses_test",
+    cwd: "/work/shipctl",
+    prompt: "staging auth fails when SHIPCTL_TOKEN is unset",
+  };
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        requests.push({ path: req.url ?? "", body: JSON.parse(body || "{}") });
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(req.url === "/agentmemory/prompt-context" ? { context: "remembered auth fix" } : {}));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    url = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+  });
+
+  afterAll(() => new Promise<void>((r) => server.close(() => r())));
+
+  beforeEach(() => {
+    requests = [];
+    home = mkdtempSync(join(tmpdir(), "prompt-submit-home-"));
+  });
+
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it("records the prompt but injects nothing when AGENTMEMORY_INJECT_CONTEXT is unset", async () => {
+    const result = await runHook("prompt-submit.mjs", JSON.stringify(prompt), { HOME: home, AGENTMEMORY_URL: url });
+    expect(result.stdout).toBe("");
+    expect(requests.map((r) => r.path)).toEqual(["/agentmemory/observe"]);
+  });
+
+  it("injects recalled context in the UserPromptSubmit envelope", async () => {
+    const result = await runHook("prompt-submit.mjs", JSON.stringify(prompt), {
+      HOME: home,
+      AGENTMEMORY_URL: url,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "remembered auth fix" },
+    });
+    const ask = requests.find((r) => r.path === "/agentmemory/prompt-context");
+    expect(ask?.body).toEqual({ sessionId: "ses_test", project: "shipctl", prompt: prompt.prompt });
+    expect(requests.some((r) => r.path === "/agentmemory/observe")).toBe(true);
+  });
+
+  it("does not inject into a subagent", async () => {
+    const result = await runHook("prompt-submit.mjs", JSON.stringify({ ...prompt, agent_id: "agent_1" }), {
+      HOME: home,
+      AGENTMEMORY_URL: url,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    expect(result.stdout).toBe("");
+    expect(requests.some((r) => r.path === "/agentmemory/prompt-context")).toBe(false);
+  });
+
+  it("does not inject for a host that sends no UserPromptSubmit event name", async () => {
+    const { hook_event_name: _, ...bare } = prompt;
+    const result = await runHook("prompt-submit.mjs", JSON.stringify(bare), {
+      HOME: home,
+      AGENTMEMORY_URL: url,
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    expect(result.stdout).toBe("");
+  });
+
+  it("records a Missed Injection when the daemon is down", async () => {
+    const result = await runHook("prompt-submit.mjs", JSON.stringify(prompt), {
+      HOME: home,
+      AGENTMEMORY_URL: "http://127.0.0.1:1",
+      AGENTMEMORY_INJECT_CONTEXT: "true",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    const entry = JSON.parse(readFileSync(join(home, ".agentmemory", "missed-injections.jsonl"), "utf-8").trim());
+    expect([entry.hook, entry.reason]).toEqual(["prompt-submit", "connection"]);
   });
 });

@@ -13,7 +13,7 @@ export interface Session {
   observations?: EvalObservation[];
 }
 
-export type QuestionPath = "search" | "pre-tool-use" | "session-start";
+export type QuestionPath = "search" | "pre-tool-use" | "session-start" | "prompt-submit";
 
 export interface Question {
   id: string;
