@@ -513,7 +513,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         // infer-memory-projects migration runs. Surface a count so operators
         // know the backfill is still pending and can trigger it explicitly.
         const latestMemories = memories.filter((m) => m.isLatest);
-        const unscopedCount = latestMemories.filter((m) => !m.project).length;
+        const unscopedCount = latestMemories.filter((m) => !m.project && !m.global).length;
         if (unscopedCount === 0) {
           checks.push({
             name: "memory-project-coverage",

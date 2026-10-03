@@ -96,12 +96,3 @@ whether any of them were used.
   unscorable.
 - **Done when.** Insights have usage evidence, such as their concepts appearing in later
   Observations, and the check reports a rate for them.
-
-## Let a Memory be global on purpose
-
-`memory-project-coverage` (`src/functions/diagnostics.ts:462`) counts every Memory without a
-`project` as unscoped. A preference that is meant to apply everywhere, such as the tmux one,
-keeps the warning on for good.
-
-- **Done when.** A Memory can be marked global explicitly, and the check counts only Memories
-  that have neither a project nor that mark.
