@@ -106,11 +106,7 @@ function resolveProject(cwd) {
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
 	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
-	const roots = data.workspace_roots;
-	if (Array.isArray(roots)) {
-		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
-	}
-	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
+	const projectDir = process.env["CLAUDE_PROJECT_DIR"];
 	if (projectDir && projectDir.trim()) return projectDir;
 }
 //#endregion
@@ -134,7 +130,7 @@ async function main() {
 	}
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
-	const sessionId = data.session_id || data.sessionId || data.conversation_id || "unknown";
+	const sessionId = data.session_id || "unknown";
 	const cwd = hookCwd(data) || process.cwd();
 	fetch(`${REST_URL}/agentmemory/observe`, {
 		method: "POST",

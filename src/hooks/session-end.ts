@@ -29,7 +29,7 @@ async function main() {
   if (!data || typeof data !== "object") return;
   if (shouldSkipSession()) return;
 
-  const sessionId = ((data.session_id || data.sessionId || data.conversation_id) as string) || "unknown";
+  const sessionId = (data.session_id as string) || "unknown";
 
   fetch(`${REST_URL}/agentmemory/session/end`, {
     method: "POST",

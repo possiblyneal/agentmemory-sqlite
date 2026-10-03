@@ -13,7 +13,7 @@ without installing the full package first.
 npx -y @agentmemory/mcp
 ```
 
-Or wire it into your MCP client (Claude Desktop, OpenClaw, Cursor, Codex, etc.):
+Or wire it into Claude Code as an MCP server:
 
 ```json
 {

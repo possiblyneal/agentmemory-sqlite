@@ -17,7 +17,7 @@
 | Adapter | Path | n | Recall | Precision | No-answer clean | Hit | Mean chars | p50 |
 |---|---|---|---|---|---|---|---|---|
 | agentmemory | search | | | | | | — | |
-| agentmemory | pre-tool-use | | | | | | | |
+| agentmemory | prompt-submit | | | | | | | |
 | agentmemory | session-start | | | | | | | |
 | agentmemory-bm25 | ... | | | | | | | |
 | grep | search | | | | | | — | |

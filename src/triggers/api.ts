@@ -193,7 +193,6 @@ interface InjectionDelivery {
   source: InjectionSource;
   sessionId: string;
   project?: string;
-  files?: string[];
 }
 
 function noteInjection(
@@ -208,7 +207,6 @@ function noteInjection(
     sessionId: delivery.sessionId,
     ...(delivery.project ? { project: delivery.project } : {}),
     injected: context.trim() ? (result?.injected ?? []) : [],
-    ...(delivery.files ? { files: delivery.files } : {}),
     tokens: result?.tokens ?? 0,
   }).catch((err) => {
     logger.warn("Injection record write failed", {
@@ -338,7 +336,7 @@ export function registerApiTriggers(
           default: false,
           affects: ["Hooks"],
           needsLlm: false,
-          description: "Hooks write recalled context into Claude Code's conversation. OFF captures in the background without injecting.",
+          description: "The session-start hook writes recalled context into Claude Code's conversation, and the prompt-submit hook adds the few strong matches for each user prompt. OFF captures in the background without injecting.",
           enableHow: "Set AGENTMEMORY_INJECT_CONTEXT=true and restart.",
           docsHref: "https://github.com/rohitg00/agentmemory/issues/143",
         },
@@ -1154,40 +1152,20 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/file-context", http_method: "POST" },
   });
 
-  sdk.registerFunction("api::enrich",
+  sdk.registerFunction("api::prompt-context",
     async (
-      req: ApiRequest<{
-        sessionId: string;
-        files: string[];
-        terms?: string[];
-        toolName?: string;
-        project?: string;
-      }>,
+      req: ApiRequest<{ sessionId: string; prompt: string; project?: string }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       if (
         !req.body?.sessionId ||
         typeof req.body.sessionId !== "string" ||
-        !Array.isArray(req.body?.files) ||
-        req.body.files.length === 0 ||
-        !req.body.files.every((f: unknown) => typeof f === "string")
+        typeof req.body.prompt !== "string"
       ) {
         return {
           status_code: 400,
-          body: {
-            error: "sessionId (string) and files (string[]) are required",
-          },
-        };
-      }
-      if (
-        req.body.terms !== undefined &&
-        (!Array.isArray(req.body.terms) ||
-          !req.body.terms.every((t: unknown) => typeof t === "string"))
-      ) {
-        return {
-          status_code: 400,
-          body: { error: "terms must be an array of strings" },
+          body: { error: "sessionId (string) and prompt (string) are required" },
         };
       }
       if (
@@ -1199,33 +1177,23 @@ export function registerApiTriggers(
           body: { error: "project must be a non-empty string" },
         };
       }
+      const project = req.body.project?.trim();
       const result = await sdk.trigger<unknown, InjectionResult>({
-        function_id: "mem::enrich",
+        function_id: "mem::prompt-context",
         payload: {
           sessionId: req.body.sessionId,
-          files: req.body.files,
-          ...(req.body.terms !== undefined && { terms: req.body.terms }),
-          ...(req.body.toolName !== undefined && { toolName: req.body.toolName }),
-          ...(req.body.project !== undefined && { project: req.body.project }),
+          prompt: req.body.prompt,
+          ...(project && { project }),
         },
       });
-      noteInjection(
-        kv,
-        {
-          source: "enrich",
-          sessionId: req.body.sessionId,
-          project: typeof req.body.project === "string" ? req.body.project.trim() : undefined,
-          files: req.body.files,
-        },
-        result,
-      );
+      noteInjection(kv, { source: "prompt-submit", sessionId: req.body.sessionId, project }, result);
       return { status_code: 200, body: withoutInjected(result) };
     },
   );
   sdk.registerTrigger({
     type: "http",
-    function_id: "api::enrich",
-    config: { api_path: "/agentmemory/enrich", http_method: "POST" },
+    function_id: "api::prompt-context",
+    config: { api_path: "/agentmemory/prompt-context", http_method: "POST" },
   });
 
   sdk.registerFunction("api::remember",

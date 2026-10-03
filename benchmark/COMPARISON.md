@@ -73,7 +73,7 @@ This isn't a "agentmemory wins everything" page. Different tools solve different
 
 **Choose agentmemory if you want:**
 - Automatic capture with zero manual `add()` calls
-- MCP server that works across Claude Code, Cursor, Codex, Gemini CLI, etc.
+- Claude Code hooks that inject context at session start and on each prompt, plus an MCP server
 - Hybrid BM25 + vector + graph search
 - Real-time viewer to see what your agent is learning
 - Self-hostable with zero external databases

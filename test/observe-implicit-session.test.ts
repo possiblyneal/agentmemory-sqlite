@@ -42,7 +42,7 @@ describe("observe implicit session create (#638)", () => {
     registerObserveFunction(sdk as never, kv as never);
 
     const result = (await sdk.trigger("mem::observe", {
-      sessionId: "ses_opencode_abc",
+      sessionId: "ses_plugin_abc",
       project: "/home/user/myrepo",
       cwd: "/home/user/myrepo",
       hookType: "prompt_submit",
@@ -54,9 +54,9 @@ describe("observe implicit session create (#638)", () => {
 
     const sessionScope = kv.store.get("mem:sessions");
     expect(sessionScope).toBeTruthy();
-    const session = sessionScope!.get("ses_opencode_abc") as Record<string, unknown>;
+    const session = sessionScope!.get("ses_plugin_abc") as Record<string, unknown>;
     expect(session).toBeTruthy();
-    expect(session.id).toBe("ses_opencode_abc");
+    expect(session.id).toBe("ses_plugin_abc");
     expect(session.project).toBe("/home/user/myrepo");
     expect(session.cwd).toBe("/home/user/myrepo");
     expect(session.status).toBe("active");

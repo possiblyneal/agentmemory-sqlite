@@ -31,10 +31,6 @@ import { join } from "node:path";
 
 export interface Prefs {
   schemaVersion: 1;
-  // Most recently picked single agent (for "use last agent" style flows).
-  lastAgent: string | null;
-  // The full multi-select set from the last onboarding run.
-  lastAgents: string[];
   // Most recently picked LLM provider; `null` means BM25-only mode.
   lastProvider: string | null;
   // Once true, splash is rendered only on first run / explicit --reset.
@@ -58,8 +54,6 @@ export interface Prefs {
 
 const DEFAULTS: Prefs = {
   schemaVersion: 1,
-  lastAgent: null,
-  lastAgents: [],
   lastProvider: null,
   skipSplash: false,
   skipConsoleInstall: false,

@@ -107,8 +107,8 @@ its context.
 _Avoid_: search, query, lookup, retrieval
 
 **Injection**:
-Recall delivered into an Agent's context at a hook boundary — session start, before a tool
-use, before compaction — without the Agent asking for it.
+Recall delivered into an Agent's context at a hook boundary — session start, on a user
+prompt, before compaction — without the Agent asking for it.
 _Avoid_: enrichment, context push
 
 **Missed Injection**:
@@ -123,8 +123,8 @@ _Avoid_: miss, no-op
 
 **Injection Record**:
 The daemon's note of one answered Injection: the path that served it (session start, context,
-or enrich, which is the pre-tool-use hook's path), the Session, and the identifiers of the
-Observations, Memories, Lessons, Insights and Session Summaries it carried. An Empty Injection
+or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,
+Insights and Session Summaries it carried. An Empty Injection
 leaves a record with no identifiers; a Missed Injection leaves none, because the daemon never
 answered. Session start leaves none while context injection is off, because the hook discards
 that reply. Kept for seven days.

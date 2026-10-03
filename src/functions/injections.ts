@@ -16,6 +16,15 @@ export function withFiles(ref: InjectedRef, files: string[] | undefined): Inject
   return files && files.length > 0 ? { ...ref, files } : ref;
 }
 
+export function refKey(ref: Pick<InjectedRef, "kind" | "id">): string {
+  return `${ref.kind}:${ref.id}`;
+}
+
+export async function injectedInSession(kv: StateKV, sessionId: string): Promise<Set<string>> {
+  const records = await kv.list<InjectionRecord>(KV.injections);
+  return new Set(records.filter((r) => r.sessionId === sessionId).flatMap((r) => r.injected.map(refKey)));
+}
+
 function sameFile(a: string, b: string): boolean {
   const x = a.replace(/^\.\//, "");
   const y = b.replace(/^\.\//, "");
@@ -29,10 +38,7 @@ export function injectedItemUse(
   record: InjectionRecord,
   sessionObservations: CompressedObservation[],
 ): InjectedItemUse {
-  const triggerFiles = record.files ?? [];
-  const evidenceFiles = (ref.files ?? []).filter(
-    (f) => !triggerFiles.some((t) => sameFile(f, t)),
-  );
+  const evidenceFiles = ref.files ?? [];
   if (evidenceFiles.length === 0) return "unscorable";
   const injectedAt = Date.parse(record.at);
   const used = sessionObservations.some(

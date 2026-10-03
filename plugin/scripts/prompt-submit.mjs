@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
@@ -106,18 +106,39 @@ function resolveProject(cwd) {
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
 	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
-	const roots = data.workspace_roots;
-	if (Array.isArray(roots)) {
-		for (const root of roots) if (typeof root === "string" && root.trim()) return root;
-	}
-	const projectDir = process.env["DEVIN_PROJECT_DIR"] || process.env["CLAUDE_PROJECT_DIR"];
+	const projectDir = process.env["CLAUDE_PROJECT_DIR"];
 	if (projectDir && projectDir.trim()) return projectDir;
+}
+//#endregion
+//#region src/hooks/_missed-injection.ts
+const MAX_BYTES = 256 * 1024;
+const KEEP_ENTRIES = 1e3;
+function missedInjectionsPath() {
+	return join(homedir(), ".agentmemory", "missed-injections.jsonl");
+}
+function missReason(err) {
+	return err instanceof Error && err.name === "TimeoutError" ? "timeout" : "connection";
+}
+function recordMissedInjection(hook, reason) {
+	try {
+		const path = missedInjectionsPath();
+		mkdirSync(join(homedir(), ".agentmemory"), { recursive: true });
+		const entry = {
+			at: (/* @__PURE__ */ new Date()).toISOString(),
+			hook,
+			reason
+		};
+		appendFileSync(path, JSON.stringify(entry) + "\n");
+		if (statSync(path).size > MAX_BYTES) writeFileSync(path, readFileSync(path, "utf-8").trimEnd().split("\n").slice(-KEEP_ENTRIES).join("\n") + "\n");
+	} catch {}
 }
 //#endregion
 //#region src/hooks/prompt-submit.ts
 hydrateHookEnv();
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
+const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
+const INJECT_TIMEOUT_MS = 1500;
 function authHeaders() {
 	const h = { "Content-Type": "application/json" };
 	if (SECRET) h["Authorization"] = `Bearer ${SECRET}`;
@@ -134,22 +155,50 @@ async function main() {
 	}
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
-	const sessionId = data.session_id || data.sessionId || data.conversation_id || "unknown";
+	const sessionId = data.session_id || "unknown";
 	const cwd = hookCwd(data) || process.cwd();
+	const project = resolveProject(cwd);
+	const prompt = data.prompt;
 	fetch(`${REST_URL}/agentmemory/observe`, {
 		method: "POST",
 		headers: authHeaders(),
 		body: JSON.stringify({
 			hookType: "prompt_submit",
 			sessionId,
-			project: resolveProject(cwd),
+			project,
 			cwd,
 			timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-			data: { prompt: data.prompt ?? data.userPrompt }
+			data: { prompt }
 		}),
 		signal: AbortSignal.timeout(3e3)
 	}).catch(() => {});
+	if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") await injectContext(sessionId, project, prompt);
 	setTimeout(() => process.exit(0), 500).unref();
+}
+async function injectContext(sessionId, project, prompt) {
+	try {
+		const res = await fetch(`${REST_URL}/agentmemory/prompt-context`, {
+			method: "POST",
+			headers: authHeaders(),
+			body: JSON.stringify({
+				sessionId,
+				project,
+				prompt
+			}),
+			signal: AbortSignal.timeout(INJECT_TIMEOUT_MS)
+		});
+		if (!res.ok) {
+			recordMissedInjection("prompt-submit", `http_${res.status}`);
+			return;
+		}
+		const result = await res.json();
+		if (result.context) process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+			hookEventName: "UserPromptSubmit",
+			additionalContext: result.context
+		} }));
+	} catch (err) {
+		recordMissedInjection("prompt-submit", missReason(err));
+	}
 }
 main().catch(() => process.exit(0));
 //#endregion
