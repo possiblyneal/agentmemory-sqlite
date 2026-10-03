@@ -517,7 +517,8 @@ export function createSessionLoader(
   }
 }
 
-// A result's project is its session's. Results with no session entry fall
+// A Global Memory matches every project, ahead of its session's project.
+// Otherwise a result's project is its session's. Results with no session entry fall
 // back to KV.memories, then to the Session Summary, and pass through when
 // neither has a project. Two cases arrive without a session:
 //   1. Synthetic sessionId: memories indexed via mem::remember use
@@ -542,7 +543,7 @@ export function createProjectMatcher(
     return memories.get(obsId)!
   }
   return async (sessionId, obsId) => {
-    if (obsId.startsWith('mem_') && (await loadMemory(obsId))?.global) return true
+    if (obsId.startsWith('mem_') && (await loadMemory(obsId))?.global === true) return true
     const session = await loadSession(sessionId)
     if (session) return session.project === project
     const memProject = (await loadMemory(obsId))?.project ?? null

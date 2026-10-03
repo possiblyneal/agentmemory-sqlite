@@ -1262,7 +1262,7 @@ export function registerApiTriggers(
         return { status_code: 400, body: { error: "global must be a boolean" } };
       }
       if (req.body.global && req.body.project !== undefined) {
-        return { status_code: 400, body: { error: "project and global cannot both be set" } };
+        return { status_code: 400, body: { error: "a Memory cannot have both a project and global" } };
       }
       const result = await sdk.trigger({
         function_id: "mem::remember",
@@ -2380,7 +2380,7 @@ export function registerApiTriggers(
       const project = req.query_params?.["project"];
       let filtered = latest ? memories.filter((m) => m.isLatest) : memories;
       if (typeof project === "string" && project) {
-        filtered = filtered.filter((m) => m.project === project);
+        filtered = filtered.filter((m) => m.project === project || m.global === true);
       }
       if (filterAgentId) {
         filtered = filtered.filter(
@@ -3243,7 +3243,7 @@ export function registerApiTriggers(
       let memories = await kv.list<import("../types.js").Memory>(KV.memories);
       let actions = await kv.list<import("../types.js").Action>(KV.actions);
       if (project) {
-        memories = memories.filter((m) => m.project === project);
+        memories = memories.filter((m) => m.project === project || m.global === true);
         actions = actions.filter((a) => a.project === project);
       }
       const body: Record<string, unknown> = {

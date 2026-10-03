@@ -86,6 +86,69 @@ describe("Global Memory (#95)", () => {
     });
   });
 
+  describe("supersession keeps the marker where it was put", () => {
+    const pref = "always run the test suite inside tmux before pushing any branch";
+
+    it("an unmarked save does not supersede a Global Memory", async () => {
+      const { memory: global } = await remember({ content: pref, global: true });
+      const { memory: plain } = await remember({ content: `${pref} today` });
+      expect((await kv.get<Memory>(KV.memories, global!.id))?.isLatest).not.toBe(false);
+      expect(plain?.supersedes ?? []).not.toContain(global!.id);
+    });
+
+    it("a project save does not supersede a Global Memory", async () => {
+      const { memory: global } = await remember({ content: pref, global: true });
+      await remember({ content: `${pref} today`, project: "api" });
+      expect((await kv.get<Memory>(KV.memories, global!.id))?.isLatest).not.toBe(false);
+    });
+
+    it("a global save does not supersede a project Memory", async () => {
+      const { memory: scoped } = await remember({ content: pref, project: "web" });
+      await remember({ content: `${pref} today`, global: true });
+      expect((await kv.get<Memory>(KV.memories, scoped!.id))?.isLatest).not.toBe(false);
+    });
+
+    it("a global save supersedes a Global Memory and stays global", async () => {
+      const { memory: old } = await remember({ content: pref, global: true });
+      const { memory: next } = await remember({ content: `${pref} today`, global: true });
+      expect((await kv.get<Memory>(KV.memories, old!.id))?.isLatest).toBe(false);
+      expect((await kv.get<Memory>(KV.memories, next!.id))?.global).toBe(true);
+    });
+  });
+
+  it("search does not treat a non-boolean stored marker as global", async () => {
+    const attached = await savedInApiSession("tmux imported marker");
+    await kv.set(KV.memories, attached.id, { ...attached, global: "yes" });
+    const result = (await sdk.trigger("mem::search", { query: "tmux", project: "web" })) as {
+      results: unknown[];
+    };
+    expect(result.results).toHaveLength(0);
+  });
+
+  describe("a project's list and mesh export include Global Memories", () => {
+    const get = (fn: string, query_params: Record<string, string>) =>
+      sdk.fns.get(fn)!({ headers: { authorization: `Bearer ${SECRET}` }, query_params }) as Promise<{
+        status_code: number;
+        body: { memories: Memory[] };
+      }>;
+
+    beforeEach(async () => {
+      await remember({ content: "global preference", global: true });
+      await remember({ content: "web only", project: "web" });
+      await remember({ content: "api only", project: "api" });
+    });
+
+    it("GET /memories?project=web", async () => {
+      const contents = (await get("api::memories", { project: "web" })).body.memories.map((m) => m.content);
+      expect(contents.sort()).toEqual(["global preference", "web only"]);
+    });
+
+    it("mesh export of web", async () => {
+      const contents = (await get("api::mesh-export", { project: "web" })).body.memories.map((m) => m.content);
+      expect(contents.sort()).toEqual(["global preference", "web only"]);
+    });
+  });
+
   describe("Recall from another project", () => {
     it("search from web returns a Global Memory saved in an api Session, and not an unmarked one", async () => {
       await savedInApiSession("tmux preference global marker", { global: true });

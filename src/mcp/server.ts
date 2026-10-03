@@ -217,7 +217,7 @@ export function registerMcpEndpoints(
               return { status_code: 400, body: { error: "global must be a boolean" } };
             }
             if (args.global && project !== undefined) {
-              return { status_code: 400, body: { error: "project and global cannot both be set" } };
+              return { status_code: 400, body: { error: "a Memory cannot have both a project and global" } };
             }
 
             const result = await sdk.trigger({ function_id: "mem::remember", payload: {

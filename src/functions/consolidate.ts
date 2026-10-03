@@ -165,10 +165,12 @@ export function registerConsolidateFunction(
           // cause one project's memory to silently evolve the other's — the
           // exact class of cross-project corruption this fix is designed to
           // prevent. An unscoped run (no data.project, background cron path)
-          // preserves the pre-existing behavior and may evolve any memory.
+          // may evolve any memory except a Global one, which no run evolves
+          // because the evolved Memory would lose its marker.
           const existingMatch = existingMemories.find(
             (m) =>
               m.title.toLowerCase() === parsed.title.toLowerCase() &&
+              m.global !== true &&
               (!scopedProject || !m.project || m.project === scopedProject),
           );
 

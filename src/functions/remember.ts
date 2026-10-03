@@ -135,6 +135,9 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           if (project && existing.project && existing.project !== project) {
             continue;
           }
+          // A Global Memory and a scoped one never replace each other, so
+          // supersession can neither strip the marker nor hand it to a project.
+          if ((existing.global === true) !== (data.global === true)) continue;
           const similarity = jaccardSimilarity(
             lowerContent,
             existing.content.toLowerCase(),

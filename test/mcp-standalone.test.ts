@@ -349,7 +349,7 @@ describe("handleToolCall", () => {
     );
     await expect(
       handleToolCall("memory_save", { content: "x", global: true, project: "demo" }, kv),
-    ).rejects.toThrow("project and global cannot both be set");
+    ).rejects.toThrow("a Memory cannot have both a project and global");
   });
 
   it("memory_sessions honours the limit arg (#139)", async () => {

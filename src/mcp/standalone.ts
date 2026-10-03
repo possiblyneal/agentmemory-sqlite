@@ -157,7 +157,7 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
         throw new Error("global must be a boolean");
       }
       if (args["global"] && v.project !== undefined) {
-        throw new Error("project and global cannot both be set");
+        throw new Error("a Memory cannot have both a project and global");
       }
       if (args["global"] === true) v.global = true;
       return v;
