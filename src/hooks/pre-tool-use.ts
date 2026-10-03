@@ -16,12 +16,12 @@ hydrateHookEnv();
 // It needs its own opt-in on top of the session-start one, so an Operator
 // can keep session-start Injection without paying per tool call:
 //   AGENTMEMORY_INJECT_CONTEXT=true
-//   AGENTMEMORY_INJECT_TOOL_CONTEXT=true   in ~/.agentmemory/.env
+//   AGENTMEMORY_INJECT_EVERY_TOOL_CALL=true   in ~/.agentmemory/.env
 // (read by hydrateHookEnv above on every hook run; a shell-exported value
 // wins) and restart Claude Code.
 const INJECT_CONTEXT =
   process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true" &&
-  process.env["AGENTMEMORY_INJECT_TOOL_CONTEXT"] === "true";
+  process.env["AGENTMEMORY_INJECT_EVERY_TOOL_CALL"] === "true";
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";

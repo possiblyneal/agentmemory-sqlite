@@ -11,7 +11,7 @@ import {
   isAutoCompressEnabled,
   isConsolidationEnabled,
   isContextInjectionEnabled,
-  isToolContextInjectionEnabled,
+  isEveryToolCallInjectionEnabled,
   isDropStaleIndexEnabled,
   getSqlitePath,
 } from "./config.js";
@@ -300,13 +300,13 @@ async function main() {
     );
   }
 
-  if (isToolContextInjectionEnabled()) {
+  if (isEveryToolCallInjectionEnabled()) {
     bootLog(
-      `WARNING: AGENTMEMORY_INJECT_TOOL_CONTEXT=true — the PreToolUse hook will inject up to ~4000 chars of memory context into every file-touching tool turn, on top of session-start Injection. Session input tokens grow with tool-call frequency. Unset AGENTMEMORY_INJECT_TOOL_CONTEXT to disable.`,
+      `WARNING: AGENTMEMORY_INJECT_EVERY_TOOL_CALL=true — the PreToolUse hook will inject up to ~4000 chars of memory context into every file-touching tool turn, on top of session-start Injection. Session input tokens grow with tool-call frequency. Unset AGENTMEMORY_INJECT_EVERY_TOOL_CALL to disable.`,
     );
   } else if (isContextInjectionEnabled()) {
     bootLog(
-      `Context injection: session start and per prompt (AGENTMEMORY_INJECT_CONTEXT=true). Set AGENTMEMORY_INJECT_TOOL_CONTEXT=true to also inject on every file-touching tool call.`,
+      `Context injection: session start and per prompt (AGENTMEMORY_INJECT_CONTEXT=true). Set AGENTMEMORY_INJECT_EVERY_TOOL_CALL=true to also inject on every file-touching tool call.`,
     );
   } else {
     bootLog(
