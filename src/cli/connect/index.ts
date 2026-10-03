@@ -63,7 +63,7 @@ export async function runConnect(args: string[]): Promise<void> {
   if (platform() === "win32") {
     p.intro("agentmemory connect");
     p.log.warn(
-      "Windows: automated `connect` is not supported yet. See https://github.com/rohitg00/agentmemory#other-agents for manual install steps.",
+      "Windows: automated `connect` is not supported yet. Install the Claude Code plugin from the possiblyneal/agentmemory-sqlite marketplace instead.",
     );
     p.outro("Windows: manual install required — see docs");
     return;
