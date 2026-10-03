@@ -12,7 +12,7 @@ hydrateHookEnv();
 // UserPromptSubmit, so the lifecycle is synthesized from PreInvocation and
 // Stop); the payload is camelCase and nests tool calls under `toolCall`; and
 // stdout must be a JSON object, which `pre-tool-use.mjs` breaks when
-// AGENTMEMORY_INJECT_CONTEXT=true makes it write raw context text.
+// tool-call Injection is on and it writes raw context text.
 //
 // Invoked as: node antigravity-bridge.mjs <PreInvocation|PreToolUse|PostToolUse|Stop>
 // Sources: antigravity.google/docs/hooks, antigravity.google/docs/cli/using

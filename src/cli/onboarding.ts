@@ -284,7 +284,7 @@ async function maybePromptContextInjection(envPath: string | null): Promise<void
   }
 
   p.log.info(
-    "Cost note: injection spends session tokens proportional to tool-call frequency. Default is off.",
+    "Cost note: injection adds a recalled-context block at each session start. Default is off.",
   );
 
   writePrefs({ injectContextChosen: true });

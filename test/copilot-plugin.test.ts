@@ -308,7 +308,7 @@ describe("Copilot hook scripts", () => {
         toolName: "read",
         toolArgs: { path: "src/index.ts" },
       },
-      { AGENTMEMORY_INJECT_CONTEXT: "true" },
+      { AGENTMEMORY_INJECT_CONTEXT: "true", AGENTMEMORY_INJECT_TOOL_CONTEXT: "true" },
     );
 
     expect(result.stdout).toBe("remembered context");
