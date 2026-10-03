@@ -84,8 +84,6 @@ describe("cli onboarding", () => {
     const preferences = JSON.parse(readFileSync(preferencesPath, "utf-8"));
     expect(preferences).toMatchObject({
       schemaVersion: 1,
-      lastAgent: null,
-      lastAgents: [],
       lastProvider: null,
       skipSplash: true,
     });

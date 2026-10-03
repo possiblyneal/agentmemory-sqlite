@@ -108,8 +108,6 @@ function shouldSkipInteractiveOnboarding(): boolean {
 
 function writeDefaultOnboardingPrefs(): OnboardingResult {
   writePrefs({
-    lastAgent: null,
-    lastAgents: [],
     lastProvider: null,
     skipSplash: true,
     firstRunAt: new Date().toISOString(),
@@ -243,8 +241,8 @@ async function offerClaudeCodeWiring(): Promise<void> {
     "Claude Code",
   );
   const confirmed = await p.confirm({
-    message: "Run `agentmemory connect` to wire Claude Code's MCP server now? [Y/n]",
-    initialValue: true,
+    message: "Wire Claude Code's MCP server now? Skip this if you install the marketplace plugin.",
+    initialValue: false,
   });
 
   if (p.isCancel(confirmed) || confirmed === false) {
