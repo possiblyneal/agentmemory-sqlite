@@ -6,6 +6,7 @@ import type {
 } from "../src/types.js";
 import { registerEvictFunction } from "../src/functions/evict.js";
 import { KV } from "../src/state/schema.js";
+import { logger } from "../src/logger.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -133,9 +134,9 @@ describe("mem::evict stale sessions", () => {
 
     registerEvictFunction(sdk as never, kv as never);
     sdk.registerFunction("event::session::stopped", async (payload) => {
-      // Recovery must pass skipConsolidation so the per-session fan-out is
-      // suppressed (evict runs a single corpus-wide pass afterwards).
-      expect(payload).toEqual({ sessionId, skipConsolidation: true });
+      // Recovery must say so, which suppresses the per-session fan-out
+      // (evict runs a single corpus-wide pass afterwards).
+      expect(payload).toEqual({ sessionId, recovery: true });
       expect(await kv.get(KV.sessions, sessionId)).toMatchObject({
         id: sessionId,
       });
@@ -168,7 +169,7 @@ describe("mem::evict stale sessions", () => {
   });
 
   it("bounds consolidation to one pass regardless of how many stale sessions are recovered", async () => {
-    // Regression (P1): before the skipConsolidation guard, N recovered
+    // Regression (P1): before the recovery guard, N recovered
     // sessions each triggered a forced full-corpus consolidate + crystallize
     // via the session::stopped fan-out, on top of evict's final pass — an
     // N+1 amplification of an expensive LLM path. Recovery must stay O(1).
@@ -206,12 +207,74 @@ describe("mem::evict stale sessions", () => {
     // own fan-out...
     expect(stoppedPayloads).toHaveLength(3);
     for (const p of stoppedPayloads) {
-      expect(p).toMatchObject({ skipConsolidation: true });
+      expect(p).toMatchObject({ recovery: true });
     }
     // ...and the corpus-wide consolidation + crystallization run exactly once.
     const fnIds = calls.map((c) => c.function_id);
     expect(fnIds.filter((f) => f === "mem::consolidate-pipeline")).toHaveLength(1);
     expect(fnIds.filter((f) => f === "mem::auto-crystallize")).toHaveLength(1);
+  });
+
+  it("recovers Sessions one at a time, an Abandoned one included", async () => {
+    const ids = ["ses_a", "ses_b"];
+    const store: Store = new Map([
+      [
+        KV.sessions,
+        new Map(ids.map((id) => [id, { ...makeSession(id), status: "abandoned" as const }])),
+      ],
+      [KV.summaries, new Map()],
+      [KV.config, new Map()],
+      [KV.audit, new Map()],
+    ]);
+    for (const id of ids) {
+      store.set(KV.observations(id), new Map([["obs_1", makeObservation(id)]]));
+    }
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    const events: string[] = [];
+    sdk.registerFunction("event::session::stopped", async (payload) => {
+      const { sessionId } = payload as { sessionId: string };
+      events.push(`start ${sessionId}`);
+      await new Promise((r) => setTimeout(r, 5));
+      events.push(`end ${sessionId}`);
+      return { success: true };
+    });
+    sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
+
+    const result = (await sdk.trigger({ function_id: "mem::evict", payload: {} })) as {
+      staleSessions: number;
+    };
+
+    expect(events).toEqual(["start ses_a", "end ses_a", "start ses_b", "end ses_b"]);
+    expect(result.staleSessions).toBe(2);
+  });
+
+  it("does not start a second recovery sweep while one is running", async () => {
+    const sessionId = "ses_stale";
+    const kv = mockKV(storeForObservedSession(sessionId));
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    let recoveries = 0;
+    sdk.registerFunction("event::session::stopped", async () => {
+      recoveries++;
+      await new Promise((r) => setTimeout(r, 5));
+      return { success: true };
+    });
+    sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
+
+    await Promise.all([
+      sdk.trigger({ function_id: "mem::evict", payload: {} }),
+      sdk.trigger({ function_id: "mem::evict", payload: {} }),
+    ]);
+
+    expect(recoveries).toBe(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("recovery already running"),
+      { staleSessions: 1 },
+    );
   });
 
   it("keeps a stale observed session when recovery fails", async () => {

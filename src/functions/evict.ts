@@ -62,9 +62,10 @@ async function recoverStaleSession(
   try {
     const result = await sdk.trigger({
       function_id: "event::session::stopped",
-      // Suppress the per-session consolidation fan-out: eviction runs a
-      // single corpus-wide consolidation pass after all recoveries instead.
-      payload: { sessionId, skipConsolidation: true },
+      // Recovery holds one LLM slot and suppresses the per-session
+      // consolidation fan-out: eviction runs a single corpus-wide
+      // consolidation pass after all recoveries instead.
+      payload: { sessionId, recovery: true },
     });
     if (!isValidRecoveryResult(result)) {
       logger.warn("Stale session recovery failed", {
@@ -93,7 +94,7 @@ async function runRecoveredSessionConsolidation(sdk: ISdk): Promise<void> {
       payload: { tier: "all", force: true },
     });
     // One crystallization pass for the batch (the per-session fan-out was
-    // suppressed with skipConsolidation), keeping recovered sessions
+    // suppressed on the recovery path), keeping recovered sessions
     // consistent with normally-stopped ones without the N-fold amplification.
     await sdk.trigger({
       function_id: "mem::auto-crystallize",
@@ -106,7 +107,68 @@ async function runRecoveredSessionConsolidation(sdk: ISdk): Promise<void> {
   }
 }
 
+async function recoverOrEvictStaleSession(
+  sdk: ISdk,
+  kv: StateKV,
+  sessionId: string,
+): Promise<{ recovered: boolean; evicted: boolean }> {
+  const kept = { recovered: false, evicted: false };
+  const observations = await kv
+    .list<CompressedObservation | RawObservation>(KV.observations(sessionId))
+    .catch((err) => {
+      logger.warn("Stale session observation scan failed", {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
+  if (!observations) return kept;
+
+  // A raw row this old is a compression that never ran, so it is
+  // compressed synthetically here; otherwise the Session could
+  // never be summarized and would be retried on every run.
+  let recovered = false;
+  if (observations.length > 0) {
+    const raw = observations.filter(
+      (o): o is RawObservation => !isCompressedObservation(o),
+    );
+    try {
+      for (const o of raw) {
+        await storeSyntheticCompression(kv, { ...o, sessionId });
+      }
+    } catch (err) {
+      logger.warn("Stale session compression failed", {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return kept;
+    }
+    recovered = await recoverStaleSession(sdk, sessionId);
+    if (!recovered) return kept;
+  }
+
+  try {
+    await kv.delete(KV.sessions, sessionId);
+  } catch (err) {
+    logger.warn("Eviction delete failed", {
+      resource: "session",
+      id: sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { recovered, evicted: false };
+  }
+  await recordAudit(kv, "delete", "mem::evict", [sessionId], {
+    resource: "session",
+    reason: recovered
+      ? "stale_session_recovered_then_evicted"
+      : "stale_session_without_summary",
+    dryRun: false,
+  });
+  return { recovered, evicted: true };
+}
+
 export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
+  let recoveryRunning = false;
   sdk.registerFunction("mem::evict", 
     async (data: { dryRun?: boolean }): Promise<EvictionStats> => {
       const dryRun = data?.dryRun ?? false;
@@ -127,85 +189,49 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         dryRun,
       };
 
-      let recoveredStaleSessions = 0;
       const sessions = await kv.list<Session>(KV.sessions).catch(() => []);
       const summaries = await kv
         .list<SessionSummary>(KV.summaries)
         .catch(() => []);
       const summaryIds = new Set(summaries.map((s) => s.sessionId));
 
-      for (const session of sessions) {
-        if (!session.startedAt) continue;
-        const age = now - new Date(session.startedAt).getTime();
-        const staleDays = cfg.staleSessionDays * MS_PER_DAY;
-        if (age > staleDays && !summaryIds.has(session.id)) {
-          if (dryRun) {
-            stats.staleSessions++;
-          } else {
-            const observations = await kv
-              .list<CompressedObservation | RawObservation>(
-                KV.observations(session.id),
-              )
-              .catch((err) => {
-                logger.warn("Stale session observation scan failed", {
-                  sessionId: session.id,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                return null;
-              });
-            if (!observations) continue;
-
-            // A raw row this old is a compression that never ran, so it is
-            // compressed synthetically here; otherwise the Session could
-            // never be summarized and would be retried on every run.
-            let recovered = false;
-            if (observations.length > 0) {
-              const raw = observations.filter(
-                (o): o is RawObservation => !isCompressedObservation(o),
-              );
-              try {
-                for (const o of raw) {
-                  await storeSyntheticCompression(kv, {
-                    ...o,
-                    sessionId: session.id,
-                  });
-                }
-              } catch (err) {
-                logger.warn("Stale session compression failed", {
-                  sessionId: session.id,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                continue;
-              }
-              recovered = await recoverStaleSession(sdk, session.id);
-              if (!recovered) continue;
-              recoveredStaleSessions++;
-            }
-
-            try {
-              await kv.delete(KV.sessions, session.id);
-              stats.staleSessions++;
-            } catch (err) {
-              logger.warn("Eviction delete failed", {
-                resource: "session",
-                id: session.id,
-                error: err instanceof Error ? err.message : String(err),
-              });
-              continue;
-            }
-            await recordAudit(kv, "delete", "mem::evict", [session.id], {
-              resource: "session",
-              reason: recovered
-                ? "stale_session_recovered_then_evicted"
-                : "stale_session_without_summary",
-              dryRun,
-            });
+      const staleMs = cfg.staleSessionDays * MS_PER_DAY;
+      const staleSessions = sessions.filter(
+        (session) =>
+          session.startedAt &&
+          now - new Date(session.startedAt).getTime() > staleMs &&
+          !summaryIds.has(session.id),
+      );
+      // One recovery sweep at a time, so the sweep's one-LLM-slot bound holds
+      // when a second eviction is triggered while the first is still running.
+      // A second sweep skips rather than queuing behind a keyed lock: it would
+      // mostly repeat the running sweep's Sessions, and the next sweep finds
+      // any that went stale since.
+      if (dryRun) {
+        stats.staleSessions = staleSessions.length;
+      } else if (recoveryRunning) {
+        logger.info("Stale-Session recovery already running; this sweep skips it", {
+          staleSessions: staleSessions.length,
+        });
+      } else {
+        recoveryRunning = true;
+        try {
+          let recoveredStaleSessions = 0;
+          for (const session of staleSessions) {
+            const { recovered, evicted } = await recoverOrEvictStaleSession(
+              sdk,
+              kv,
+              session.id,
+            );
+            if (recovered) recoveredStaleSessions++;
+            if (evicted) stats.staleSessions++;
           }
+          if (recoveredStaleSessions > 0) {
+            await runRecoveredSessionConsolidation(sdk);
+          }
+        } finally {
+          recoveryRunning = false;
         }
-      }
-
-      if (!dryRun && recoveredStaleSessions > 0) {
-        await runRecoveredSessionConsolidation(sdk);
       }
 
       const projectObs = new Map<string, CompressedObservation[]>();
