@@ -23,7 +23,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
 
   beforeEach(() => {
     resetHandleForTests();
-    process.env["AGENTMEMORY_URL"] = BASE;
+    delete process.env["AGENTMEMORY_URL"];
     delete process.env["AGENTMEMORY_SECRET"];
   });
 
@@ -521,7 +521,7 @@ describe("@agentmemory/mcp standalone — resources and prompts proxy (rohitg00/
 
   beforeEach(() => {
     resetHandleForTests();
-    process.env["AGENTMEMORY_URL"] = BASE;
+    delete process.env["AGENTMEMORY_URL"];
     delete process.env["AGENTMEMORY_SECRET"];
   });
 
@@ -568,5 +568,51 @@ describe("@agentmemory/mcp standalone — resources and prompts proxy (rohitg00/
     expect(await handlePromptsList()).toEqual({ prompts: [] });
     await expect(handleResourcesRead("agentmemory://status")).rejects.toThrow(/running agentmemory server/);
     await expect(handlePromptsGet("recall_context", {})).rejects.toThrow(/running agentmemory server/);
+  });
+});
+
+describe("@agentmemory/mcp standalone — explicit daemon must not fall back (rohitg00/agentmemory#273)", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    resetHandleForTests();
+    globalThis.fetch = originalFetch;
+    delete process.env["AGENTMEMORY_URL"];
+    delete process.env["AGENTMEMORY_FORCE_PROXY"];
+  });
+
+  it("errors naming the URL when AGENTMEMORY_URL is set and the daemon is down", async () => {
+    resetHandleForTests();
+    process.env["AGENTMEMORY_URL"] = "http://daemon.invalid:3111";
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const kv = new InMemoryKV();
+    await expect(
+      handleToolCall("memory_save", { content: "keep me" }, kv),
+    ).rejects.toThrow("agentmemory daemon unreachable at http://daemon.invalid:3111");
+    expect((await kv.list("mem:memories")).length).toBe(0);
+  });
+
+  it("errors under AGENTMEMORY_FORCE_PROXY when the call cannot reach the daemon", async () => {
+    resetHandleForTests();
+    delete process.env["AGENTMEMORY_URL"];
+    process.env["AGENTMEMORY_FORCE_PROXY"] = "1";
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    await expect(handleToolCall("memory_save", { content: "keep me" })).rejects.toThrow(
+      "agentmemory daemon unreachable at http://localhost:3111",
+    );
+  });
+
+  it("keeps the local fallback when no daemon URL was named", async () => {
+    resetHandleForTests();
+    delete process.env["AGENTMEMORY_URL"];
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const res = await handleToolCall("memory_save", { content: "local ok" }, new InMemoryKV());
+    expect(res.content[0].text).toContain("saved");
   });
 });

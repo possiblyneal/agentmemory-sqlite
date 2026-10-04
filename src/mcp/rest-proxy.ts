@@ -23,6 +23,8 @@ export interface ProxyHandle {
 
 export interface LocalHandle {
   mode: "local";
+  /** Set when the daemon was named explicitly: local fallback is forbidden. */
+  unreachableUrl?: string;
 }
 
 export type Handle = ProxyHandle | LocalHandle;
@@ -45,6 +47,18 @@ export function isBlankOrPlaceholder(raw: string | undefined): raw is undefined 
 export function resolveEnvOrEmpty(name: string): string {
   const raw = process.env[name];
   return isBlankOrPlaceholder(raw) ? "" : raw;
+}
+
+function daemonNamedExplicitly(): boolean {
+  return forceProxy() || resolveEnvOrEmpty("AGENTMEMORY_URL") !== "";
+}
+
+export function daemonUnreachableMessage(url: string): string {
+  return `agentmemory daemon unreachable at ${url}; memory is unavailable and nothing was saved. Start the daemon or fix AGENTMEMORY_URL.`;
+}
+
+export function strictDaemonUrl(): string | null {
+  return daemonNamedExplicitly() ? baseUrl() : null;
 }
 
 function baseUrl(): string {
@@ -167,7 +181,9 @@ export async function resolveHandle(): Promise<Handle> {
       cachedAt = Date.now();
       return handle;
     }
-    const local: LocalHandle = { mode: "local" };
+    const local: LocalHandle = daemonNamedExplicitly()
+      ? { mode: "local", unreachableUrl: url }
+      : { mode: "local" };
     cached = local;
     cachedAt = Date.now();
     return local;
