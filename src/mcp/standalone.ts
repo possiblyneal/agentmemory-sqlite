@@ -121,6 +121,7 @@ interface Validated {
   files?: string[];
   project?: string;
   agentId?: string;
+  sessionId?: string;
   global?: boolean;
   query?: string;
   limit?: number;
@@ -153,6 +154,9 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       }
       if (typeof args["agentId"] === "string" && args["agentId"].trim()) {
         v.agentId = args["agentId"].trim();
+      }
+      if (typeof args["sessionId"] === "string" && args["sessionId"].trim()) {
+        v.sessionId = args["sessionId"].trim();
       }
       if (args["global"] !== undefined && typeof args["global"] !== "boolean") {
         throw new Error("global must be a boolean");
@@ -224,6 +228,7 @@ async function handleProxy(
           files: v.files,
           ...(v.project !== undefined && { project: v.project }),
           ...(v.agentId !== undefined && { agentId: v.agentId }),
+          ...(v.sessionId !== undefined && { sessionId: v.sessionId }),
           ...(v.global && { global: true }),
         }),
       });
@@ -304,7 +309,7 @@ async function handleLocal(
         strength: 7,
         version: 1,
         isLatest: true,
-        sessionIds: [],
+        sessionIds: v.sessionId ? [v.sessionId] : [],
         ...(v.project !== undefined && { project: v.project }),
         ...(v.global && { global: true }),
       });

@@ -111,6 +111,10 @@ export const CORE_TOOLS: McpToolDef[] = [
             "Agent identity to scope this memory to. When set, agent-scoped recall " +
             "and search only surface it for the same agentId. Omit for shared memory.",
         },
+        sessionId: {
+          type: "string",
+          description: "Session ID to attribute this saved memory to",
+        },
       },
       required: ["content"],
     },

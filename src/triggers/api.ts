@@ -1196,6 +1196,7 @@ export function registerApiTriggers(
         sourceObservationIds?: string[];
         project?: string;
         agentId?: string;
+        sessionId?: string;
         global?: boolean;
       }>,
     ): Promise<Response> => {
@@ -1233,6 +1234,9 @@ export function registerApiTriggers(
           ...(req.body.global === true && { global: true }),
           ...(typeof req.body.agentId === "string" && req.body.agentId.trim()
             ? { agentId: req.body.agentId.trim() }
+            : {}),
+          ...(typeof req.body.sessionId === "string" && req.body.sessionId.trim()
+            ? { sessionId: req.body.sessionId.trim() }
             : {}),
         },
       });
