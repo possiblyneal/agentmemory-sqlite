@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { existsSync } from "node:fs";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -12,23 +13,13 @@ import {
   isUnstoredOnFullDisk,
   unstoredOnFullDisk,
 } from "../src/functions/observe-retry.js";
-import { mockKV } from "./helpers/mocks.js";
+import { getImageRefCount } from "../src/functions/image-refs.js";
+import { KV } from "../src/state/schema.js";
+import { deleteImage } from "../src/utils/image-store.js";
+import { mockKV, mockSdk } from "./helpers/mocks.js";
 import { logger } from "../src/logger.js";
 
 const DISK_FULL = "database or disk is full";
-
-function mockSdk() {
-  const fns = new Map<string, Function>();
-  return {
-    registerFunction: (id: string, h: Function) => {
-      fns.set(id, h);
-    },
-    registerTrigger: () => {},
-    trigger: async (input: { function_id: string; payload?: unknown }) =>
-      fns.get(input.function_id)?.(input.payload),
-    _fns: fns,
-  };
-}
 
 function observeRequest(n: number, data: Record<string, unknown> = { n }) {
   return {
@@ -50,14 +41,15 @@ describe("api::observe on a full disk", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    sdk = mockSdk();
+    sdk = mockSdk({ looseTrigger: true });
     registerApiTriggers(sdk as never, mockKV() as never);
     diskFull = true;
     stored = [];
-    sdk.registerFunction("mem::observe", async (payload: { data: { n: number } }) => {
+    sdk.registerFunction("mem::observe", async (payload) => {
       if (diskFull) throw unstoredOnFullDisk();
-      stored.push(payload.data.n);
-      return { observationId: `obs-${payload.data.n}` };
+      const { n } = (payload as { data: { n: number } }).data;
+      stored.push(n);
+      return { observationId: `obs-${n}` };
     });
   });
 
@@ -65,7 +57,7 @@ describe("api::observe on a full disk", () => {
     vi.useRealTimers();
   });
 
-  const observe = (n: number) => sdk._fns.get("api::observe")!(observeRequest(n));
+  const observe = (n: number) => sdk.fns.get("api::observe")!(observeRequest(n));
 
   it("accepts the Observation and stores it once the disk frees", async () => {
     const res = await observe(1);
@@ -112,15 +104,17 @@ describe("api::observe on a full disk", () => {
     );
   });
 
-  it("drops the newest Observation past the byte cap and keeps the queued ones", async () => {
+  it("drops an Observation past the byte cap rather than storing it ahead of the queue", async () => {
     const padding = "x".repeat(4 * 1024 * 1024);
     const fits = Math.floor(OBSERVE_RETRY_CAPACITY_BYTES / (padding.length + 1024));
     const observeLarge = (n: number) =>
-      sdk._fns.get("api::observe")!(observeRequest(n, { n, padding }));
+      sdk.fns.get("api::observe")!(observeRequest(n, { n, padding }));
     for (let n = 0; n < fits; n++) {
       expect((await observeLarge(n)).status_code).toBe(202);
     }
-    await expect(observeLarge(fits)).rejects.toThrow(DISK_FULL);
+    diskFull = false;
+    await expect(observeLarge(fits)).rejects.toThrow("at its cap");
+    expect(stored).toEqual([]);
 
     diskFull = false;
     await vi.advanceTimersByTimeAsync(OBSERVE_RETRY_INTERVAL_MS);
@@ -154,13 +148,67 @@ describe("mem::observe on a full disk", () => {
   }
 
   async function observeWith(kv: ReturnType<typeof mockKV>) {
-    const sdk = mockSdk();
+    const sdk = mockSdk({ looseTrigger: true });
     registerObserveFunction(sdk as never, kv as never);
     return sdk.trigger({
       function_id: "mem::observe",
       payload: observeRequest(1).body,
     });
   }
+
+  const imageRequest = (n: number, image: string) =>
+    observeRequest(n, { tool_name: "screenshot", tool_output: { image_data: image } }).body;
+  const uniqueImage = () =>
+    "data:image/png;base64," + Buffer.from(`disk-full-${process.pid}-${Math.random()}`).toString("base64");
+  const savedImages: string[] = [];
+
+  afterEach(async () => {
+    for (const filePath of savedImages.splice(0)) await deleteImage(filePath);
+  });
+
+  it("deletes a newly written image when its ref cannot be stored", async () => {
+    const kv = failingKV((scope) => scope === KV.imageRefs);
+    const sdk = mockSdk({ looseTrigger: true });
+    registerObserveFunction(sdk as never, kv as never);
+    const deltas: number[] = [];
+    sdk.registerFunction("mem::disk-size-delta", async (p) => {
+      deltas.push((p as { deltaBytes: number }).deltaBytes);
+    });
+
+    const err = await sdk
+      .trigger({ function_id: "mem::observe", payload: imageRequest(1, uniqueImage()) })
+      .catch((e: unknown) => e);
+
+    expect(isUnstoredOnFullDisk(err)).toBe(true);
+    expect(deltas).toHaveLength(2);
+    expect(deltas[0]! + deltas[1]!).toBe(0);
+  });
+
+  it("retries a failed image ref rollback once the disk has room", async () => {
+    let full = true;
+    const kv = failingKV((scope) => full && scope.startsWith("mem:obs:"));
+    const del = kv.delete;
+    kv.delete = async (scope: string, key: string) => {
+      if (full) throw new Error(DISK_FULL);
+      return del(scope, key);
+    };
+    const sdk = mockSdk({ looseTrigger: true });
+    registerObserveFunction(sdk as never, kv as never);
+    const image = uniqueImage();
+
+    await expect(
+      sdk.trigger({ function_id: "mem::observe", payload: imageRequest(1, image) }),
+    ).rejects.toThrow(DISK_FULL);
+    const [filePath] = [...(kv.store.get(KV.imageRefs)?.keys() ?? [])];
+    savedImages.push(filePath!);
+    expect(await getImageRefCount(kv as never, filePath!)).toBe(1);
+
+    full = false;
+    await sdk.trigger({ function_id: "mem::observe", payload: observeRequest(2).body });
+
+    expect(await getImageRefCount(kv as never, filePath!)).toBe(0);
+    expect(existsSync(filePath!)).toBe(false);
+  });
 
   it("marks the Observation unstored when its row write fails", async () => {
     const kv = failingKV((scope) => scope.startsWith("mem:obs:"));

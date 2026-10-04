@@ -11,7 +11,7 @@ import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
 import { safeAudit } from "./audit.js";
-import { decrementImageRef } from "./image-refs.js";
+import { decrementImageRef, deleteUnreferencedImage, incrementImageRef } from "./image-refs.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { recordProjectActivity } from "../state/project-time.js";
@@ -180,6 +180,11 @@ export function registerObserveFunction(
   dedupMap?: DedupMap,
   maxObservationsPerSession?: number,
 ): void {
+  // An image ref whose rollback failed on a full disk; retried on each later
+  // Observation until the disk has room. A restart forgets it, as it does the
+  // disk-full queue.
+  const pendingRefRollbacks: string[] = [];
+
   sdk.registerFunction("mem::observe", 
     async (payload: HookPayload) => {
 
@@ -302,6 +307,13 @@ export function registerObserveFunction(
           raw.agentId = inheritedAgentId;
         }
 
+        // Before this Observation saves its image, so a retried rollback cannot
+        // delete a file this Observation is about to reference.
+        for (const filePath of pendingRefRollbacks.splice(0)) {
+          await decrementImageRef(kv, sdk, filePath).catch(() => pendingRefRollbacks.push(filePath));
+        }
+
+        let imageBytesWritten = 0;
         if (pendingImageData && (pendingImageData.startsWith("data:image/") || pendingImageData.startsWith("iVBORw0KGgo") || pendingImageData.startsWith("/9j/"))) {
           const { filePath, bytesWritten } = await saveImageToDisk(pendingImageData).catch(
             (error: NodeJS.ErrnoException) => {
@@ -309,6 +321,7 @@ export function registerObserveFunction(
             },
           );
           raw.imageData = filePath;
+          imageBytesWritten = bytesWritten;
           sdk.trigger({
             function_id: "mem::disk-size-delta",
             payload: { deltaBytes: bytesWritten },
@@ -327,31 +340,30 @@ export function registerObserveFunction(
           }
         }
 
-        let imageRefTaken = false;
+        let heldImageRef: string | undefined;
         try {
           if (raw.imageData) {
-            const { incrementImageRef } = await import("./image-refs.js");
             await incrementImageRef(kv, raw.imageData);
-            imageRefTaken = true;
+            heldImageRef = raw.imageData;
           }
           await kv.set(KV.observations(payload.sessionId), obsId, raw);
         } catch (error) {
-          if (imageRefTaken && raw.imageData) {
-            // Roll back the ref taken above. decrementImageRef deletes the file
-            // only when no other observation still references it (deduped images
-            // survive) and emits the disk-size delta itself — deleting the file
-            // directly here would orphan shared images and leave a stale ref.
-            // If the rollback itself fails, log it but still surface the
-            // original write error (the more useful failure to diagnose).
+          if (heldImageRef) {
+            // decrementImageRef deletes the file only when no other observation
+            // still references it (deduped images survive) and emits the
+            // disk-size delta itself. A rollback that fails is retried later
+            // rather than leaving the file referenced forever.
             try {
-              const { decrementImageRef } = await import("./image-refs.js");
-              await decrementImageRef(kv, sdk, raw.imageData);
+              await decrementImageRef(kv, sdk, heldImageRef);
             } catch (rollbackError) {
+              pendingRefRollbacks.push(heldImageRef);
               logger.error("Failed to roll back image ref after observation write failure", {
-                imageRef: raw.imageData,
+                imageRef: heldImageRef,
                 error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
               });
             }
+          } else if (raw.imageData && imageBytesWritten > 0) {
+            await deleteUnreferencedImage(kv, sdk, raw.imageData).catch(() => {});
           }
           if (isSqliteFull(error)) throw unstoredOnFullDisk();
           throw error;
@@ -359,9 +371,19 @@ export function registerObserveFunction(
 
         // Evicting only after the row is stored means a write that fails on a
         // full disk, and each retry of it, costs the Session nothing.
+        // The row is stored, so an eviction error must not fail the observe:
+        // the hook would see a 500 and the Session's count would miss this row.
         const capEvicted =
           maxObservationsPerSession && maxObservationsPerSession > 0
-            ? await evictOverCap(sdk, kv, payload.sessionId, maxObservationsPerSession, obsId)
+            ? await evictOverCap(sdk, kv, payload.sessionId, maxObservationsPerSession, obsId).catch(
+                (err) => {
+                  logger.warn("Session cap eviction failed", {
+                    sessionId: payload.sessionId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                  return 0;
+                },
+              )
             : 0;
 
         if (dedupMap && dedupHash) {

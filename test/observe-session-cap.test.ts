@@ -200,6 +200,39 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect((await kv.list<{ id: string }>(KV.observations(SESSION))).map((o) => o.id)).toEqual(["a", "b"]);
   });
 
+  it("stores the Observation and counts it when eviction fails", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    await kv.set(KV.observations(SESSION), "a", stored("a", 2, "2026-01-01T00:00:00Z"));
+    await kv.set(KV.sessions, SESSION, {
+      id: SESSION,
+      project: "p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      status: "active",
+      observationCount: 1,
+    });
+    const list = kv.list;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      if (scope === KV.observations(SESSION)) throw new Error("boom");
+      return list<T>(scope);
+    };
+    registerObserveFunction(sdk as never, kv as never, undefined, 1);
+
+    const result = (await sdk.trigger({
+      function_id: "mem::observe",
+      payload: {
+        sessionId: SESSION,
+        hookType: "post_tool_use",
+        timestamp: "2026-05-01T00:00:00Z",
+        data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+      },
+    })) as { observationId?: string };
+
+    expect(result.observationId).toBeTruthy();
+    expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
+  });
+
   it("evicts nothing under the cap", async () => {
     const { ids } = await setup([stored("a", 1, "2026-01-01T00:00:00Z")], 3);
     expect(ids).toHaveLength(2);

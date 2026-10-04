@@ -53,7 +53,10 @@ export async function saveImageToDisk(base64Data: string): Promise<{ filePath: s
   }
 
   const buffer = Buffer.from(cleanBase64, "base64");
-  await writeFile(filePath, buffer);
+  await writeFile(filePath, buffer).catch(async (error: unknown) => {
+    await unlink(filePath).catch(() => {});
+    throw error;
+  });
 
   const s = await stat(filePath);
 

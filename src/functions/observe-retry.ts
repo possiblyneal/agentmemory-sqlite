@@ -10,7 +10,7 @@ export const OBSERVE_RETRY_INTERVAL_MS = 30_000;
 // The Engine rethrows handler errors as InprocInvocationError, which keeps the
 // message but not node:sqlite's errcode, so both checks match on message text.
 const SQLITE_FULL_MESSAGE = "database or disk is full";
-const UNSTORED_PREFIX = "Observation not stored: ";
+const UNSTORED_FULL_MESSAGE = "Observation not stored: " + SQLITE_FULL_MESSAGE;
 
 export function isSqliteFull(err: unknown): boolean {
   return err instanceof Error && err.message.includes(SQLITE_FULL_MESSAGE);
@@ -19,11 +19,11 @@ export function isSqliteFull(err: unknown): boolean {
 // Only a failed row write is safe to replay. A failure after the row is stored
 // would replay as a duplicate, or as a no-op once dedup has recorded it.
 export function unstoredOnFullDisk(): Error {
-  return new Error(UNSTORED_PREFIX + SQLITE_FULL_MESSAGE);
+  return new Error(UNSTORED_FULL_MESSAGE);
 }
 
 export function isUnstoredOnFullDisk(err: unknown): boolean {
-  return err instanceof Error && err.message.includes(UNSTORED_PREFIX + SQLITE_FULL_MESSAGE);
+  return err instanceof Error && err.message.includes(UNSTORED_FULL_MESSAGE);
 }
 
 export class ObserveRetryQueue {
@@ -36,9 +36,16 @@ export class ObserveRetryQueue {
   constructor(private readonly observe: (payload: HookPayload) => Promise<unknown>) {}
 
   // Once anything is queued, later Observations queue behind it so the Session
-  // stores them in arrival order; each one also prompts a drain.
+  // stores them in arrival order; each one also prompts a drain. Past the cap
+  // an Observation is dropped rather than written ahead of the queue.
   async submit(payload: HookPayload): Promise<{ queued: true } | { queued: false; result: unknown }> {
-    if (this.pending.length > 0 && this.enqueue(payload)) {
+    if (this.pending.length > 0) {
+      if (!this.enqueue(payload)) {
+        logger.error("Dropped Observation: the disk-full queue is at its cap", {
+          sessionId: payload.sessionId,
+        });
+        throw new Error("Observation not stored: disk-full queue is at its cap");
+      }
       void this.drain();
       return { queued: true };
     }
