@@ -187,6 +187,14 @@ describe("mem::context — pinned slot injection", () => {
       expect(b.context).not.toContain("alpha-ctx");
     });
 
+    it("trims the Session's project the way the slot tools do", async () => {
+      await seedPinnedSlot(kv, "project_context", "alpha-ctx", "project", "alpha");
+
+      const result = await handler({ sessionId: "ses_t", project: " alpha " });
+
+      expect(result.context).toContain("alpha-ctx");
+    });
+
     it("never injects pre-upgrade flat project slots", async () => {
       await kv.set(KV.legacySlots, "project_context", {
         label: "project_context",

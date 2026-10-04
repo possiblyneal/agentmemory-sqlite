@@ -17,7 +17,8 @@ export const PROJECT_OMITTED_CLAUSE = "Leave it out to search every project.";
 export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} ${PROJECT_OMITTED_CLAUSE}`;
 
 // rohitg00/agentmemory#1108: a project slot belongs to one project.
-export const SLOT_PROJECT_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} Project slots are reached only through it; leave it out to reach global slots alone.`;
+const SLOT_PROJECT_SENTENCE =
+  "Project slots are reached only through project; leave it out to reach global slots alone.";
 
 export type McpToolDef = {
   name: string;
@@ -931,29 +932,30 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
   {
     name: "memory_slot_list",
     description:
-      "List the global slots and, given project, that project's slots. Slots are editable, size-limited memory units the agent can read and modify across sessions. `legacy` lists pre-upgrade project slots that no project owns and that are never injected; copy what is worth keeping into a project slot.",
+      "List the global slots and, given project, that project's slots. Slots are editable, size-limited memory units the agent can read and modify across sessions. `legacy` lists pre-upgrade project slots that no project owns and that are never injected; copy what is worth keeping into a project slot. " +
+      SLOT_PROJECT_SENTENCE,
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: SLOT_PROJECT_DESCRIPTION },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
     },
   },
   {
     name: "memory_slot_get",
-    description: "Read a single slot by label.",
+    description: `Read a single slot by label. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label (e.g. 'persona', 'pending_items')" },
-        project: { type: "string", description: SLOT_PROJECT_DESCRIPTION },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label"],
     },
   },
   {
     name: "memory_slot_create",
-    description: "Create a new slot. Reject if a slot with the same label already exists.",
+    description: `Create a new slot. Reject if a slot with the same label already exists. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -963,7 +965,7 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
         description: { type: "string", description: "What this slot is for" },
         pinned: { type: "string", description: "'false' to exclude from context injection; default true" },
         scope: { type: "string", description: "'project' (default) or 'global' (shared across projects)" },
-        project: { type: "string", description: SLOT_PROJECT_DESCRIPTION },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label"],
     },
@@ -971,38 +973,38 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
   {
     name: "memory_slot_append",
     description:
-      "Append text to an existing slot. Fails with 413 if the append would exceed the slot's sizeLimit — agent must compact via memory_slot_replace first.",
+      `Append text to an existing slot. Fails with 413 if the append would exceed the slot's sizeLimit — agent must compact via memory_slot_replace first. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label" },
         text: { type: "string", description: "Text to append" },
-        project: { type: "string", description: SLOT_PROJECT_DESCRIPTION },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label", "text"],
     },
   },
   {
     name: "memory_slot_replace",
-    description: "Replace slot content in place. Fails if content exceeds sizeLimit.",
+    description: `Replace slot content in place. Fails if content exceeds sizeLimit. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label" },
         content: { type: "string", description: "New full content" },
-        project: { type: "string", description: SLOT_PROJECT_DESCRIPTION },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label", "content"],
     },
   },
   {
     name: "memory_slot_delete",
-    description: "Delete a slot. Seeded default slots can be deleted unless marked readOnly.",
+    description: `Delete a slot. Seeded default slots can be deleted unless marked readOnly. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label" },
-        project: { type: "string", description: SLOT_PROJECT_DESCRIPTION },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label"],
     },

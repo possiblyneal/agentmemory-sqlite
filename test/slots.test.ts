@@ -23,8 +23,7 @@ function mockKV() {
   };
 }
 
-function wire() {
-  const kv = mockKV();
+function wire(kv = mockKV()) {
   const handlers: Record<string, (data: Record<string, unknown>) => Promise<Record<string, unknown>>> = {};
   const sdk = {
     registerFunction: vi.fn((id: string, cb) => {
@@ -55,13 +54,14 @@ describe("slots — primitive", () => {
     await waitForSeed(kv);
   });
 
-  it("seeds global defaults at boot and a project's defaults on its first slot call", async () => {
+  it("seeds global defaults at boot and a project's defaults on its first slot write", async () => {
     type Listed = { slots: Array<{ label: string; scope: string }> };
     const unscoped = (await handlers["mem::slot-list"]({})) as Listed;
     expect(unscoped.slots.map((s) => s.label)).toEqual(
       ["persona", "tool_guidelines", "user_preferences"],
     );
 
+    await handlers["mem::slot-append"]({ project: P, label: "guidance", text: "first write" });
     const scoped = (await handlers["mem::slot-list"]({ project: P })) as Listed;
     expect(scoped.slots.map((s) => s.label)).toEqual([
       "guidance",
@@ -89,7 +89,8 @@ describe("slots — primitive", () => {
   });
 
   it("create then get round-trips a new slot", async () => {
-    const created = (await handlers["mem::slot-create"]({ project: P,
+    const created = (await handlers["mem::slot-create"]({
+      project: P,
       label: "notes_todo",
       content: "hello",
       description: "scratchpad",
@@ -151,7 +152,8 @@ describe("slots — primitive", () => {
     // same handler so scope validation + shadowing logic is exercised end
     // to end (no direct kv.set).
     await handlers["mem::slot-replace"]({ project: P, label: "persona", content: "global-persona" });
-    const createRes = (await handlers["mem::slot-create"]({ project: P,
+    const createRes = (await handlers["mem::slot-create"]({
+      project: P,
       label: "persona",
       content: "project-override",
       scope: "project",
@@ -167,20 +169,23 @@ describe("slots — primitive", () => {
   });
 
   it("rejects invalid sizeLimit instead of silently defaulting", async () => {
-    const tooBig = (await handlers["mem::slot-create"]({ project: P,
+    const tooBig = (await handlers["mem::slot-create"]({
+      project: P,
       label: "oversize",
       sizeLimit: 99999,
     })) as { success: boolean; error: string };
     expect(tooBig.success).toBe(false);
     expect(tooBig.error).toMatch(/sizeLimit must be/);
 
-    const negative = (await handlers["mem::slot-create"]({ project: P,
+    const negative = (await handlers["mem::slot-create"]({
+      project: P,
       label: "negative",
       sizeLimit: -1,
     })) as { success: boolean; error: string };
     expect(negative.success).toBe(false);
 
-    const nonInteger = (await handlers["mem::slot-create"]({ project: P,
+    const nonInteger = (await handlers["mem::slot-create"]({
+      project: P,
       label: "fractional",
       sizeLimit: 1.5,
     })) as { success: boolean; error: string };
@@ -188,7 +193,8 @@ describe("slots — primitive", () => {
   });
 
   it("rejects unknown scope values", async () => {
-    const res = (await handlers["mem::slot-create"]({ project: P,
+    const res = (await handlers["mem::slot-create"]({
+      project: P,
       label: "bad_scope",
       scope: "wrong" as unknown as "project",
     })) as { success: boolean; error: string };
@@ -277,6 +283,38 @@ describe("slots — reflect", () => {
   });
 });
 
+describe("slots — reflect stays in the Session's project", () => {
+  it("never falls back to a global slot of the same label", async () => {
+    const { kv, handlers } = wire();
+    await waitForSeed(kv);
+    await handlers["mem::slot-create"]({
+      label: "pending_items",
+      content: "global-todos",
+      scope: "global",
+    });
+    await handlers["mem::slot-append"]({ project: P, label: "guidance", text: "seed" });
+    await handlers["mem::slot-delete"]({ project: P, label: "pending_items" });
+    expect(await kv.get(KV.projectSlots(P), "pending_items")).toBeNull();
+
+    const sessionId = "sess_global_guard";
+    await kv.set(KV.sessions, sessionId, { id: sessionId, project: P });
+    await kv.set(KV.observations(sessionId), "obs1", {
+      id: "obs1",
+      sessionId,
+      timestamp: new Date().toISOString(),
+      type: "decision",
+      title: "TODO: leak me",
+      narrative: "",
+      files: [],
+    });
+    await handlers["mem::slot-reflect"]({ sessionId });
+
+    const global = (await kv.get(KV.globalSlots, "pending_items")) as { content: string };
+    expect(global.content).toBe("global-todos");
+    expect(await kv.get(KV.projectSlots(P), "pending_items")).toBeNull();
+  });
+});
+
 describe("slots — project scope (rohitg00/agentmemory#1108)", () => {
   let kv: ReturnType<typeof mockKV>;
   let handlers: Record<string, (d: Record<string, unknown>) => Promise<Record<string, unknown>>>;
@@ -310,6 +348,7 @@ describe("slots — project scope (rohitg00/agentmemory#1108)", () => {
     });
     await kv.set(KV.legacySlots, "project_context", flat("project_context", "old-shared-ctx"));
     await kv.set(KV.legacySlots, "guidance", flat("guidance", ""));
+    await handlers["mem::slot-append"]({ label: "guidance", text: "seed alpha", project: "alpha" });
 
     const listed = (await handlers["mem::slot-list"]({ project: "alpha" })) as {
       slots: Array<{ label: string; content: string }>;
@@ -329,5 +368,37 @@ describe("slots — project scope (rohitg00/agentmemory#1108)", () => {
     const res = (await handlers["mem::slot-get"]({ label: "project_context" })) as { success: boolean; error: string };
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/pass project/);
+  });
+});
+
+describe("slots — project defaults seeding", () => {
+  it("two concurrent first writes share one seed, which never overwrites a write", async () => {
+    const kv = mockKV();
+    const rawGet = kv.get;
+    let projectContextReads = 0;
+    kv.get = async <T>(scope: string, key: string): Promise<T | null> => {
+      const row = await rawGet<T>(scope, key);
+      if (scope === KV.projectSlots("racer") && key === "project_context" && ++projectContextReads === 2) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return row;
+    };
+    const { handlers } = wire(kv);
+    await waitForSeed(kv);
+    const [replaced] = await Promise.all([
+      handlers["mem::slot-replace"]({ project: "racer", label: "project_context", content: "written" }),
+      handlers["mem::slot-append"]({ project: "racer", label: "guidance", text: "g" }),
+    ]);
+    expect(replaced.success).toBe(true);
+    const row = (await kv.get(KV.projectSlots("racer"), "project_context")) as { content: string };
+    expect(row.content).toBe("written");
+  });
+
+  it("a read with a new project leaves no scope behind", async () => {
+    const { kv, handlers } = wire();
+    await waitForSeed(kv);
+    await handlers["mem::slot-list"]({ project: "fresh" });
+    await handlers["mem::slot-get"]({ project: "fresh", label: "project_context" });
+    expect(await kv.list(KV.projectSlots("fresh"))).toEqual([]);
   });
 });
