@@ -38,3 +38,26 @@ describe("MetricsStore.record", () => {
     expect(persisted).toMatchObject({ totalCalls: 3, successCount: 2, failureCount: 1, avgLatencyMs: 20 });
   });
 });
+
+describe("MetricsStore windowed failures", () => {
+  it("bounds recent outcomes, records lastFailureAt, and reads legacy records", async () => {
+    const kv = mockKV();
+    await kv.set("mem:metrics", "legacy", {
+      functionId: "legacy", totalCalls: 5, successCount: 1, failureCount: 4,
+      avgLatencyMs: 1, avgQualityScore: 0,
+    });
+    const store = new MetricsStore(kv as never);
+    await store.record("legacy", 1, true);
+    const legacy = await store.get("legacy");
+    expect(legacy?.recentOutcomes).toEqual([true]);
+    expect(legacy?.lastFailureAt).toBeUndefined();
+
+    await store.record("f", 1, false);
+    for (let i = 0; i < 150; i++) await store.record("f", 1, true);
+    const m = await store.get("f");
+    expect(m?.recentOutcomes?.length).toBe(100);
+    expect(m?.recentOutcomes?.every(Boolean)).toBe(true);
+    expect(m?.failureCount).toBe(1);
+    expect(typeof m?.lastFailureAt).toBe("string");
+  });
+});

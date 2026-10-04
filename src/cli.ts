@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { importZeroFilesMessage } from "./cli/import-jsonl-result.js";
 import { spawn, execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -1760,6 +1761,11 @@ async function runImportJsonl(): Promise<void> {
       } else {
         p.log.error(detail);
       }
+      process.exit(1);
+    }
+    if (!json.imported) {
+      spinner.stop("nothing imported");
+      p.log.warn(importZeroFilesMessage(importRoot));
       process.exit(1);
     }
     spinner.stop(
