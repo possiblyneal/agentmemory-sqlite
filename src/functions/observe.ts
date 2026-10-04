@@ -311,6 +311,7 @@ export function registerObserveFunction(
           observationCount?: number;
           firstPrompt?: string;
           status?: Session["status"];
+          idleClosed?: boolean;
         }>(KV.sessions, payload.sessionId);
         const inheritedAgentId = existingSession
           ? existingSession.agentId
@@ -456,12 +457,14 @@ export function registerObserveFunction(
               });
             }
           }
-          // Heal closes a Session that sat idle, and work may resume in the same
-          // terminal with no SessionStart. A Session that ended normally stays ended.
-          if (session.status === "abandoned") {
+          // Heal and the idle sweep close a Session that sat idle, and work may
+          // resume in the same terminal with no SessionStart. A Session that
+          // ended normally stays ended.
+          if (session.status === "abandoned" || session.idleClosed) {
             updates.push(
               { type: "set", path: "status", value: "active" },
               { type: "remove", path: "endedAt" },
+              { type: "remove", path: "idleClosed" },
             );
           }
           await kv.update(KV.sessions, payload.sessionId, updates);

@@ -63,7 +63,9 @@ prs:
       - test/claude-bridge.test.ts
       - test/snapshot.test.ts
     note: "Viewer-proxy auth, snapshot write integrity and several hardening fixes across 9 files this fork carries."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "898c222"
     url: https://github.com/rohitg00/agentmemory/pull/264
   - number: 300
     title: "feat: add sqlite-vec vector backend with Strategy pattern"
@@ -82,7 +84,9 @@ prs:
       - src/state/vector-index.ts
       - test/vector-index.test.ts
     note: "sqlite-vec vector backend behind a Strategy interface — the closest upstream work to this fork's own storage model."
-    disposition: candidate
+    disposition: wont-fix
+    status: "present-here — search scans every vector in JS (src/state/vector-index.ts)."
+    wont_fix_reason: "Measured on fix/upstream-triage-run against the live 51.7k-row store: sqlite-vec 0.1.9 also brute-forces, so search went only 672 → 419 ms/query while the DB grew 846 MB → 1.67 GB. Smaller vectors cut the scan instead: local BGE-small (384-dim) matched wemm-embedding at 4096 dims on production hybrid search (nDCG@10 0.401 vs 0.412, MRR 0.776 vs 0.764) at 255 vs 2379 ms p50 and 76 vs 807 MB of index RAM."
     url: https://github.com/rohitg00/agentmemory/pull/300
   - number: 470
     title: "Add consistency guards for MCP tools and REST endpoint drift"
@@ -121,7 +125,9 @@ prs:
       - src/types.ts
       - test/smart-search.test.ts
     note: "Boosts title/narrative matches on 'who/what is X' queries, where BM25 currently ranks busy observations over the record that names the concept."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "5a8880b, 6a01ff0"
     url: https://github.com/rohitg00/agentmemory/pull/571
   - number: 572
     title: "perf(summarize): skip mem::summarize when a fresh summary exists"
@@ -193,8 +199,9 @@ prs:
       - plugin/scripts/prompt-submit.mjs
       # +40 more
     note: "AGENTMEMORY_PROJECT_ISOLATION enforced across MCP, REST and search, including a cross-project leak in hybrid smart-search."
-    disposition: candidate
-    status: "present-here — no AGENTMEMORY_PROJECT_ISOLATION."
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run: the plugin and connect run this fork's agentmemory mcp, which fills an omitted project from its cwd (src/mcp/default-project.ts). REST and the daemon's /mcp endpoint still read every project when project is omitted; no AGENTMEMORY_PROJECT_ISOLATION switch."
+    fixed_by: "8ecc7b0, f688b13"
     url: https://github.com/rohitg00/agentmemory/pull/829
   - number: 878
     title: "Security: escape stored memory content in injected context (H1)"
@@ -255,8 +262,9 @@ prs:
       - src/index.ts
       - src/state/hybrid-search.ts
     note: "Opt-in exponential temporal decay in RRF fusion; today a note from this morning ranks identically to one from a year ago."
-    disposition: candidate
-    status: "present-here — no temporal decay in src/state/hybrid-search.ts."
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "5a8880b, 6a01ff0"
     url: https://github.com/rohitg00/agentmemory/pull/928
   - number: 975
     title: "Fix: unified environment behavior"
@@ -329,8 +337,9 @@ prs:
       - src/mcp/tools-registry.ts
       - src/types.ts
     note: "mem::slot-replace is an unguarded whole-object write, so two sessions silently clobber each other."
-    disposition: candidate
-    status: "partly-present-here — mem::slot-replace is serialized by withKeyedLock (src/functions/slots.ts:319), so it is not the unguarded write described. It still has no version precondition and no undo copy, so a read-modify-write across two sessions silently loses the first write."
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "1242ccb"
     url: https://github.com/rohitg00/agentmemory/pull/1175
   - number: 1176
     title: "fix: bound the audit log with AGENTMEMORY_AUDIT_MAX"
@@ -440,7 +449,9 @@ prs:
       - src/triggers/events.ts
       - src/types.ts
     note: "Sessions only reach completed when a client POSTs /session/end; clients that never do leave sessions active forever."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "6d6617a"
     url: https://github.com/rohitg00/agentmemory/pull/1307
   - number: 1309
     title: "feat(graph): delta graph extraction"
@@ -455,8 +466,8 @@ prs:
       - test/graph.test.ts
       - test/schema.test.ts
     note: "Graph extraction re-runs over all observations every trigger, duplicating nodes and burning LLM calls."
-    disposition: candidate
-    status: "present-here — no graphExtracted scope in src/state/schema.ts."
+    disposition: already-fixed
+    status: "fixed-here — graph extraction covers only Observations past the session's graphExtractedThrough watermark (src/triggers/events.ts); nodes dedupe via graphNameIndex."
     url: https://github.com/rohitg00/agentmemory/pull/1309
   - number: 1310
     title: "fix(compression): guard empty compression prompts and watermark summarization"
@@ -476,7 +487,8 @@ prs:
       - test/schema.test.ts
       - test/summarize.test.ts
     note: "Empty observations produce empty compression prompts, and summarization re-runs on an unchanged observation count."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — empty Observations take the synthetic path (src/functions/observe.ts hasCompressibleContent); summarize reuses the summary when observationCount and lastObservationId are unchanged (src/functions/summarize.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/1310
   - number: 1317
     title: "fix(health): measure heap saturation against the heap ceiling, not heapTotal"
@@ -564,7 +576,9 @@ prs:
       - src/state/hybrid-search.ts
       - src/state/kv.ts
     note: "Rebuilds the graph view per search and traverses unbounded; reuses one view per store and caps the traversal."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "2f4f3e8"
     url: https://github.com/rohitg00/agentmemory/pull/1351
   - number: 1367
     title: "fix(summarize): detect wrapped noop provider so keyless installs skip the pipeline"
@@ -593,7 +607,9 @@ prs:
       - src/prompts/reflect.ts
       - test/reflect.test.ts
     note: "mem::reflect enumerates the full graph and blows the invocation limit on a large store; bounds the snapshot and caps the cluster prompt."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "2f4f3e8"
     url: https://github.com/rohitg00/agentmemory/pull/1368
   - number: 218
     title: "fix(viewer): prevent tab bar crush and fix graph canvas overflow"
@@ -626,7 +642,9 @@ prs:
     paths:
       - src/state/search-index.ts
     note: "CJK bigram tokenization in the BM25 index; without it CJK text is effectively unsearchable."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "5a8880b, 6a01ff0"
     url: https://github.com/rohitg00/agentmemory/pull/224
   - number: 225
     title: "feat(embedding): configurable local model, cache dir, and HF mirror | 嵌入模型可配置"
@@ -637,7 +655,9 @@ prs:
     paths:
       - src/providers/embedding/local.ts
     note: "Env-configurable local embedding model, cache dir and HF mirror."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "56454e8"
     url: https://github.com/rohitg00/agentmemory/pull/225
   - number: 266
     title: "fix: suppress floating promise in keyed-mutex to prevent unhandled-rejection warnings"
@@ -661,7 +681,9 @@ prs:
       - src/mcp/rest-proxy.ts
       - test/mcp-standalone-proxy.test.ts
     note: "The MCP shim silently falls back to local in-memory mode when AGENTMEMORY_URL is unreachable; this makes it opt-in loud."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "3d59f66"
     url: https://github.com/rohitg00/agentmemory/pull/273
   - number: 319
     title: "fix(fs-watcher): load agentmemory env file"
@@ -674,7 +696,9 @@ prs:
       - integrations/filesystem-watcher/watcher.mjs
       - test/fs-watcher.test.ts
     note: "fs-watcher never loads ~/.agentmemory/.env, so its config is silently ignored."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "f5e7156"
     url: https://github.com/rohitg00/agentmemory/pull/319
   - number: 365
     title: "fix: tolerate partial dashboard payloads"
@@ -685,7 +709,8 @@ prs:
     paths:
       - src/viewer/index.html
     note: "Dashboard crashes on partial payloads instead of rendering empty lists."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — every dashboard field defaults to [] and api() returns null on failure (src/viewer/index.html)."
     url: https://github.com/rohitg00/agentmemory/pull/365
   - number: 465
     title: "feat(connect): automate Hermes config merge"
@@ -731,7 +756,9 @@ prs:
       - test/mcp-standalone.test.ts
       - test/remember-forget-audit.test.ts
     note: "mem::remember records no audit row and drops sessionId/tags from attribution."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — CJK-aware dedup implemented on fix/upstream-triage-run; the negation guard was dropped by Operator decision: a correction supersedes the rule it flips, and the old rule stays as a prior version."
+    fixed_by: "4ac4774, 9115433"
     url: https://github.com/rohitg00/agentmemory/pull/468
   - number: 502
     title: "fix: run graph extraction on manual session end"
@@ -743,7 +770,8 @@ prs:
       - src/triggers/api.ts
       - src/triggers/events.ts
     note: "POST /session/end skips the stopped-session pipeline, so graph extraction never runs on a manual end."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — /session/end fires event::session::stopped, which runs mem::graph-extract (src/triggers/api.ts, src/triggers/events.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/502
   - number: 529
     title: "fix(viewer): show explicit error banner when dashboard endpoints fail"
@@ -761,7 +789,8 @@ prs:
       - test/env-loader.test.ts
       - test/mcp-standalone-proxy.test.ts
     note: "Dashboard shows 0 memories rather than an error when the backend is down."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — the viewer tracks failed dashboard endpoints and shows a dash instead of 0 (src/viewer/index.html valueOrDash); no global banner."
     url: https://github.com/rohitg00/agentmemory/pull/529
   - number: 568
     title: "feat(graph): auto-trigger mem::graph-extract on mem::remember"
@@ -773,7 +802,9 @@ prs:
       - src/functions/remember.ts
       - test/cross-project-isolation.test.ts
     note: "mem::remember never triggers graph-extract, so explicit saves never enter the graph."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "4ac4774"
     url: https://github.com/rohitg00/agentmemory/pull/568
   - number: 569
     title: "feat(provider): AGENTMEMORY_DISABLE_THINKING to recover structured output on Qwen3/GLM/Kimi"
@@ -881,7 +912,9 @@ prs:
       - src/mcp/standalone.ts
       - test/mcp-standalone.test.ts
     note: "Resources and prompts capabilities on the stdio MCP shim, proxied to the running server."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "ea8fae1"
     url: https://github.com/rohitg00/agentmemory/pull/846
   - number: 862
     title: "Allow XENOVA_CACHE_HOME to redirect local embedding model path"
@@ -903,7 +936,9 @@ prs:
     paths:
       - src/cli.ts
     note: "import-jsonl reports success when it imported zero files."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "3ca2457"
     url: https://github.com/rohitg00/agentmemory/pull/927
   - number: 953
     title: "fix: preserve Zed settings during connect"
@@ -933,7 +968,9 @@ prs:
       - src/functions/consolidate.ts
       - src/index.ts
     note: "Consolidate per-concept and worker invocation timeouts hardcoded; adjacent to this fork's own LLM-timeout work."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "d51077e"
     url: https://github.com/rohitg00/agentmemory/pull/970
   - number: 974
     title: "fix(context,compress-synthetic): conversation observations render with full content"
@@ -948,7 +985,9 @@ prs:
       - src/functions/context.ts
       - website/package.json
     note: "tool_name 'conversation' observations render as type 'other' with no content in injected context."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "0bc3436, 6a01ff0"
     url: https://github.com/rohitg00/agentmemory/pull/974
   - number: 1011
     title: "feat(replay): support OpenAI chat-format JSONL in parseJsonlText"
@@ -972,7 +1011,9 @@ prs:
       - src/functions/replay.ts
       - test/replay.test.ts
     note: "Replay detail panel is empty because rawFromCompressed() drops the compressed content."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "b3d4663"
     url: https://github.com/rohitg00/agentmemory/pull/1023
   - number: 1037
     title: "fix: CJK-aware remember dedup with negation guard (#1021)"
@@ -984,7 +1025,9 @@ prs:
       - src/functions/remember.ts
       - src/state/schema.ts
     note: "remember dedup tokenizes on whitespace, so repeated CJK preferences never dedupe."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "4ac4774"
     url: https://github.com/rohitg00/agentmemory/pull/1037
   - number: 1089
     title: "feat: forward agentId on remember + Hermes multi-profile project tagging"
@@ -1005,7 +1048,8 @@ prs:
       - test/agent-id-scope.test.ts
       # +2 more
     note: "remember and memory_save drop agentId, and standalone MCP drops project despite advertising it. Only that half applies here; the Hermes profile tagging is for an unsupported host."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — standalone MCP forwards project and agentId (src/mcp/standalone.ts); remember stores agentId. The Hermes half targets an unsupported host."
     url: https://github.com/rohitg00/agentmemory/pull/1089
   - number: 1177
     title: "feat(health): surface search-index freshness"
@@ -1018,7 +1062,8 @@ prs:
       - src/health/thresholds.ts
       - src/types.ts
     note: "Health surfaces search-index freshness; today a broken persister is visible only as a throttled warn line."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — no separate persister can go stale: vector rows commit with their content (src/engine/inproc/vectors.ts) and BM25 rebuilds at boot (src/index.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/1177
   - number: 1215
     title: "fix(embedding): route transformers cacheDir to user home cache"
@@ -1033,7 +1078,9 @@ prs:
       - src/state/reranker.ts
       - test/local-embedding-provider.test.ts
     note: "transformers writes its model cache next to its own package, which fails on global or containerized installs."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "56454e8"
     url: https://github.com/rohitg00/agentmemory/pull/1215
   - number: 1290
     title: "fix(metrics): window failure rate to recent activity + track lastFailureAt"
@@ -1046,7 +1093,9 @@ prs:
       - src/health/monitor.ts
       - src/types.ts
     note: "Health reports a cumulative failure rate, so a fixed bug leaves a stale high number forever."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "3ca2457"
     url: https://github.com/rohitg00/agentmemory/pull/1290
   - number: 1291
     title: "fix(metrics): serialize MetricsStore.record per function"
@@ -1080,7 +1129,8 @@ prs:
       - src/hooks/post-tool-failure.ts
       # +6 more
     note: "Adds retry/queue to hook observe POSTs; conflicts with this fork's fire-and-forget hook contract, so take the diagnosis, not the design."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "Conflicts with this fork's fire-and-forget telemetry hook contract (CLAUDE.md Hook Scripts); the daemon-side ObserveRetryQueue covers disk-full loss instead."
     url: https://github.com/rohitg00/agentmemory/pull/1293
   - number: 1308
     title: "fix(pipeline): classify telemetry observations and extract semantic fields for non-tool events"
@@ -1098,7 +1148,9 @@ prs:
       - src/prompts/summary.ts
       - src/types.ts
     note: "Non-tool hook events carry payload data that mem::observe never extracts, so telemetry observations are contentless."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "0bc3436, 6a01ff0"
     url: https://github.com/rohitg00/agentmemory/pull/1308
   - number: 1311
     title: "fix(opencode): skip replayed history observation on session fork"
@@ -1122,7 +1174,9 @@ prs:
       - src/functions/lessons.ts
       - src/functions/replay.ts
     note: "JSONL re-import bumps reinforcements but never confidence, unlike reinforceLesson()."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "b3d4663"
     url: https://github.com/rohitg00/agentmemory/pull/1318
   - number: 1322
     title: "fix(memory): reject leaked tool-call args in remember"
@@ -1133,7 +1187,9 @@ prs:
     paths:
       - src/functions/remember.ts
     note: "A mis-encoded tool call writes its trailing arguments into memory content as literal text."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "4ac4774"
     url: https://github.com/rohitg00/agentmemory/pull/1322
   - number: 1323
     title: "fix(mcp): stop masking tool errors as unknown-tool fallback"
@@ -1161,7 +1217,9 @@ prs:
       - src/providers/embedding/clip.ts
       - test/clip-embedding-provider.test.ts
     note: "ClipEmbeddingProvider encoded text with the image tower, so text-to-image vision-search always failed."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "56454e8"
     url: https://github.com/rohitg00/agentmemory/pull/1327
   - number: 1336
     title: "fix(slots): line-boundary truncation in slot reflection to prevent mid-line slicing"
@@ -1182,7 +1240,9 @@ prs:
       - src/functions/reflect.ts
       # +24 more
     note: "Line-boundary truncation in slot reflection instead of a raw mid-line slice; the fix is small but the PR carries 7.8k churn across 51 files."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run."
+    fixed_by: "1242ccb"
     url: https://github.com/rohitg00/agentmemory/pull/1336
   - number: 1363
     title: "feat(scope): dynamic project identity and tiered observation lifecycle"
@@ -1203,7 +1263,8 @@ prs:
       - plugin/scripts/prompt-submit.mjs
       # +47 more
     note: "Git-remote-derived canonical project slugs and a tiered observation lifecycle; the right-scope idea is good, the 13k-churn PR is not."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "Operator kept the folder-name project identity; the 13k-churn PR also targets dropped hosts (opencode)."
     url: https://github.com/rohitg00/agentmemory/pull/1363
   - number: 1369
     title: "fix(embeddings): send OPENAI_EMBEDDING_DIMENSIONS as the dimensions field"
@@ -1280,7 +1341,8 @@ prs:
     paths:
       - src/health/thresholds.ts
     note: "Health thresholds via env; the defaults false-alarm on small hosts."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — src/health/thresholds.ts merges HEALTH_ENV_KEYS env overrides via getHealthTuning (src/config.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/226
   - number: 227
     title: "feat(shutdown): graceful shutdown timeout with force exit | 优雅关闭超时"

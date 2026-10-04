@@ -6,6 +6,7 @@ export interface Session {
   updatedAt?: string;
   endedAt?: string;
   status: "active" | "completed" | "abandoned";
+  idleClosed?: boolean;
   observationCount: number;
   model?: string;
   tags?: string[];
@@ -252,6 +253,9 @@ export interface FunctionMetrics {
   failureCount: number;
   avgLatencyMs: number;
   avgQualityScore: number;
+  /** Newest-last outcomes (true = success), bounded; absent on records written before windowing. */
+  recentOutcomes?: boolean[];
+  lastFailureAt?: string;
 }
 
 // The verdict vocabulary. Defined here rather than beside the evaluator so a
@@ -300,6 +304,8 @@ export interface MemorySlot {
   readOnly: boolean;
   scope: "project" | "global";
   project?: string;
+  version?: number;
+  previousContent?: string;
   createdAt: string;
   updatedAt: string;
 }

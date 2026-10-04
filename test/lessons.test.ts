@@ -183,6 +183,21 @@ describe("Lessons", () => {
       expect(result.lessons[0].project).toBe("/other");
     });
 
+    it("keeps a lesson saved without a project in every project's recall", async () => {
+      await sdk.trigger("mem::lesson-save", {
+        content: "Prefer typescript discriminated unions over flags",
+      });
+
+      const result = (await sdk.trigger("mem::lesson-recall", {
+        query: "typescript discriminated unions",
+        project: "/app",
+      })) as { lessons: Lesson[] };
+
+      expect(result.lessons.map((l) => l.content)).toContain(
+        "Prefer typescript discriminated unions over flags",
+      );
+    });
+
     it("filters by minConfidence", async () => {
       const result = (await sdk.trigger("mem::lesson-recall", {
         query: "validate input",

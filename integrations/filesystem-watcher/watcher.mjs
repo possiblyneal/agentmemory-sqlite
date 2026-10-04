@@ -1,4 +1,5 @@
-import { watch, promises as fsp, statSync } from "node:fs";
+import { watch, promises as fsp, statSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve, relative, join, extname, sep, basename } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -329,6 +330,37 @@ export class FilesystemWatcher {
 }
 
 // Small helper used by tests and bin.mjs to parse env.
+// Mirrors the daemon's reader of ~/.agentmemory/.env (src/hooks/_env.ts) without
+// importing it: this process must not pull in the daemon's modules. A missing or
+// unreadable file means no settings.
+export function loadEnvFile(path = join(homedir(), ".agentmemory", ".env")) {
+  let content;
+  try {
+    content = readFileSync(path, "utf-8");
+  } catch {
+    return {};
+  }
+  const vars = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    let val = trimmed.slice(eqIdx + 1).trim();
+    const quote = val[0] === '"' || val[0] === "'" ? val[0] : "";
+    if (quote) {
+      const closeIdx = val.indexOf(quote, 1);
+      if (closeIdx !== -1) val = val.slice(1, closeIdx);
+    } else {
+      const hashIdx = val.indexOf(" #");
+      if (hashIdx !== -1) val = val.slice(0, hashIdx).trim();
+    }
+    vars[key] = val;
+  }
+  return vars;
+}
+
 export function configFromEnv(env = process.env) {
   const roots = (env.AGENTMEMORY_FS_WATCH_DIRS || "")
     .split(",")

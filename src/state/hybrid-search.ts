@@ -36,6 +36,34 @@ const CANDIDATE_OVERFETCH = 3;
 // same size.
 const RERANK_WINDOW = 20;
 
+// Mild recency term, Observations only. "Durable beats recent" (CLAUDE.md), so
+// the half-life is long and the factor never falls below RECENCY_FLOOR: a
+// year-old Observation keeps most of its fused score. Memories and Lessons are
+// durable by kind and are never decayed. Whole days keep a fresh record at
+// exactly 1.
+const RECENCY_HALF_LIFE_DAYS = 180;
+const RECENCY_FLOOR = 0.6;
+const DAY_MS = 86_400_000;
+
+function isDurableRecord(obsId: string, sessionId: string): boolean {
+  return (
+    obsId.startsWith("mem_") ||
+    obsId.startsWith("lsn_") ||
+    sessionId === MEMORY_SESSION ||
+    sessionId === "lesson"
+  );
+}
+
+export function recencyFactor(timestamp: string, now: number): number {
+  const ageMs = now - Date.parse(timestamp);
+  if (!Number.isFinite(ageMs) || ageMs <= 0) return 1;
+  const ageDays = Math.floor(ageMs / DAY_MS);
+  return (
+    RECENCY_FLOOR +
+    (1 - RECENCY_FLOOR) * Math.pow(0.5, ageDays / RECENCY_HALF_LIFE_DAYS)
+  );
+}
+
 function envNumber(key: string, fallback: number): number {
   const raw = process.env[key];
   if (!raw) return fallback;
@@ -376,10 +404,8 @@ export class HybridSearch {
       combined,
       filterNonLatest ? retrievalDepth * CANDIDATE_OVERFETCH : retrievalDepth,
     );
-    const enriched = await this.enrichResults(
-      diversified,
-      retrievalDepth,
-      filterNonLatest,
+    const enriched = this.applyRecency(
+      await this.enrichResults(diversified, retrievalDepth, filterNonLatest),
     );
 
     // Probe 0 capture point 2: what a reranker would actually receive. Taken
@@ -404,6 +430,20 @@ export class HybridSearch {
     }
 
     return enriched.slice(0, limit);
+  }
+
+  private applyRecency(rows: HybridSearchResult[]): HybridSearchResult[] {
+    const now = Date.now();
+    const decayed = rows.map((r) =>
+      isDurableRecord(r.observation.id, r.sessionId)
+        ? r
+        : {
+            ...r,
+            combinedScore:
+              r.combinedScore * recencyFactor(r.observation.timestamp, now),
+          },
+    );
+    return decayed.sort((a, b) => b.combinedScore - a.combinedScore);
   }
 
   private diversifyBySession(

@@ -20,7 +20,8 @@ Observations and a consumer of Recall, never a decision-maker about the store it
 **Session**:
 One continuous stretch of an Agent's work, bounded by a start hook and either an end hook or
 going idle after a turn end. The unit that Observations are attributed to and that Recall is
-scoped by.
+scoped by. One left active with no Observation for `SESSION_IDLE_CLOSE_HOURS` is closed and
+summarized by the idle sweep; its next Observation reopens it.
 
 **Abandoned Session**:
 A Session still marked active with no activity for 24 hours. Heal closes it with status

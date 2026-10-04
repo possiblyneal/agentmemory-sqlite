@@ -219,6 +219,14 @@ export function getSqlitePath(): string {
   );
 }
 
+export function getModelCacheDir(): string {
+  return (
+    getEnvVar("AGENTMEMORY_MODEL_CACHE_DIR") ||
+    getEnvVar("XENOVA_CACHE_HOME") ||
+    join(getEnvVar("AGENTMEMORY_DATA_DIR") || DATA_DIR, "models")
+  );
+}
+
 export function isDropStaleIndexEnabled(): boolean {
   return getMergedEnv()["AGENTMEMORY_DROP_STALE_INDEX"] === "true";
 }
@@ -476,6 +484,16 @@ export function getFollowupWindowSeconds(): number {
     getMergedEnv()["AGENTMEMORY_FOLLOWUP_WINDOW_SECONDS"],
     FOLLOWUP_WINDOW_DEFAULT_SECONDS,
   );
+}
+
+const IDLE_SESSION_DEFAULT_HOURS = 6;
+
+export function getIdleSessionMs(): number {
+  const hours = safeParseInt(
+    getMergedEnv()["SESSION_IDLE_CLOSE_HOURS"],
+    IDLE_SESSION_DEFAULT_HOURS,
+  );
+  return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
 }
 
 export function isConsolidationEnabled(): boolean {

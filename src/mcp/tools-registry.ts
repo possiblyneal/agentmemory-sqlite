@@ -5,20 +5,20 @@ export const NOT_A_MEMORY_HINT =
 
 // rohitg00/agentmemory#1225: a bare "Filter by project" left the Agent guessing
 // what value to pass. There is no server-side default: the daemon cannot see
-// the Agent's cwd through the MCP proxy shim.
+// the Agent's cwd. `agentmemory mcp` fills an omitted project from its own cwd.
 export const PROJECT_NAME_DESCRIPTION =
   'Project name. Use the project="…" value from an injected <agentmemory-context> block ' +
   "when one is present; otherwise the basename of the repository's main checkout directory " +
   "(shared by all its worktrees), unless AGENTMEMORY_PROJECT_NAME overrides it. " +
   "Not a filesystem path.";
 
-export const PROJECT_OMITTED_CLAUSE = "Leave it out to search every project.";
+export const PROJECT_OMITTED_CLAUSE = "Leave it out to use the current project; name another project to search it.";
 
 export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} ${PROJECT_OMITTED_CLAUSE}`;
 
 // rohitg00/agentmemory#1108: a project slot belongs to one project.
 const SLOT_PROJECT_SENTENCE =
-  "Project slots are reached only through project; leave it out to reach global slots alone.";
+  "Leave project out to use the current project's slots; a label the project lacks falls back to the global slot.";
 
 export type McpToolDef = {
   name: string;
@@ -110,6 +110,10 @@ export const CORE_TOOLS: McpToolDef[] = [
           description:
             "Agent identity to scope this memory to. When set, agent-scoped recall " +
             "and search only surface it for the same agentId. Omit for shared memory.",
+        },
+        sessionId: {
+          type: "string",
+          description: "Session ID to attribute this saved memory to",
         },
       },
       required: ["content"],
@@ -991,12 +995,13 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
   },
   {
     name: "memory_slot_replace",
-    description: `Replace slot content in place. Fails if content exceeds sizeLimit. ${SLOT_PROJECT_SENTENCE}`,
+    description: `Replace slot content in place. Fails if content exceeds sizeLimit. Pass expectedVersion (the slot's version from memory_slot_get) to fail with a version conflict if another write landed since; the previous content is kept as one undo copy. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label" },
         content: { type: "string", description: "New full content" },
+        expectedVersion: { type: "number", description: "Slot version you read; replace fails with a version conflict if the slot has changed since" },
         project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label", "content"],

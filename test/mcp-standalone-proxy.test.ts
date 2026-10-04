@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleToolCall, handleToolsList, hydrateMcpEnv } from "../src/mcp/standalone.js";
+import { handleToolCall, handleToolsList, handleResourcesList, handleResourcesRead, handlePromptsList, handlePromptsGet, hydrateMcpEnv } from "../src/mcp/standalone.js";
 import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
 import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
 
@@ -17,13 +17,14 @@ function installFetch(handler: (url: string, init?: RequestInit) => Response): F
 }
 
 const BASE = "http://localhost:3111";
+process.env["AGENTMEMORY_PROJECT_NAME"] = "cwd-project";
 
 describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
     resetHandleForTests();
-    process.env["AGENTMEMORY_URL"] = BASE;
+    delete process.env["AGENTMEMORY_URL"];
     delete process.env["AGENTMEMORY_SECRET"];
   });
 
@@ -114,6 +115,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       limit: 5,
       format: "full",
       token_budget: 800,
+      project: "cwd-project",
     });
     expect(calls.find((c) => c.url.endsWith("/agentmemory/smart-search"))).toBeUndefined();
   });
@@ -203,7 +205,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     const localKv = new InMemoryKV(undefined);
     await handleToolCall("memory_save", { content: "scoped here", project: "here" }, localKv);
     await handleToolCall("memory_save", { content: "scoped there", project: "there" }, localKv);
-    await handleToolCall("memory_save", { content: "scoped nowhere" }, localKv);
+    await handleToolCall("memory_save", { content: "scoped nowhere", global: true }, localKv);
     const res = await handleToolCall(
       "memory_smart_search",
       { query: "scoped", project: "here" },
@@ -353,7 +355,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].body).toEqual({
       name: "memory_lesson_save",
-      arguments: { title: "Always pin lockfiles", content: "..." },
+      arguments: { title: "Always pin lockfiles", content: "...", project: "cwd-project" },
     });
   });
 
@@ -513,5 +515,126 @@ describe("@agentmemory/mcp standalone — ~/.agentmemory/.env hydration", () => 
     hydrateMcpEnv();
 
     expect(process.env["AGENTMEMORY_SECRET"]).toBe("from-host");
+  });
+});
+
+describe("@agentmemory/mcp standalone — resources and prompts proxy (rohitg00/agentmemory#846)", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    resetHandleForTests();
+    delete process.env["AGENTMEMORY_URL"];
+    delete process.env["AGENTMEMORY_SECRET"];
+  });
+
+  afterEach(() => {
+    resetHandleForTests();
+    globalThis.fetch = originalFetch;
+    delete process.env["AGENTMEMORY_URL"];
+  });
+
+  const json = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+  it("proxies resources and prompts list/read/get to the server", async () => {
+    const calls: Array<{ url: string; body?: string }> = [];
+    installFetch((url, init) => {
+      calls.push({ url, body: init?.body as string | undefined });
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      if (url.endsWith("/mcp/resources")) return json({ resources: [{ uri: "agentmemory://status" }] });
+      if (url.endsWith("/mcp/resources/read")) return json({ contents: [{ uri: "agentmemory://status", text: "{}" }] });
+      if (url.endsWith("/mcp/prompts")) return json({ prompts: [{ name: "recall_context" }] });
+      if (url.endsWith("/mcp/prompts/get")) return json({ messages: [] });
+      return new Response("", { status: 404 });
+    });
+
+    expect(await handleResourcesList()).toEqual({ resources: [{ uri: "agentmemory://status" }] });
+    expect(await handlePromptsList()).toEqual({ prompts: [{ name: "recall_context" }] });
+    expect(await handleResourcesRead("agentmemory://status")).toEqual({
+      contents: [{ uri: "agentmemory://status", text: "{}" }],
+    });
+    expect(await handlePromptsGet("recall_context", { task_description: "x" })).toEqual({ messages: [] });
+
+    const read = calls.find((c) => c.url.endsWith("/resources/read"));
+    expect(JSON.parse(read!.body!)).toEqual({ uri: "agentmemory://status" });
+    const get = calls.find((c) => c.url.endsWith("/prompts/get"));
+    expect(JSON.parse(get!.body!)).toEqual({ name: "recall_context", arguments: { task_description: "x" } });
+  });
+
+  it("lists empty and refuses read/get when no server is reachable", async () => {
+    installFetch(() => new Response("down", { status: 500 }));
+    expect(await handleResourcesList()).toEqual({ resources: [] });
+    expect(await handlePromptsList()).toEqual({ prompts: [] });
+    await expect(handleResourcesRead("agentmemory://status")).rejects.toThrow(/running agentmemory server/);
+    await expect(handlePromptsGet("recall_context", {})).rejects.toThrow(/running agentmemory server/);
+  });
+});
+
+describe("@agentmemory/mcp standalone — explicit daemon must not fall back (rohitg00/agentmemory#273)", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    resetHandleForTests();
+    globalThis.fetch = originalFetch;
+    delete process.env["AGENTMEMORY_URL"];
+    delete process.env["AGENTMEMORY_FORCE_PROXY"];
+  });
+
+  it("errors naming the URL when AGENTMEMORY_URL is set and the daemon is down", async () => {
+    resetHandleForTests();
+    process.env["AGENTMEMORY_URL"] = "http://daemon.invalid:3111";
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const kv = new InMemoryKV();
+    await expect(
+      handleToolCall("memory_save", { content: "keep me" }, kv),
+    ).rejects.toThrow("agentmemory daemon unreachable at http://daemon.invalid:3111");
+    expect((await kv.list("mem:memories")).length).toBe(0);
+  });
+
+  it("errors under AGENTMEMORY_FORCE_PROXY when the call cannot reach the daemon", async () => {
+    resetHandleForTests();
+    delete process.env["AGENTMEMORY_URL"];
+    process.env["AGENTMEMORY_FORCE_PROXY"] = "1";
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    await expect(handleToolCall("memory_save", { content: "keep me" })).rejects.toThrow(
+      "agentmemory daemon unreachable at http://localhost:3111",
+    );
+  });
+
+  it("keeps the local fallback when no daemon URL was named", async () => {
+    resetHandleForTests();
+    delete process.env["AGENTMEMORY_URL"];
+    installFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const res = await handleToolCall("memory_save", { content: "local ok" }, new InMemoryKV());
+    expect(res.content[0].text).toContain("saved");
+  });
+});
+
+describe("agentmemory mcp — current project default", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    resetHandleForTests();
+    globalThis.fetch = originalFetch;
+  });
+
+  it("proxies the cwd project when omitted and keeps an explicit one", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      bodies.push(JSON.parse((init?.body as string) || "{}"));
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    });
+    await handleToolCall("memory_recall", { query: "x" });
+    await handleToolCall("memory_recall", { query: "x", project: "other" });
+    expect(bodies.map((b) => b["project"])).toEqual(["cwd-project", "other"]);
   });
 });

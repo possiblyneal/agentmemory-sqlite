@@ -143,3 +143,26 @@ describe("projectTimeline", () => {
   });
 });
 
+
+describe("replay::load of compressed observations (#1023)", () => {
+  it("surfaces the compressed content and keeps the hook type and tool name", async () => {
+    const { registerReplayFunctions } = await import("../src/functions/replay.js");
+    const base = { sessionId: "s1", concepts: [], files: [], importance: 3, toolName: "Bash" };
+    const rows = [
+      { ...base, id: "o1", timestamp: "2026-01-01T00:00:00.000Z", type: "command_run", title: "Ran tests", narrative: "All 5 passed", facts: ["5 passed", "0 failed"] },
+      { ...base, id: "o2", timestamp: "2026-01-01T00:00:01.000Z", type: "error", title: "Build failed", narrative: "tsc error", facts: [] },
+    ];
+    const fns = new Map<string, Function>();
+    const kv = { get: async () => null, list: async () => rows, set: async () => {}, delete: async () => {} } as any;
+    registerReplayFunctions({ registerFunction: (id: string, h: Function) => fns.set(id, h) } as any, kv);
+    const res = await fns.get("mem::replay::load")!({ sessionId: "s1" });
+    const [run, err] = res.timeline.events;
+    expect(run.toolName).toBe("Bash");
+    expect(run.kind).toBe("tool_result");
+    expect(run.toolOutput).toContain("Ran tests");
+    expect(run.toolOutput).toContain("All 5 passed");
+    expect(run.toolOutput).toContain("5 passed");
+    expect(err.kind).toBe("tool_error");
+    expect(err.toolOutput).toContain("tsc error");
+  });
+});

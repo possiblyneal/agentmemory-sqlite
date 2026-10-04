@@ -12,6 +12,25 @@ type SlotScope = "project" | "global";
 
 const DEFAULT_SIZE_LIMIT = 2000;
 
+function nextVersion(slot: MemorySlot): number {
+  return (slot.version ?? 0) + 1;
+}
+
+// Cuts at a line boundary so a slot never starts or ends mid-line. A single
+// line longer than the limit has no boundary to cut at, so it is cut raw.
+function truncateToLines(text: string, limit: number, keep: "keep-head" | "keep-tail"): string {
+  if (text.length <= limit) return text;
+  if (keep === "keep-head") {
+    if (text[limit] === "\n") return text.slice(0, limit);
+    const cut = text.lastIndexOf("\n", limit);
+    return cut > 0 ? text.slice(0, cut) : text.slice(0, limit);
+  }
+  const start = text.length - limit;
+  if (text[start - 1] === "\n") return text.slice(start);
+  const cut = text.indexOf("\n", start);
+  return cut >= 0 && cut < text.length - 1 ? text.slice(cut + 1) : text.slice(start);
+}
+
 export const DEFAULT_SLOTS: ReadonlyArray<
   Omit<MemorySlot, "createdAt" | "updatedAt">
 > = [
@@ -179,6 +198,7 @@ async function seedDefaults(
         ...tmpl,
         ...(project ? { project } : {}),
         createdAt: ts,
+        version: 0,
         updatedAt: ts,
       };
       await kv.set(kvScope, tmpl.label, slot);
@@ -314,6 +334,7 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
           scope,
           ...(scope === "project" ? { project } : {}),
           createdAt: ts,
+          version: 0,
           updatedAt: ts,
         };
         await kv.set(target, label, slot);
@@ -353,7 +374,7 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
             sizeLimit: slot.sizeLimit,
           };
         }
-        const updated: MemorySlot = { ...slot, content: next, updatedAt: nowIso() };
+        const updated: MemorySlot = { ...slot, content: next, updatedAt: nowIso(), version: nextVersion(slot) };
         await kv.set(kvScope, label, updated);
         await recordAudit(kv, "slot_append", "mem::slot-append", [label], {
           scope,
@@ -368,12 +389,16 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
 
   sdk.registerFunction(
     "mem::slot-replace",
-    async (data: { label?: string; content?: string; project?: string }) => {
+    async (data: { label?: string; content?: string; project?: string; expectedVersion?: number }) => {
       data = scrubFields(data, "content");
       const label = validateLabel(data?.label);
       if (!label) return { success: false, error: "label required" };
       const content = data?.content;
       if (typeof content !== "string") return { success: false, error: "content required (string)" };
+      const expectedVersion = data?.expectedVersion;
+      if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0)) {
+        return { success: false, error: "expectedVersion must be a non-negative integer" };
+      }
       const project = validateProject(data?.project);
       if (project) await ensureProjectDefaults(project);
       return withKeyedLock(`slot:${label}`, async () => {
@@ -381,6 +406,13 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
         if (!found) return { success: false, error: notFound(project, " (use mem::slot-create first)") };
         const { slot, scope, kvScope } = found;
         if (slot.readOnly) return { success: false, error: "slot is read-only" };
+        if (expectedVersion !== undefined && expectedVersion !== (slot.version ?? 0)) {
+          return {
+            success: false,
+            error: `version conflict (expected ${expectedVersion}, current ${slot.version ?? 0}); re-read the slot and retry`,
+            currentVersion: slot.version ?? 0,
+          };
+        }
         if (content.length > slot.sizeLimit) {
           return {
             success: false,
@@ -388,7 +420,13 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
             sizeLimit: slot.sizeLimit,
           };
         }
-        const updated: MemorySlot = { ...slot, content, updatedAt: nowIso() };
+        const updated: MemorySlot = {
+          ...slot,
+          content,
+          previousContent: slot.content,
+          updatedAt: nowIso(),
+          version: nextVersion(slot),
+        };
         await kv.set(kvScope, label, updated);
         await recordAudit(kv, "slot_replace", "mem::slot-replace", [label], {
           scope,
@@ -488,13 +526,12 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
           if (fresh.length === 0) return false;
           const sep = slot.content && !slot.content.endsWith("\n") ? "\n" : "";
           const next = `${slot.content}${sep}${fresh.join("\n")}`;
-          const truncated = next.length > slot.sizeLimit
-            ? next.slice(next.length - slot.sizeLimit)
-            : next;
+          const truncated = truncateToLines(next, slot.sizeLimit, "keep-tail");
           await kv.set(projectKv, "pending_items", {
             ...slot,
             content: truncated,
             updatedAt: nowIso(),
+            version: nextVersion(slot),
           });
           return true;
         });
@@ -511,12 +548,12 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
               ([kind, count]) => `- ${kind}: ${count} in last ${recent.length} observations`,
             ),
           ].join("\n");
-          const next =
-            summary.length > slot.sizeLimit ? summary.slice(0, slot.sizeLimit) : summary;
+          const next = truncateToLines(summary, slot.sizeLimit, "keep-head");
           await kv.set(projectKv, "session_patterns", {
             ...slot,
             content: next,
             updatedAt: nowIso(),
+            version: nextVersion(slot),
           });
           return true;
         });
@@ -538,14 +575,12 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
           const nextRaw = `${already}${sep}${header ? header + "\n" : ""}${fresh
             .map((f) => `- ${f}`)
             .join("\n")}`;
-          const next =
-            nextRaw.length > slot.sizeLimit
-              ? nextRaw.slice(nextRaw.length - slot.sizeLimit)
-              : nextRaw;
+          const next = truncateToLines(nextRaw, slot.sizeLimit, "keep-tail");
           await kv.set(projectKv, "project_context", {
             ...slot,
             content: next,
             updatedAt: nowIso(),
+            version: nextVersion(slot),
           });
           return true;
         });

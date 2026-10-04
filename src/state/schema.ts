@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { hasCjk, segmentCjk } from "./cjk-segmenter.js";
+import { cjkBigrams, hasCjk, segmentCjk } from "./cjk-segmenter.js";
 
 export const KV = {
   sessions: "mem:sessions",
@@ -157,14 +157,7 @@ function jaccardTokens(text: string): Set<string> {
       // segmenter returns the whole run: overlapping bigrams make
       // near-identical strings match while unrelated ones ("北京" vs
       // "上海") share none. Never drop short CJK tokens.
-      const chars = Array.from(raw);
-      if (chars.length === 1) {
-        tokens.add(chars[0]);
-      } else {
-        for (let i = 0; i < chars.length - 1; i++) {
-          tokens.add(chars[i] + chars[i + 1]);
-        }
-      }
+      for (const bg of cjkBigrams(raw)) tokens.add(bg);
     } else if (raw.length > 2) {
       tokens.add(raw);
     }

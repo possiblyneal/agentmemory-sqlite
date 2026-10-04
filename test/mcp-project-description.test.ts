@@ -63,7 +63,7 @@ describe("MCP project argument description", () => {
     }
   });
 
-  it("filter tools say that leaving project out searches every project", () => {
+  it("filter tools say that leaving project out uses the current project", () => {
     const descriptions = projectDescriptions();
     for (const tool of FILTER_TOOLS) {
       expect(descriptions.get(tool), tool).toBe(PROJECT_FILTER_DESCRIPTION);

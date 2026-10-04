@@ -18,7 +18,7 @@ import {
   formatNarrativeLine,
   formatScoredLine,
 } from "../prompts/reflect.js";
-import { graphLegDisabled } from "../state/graph-indexes.js";
+import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { logger } from "../logger.js";
 
@@ -27,6 +27,8 @@ import { logger } from "../logger.js";
 // prefill. ~8k tokens at the tree's chars/3 estimate.
 const CLUSTER_PROMPT_CHARS = 24_000;
 const MIN_CLUSTER_ITEMS = 3;
+// Nodes one reflect pass reads from the graph indexes.
+const REFLECT_GRAPH_NODE_LIMIT = 5000;
 
 interface ConceptCluster {
   concepts: string[];
@@ -231,12 +233,28 @@ export function registerReflectFunctions(
       const maxInsightsPerCluster = 5;
       const maxTotal = 50;
 
-      const [graphNodes, graphEdges, semanticMemories, lessons, crystals] =
+      const project = data?.project;
+      const projectSessionIds = project
+        ? new Set(
+            (await kv.list<Session>(KV.sessions))
+              .filter((s) => s.project === project)
+              .map((s) => s.id),
+          )
+        : undefined;
+      const inProject = (n: GraphNode): boolean =>
+        !projectSessionIds ||
+        (n.sessionId !== undefined && projectSessionIds.has(n.sessionId));
+
+      const noGraph = { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
+      const [graph, semanticMemories, lessons, crystals] =
         await Promise.all([
           // B-mode: graph frozen — skip graph-scope reads, cluster over
           // semantic/lessons/crystals only.
-          graphLegDisabled() ? [] : kv.list<GraphNode>(KV.graphNodes).catch(() => []),
-          graphLegDisabled() ? [] : kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
+          graphLegDisabled()
+            ? noGraph
+            : readBoundedGraphSnapshot(kv, REFLECT_GRAPH_NODE_LIMIT, inProject).catch(
+                () => noGraph,
+              ),
           kv.list<SemanticMemory>(KV.semantic).catch(() => []),
           kv.list<Lesson>(KV.lessons).catch(() => []),
           kv.list<Crystal>(KV.crystals).catch(() => []),
@@ -245,26 +263,18 @@ export function registerReflectFunctions(
       let activeLessons = lessons.filter((l) => !l.deleted);
       let scopedSemantic = semanticMemories;
       let scopedCrystals = crystals;
-      let scopedNodes = graphNodes;
-      let scopedEdges = graphEdges;
+      const scopedNodes = graph.nodes;
+      let scopedEdges = graph.edges;
       // One project's clusters must never borrow another's facts, crystals or
       // concepts: an insight is stamped with the project it was built for (#1344).
-      if (data?.project) {
-        const project = data.project;
-        const sessions = await kv.list<Session>(KV.sessions);
-        const projectSessionIds = new Set(
-          sessions.filter((s) => s.project === project).map((s) => s.id),
-        );
+      if (project && projectSessionIds) {
         activeLessons = activeLessons.filter((l) => l.project === project);
         scopedSemantic = semanticMemories.filter((m) =>
           m.sourceSessionIds.some((id) => projectSessionIds.has(id)),
         );
         scopedCrystals = crystals.filter((c) => c.project === project);
-        scopedNodes = graphNodes.filter(
-          (n) => n.sessionId !== undefined && projectSessionIds.has(n.sessionId),
-        );
         const nodeIds = new Set(scopedNodes.map((n) => n.id));
-        scopedEdges = graphEdges.filter(
+        scopedEdges = graph.edges.filter(
           (e) => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId),
         );
       }

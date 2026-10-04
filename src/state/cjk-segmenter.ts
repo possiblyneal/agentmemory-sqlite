@@ -17,6 +17,15 @@ export function hasCjk(text: string): boolean {
   return CJK_RE.test(text);
 }
 
+// Overlapping character pairs; a single character is its own shingle.
+export function cjkBigrams(text: string): string[] {
+  const chars = Array.from(text);
+  if (chars.length <= 1) return chars;
+  const out: string[] = [];
+  for (let i = 0; i < chars.length - 1; i++) out.push(chars[i] + chars[i + 1]);
+  return out;
+}
+
 export function detectScript(text: string): Script {
   if (HAN_RE.test(text)) return "han";
   if (KANA_RE.test(text)) return "kana";

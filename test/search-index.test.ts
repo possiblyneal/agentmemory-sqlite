@@ -89,6 +89,32 @@ describe("SearchIndex", () => {
     expect(index.search("auth")).toEqual([]);
   });
 
+  describe("title weighting", () => {
+    it("does not boost a title that restates the start of its narrative", () => {
+      const base = { subtitle: undefined, facts: [], concepts: [], files: [] };
+      index.add(
+        makeObs({
+          ...base,
+          id: "restates",
+          title: "zebra crossing",
+          narrative: "zebra  crossing near school",
+        }),
+      );
+      index.add(
+        makeObs({
+          ...base,
+          id: "names",
+          title: "zebra crossing",
+          narrative: "school near zebra crossing",
+        }),
+      );
+      const scores = new Map(
+        index.search("zebra crossing", 5).map((r) => [r.obsId, r.score]),
+      );
+      expect(scores.get("names")!).toBeGreaterThan(scores.get("restates")!);
+    });
+  });
+
   // Regression coverage: deleted docs must not keep occupying result
   // slots after remove(). Without remove(), a limit-capped search can
   // return fewer live results than requested because the slot is held
@@ -289,5 +315,36 @@ describe("SearchIndex", () => {
     ]);
     expect(segmentCjk("leading 项目")).toEqual(["leading", "项目"]);
     expect(segmentCjk("项目 trailing")).toEqual(["项目", "trailing"]);
+  });
+});
+
+describe("SearchIndex field weighting and CJK fallback", () => {
+  const base = (id: string, over: Record<string, unknown>) => ({
+    id,
+    sessionId: "s",
+    timestamp: new Date().toISOString(),
+    type: "decision",
+    title: "",
+    facts: [],
+    narrative: "",
+    concepts: [],
+    files: [],
+    importance: 5,
+    ...over,
+  }) as never;
+
+  it("ranks a title match above a narrative-only mention", () => {
+    const idx = new SearchIndex();
+    idx.add(base("mention", { title: "deploy notes", narrative: "talked to zorblax briefly" }));
+    idx.add(base("named", { title: "zorblax", narrative: "the deploy notes owner" }));
+    expect(idx.search("zorblax")[0].obsId).toBe("named");
+  });
+
+  it("matches a CJK substring when no segmenter splits the run", () => {
+    const idx = new SearchIndex();
+    idx.add(base("a", { title: "数据库迁移计划" }));
+    idx.add(base("b", { title: "前端样式调整" }));
+    const hits = idx.search("迁移");
+    expect(hits.map((h) => h.obsId)).toEqual(["a"]);
   });
 });

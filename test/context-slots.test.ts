@@ -232,3 +232,38 @@ describe("mem::context — pinned slot injection", () => {
     });
   });
 });
+
+describe("mem::context — contentless Observations", () => {
+  it("leaves out Observations with an empty narrative", async () => {
+    const kv = mockKV();
+    const handler = wireContext(kv);
+    await kv.set(KV.sessions, "ses_old", {
+      id: "ses_old",
+      project: "/tmp/proj",
+      startedAt: new Date().toISOString(),
+      status: "completed",
+    });
+    const obs = (id: string, title: string, narrative: string) => ({
+      id,
+      sessionId: "ses_old",
+      timestamp: new Date().toISOString(),
+      type: "other",
+      title,
+      facts: [],
+      narrative,
+      concepts: [],
+      files: [],
+      importance: 5,
+      confidence: 0.3,
+    });
+    await kv.set(KV.observations("ses_old"), "o1", obs("o1", "empty-title", ""));
+    await kv.set(KV.observations("ses_old"), "o2", obs("o2", "blank-title", "   "));
+    await kv.set(KV.observations("ses_old"), "o3", obs("o3", "real-title", "real narrative"));
+
+    const result = await handler({ sessionId: "ses_new", project: "/tmp/proj" });
+
+    expect(result.context).toContain("real-title");
+    expect(result.context).not.toContain("empty-title");
+    expect(result.context).not.toContain("blank-title");
+  });
+});

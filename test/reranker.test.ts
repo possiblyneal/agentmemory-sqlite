@@ -71,7 +71,9 @@ describe("reranker with loaded pipeline", () => {
     const mockPipeline = vi.fn(async (text: string) => [
       { score: text.includes("First") ? 0.9 : 0.1 },
     ]);
+    const env: Record<string, unknown> = {};
     vi.doMock("@huggingface/transformers", () => ({
+      env,
       pipeline: () => Promise.resolve(mockPipeline),
     }));
     vi.resetModules();
@@ -87,5 +89,6 @@ describe("reranker with loaded pipeline", () => {
 
     expect(mockPipeline).toHaveBeenCalled();
     expect(reranked[0].observation.id).toBe("o1");
+    expect(env["cacheDir"]).toMatch(/models$/);
   });
 });

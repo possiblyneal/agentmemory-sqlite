@@ -6,6 +6,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import {
   memoryToIndexDoc,
   memoryChunkJobs,
+  memoryToObservation,
   refersToDifferentDates,
   MEMORY_SESSION,
 } from "../state/memory-utils.js";
@@ -14,6 +15,7 @@ import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorI
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
+import { graphWritesDisabled } from "./graph.js";
 
 // Slicing by UTF-16 code unit can cut an astral character (emoji, some CJK
 // extensions) mid surrogate pair, leaving a lone high surrogate that renders
@@ -22,6 +24,37 @@ import { scrubFields } from "./privacy.js";
 function safeSlice(text: string, length: number): string {
   const sliced = text.slice(0, length);
   return /[\uD800-\uDBFF]$/.test(sliced) ? sliced.slice(0, -1) : sliced;
+}
+
+// Signs that a caller mis-encoded its tool call and the arguments after content
+// were absorbed into it as literal text. /g so match() counts every marker.
+const XML_LEAK_MARKERS = [
+  /<\/(?:[a-z]+:)?(?:parameter|invoke|function_calls)>/gi,
+  /<parameter\s+name=/gi,
+  /<\/content>/gi,
+];
+// A JSON argument list that closed content's string and went on to the next
+// key. type counts only with a Memory type as its value, so quoted JSON such as
+// a package.json "type": "module" still saves.
+const JSON_LEAK =
+  /["\u201d]\s*,\s*["\u201c](?:concepts["\u201d]\s*:|type["\u201d]\s*:\s*["\u201c](?:pattern|preference|architecture|bug|workflow|fact)["\u201d])/;
+
+// More than one XML marker is required so content that legitimately mentions
+// a single tag still saves.
+function hasLeakedToolArgs(content: string): boolean {
+  if (JSON_LEAK.test(content)) return true;
+  const markers = XML_LEAK_MARKERS.reduce(
+    (n, p) => n + (content.match(p)?.length ?? 0),
+    0,
+  );
+  return markers > 1;
+}
+
+function warnGraphExtract(memId: string, err: unknown): void {
+  logger.warn("graph-extract trigger failed on remember", {
+    memId,
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
@@ -34,6 +67,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       ttlDays?: number;
       sourceObservationIds?: string[];
       agentId?: string;
+      sessionId?: string;
       project?: string;
       global?: boolean;
     }) => {
@@ -44,6 +78,18 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         !data.content.trim()
       ) {
         return { success: false, error: "content is required" };
+      }
+      if (hasLeakedToolArgs(data.content)) {
+        return {
+          success: false,
+          error:
+            "content contains tool-call markup, so the arguments after it were " +
+            "probably absorbed into content. Resend with one parameter per " +
+            "argument: content, type, concepts, files, project.",
+        };
+      }
+      if (data.sessionId !== undefined && typeof data.sessionId !== "string") {
+        return { success: false, error: "sessionId must be a string" };
       }
       if (data.files && !Array.isArray(data.files)) {
         return { success: false, error: "files must be an array" };
@@ -77,6 +123,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         typeof data.project === "string" && data.project.trim().length > 0
           ? data.project.trim()
           : undefined;
+      const sessionId = data.sessionId?.trim() || undefined;
       if (data.global && project) {
         return { success: false, error: "a Memory cannot have both a project and global" };
       }
@@ -189,7 +236,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           content: data.content,
           concepts: data.concepts || [],
           files: data.files || [],
-          sessionIds: [],
+          sessionIds: sessionId ? [sessionId] : [],
           strength: 7,
           version: supersededId ? supersededVersion + 1 : 1,
           parentId: supersededId,
@@ -243,15 +290,38 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         }
         // Batched so a chunked save costs ONE embed round-trip rather
         // than one per chunk. Yields a single job when chunking is off.
-        const sessionId = memory.sessionIds?.[0] ?? MEMORY_SESSION;
+        const vectorSessionId = memory.sessionIds?.[0] ?? MEMORY_SESSION;
         await vectorIndexAddBatchGuarded(
           memoryChunkJobs(memory).map((job) => ({
             id: job.id,
-            sessionId,
+            sessionId: vectorSessionId,
             text: job.text,
             context: { kind: "memory" as const, logId: job.id },
           })),
         );
+
+        await recordAudit(kv, "remember", "mem::remember", [memory.id], {
+          type: memory.type,
+          sessionIds: memory.sessionIds,
+          concepts: memory.concepts,
+          files: memory.files,
+          version: memory.version,
+          ...(supersededId && { supersededMemoryId: supersededId }),
+        });
+
+        if (!graphWritesDisabled()) {
+          try {
+            sdk
+              .trigger({
+                function_id: "mem::graph-extract",
+                payload: { observations: [memoryToObservation(memory)] },
+                action: TriggerAction.Void(),
+              })
+              .catch((err: unknown) => warnGraphExtract(memory.id, err));
+          } catch (err) {
+            warnGraphExtract(memory.id, err);
+          }
+        }
 
         if (supersededId) {
           await sdk.trigger({

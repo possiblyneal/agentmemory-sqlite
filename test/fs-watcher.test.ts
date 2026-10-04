@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FilesystemWatcher, configFromEnv } from "../integrations/filesystem-watcher/watcher.mjs";
+import { FilesystemWatcher, configFromEnv, loadEnvFile } from "../integrations/filesystem-watcher/watcher.mjs";
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "fs-watch-"));
@@ -388,5 +388,27 @@ describe("configFromEnv", () => {
   it("returns empty roots when the env var is missing", () => {
     const cfg = configFromEnv({});
     expect(cfg.roots).toEqual([]);
+  });
+});
+
+describe("loadEnvFile", () => {
+  it("parses the daemon's env file format and returns {} when missing", () => {
+    const dir = tempDir();
+    const file = join(dir, ".env");
+    writeFileSync(
+      file,
+      '# c\nAGENTMEMORY_FS_WATCH_DIRS="/a,/b" # note\nAGENTMEMORY_URL=http://x:1 # n\nbad line\n',
+    );
+    expect(loadEnvFile(file)).toEqual({
+      AGENTMEMORY_FS_WATCH_DIRS: "/a,/b",
+      AGENTMEMORY_URL: "http://x:1",
+    });
+    expect(loadEnvFile(join(dir, "missing"))).toEqual({});
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("lets process.env win when merged ahead of configFromEnv", () => {
+    const merged = { AGENTMEMORY_URL: "http://file:1", ...{ AGENTMEMORY_URL: "http://proc:2" } };
+    expect(configFromEnv(merged).baseUrl).toBe("http://proc:2");
   });
 });

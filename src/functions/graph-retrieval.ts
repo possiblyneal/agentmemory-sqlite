@@ -7,9 +7,8 @@ import type {
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import {
-  GraphIndexReader,
   graphReadable,
-  loadNameCatalog,
+  openGraphReadView,
   loadNodeIdsForObservations,
 } from "../state/graph-indexes.js";
 
@@ -49,6 +48,10 @@ function buildGraphContext(
   }
   return parts.join(" ");
 }
+
+// Nodes one traversal may expand. Depth alone bounds a hub's reach by its
+// degree to the power of the depth.
+const MAX_EXPANDED_NODES = 500;
 
 export class GraphRetrieval {
   constructor(private kv: StateKV) {}
@@ -133,8 +136,8 @@ export class GraphRetrieval {
     maxResults = 20,
   ): Promise<GraphRetrievalResult[]> {
     if (await graphReadable(this.kv)) {
-      const reader = await GraphIndexReader.open(this.kv);
-      const catalog = await loadNameCatalog(this.kv);
+      const { reader, loadCatalog } = await openGraphReadView(this.kv);
+      const catalog = await loadCatalog();
       const lowered = entityNames.map((e) => e.toLowerCase());
       const matchingNodes: GraphNode[] = [];
       for (const entry of catalog) {
@@ -238,7 +241,7 @@ export class GraphRetrieval {
     maxResults = 10,
   ): Promise<GraphRetrievalResult[]> {
     if (await graphReadable(this.kv)) {
-      const reader = await GraphIndexReader.open(this.kv);
+      const { reader } = await openGraphReadView(this.kv);
       const candidateIds = await loadNodeIdsForObservations(this.kv, obsIds);
       const linkedNodes: GraphNode[] = [];
       for (const nodeId of candidateIds) {
@@ -314,8 +317,8 @@ export class GraphRetrieval {
     history: GraphEdge[];
   }> {
     if (await graphReadable(this.kv)) {
-      const reader = await GraphIndexReader.open(this.kv);
-      const catalog = await loadNameCatalog(this.kv);
+      const { reader, loadCatalog } = await openGraphReadView(this.kv);
+      const catalog = await loadCatalog();
       const lower = entityName.toLowerCase();
       let entity: GraphNode | null = null;
       for (const entry of catalog) {
@@ -410,6 +413,7 @@ export class GraphRetrieval {
     startNode: GraphNode,
     getNeighbors: NeighborProvider,
     maxDepth: number,
+    maxExpanded = MAX_EXPANDED_NODES,
   ): Promise<Array<Array<{ node: GraphNode; edge?: GraphEdge }>>> {
     const dist = new Map<string, number>();
     const pathTo = new Map<string, Array<{ node: GraphNode; edge?: GraphEdge }>>();
@@ -421,12 +425,14 @@ export class GraphRetrieval {
     );
     heap.push({ nodeId: startNode.id, depth: 0, cost: 0 });
 
-    while (heap.size() > 0) {
+    let expanded = 0;
+    while (heap.size() > 0 && expanded < maxExpanded) {
       const { nodeId, depth, cost } = heap.pop()!;
       // Skip stale heap entries (cost beaten by a later push).
       if (cost > (dist.get(nodeId) ?? Infinity)) continue;
       if (depth >= maxDepth) continue;
 
+      expanded++;
       const neighbors = await getNeighbors(nodeId);
       for (const { node: nextNode, edge } of neighbors) {
         const neighborId = nextNode.id;

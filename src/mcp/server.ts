@@ -214,6 +214,10 @@ export function registerMcpEndpoints(
               typeof args.agentId === "string" && args.agentId.trim().length > 0
                 ? (args.agentId as string).trim()
                 : undefined;
+            const saveSessionId =
+              typeof args.sessionId === "string" && args.sessionId.trim().length > 0
+                ? args.sessionId.trim()
+                : undefined;
             if (args.global !== undefined && typeof args.global !== "boolean") {
               return { status_code: 400, body: { error: "global must be a boolean" } };
             }
@@ -228,6 +232,7 @@ export function registerMcpEndpoints(
               files,
               ...(project !== undefined && { project }),
               ...(saveAgentId !== undefined && { agentId: saveAgentId }),
+              ...(saveSessionId !== undefined && { sessionId: saveSessionId }),
               ...(args.global === true && { global: true }),
             } });
             return {
@@ -1302,7 +1307,7 @@ export function registerMcpEndpoints(
             if (!label || typeof args.content !== "string") {
               return { status_code: 400, body: { error: "label and content (string) required" } };
             }
-            const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content: args.content, project: asNonEmptyString(args.project) } });
+            const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content: args.content, project: asNonEmptyString(args.project), expectedVersion: args.expectedVersion } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },

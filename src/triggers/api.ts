@@ -750,6 +750,7 @@ export function registerApiTriggers(
             { type: "set", path: "cwd", value: cwd },
             { type: "set", path: "updatedAt", value: now },
             { type: "remove", path: "endedAt" },
+            { type: "remove", path: "idleClosed" },
             ...(firstPrompt && !existing.firstPrompt
               ? [{ type: "set", path: "firstPrompt", value: firstPrompt }]
               : []),
@@ -816,6 +817,7 @@ export function registerApiTriggers(
     await kv.update(KV.sessions, sessionId, [
       { type: "set", path: "endedAt", value: new Date().toISOString() },
       { type: "set", path: "status", value: "completed" },
+      { type: "remove", path: "idleClosed" },
     ]);
     // Fan out session-stopped lifecycle (non-blocking).
     try {
@@ -1196,6 +1198,7 @@ export function registerApiTriggers(
         sourceObservationIds?: string[];
         project?: string;
         agentId?: string;
+        sessionId?: string;
         global?: boolean;
       }>,
     ): Promise<Response> => {
@@ -1233,6 +1236,9 @@ export function registerApiTriggers(
           ...(req.body.global === true && { global: true }),
           ...(typeof req.body.agentId === "string" && req.body.agentId.trim()
             ? { agentId: req.body.agentId.trim() }
+            : {}),
+          ...(typeof req.body.sessionId === "string" && req.body.sessionId.trim()
+            ? { sessionId: req.body.sessionId.trim() }
             : {}),
         },
       });
@@ -2666,12 +2672,13 @@ export function registerApiTriggers(
     if (!label || typeof content !== "string") {
       return { status_code: 400, body: { error: "label and content (string) required" } };
     }
-    const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content, project: asNonEmptyString(body["project"]) } });
+    const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content, project: asNonEmptyString(body["project"]), expectedVersion: body["expectedVersion"] } });
     const resp = result as { success?: boolean; error?: string };
     if (resp?.success === false) {
       const notFound = resp.error?.includes("not found");
       const overLimit = resp.error?.includes("exceed");
-      return { status_code: notFound ? 404 : overLimit ? 413 : 400, body: resp };
+      const conflict = resp.error?.startsWith("version conflict");
+      return { status_code: notFound ? 404 : conflict ? 409 : overLimit ? 413 : 400, body: resp };
     }
     return { status_code: 200, body: result };
   });

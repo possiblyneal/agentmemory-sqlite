@@ -6,11 +6,15 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
+import { resolveProject } from "../hooks/_project.js";
+import { withDefaultProject } from "./default-project.js";
 import { hydrateEnvFromFile } from "../hooks/_env.js";
 import {
   isBlankOrPlaceholder,
   resolveHandle,
   invalidateHandle,
+  daemonUnreachableMessage,
+  strictDaemonUrl,
   type Handle,
   type ProxyHandle,
 } from "./rest-proxy.js";
@@ -121,6 +125,7 @@ interface Validated {
   files?: string[];
   project?: string;
   agentId?: string;
+  sessionId?: string;
   global?: boolean;
   query?: string;
   limit?: number;
@@ -153,6 +158,9 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       }
       if (typeof args["agentId"] === "string" && args["agentId"].trim()) {
         v.agentId = args["agentId"].trim();
+      }
+      if (typeof args["sessionId"] === "string" && args["sessionId"].trim()) {
+        v.sessionId = args["sessionId"].trim();
       }
       if (args["global"] !== undefined && typeof args["global"] !== "boolean") {
         throw new Error("global must be a boolean");
@@ -224,6 +232,7 @@ async function handleProxy(
           files: v.files,
           ...(v.project !== undefined && { project: v.project }),
           ...(v.agentId !== undefined && { agentId: v.agentId }),
+          ...(v.sessionId !== undefined && { sessionId: v.sessionId }),
           ...(v.global && { global: true }),
         }),
       });
@@ -304,7 +313,7 @@ async function handleLocal(
         strength: 7,
         version: 1,
         isLatest: true,
-        sessionIds: [],
+        sessionIds: v.sessionId ? [v.sessionId] : [],
         ...(v.project !== undefined && { project: v.project }),
         ...(v.global && { global: true }),
       });
@@ -415,13 +424,21 @@ function serverAnswered(err: unknown): boolean {
   return typeof status === "number" && !GATEWAY_DOWN.has(status);
 }
 
+let cwdProject: string | undefined;
+
 export async function handleToolCall(
   toolName: string,
-  args: Record<string, unknown>,
+  rawArgs: Record<string, unknown>,
   kvInstance: InMemoryKV = kv,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+  cwdProject ??= resolveProject();
+  const args = withDefaultProject(toolName, rawArgs, cwdProject);
   const handle = await resolveHandle();
   announceMode(handle);
+
+  if (handle.mode === "local" && handle.unreachableUrl) {
+    throw new Error(daemonUnreachableMessage(handle.unreachableUrl));
+  }
 
   // Tools the local InMemoryKV fallback doesn't implement: forward straight
   // to the server. Local validation would otherwise raise "Unknown tool"
@@ -460,6 +477,11 @@ export async function handleToolCall(
       // Any other answer is the tool's real error; the local store is only
       // for a server that could not be reached.
       if (serverAnswered(err)) throw err;
+      const explicitUrl = strictDaemonUrl();
+      if (explicitUrl) {
+        invalidateHandle();
+        throw new Error(daemonUnreachableMessage(explicitUrl));
+      }
       process.stderr.write(
         `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}; invalidating handle and falling back to local KV\n`,
       );
@@ -527,6 +549,62 @@ export async function handleToolsList(): Promise<{ tools: unknown[] }> {
   return { tools: fallback };
 }
 
+async function proxyServerOnly(
+  what: string,
+  path: string,
+  init: { method: string; body?: string },
+): Promise<unknown> {
+  const handle = await resolveHandle();
+  announceMode(handle);
+  if (handle.mode !== "proxy") {
+    throw new Error(
+      `${what} needs a running agentmemory server (local fallback has none); start one and set AGENTMEMORY_URL`,
+    );
+  }
+  try {
+    return await handle.call(path, init);
+  } catch (err) {
+    if (!serverAnswered(err)) invalidateHandle();
+    throw err;
+  }
+}
+
+async function listFromServer(
+  what: string,
+  path: string,
+  key: "resources" | "prompts",
+): Promise<Record<string, unknown[]>> {
+  const handle = await resolveHandle();
+  if (handle.mode !== "proxy") return { [key]: [] };
+  const remote = (await proxyServerOnly(what, path, { method: "GET" })) as
+    | Record<string, unknown>
+    | null;
+  const items = remote?.[key];
+  return { [key]: Array.isArray(items) ? items : [] };
+}
+
+export function handleResourcesList() {
+  return listFromServer("resources/list", "/agentmemory/mcp/resources", "resources");
+}
+
+export function handleResourcesRead(uri: unknown) {
+  return proxyServerOnly("resources/read", "/agentmemory/mcp/resources/read", {
+    method: "POST",
+    body: JSON.stringify({ uri }),
+  });
+}
+
+export function handlePromptsList() {
+  return listFromServer("prompts/list", "/agentmemory/mcp/prompts", "prompts");
+}
+
+export function handlePromptsGet(name: unknown, args: unknown) {
+  return proxyServerOnly("prompts/get", "/agentmemory/mcp/prompts/get", {
+    method: "POST",
+    body: JSON.stringify({ name, arguments: args }),
+  });
+}
+
 const transport = createStdioTransport(async (method, params) => {
   switch (method) {
     case "initialize": {
@@ -539,7 +617,11 @@ const transport = createStdioTransport(async (method, params) => {
           : SUPPORTED_PROTOCOL_VERSIONS[0];
       return {
         protocolVersion,
-        capabilities: { tools: { listChanged: false } },
+        capabilities: {
+          tools: { listChanged: false },
+          resources: { listChanged: false },
+          prompts: { listChanged: false },
+        },
         serverInfo: {
           name: SERVER_INFO.name,
           version: SERVER_INFO.version,
@@ -552,6 +634,18 @@ const transport = createStdioTransport(async (method, params) => {
 
     case "tools/list":
       return handleToolsList();
+
+    case "resources/list":
+      return handleResourcesList();
+
+    case "resources/read":
+      return handleResourcesRead(params?.uri);
+
+    case "prompts/list":
+      return handlePromptsList();
+
+    case "prompts/get":
+      return handlePromptsGet(params?.name, params?.arguments);
 
     case "tools/call": {
       const toolName = params.name as string;

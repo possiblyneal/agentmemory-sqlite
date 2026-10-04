@@ -30,10 +30,13 @@ const snapshotFile = vi.hoisted(() => ({
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn((_path: string, content: string) => {
+  readFileSync: vi.fn(() => snapshotFile.content),
+}));
+
+vi.mock("../src/utils/atomic-write.js", () => ({
+  writeFileAtomicNoSymlink: vi.fn((_path: string, content: string) => {
     snapshotFile.content = content;
   }),
-  readFileSync: vi.fn(() => snapshotFile.content),
 }));
 
 import { registerSnapshotFunction } from "../src/functions/snapshot.js";

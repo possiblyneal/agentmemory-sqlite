@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { FilesystemWatcher, configFromEnv } from "./watcher.mjs";
+import { FilesystemWatcher, configFromEnv, loadEnvFile } from "./watcher.mjs";
 
 const cliArgs = process.argv.slice(2);
-const envCfg = configFromEnv(process.env);
+const envCfg = configFromEnv({ ...loadEnvFile(), ...process.env });
 
 const roots = cliArgs.length > 0 ? cliArgs : envCfg.roots;
 if (!roots || roots.length === 0) {

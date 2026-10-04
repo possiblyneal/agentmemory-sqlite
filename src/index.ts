@@ -62,6 +62,7 @@ import { evictOldestAudit } from "./functions/audit.js";
 import { registerRelationsFunction } from "./functions/relations.js";
 import { registerTimelineFunction } from "./functions/timeline.js";
 import { registerSmartSearchFunction } from "./functions/smart-search.js";
+import { registerIdleSessionSweepFunction } from "./functions/idle-session-sweep.js";
 import { registerRecentSearchesSweepFunction } from "./functions/recent-searches-sweep.js";
 import { registerInjectionsFunction } from "./functions/injections.js";
 import { registerProfileFunction } from "./functions/profile.js";
@@ -413,6 +414,7 @@ async function main() {
       : hybridSearch.search(query, limit),
   );
   registerRecentSearchesSweepFunction(sdk, kv);
+  registerIdleSessionSweepFunction(sdk, kv);
   registerInjectionsFunction(sdk, kv);
 
   registerApiTriggers(sdk, kv, secret, metricsStore, provider);
@@ -579,7 +581,7 @@ async function main() {
     `REST API: 133 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
   );
   bootLog(
-    `MCP surface (opt-in via \`npx @agentmemory/mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,
+    `MCP surface (opt-in via \`agentmemory mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,
   );
 
   const viewerPort = config.restPort + 2;
@@ -657,6 +659,14 @@ async function main() {
     } catch {}
   }, 60 * 60 * 1000);
   recentSearchesSweepTimer.unref();
+
+  // Sessions whose client never sent SessionEnd stay active; close them once idle.
+  const idleSessionSweepTimer = setInterval(async () => {
+    try {
+      await sdk.trigger({ function_id: "mem::idle-session-sweep", payload: {} });
+    } catch {}
+  }, 60 * 60 * 1000);
+  idleSessionSweepTimer.unref();
 
   const injectionsSweepTimer = setInterval(async () => {
     try {
