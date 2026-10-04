@@ -7,8 +7,11 @@ vi.mock("../src/logger.js", () => ({
 vi.mock("node:fs", () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
-  writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
+}));
+
+vi.mock("../src/utils/atomic-write.js", () => ({
+  writeFileAtomicNoSymlink: vi.fn(),
 }));
 
 vi.mock("node:path", async () => ({
@@ -17,7 +20,8 @@ vi.mock("node:path", async () => ({
 }));
 
 import { registerClaudeBridgeFunction } from "../src/functions/claude-bridge.js";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFileAtomicNoSymlink } from "../src/utils/atomic-write.js";
 import type { ClaudeBridgeConfig, Memory } from "../src/types.js";
 
 function mockKV() {
@@ -148,8 +152,8 @@ describe("Claude Bridge Functions", () => {
 
     expect(result.success).toBe(true);
     expect(result.path).toBe("/tmp/.claude/MEMORY.md");
-    expect(writeFileSync).toHaveBeenCalled();
-    const writtenContent = vi.mocked(writeFileSync).mock.calls[0][1] as string;
+    expect(writeFileAtomicNoSymlink).toHaveBeenCalled();
+    const writtenContent = vi.mocked(writeFileAtomicNoSymlink).mock.calls[0][1] as string;
     expect(writtenContent).toContain("Auth pattern");
   });
 

@@ -1,11 +1,12 @@
 import type { ISdk } from "../engine/types.js";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Memory, ClaudeBridgeConfig } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { logger } from "../logger.js";
+import { writeFileAtomicNoSymlink } from "../utils/atomic-write.js";
 
 function parseMemoryMd(content: string): {
   sections: Map<string, string>;
@@ -139,7 +140,7 @@ export function registerClaudeBridgeFunction(
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
         }
-        writeFileSync(config.memoryFilePath, md, "utf-8");
+        writeFileAtomicNoSymlink(config.memoryFilePath, md);
 
         await recordAudit(kv, "export", "mem::claude-bridge-sync", [], {
           path: config.memoryFilePath,
