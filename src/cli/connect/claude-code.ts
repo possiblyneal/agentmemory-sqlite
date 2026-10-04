@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import * as p from "@clack/prompts";
+import { getClaudeConfigDir, getClaudeJsonPath } from "../../config.js";
 import {
   AGENTMEMORY_MCP_BLOCK,
   backupFile,
@@ -22,9 +21,6 @@ export type ConnectResult =
   | { kind: "already-wired" }
   | { kind: "skipped"; reason: string };
 
-const CLAUDE_DIR = join(homedir(), ".claude");
-const CLAUDE_JSON = join(homedir(), ".claude.json");
-
 type ClaudeMcpEntry = typeof AGENTMEMORY_MCP_BLOCK;
 type ClaudeConfig = {
   mcpServers?: Record<string, ClaudeMcpEntry>;
@@ -40,8 +36,10 @@ function entryMatches(entry: unknown): boolean {
 }
 
 export async function installClaudeCode(opts: ConnectOptions): Promise<ConnectResult> {
-  if (!existsSync(CLAUDE_DIR)) {
-    p.log.warn(`Claude Code: not detected on this machine (${CLAUDE_DIR} is missing).`);
+  const claudeDir = getClaudeConfigDir();
+  const claudeJson = getClaudeJsonPath();
+  if (!existsSync(claudeDir)) {
+    p.log.warn(`Claude Code: not detected on this machine (${claudeDir} is missing).`);
     return { kind: "skipped", reason: "not-detected" };
   }
   p.log.step("Wiring Claude Code…");
@@ -49,7 +47,7 @@ export async function installClaudeCode(opts: ConnectOptions): Promise<ConnectRe
     "→ Using MCP only. Hooks and skills come with the marketplace plugin: /plugin marketplace add possiblyneal/agentmemory-sqlite, then /plugin install agentmemory.",
   );
 
-  const existing = readJsonSafe<ClaudeConfig>(CLAUDE_JSON);
+  const existing = readJsonSafe<ClaudeConfig>(claudeJson);
   const next: ClaudeConfig = existing ? { ...existing } : {};
   const servers: Record<string, ClaudeMcpEntry> = {
     ...((next.mcpServers as Record<string, ClaudeMcpEntry>) ?? {}),
@@ -57,39 +55,39 @@ export async function installClaudeCode(opts: ConnectOptions): Promise<ConnectRe
 
   const alreadyHas = entryMatches(servers["agentmemory"]);
   if (alreadyHas && !opts.force) {
-    logAlreadyWired("Claude Code", CLAUDE_JSON);
+    logAlreadyWired("Claude Code", claudeJson);
     return { kind: "already-wired" };
   }
 
   if (opts.dryRun) {
     p.log.info(
-      `[dry-run] Would ${alreadyHas ? "overwrite" : "add"} mcpServers.agentmemory in ${CLAUDE_JSON}`,
+      `[dry-run] Would ${alreadyHas ? "overwrite" : "add"} mcpServers.agentmemory in ${claudeJson}`,
     );
     return { kind: "installed" };
   }
 
   let backupPath: string | undefined;
-  if (existsSync(CLAUDE_JSON)) {
-    backupPath = backupFile(CLAUDE_JSON, "claude-code");
+  if (existsSync(claudeJson)) {
+    backupPath = backupFile(claudeJson, "claude-code");
     logBackup(backupPath);
   } else {
-    mkdirSync(CLAUDE_DIR, { recursive: true });
-    writeFileSync(CLAUDE_JSON, "{}\n", "utf-8");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(claudeJson, "{}\n", "utf-8");
   }
 
   servers["agentmemory"] = AGENTMEMORY_MCP_BLOCK;
   next.mcpServers = servers;
-  writeJsonAtomic(CLAUDE_JSON, next);
+  writeJsonAtomic(claudeJson, next);
 
-  const verify = readJsonSafe<ClaudeConfig>(CLAUDE_JSON);
+  const verify = readJsonSafe<ClaudeConfig>(claudeJson);
   if (!entryMatches(verify?.mcpServers?.["agentmemory"])) {
     p.log.error(
-      `Verification failed: ${CLAUDE_JSON} did not contain mcpServers.agentmemory after write.`,
+      `Verification failed: ${claudeJson} did not contain mcpServers.agentmemory after write.`,
     );
     return { kind: "skipped", reason: "verification-failed" };
   }
 
-  logInstalled("Claude Code", CLAUDE_JSON);
+  logInstalled("Claude Code", claudeJson);
   p.log.info(
     "Restart Claude Code (or run `/mcp` inside a session) to pick up the new server.",
   );

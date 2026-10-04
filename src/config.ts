@@ -198,6 +198,21 @@ export function getEnvVar(key: string): string | undefined {
   return getMergedEnv()[key];
 }
 
+// Claude Code reads only its own process environment, never ~/.agentmemory/.env.
+function claudeConfigDirOverride(): string | undefined {
+  const dir = process.env["CLAUDE_CONFIG_DIR"];
+  return hasRealValue(dir) ? dir : undefined;
+}
+
+export function getClaudeConfigDir(): string {
+  return claudeConfigDirOverride() ?? join(homedir(), ".claude");
+}
+
+export function getClaudeJsonPath(): string {
+  const dir = claudeConfigDirOverride();
+  return dir ? join(dir, ".claude.json") : join(homedir(), ".claude.json");
+}
+
 export function getSqlitePath(): string {
   return (
     getEnvVar("AGENTMEMORY_SQLITE_PATH") || join(DATA_DIR, "agentmemory.sqlite")
@@ -262,7 +277,7 @@ export function loadClaudeBridgeConfig(): ClaudeBridgeConfig {
   let memoryFilePath = "";
   if (enabled && projectPath) {
     // Claude Code stores project memory at
-    //   ~/.claude/projects/<slug>/memory/MEMORY.md
+    //   <claude config dir>/projects/<slug>/memory/MEMORY.md
     // where <slug> is the project path with `/` and `\` swapped for `-`.
     // The leading `-` from an absolute POSIX path is preserved (Claude
     // Code keeps it; stripping it produced a slug Claude never reads).
@@ -270,8 +285,7 @@ export function loadClaudeBridgeConfig(): ClaudeBridgeConfig {
     // per-topic `.md` file per memory (verified against Claude Code 2.x).
     const safePath = projectPath.replace(/[/\\]/g, "-");
     memoryFilePath = join(
-      homedir(),
-      ".claude",
+      getClaudeConfigDir(),
       "projects",
       safePath,
       "memory",

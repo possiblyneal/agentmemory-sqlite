@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import {
   CONNECT_USAGE,
@@ -61,6 +62,7 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     originalUserprofile = process.env["USERPROFILE"];
     process.env["HOME"] = tmpHome;
     process.env["USERPROFILE"] = tmpHome;
+    delete process.env["CLAUDE_CONFIG_DIR"];
     vi.resetModules();
   });
 
@@ -70,6 +72,7 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     if (originalUserprofile !== undefined)
       process.env["USERPROFILE"] = originalUserprofile;
     else delete process.env["USERPROFILE"];
+    delete process.env["CLAUDE_CONFIG_DIR"];
     rmSync(tmpHome, { recursive: true, force: true });
     vi.resetModules();
   });
@@ -202,5 +205,66 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
       expect(existsSync(result.backupPath!)).toBe(true);
       expect(result.backupPath!).toContain(join(".agentmemory", "backups"));
     }
+  });
+
+  describe("with CLAUDE_CONFIG_DIR set (rohitg00/agentmemory#1067)", () => {
+    const repoTmp = fileURLToPath(new URL("../tmp", import.meta.url));
+    let configDir: string;
+
+    beforeEach(() => {
+      mkdirSync(repoTmp, { recursive: true });
+      configDir = mkdtempSync(join(repoTmp, "claude-config-"));
+      process.env["CLAUDE_CONFIG_DIR"] = configDir;
+    });
+
+    afterEach(() => {
+      rmSync(configDir, { recursive: true, force: true });
+    });
+
+    it("writes the entry into $CLAUDE_CONFIG_DIR/.claude.json and leaves ~/.claude* alone", async () => {
+      const install = await loadInstall();
+      const result = await install({ dryRun: false, force: false });
+      expect(result.kind).toBe("installed");
+
+      const config = JSON.parse(readFileSync(join(configDir, ".claude.json"), "utf-8"));
+      expect(config.mcpServers.agentmemory.args).toContain("@agentmemory/mcp");
+      expect(existsSync(join(tmpHome, ".claude.json"))).toBe(false);
+      expect(existsSync(join(tmpHome, ".claude"))).toBe(false);
+    });
+
+    it("a dry run names the resolved .claude.json", async () => {
+      const { runConnect: runConnectUnderTmpHome } = await import("../src/cli/connect/index.js");
+      const printed: string[] = [];
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+        printed.push(String(chunk));
+        return true;
+      }) as never);
+      try {
+        await runConnectUnderTmpHome(["--dry-run"]);
+      } finally {
+        write.mockRestore();
+      }
+      expect(printed.join("")).toContain(join(configDir, ".claude.json"));
+      expect(existsSync(join(configDir, ".claude.json"))).toBe(false);
+    });
+
+    it("skips with not-detected when the configured dir is missing", async () => {
+      rmSync(configDir, { recursive: true, force: true });
+      mkdirSync(join(tmpHome, ".claude"), { recursive: true });
+      const install = await loadInstall();
+      expect(await install({ dryRun: false, force: false })).toEqual({
+        kind: "skipped",
+        reason: "not-detected",
+      });
+      expect(existsSync(join(tmpHome, ".claude.json"))).toBe(false);
+    });
+
+    it("a blank value falls back to ~/.claude", async () => {
+      process.env["CLAUDE_CONFIG_DIR"] = "  ";
+      mkdirSync(join(tmpHome, ".claude"), { recursive: true });
+      const install = await loadInstall();
+      expect((await install({ dryRun: false, force: false })).kind).toBe("installed");
+      expect(existsSync(join(tmpHome, ".claude.json"))).toBe(true);
+    });
   });
 });

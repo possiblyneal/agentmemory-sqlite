@@ -139,7 +139,7 @@ function env(): string {
 
 function agents(): string {
   const lines = [
-    `\`${CONNECT_USAGE}\` wires agentmemory's MCP server into Claude Code (\`~/.claude.json\`). \`agentmemory connect ${CONNECT_ALIAS}\` is accepted as an alias. Any other flag or argument exits 1.`,
+    `\`${CONNECT_USAGE}\` wires agentmemory's MCP server into Claude Code (\`~/.claude.json\`, or \`$CLAUDE_CONFIG_DIR/.claude.json\` when that is set). \`agentmemory connect ${CONNECT_ALIAS}\` is accepted as an alias. Any other flag or argument exits 1.`,
     "",
     "| Flag | Effect |",
     "| --- | --- |",
