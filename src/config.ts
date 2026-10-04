@@ -478,6 +478,16 @@ export function getFollowupWindowSeconds(): number {
   );
 }
 
+const IDLE_SESSION_DEFAULT_HOURS = 6;
+
+export function getIdleSessionMs(): number {
+  const hours = safeParseInt(
+    getMergedEnv()["SESSION_IDLE_CLOSE_HOURS"],
+    IDLE_SESSION_DEFAULT_HOURS,
+  );
+  return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
+}
+
 export function isConsolidationEnabled(): boolean {
   const env = getMergedEnv();
   const explicit = env["CONSOLIDATION_ENABLED"];
