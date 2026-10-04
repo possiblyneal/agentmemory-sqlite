@@ -2325,7 +2325,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Every project-scoped MCP tool asks the model for a project id nothing tells it."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#129"
+    status: "fixed-here — #129: every MCP project property shares PROJECT_NAME_DESCRIPTION (main checkout basename, as in the injected project=\"…\" attribute); filter tools add that omitting it searches every project (src/mcp/tools-registry.ts). test/mcp-project-description.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1225
   - number: 1226
     title: "mem::patterns walks every observation in the store — memory_patterns 500s \"Invocation stopped\" and drops the worker"
