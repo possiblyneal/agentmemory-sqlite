@@ -22,6 +22,7 @@ vi.mock("../src/functions/audit.js", () => ({
 }));
 
 import { registerSummarizeFunction } from "../src/functions/summarize.js";
+import { estimateTokens } from "../src/utils/tokens.js";
 import type {
   CompressedObservation,
   Session,
@@ -225,6 +226,36 @@ describe("mem::summarize chunking", () => {
     // not just the final chunk.
     expect(stored?.observationCount).toBe(250);
     expect(stored?.keyDecisions).toEqual(["dA", "dB", "dC"]);
+  });
+
+  it("merges partials in budget-sized rounds when one merge prompt would exceed the chunk budget", async () => {
+    const budget = 300;
+    process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + budget);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const longNarrative = "Long partial narrative. ".repeat(12);
+    const provider = makeProvider([
+      summaryXml({ title: "Part", narrative: longNarrative, decisions: ["d"] }),
+    ]);
+    const { handler, kv } = await setupHandler({
+      sessionId: "ses_wide",
+      obsCount: 105,
+      provider,
+    });
+
+    const result: any = await handler({ sessionId: "ses_wide" });
+
+    expect(result.success).toBe(true);
+    const merges = provider.calls.filter((c) =>
+      c.system.includes("merging multiple partial summaries"),
+    );
+    expect(merges.length).toBeGreaterThan(1);
+    for (const m of merges) {
+      expect(estimateTokens(m.user)).toBeLessThanOrEqual(budget);
+    }
+    expect(merges.at(-1)!.user).toContain("obs 1-");
+    expect(merges.at(-1)!.user).toContain("-105]");
+    const stored: any = await kv.get("summaries", "ses_wide");
+    expect(stored?.observationCount).toBe(105);
   });
 
   it("SUMMARIZE_CHUNK_TOKENS env override is respected", async () => {
@@ -465,7 +496,7 @@ describe("mem::summarize chunking", () => {
     const result: any = await handler({ sessionId: "ses_tok" });
 
     expect(result.success).toBe(true);
-    const chunkPrompts = calls.slice(0, -1);
+    const chunkPrompts = calls.filter((c) => !c.startsWith("Partial summaries"));
     expect(chunkPrompts.length).toBeGreaterThan(1);
     const seen: number[] = [];
     for (const prompt of chunkPrompts) {
@@ -506,8 +537,10 @@ describe("mem::summarize chunking", () => {
     const result: any = await handler({ sessionId: "ses_big" });
 
     expect(result.success).toBe(true);
-    const chunkPrompts = provider.calls.slice(0, -1).map((c) => c.user);
-    // [0,1] fit, [2] alone, [3,4] fit → 3 chunks + reduce.
+    const chunkPrompts = provider.calls
+      .filter((c) => c.system.includes("session summarizer"))
+      .map((c) => c.user);
+    // [0,1] fit, [2] alone, [3,4] fit → 3 chunks.
     expect(chunkPrompts).toHaveLength(3);
     expect(chunkPrompts[1]).toContain("obs 2");
     expect(chunkPrompts[1]).not.toContain("obs 1");

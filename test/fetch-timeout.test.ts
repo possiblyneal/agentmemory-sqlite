@@ -26,6 +26,19 @@ function hangingFetch(_url: string, _init?: RequestInit): Promise<Response> {
   });
 }
 
+// Headers arrive at once; the body never finishes until the request aborts.
+function stalledBodyFetch(_url: string, init?: RequestInit): Promise<Response> {
+  const signal = init!.signal as AbortSignal;
+  const body = new ReadableStream({
+    start(controller) {
+      signal.addEventListener("abort", () =>
+        controller.error(new DOMException("AbortError", "AbortError")),
+      );
+    },
+  });
+  return Promise.resolve(new Response(body, { status: 200 }));
+}
+
 // ─────────────────────────────────────────────────────────────
 // fetchWithTimeout unit tests
 // ─────────────────────────────────────────────────────────────
@@ -195,10 +208,13 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     vi.useFakeTimers();
     const start = Date.now();
 
-    const p = fetchWithTimeout("https://example.com", {}, 60000);
+    let resolvedAt = 0;
+    const p = fetchWithTimeout("https://example.com", {}, 60000).finally(() => {
+      resolvedAt = Date.now();
+    });
     await vi.runAllTimersAsync();
     const res = await p;
-    const elapsed = Date.now() - start;
+    const elapsed = resolvedAt - start;
 
     expect(res.status).toBe(429);
     expect(q.calls()).toBe(1);
@@ -217,10 +233,13 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     const start = Date.now();
 
     // Budget 1000ms: delay + floor 100ms > remaining, no retry.
-    const p = fetchWithTimeout("https://example.com", {}, 1000);
+    let resolvedAt = 0;
+    const p = fetchWithTimeout("https://example.com", {}, 1000).finally(() => {
+      resolvedAt = Date.now();
+    });
     await vi.runAllTimersAsync();
     const res = await p;
-    const elapsed = Date.now() - start;
+    const elapsed = resolvedAt - start;
 
     expect(res.status).toBe(429);
     expect(q.calls()).toBe(1);
@@ -319,10 +338,13 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
     const start = Date.now();
 
     // Budget 1000ms: delay + floor > remaining, so no retry.
-    const p = fetchWithTimeout("https://example.com", {}, 1000);
+    let resolvedAt = 0;
+    const p = fetchWithTimeout("https://example.com", {}, 1000).finally(() => {
+      resolvedAt = Date.now();
+    });
     await vi.runAllTimersAsync();
     const res = await p;
-    const elapsed = Date.now() - start;
+    const elapsed = resolvedAt - start;
 
     expect(res.status).toBe(503);
     expect(q.calls()).toBe(1);
@@ -392,6 +414,21 @@ describe.each([
   });
 
   it("embedBatch() aborts at EMBED_TIMEOUT_MS, not the LLM timeout", async () => {
+    let settled = false;
+    const call = makeProvider()
+      .embedBatch(["hello"])
+      .finally(() => {
+        settled = true;
+      });
+    const outcome = expect(call).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(EMBED_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+  });
+
+  it("embedBatch() aborts a body that stalls after the headers at EMBED_TIMEOUT_MS", async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(stalledBodyFetch as typeof fetch);
     let settled = false;
     const call = makeProvider()
       .embedBatch(["hello"])

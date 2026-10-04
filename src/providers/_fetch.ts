@@ -70,19 +70,6 @@ function parseRetryAfter(header: string | null): number | undefined {
   return undefined;
 }
 
-async function fetchOnce(
-  url: string,
-  init: RequestInit,
-  ms: number,
-): Promise<Response> {
-  const ctl = new AbortController();
-  const signal = init.signal
-    ? AbortSignal.any([init.signal, ctl.signal])
-    : ctl.signal;
-  const t = setTimeout(() => ctl.abort(), ms);
-  return fetch(url, { ...init, signal }).finally(() => clearTimeout(t));
-}
-
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -93,11 +80,19 @@ export async function fetchWithTimeout(
     Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "60000", 10);
   const ms = Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
 
-  // The caller's timeout is the TOTAL budget for all attempts + sleeps, honored
-  // exactly: nothing above this Engine imposes a shorter ceiling (ADR 0001).
+  // The caller's timeout is the TOTAL budget for all attempts, sleeps and the
+  // caller's read of the returned body, honored exactly: nothing above this
+  // Engine imposes a shorter ceiling (ADR 0001). The deadline stays armed after
+  // the headers arrive, so a server that stalls mid-body is cut off too.
   const start = Date.now();
+  const deadline = new AbortController();
+  setTimeout(() => deadline.abort(), ms).unref?.();
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, deadline.signal])
+    : deadline.signal;
+  const send = () => fetch(url, { ...init, signal });
 
-  let response: Response = await fetchOnce(url, init, ms);
+  let response: Response = await send();
   for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
     if (!RETRY_STATUS.has(response.status)) return response;
 
@@ -117,14 +112,7 @@ export async function fetchWithTimeout(
     // underlying connection is returned to the pool instead of leaking.
     await response.body?.cancel().catch(() => {});
     await sleep(delay);
-
-    // Cap the per-attempt timeout to whatever budget is left so a late attempt
-    // can't push total elapsed past the deadline.
-    const attemptMs = Math.max(
-      MIN_ATTEMPT_FLOOR_MS,
-      ms - (Date.now() - start),
-    );
-    response = await fetchOnce(url, init, attemptMs);
+    response = await send();
   }
   return response;
 }

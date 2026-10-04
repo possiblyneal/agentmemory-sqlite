@@ -12,12 +12,11 @@ work for live Sessions.
 - **What exists.** `ResilientProvider` (`src/providers/resilient.ts`) already caps every
   generating call at one shared `AGENTMEMORY_LLM_MAX_CONCURRENCY` (2 on dev). The cap
   bounds how many calls run at once, not who gets them: a recovery sweep can hold both
-  slots, and a graph batch sharing the GPU with a 50k-token Summarize chunk slows to under
-  1 token/s.
-- **Partly addressed.** `SUMMARIZE_CHUNK_TOKENS` now defaults to 16k, so each prefill is
-  shorter; recovery can still hold both slots.
-- **Evidence (2026-09-28).** During the recovery sweep of 43 stale Sessions, the broker
-  mostly served ~50k-token prompts (`SUMMARIZE_CHUNK_TOKENS`, 2 chunks at a time). A
+  slots. Summarize chunk and merge prompts are capped at `SUMMARIZE_CHUNK_TOKENS` (16k
+  default), which shortens each prefill but does not limit how many slots recovery holds.
+- **Evidence (2026-09-28).** A graph batch sharing the GPU with a 50k-token Summarize chunk
+  (the default then) slowed to under 1 token/s. During the recovery sweep of 43 stale
+  Sessions, the broker mostly served ~50k-token prompts (2 chunks at a time). A
   10-Observation graph batch timed out at 300 s at 16:46, while one slot was generating
   6.6k tokens and another was prefilling a 45k-token prompt.
 - **Done when.** A recovery sweep leaves at least one slot for Session-stop work (Summarize

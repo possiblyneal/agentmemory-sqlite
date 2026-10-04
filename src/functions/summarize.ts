@@ -275,11 +275,66 @@ async function produceSummaryXml(
       obsRangeEnd: start + chunks[originalIdx]!.length,
     };
   });
-  const response = await provider.summarize(
-    REDUCE_SYSTEM,
-    buildReducePrompt(reduceInput),
+  const response = await reducePartials(
+    provider,
+    reduceInput,
+    sessionId,
+    project,
+    concurrency,
   );
   return { response, mode: "chunked", chunks: chunks.length, skipped };
+}
+
+type ReducePartial = Parameters<typeof buildReducePrompt>[0][number];
+
+// Consecutive partials whose merge prompt fits the budget. Every group but the
+// last takes at least two partials, so each round shrinks the list.
+function groupPartials(partials: ReducePartial[], budget: number): ReducePartial[][] {
+  const groups: ReducePartial[][] = [];
+  let current: ReducePartial[] = [];
+  for (const p of partials) {
+    const fits = estimateTokens(buildReducePrompt([...current, p])) <= budget;
+    if (current.length >= 2 && !fits) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(p);
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+// Merges partials in rounds of budget-sized groups until one prompt holds them
+// all, so the merge prefill is never longer than a chunk's: a long one starves
+// graph extraction on the Operator's broker just as a long chunk does.
+async function reducePartials(
+  provider: MemoryProvider,
+  partials: ReducePartial[],
+  sessionId: string,
+  project: string,
+  concurrency: number,
+): Promise<string> {
+  const budget = getChunkTokens() - PROMPT_OVERHEAD_TOKENS;
+  let groups = groupPartials(partials, budget);
+  while (groups.length > 1) {
+    const merged = await mapWithConcurrency(groups, concurrency, async (group) => {
+      if (group.length === 1) return group[0]!;
+      const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
+      const parsed = parseSummaryXml(xml, sessionId, project, 0);
+      if (!parsed) throw new Error("reduce_parse_failed: an intermediate merge did not parse");
+      return {
+        title: parsed.title,
+        narrative: parsed.narrative,
+        keyDecisions: parsed.keyDecisions,
+        filesModified: parsed.filesModified,
+        concepts: parsed.concepts,
+        obsRangeStart: group[0]!.obsRangeStart,
+        obsRangeEnd: group[group.length - 1]!.obsRangeEnd,
+      };
+    });
+    groups = groupPartials(merged, budget);
+  }
+  return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!));
 }
 
 // #783: many LLMs (DeepSeek, GPT variants, some Anthropic responses)
