@@ -1,6 +1,6 @@
 import type { GraphNode, GraphEdge } from "../types.js";
 import { KV } from "./schema.js";
-import type { StateKV } from "./kv.js";
+import { graphWriteGeneration, type StateKV } from "./kv.js";
 import { withKeyedLock } from "./keyed-mutex.js";
 
 export const NAME_SHARD_COUNT = 64;
@@ -249,6 +249,67 @@ export class GraphIndexReader {
     }
     return neighbors;
   }
+}
+
+export interface GraphReadView {
+  reader: GraphIndexReader;
+  loadCatalog(): Promise<NameCatalogEntry[]>;
+}
+
+interface CachedGraphReadView {
+  generation: number;
+  reader: Promise<GraphIndexReader>;
+  catalog?: Promise<NameCatalogEntry[]>;
+}
+
+const readViews = new WeakMap<object, CachedGraphReadView>();
+
+// One reader and name catalog per store, rebuilt whenever any graph scope is
+// written, so a search stops re-reading the 64 name shards and re-fetching
+// nodes it just read. The reader's record caches would otherwise go stale.
+export async function openGraphReadView(kv: StateKV): Promise<GraphReadView> {
+  const generation = graphWriteGeneration();
+  let cached = readViews.get(kv);
+  if (!cached || cached.generation !== generation) {
+    cached = { generation, reader: GraphIndexReader.open(kv) };
+    readViews.set(kv, cached);
+  }
+  const entry = cached;
+  const reader = await entry.reader.catch((err) => {
+    if (readViews.get(kv) === entry) readViews.delete(kv);
+    throw err;
+  });
+  return {
+    reader,
+    loadCatalog: () => {
+      entry.catalog ??= loadNameCatalog(kv);
+      return entry.catalog;
+    },
+  };
+}
+
+// A bounded snapshot of live nodes and the edges incident to them, read
+// through the indexes. Empty while the graph is unreadable; never enumerates.
+export async function readBoundedGraphSnapshot(
+  kv: StateKV,
+  nodeLimit: number,
+): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  if (!(await graphReadable(kv))) return { nodes: [], edges: [] };
+  const { reader, loadCatalog } = await openGraphReadView(kv);
+  const catalog = [...(await loadCatalog())]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .slice(0, nodeLimit);
+  const nodes: GraphNode[] = [];
+  const edges = new Map<string, GraphEdge>();
+  for (const entry of catalog) {
+    const node = await reader.getNode(entry.id);
+    if (!node) continue;
+    nodes.push(node);
+    for (const edge of await reader.getIncidentEdges(node.id)) {
+      edges.set(edge.id, edge);
+    }
+  }
+  return { nodes, edges: [...edges.values()] };
 }
 
 export async function backfillGraphIndexes(

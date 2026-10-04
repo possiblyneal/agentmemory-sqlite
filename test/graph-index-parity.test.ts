@@ -4,6 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { noteGraphWrite } from "../src/state/kv.js";
 import { GraphRetrieval } from "../src/functions/graph-retrieval.js";
 import { registerGraphFunction } from "../src/functions/graph.js";
 import {
@@ -38,10 +39,12 @@ function mockKV(nodes: GraphNode[] = [], edges: GraphEdge[] = []) {
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());
       store.get(scope)!.set(key, data);
+      noteGraphWrite(scope);
       return data;
     },
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
+      noteGraphWrite(scope);
     },
     list: async <T>(scope: string): Promise<T[]> => {
       listCalls.set(scope, (listCalls.get(scope) ?? 0) + 1);

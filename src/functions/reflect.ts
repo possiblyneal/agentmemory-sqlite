@@ -18,7 +18,7 @@ import {
   formatNarrativeLine,
   formatScoredLine,
 } from "../prompts/reflect.js";
-import { graphLegDisabled } from "../state/graph-indexes.js";
+import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { logger } from "../logger.js";
 
@@ -27,6 +27,8 @@ import { logger } from "../logger.js";
 // prefill. ~8k tokens at the tree's chars/3 estimate.
 const CLUSTER_PROMPT_CHARS = 24_000;
 const MIN_CLUSTER_ITEMS = 3;
+// Nodes one reflect pass reads from the graph indexes.
+const REFLECT_GRAPH_NODE_LIMIT = 5000;
 
 interface ConceptCluster {
   concepts: string[];
@@ -231,12 +233,14 @@ export function registerReflectFunctions(
       const maxInsightsPerCluster = 5;
       const maxTotal = 50;
 
-      const [graphNodes, graphEdges, semanticMemories, lessons, crystals] =
+      const noGraph = { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
+      const [graph, semanticMemories, lessons, crystals] =
         await Promise.all([
           // B-mode: graph frozen — skip graph-scope reads, cluster over
           // semantic/lessons/crystals only.
-          graphLegDisabled() ? [] : kv.list<GraphNode>(KV.graphNodes).catch(() => []),
-          graphLegDisabled() ? [] : kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
+          graphLegDisabled()
+            ? noGraph
+            : readBoundedGraphSnapshot(kv, REFLECT_GRAPH_NODE_LIMIT).catch(() => noGraph),
           kv.list<SemanticMemory>(KV.semantic).catch(() => []),
           kv.list<Lesson>(KV.lessons).catch(() => []),
           kv.list<Crystal>(KV.crystals).catch(() => []),
@@ -245,6 +249,8 @@ export function registerReflectFunctions(
       let activeLessons = lessons.filter((l) => !l.deleted);
       let scopedSemantic = semanticMemories;
       let scopedCrystals = crystals;
+      const graphNodes = graph.nodes;
+      const graphEdges = graph.edges;
       let scopedNodes = graphNodes;
       let scopedEdges = graphEdges;
       // One project's clusters must never borrow another's facts, crystals or
