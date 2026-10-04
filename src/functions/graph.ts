@@ -36,9 +36,9 @@ import { recordAudit } from "./audit.js";
 import { getSearchIndex } from "./search.js";
 import { logger } from "../logger.js";
 
-// #753: keep the response payload below the iii state channel ceiling.
-// 500 nodes + their incident edges hold well under the limit on the
-// reported 11k-node / 28k-edge corpus, and 5,000 is the upper bound a
+// #753: keep the response payload small enough to serialize and render.
+// 500 nodes + their incident edges stay small on the reported
+// 11k-node / 28k-edge corpus, and 5,000 is the upper bound a
 // caller can request explicitly. Tuned conservatively because edges
 // fan out faster than nodes.
 const DEFAULT_GRAPH_QUERY_LIMIT = 500;
@@ -180,10 +180,9 @@ function paginateFromSnapshot(
   };
 }
 
-// state::list is synchronous, so a rebuild blocks the event loop for
-// the whole enumeration and index backfill. The rebuild lists nodes
-// alone first and refuses above this ceiling before it reads edges;
-// above it, mem::graph-reset and incremental re-extraction is the path.
+// state::list is synchronous, so each scope a rebuild enumerates blocks
+// the event loop for the whole read. The rebuild lists nodes alone and
+// refuses above this ceiling before it reads edges.
 const REBUILD_SAFE_NODE_CEILING = GRAPH_INDEX_NODE_CEILING;
 
 // Bounds the index-served BFS in mem::graph-query so a dense corpus
@@ -783,9 +782,9 @@ export function extractGraphHeuristics(
 // duplicating.
 //
 // #814 v2: targeted name-index lookups replace the O(n) scan over
-// `kv.list<GraphNode>(KV.graphNodes)`. At 75K nodes the list payload
-// exceeds the iii heartbeat budget and the worker dies before merge can
-// complete. Each name-index entry is a single small kv.get/set pair.
+// `kv.list<GraphNode>(KV.graphNodes)`, which blocks the event loop for the
+// whole scope on every extract. Each name-index entry is a single small
+// kv.get/set pair.
 // Fork posture (graph-off): a graph WRITE is allowed only when extraction is
 // armed (GRAPH_EXTRACTION_ENABLED) AND the graph leg is not killed
 // (AGENTMEMORY_GRAPH_LEG=off). Stock 0.9.29 writes heuristic nodes with no
@@ -1227,9 +1226,7 @@ export function registerGraphFunction(
   // #753: every branch now applies a default cap and reports the
   // unbounded `total*` counts. Before this change, an unfiltered POST
   // /graph/query body (`{}`) on a corpus with ~10k+ nodes serialized
-  // to a payload large enough that the iii state response channel
-  // rejected it with HTTP 500 "Invocation stopped", leaving the viewer
-  // graph tab silently blank.
+  // the whole graph into one response.
   sdk.registerFunction("mem::graph-query",
     async (data: {
       startNodeId?: string;
@@ -1363,8 +1360,7 @@ export function registerGraphFunction(
   // #814 v2: explicit rebuild backfills the snapshot AND the name /
   // edge-key / degree indexes from existing graphNodes/graphEdges
   // scopes. This is the path operators run once after upgrading to a
-  // post-#814 build to bring legacy corpora online. It enumerates via
-  // kv.list and refuses corpora past REBUILD_SAFE_NODE_CEILING.
+  // post-#814 build to bring legacy corpora online.
   sdk.registerFunction(
     "mem::graph-snapshot-rebuild",
     async (data?: { force?: boolean }) => {
@@ -1433,6 +1429,9 @@ export function registerGraphFunction(
         };
       }
 
+      // An extract between the two reads can leave edges whose nodes
+      // this snapshot lacks; the snapshot is disposable, so that skew is
+      // accepted over listing edges for a corpus about to be refused.
       const edges = await kv.list<GraphEdge>(KV.graphEdges);
 
       // Backfill the targeted-lookup indexes so post-rebuild
@@ -1499,13 +1498,9 @@ export function registerGraphFunction(
   });
 
   // #814 v2 + #825: clean-restart escape hatch for corpora of any
-  // size, including the legacy 75K+ case that crashes kv.list.
+  // size, including those past REBUILD_SAFE_NODE_CEILING.
   //
-  // Previous reset walked kv.list<GraphNode/Edge>(...) which is the
-  // exact primitive that heartbeat-crashes the worker on the corpus
-  // this reset was meant to recover (Allan's repro, 0.35s death).
-  //
-  // The new design is enumeration-free: write an empty snapshot and
+  // It is enumeration-free: write an empty snapshot and
   // return. The hot path (mem::graph-query empty-body, mem::graph-stats)
   // reads ONLY the snapshot post-#816, so a fresh empty snapshot
   // makes the graph behave as if it were empty for every read.
