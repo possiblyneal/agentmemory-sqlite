@@ -11,6 +11,8 @@ import {
   isBlankOrPlaceholder,
   resolveHandle,
   invalidateHandle,
+  daemonUnreachableMessage,
+  strictDaemonUrl,
   type Handle,
   type ProxyHandle,
 } from "./rest-proxy.js";
@@ -423,6 +425,10 @@ export async function handleToolCall(
   const handle = await resolveHandle();
   announceMode(handle);
 
+  if (handle.mode === "local" && handle.unreachableUrl) {
+    throw new Error(daemonUnreachableMessage(handle.unreachableUrl));
+  }
+
   // Tools the local InMemoryKV fallback doesn't implement: forward straight
   // to the server. Local validation would otherwise raise "Unknown tool"
   // (issue #234).
@@ -460,6 +466,11 @@ export async function handleToolCall(
       // Any other answer is the tool's real error; the local store is only
       // for a server that could not be reached.
       if (serverAnswered(err)) throw err;
+      const explicitUrl = strictDaemonUrl();
+      if (explicitUrl) {
+        invalidateHandle();
+        throw new Error(daemonUnreachableMessage(explicitUrl));
+      }
       process.stderr.write(
         `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}; invalidating handle and falling back to local KV\n`,
       );
