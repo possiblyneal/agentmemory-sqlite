@@ -679,6 +679,45 @@ describe("mem::summarize chunking", () => {
 
     expect(result).toMatchObject({ success: false, error: "validation_failed" });
   });
+
+  it("returns empty_provider_response when the last attempt is empty after a schema failure", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "short", narrative: SHORT_NARRATIVE }),
+      "",
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_invalid_then_empty", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_invalid_then_empty" });
+
+    expect(result).toMatchObject({ success: false, error: "empty_provider_response" });
+  });
+
+  it("on a chunked Session, a merged summary that fails schema re-runs every chunk and the reduce", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "Chunk 1" }),
+      summaryXml({ title: "Chunk 2" }),
+      summaryXml({ title: "Chunk 3" }),
+      summaryXml({ title: "Merged short", narrative: SHORT_NARRATIVE }),
+      summaryXml({ title: "Chunk 1" }),
+      summaryXml({ title: "Chunk 2" }),
+      summaryXml({ title: "Chunk 3" }),
+      summaryXml({ title: "Merged" }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_chunked_invalid", obsCount: 250, provider });
+
+    const result: any = await handler({ sessionId: "ses_chunked_invalid" });
+
+    expect(result.success).toBe(true);
+    // 3 chunks + 1 reduce per attempt, two attempts.
+    expect(provider.calls).toHaveLength(8);
+    expect(provider.calls[3].system).toContain("merging multiple partial summaries");
+    expect(provider.calls[7].system).toContain("merging multiple partial summaries");
+    const stored: any = await kv.get("summaries", "ses_chunked_invalid");
+    expect(stored.title).toBe("Merged");
+    expect(stored.narrative).toBe(VALID_NARRATIVE);
+  });
 });
 
 describe("mem::summarize Session Summary reuse", () => {

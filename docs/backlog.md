@@ -46,3 +46,12 @@ key every other Session writer holds. A replay running against a live Session ca
 observe's count or a commit-link's `commitShas`.
 
 - **Done when.** Replay's read-modify-write of `mem:sessions` holds `obs:${id}`.
+
+## Retry only the reduce when a merged Session Summary fails schema
+
+On a chunked Session, a merged Session Summary that fails schema re-runs every chunk call
+plus the reduce (`src/functions/summarize.ts`, the 2-attempt loop around
+`produceSummaryXml`). Retry only the reduce step.
+
+- **Done when.** A schema-rejected merged summary retries the reduce call alone, and the
+  chunked-path test in `test/summarize.test.ts` asserts 3 chunk calls + 2 reduce calls.

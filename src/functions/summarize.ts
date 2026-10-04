@@ -392,11 +392,9 @@ export function registerSummarizeFunction(
       }
 
       try {
-        // #783: chunk-level produceSummaryXml retries internally, but the
-        // final merge used to parse once and bail. Produce, parse and
-        // validate share one 2-attempt loop, so a wrapped, unparseable or
-        // schema-rejected response gets a second roll of the dice. The
-        // returned error names the last attempt's failure.
+        // rohitg00/agentmemory#783: one malformed or schema-rejected final
+        // response used to discard the Session Summary, so it gets a second
+        // attempt.
         let summary: SessionSummary | null = null;
         let lastError: "empty_provider_response" | "parse_failed" | "validation_failed" =
           "empty_provider_response";
