@@ -116,7 +116,6 @@ describe("api::observe on a full disk", () => {
     await expect(observeLarge(fits)).rejects.toThrow("at its cap");
     expect(stored).toEqual([]);
 
-    diskFull = false;
     await vi.advanceTimersByTimeAsync(OBSERVE_RETRY_INTERVAL_MS);
     expect(stored).toHaveLength(fits);
   });

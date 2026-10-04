@@ -111,8 +111,17 @@ async function evictOverCap(
       });
       continue;
     }
-    if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
-    if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
+    // The row is gone, so it counts as evicted even if releasing its image fails.
+    try {
+      if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
+      if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
+    } catch (err) {
+      logger.warn("Failed to release image of evicted observation", {
+        sessionId,
+        obsId: obs.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     await safeAudit(kv, "delete", "mem::observe", [obs.id], {
       resource: "observation",
       reason: "session_observation_cap",
@@ -308,9 +317,16 @@ export function registerObserveFunction(
         }
 
         // Before this Observation saves its image, so a retried rollback cannot
-        // delete a file this Observation is about to reference.
+        // delete a file this Observation is about to reference. Another Session
+        // saving the same image is not covered, as with eviction's decrements.
         for (const filePath of pendingRefRollbacks.splice(0)) {
-          await decrementImageRef(kv, sdk, filePath).catch(() => pendingRefRollbacks.push(filePath));
+          await decrementImageRef(kv, sdk, filePath).catch((err) => {
+            pendingRefRollbacks.push(filePath);
+            logger.warn("Image ref rollback retry failed", {
+              imageRef: filePath,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
         }
 
         let imageBytesWritten = 0;
@@ -363,7 +379,12 @@ export function registerObserveFunction(
               });
             }
           } else if (raw.imageData && imageBytesWritten > 0) {
-            await deleteUnreferencedImage(kv, sdk, raw.imageData).catch(() => {});
+            await deleteUnreferencedImage(kv, sdk, raw.imageData).catch((err) => {
+              logger.warn("Failed to delete image after observation write failure", {
+                imageRef: raw.imageData,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
           }
           if (isSqliteFull(error)) throw unstoredOnFullDisk();
           throw error;

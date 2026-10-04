@@ -233,6 +233,42 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
   });
 
+  it("counts a row as evicted when releasing its image fails", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    await kv.set(KV.observations(SESSION), "a", {
+      ...stored("a", 2, "2026-01-01T00:00:00Z"),
+      imageData: "/nonexistent/a.png",
+    });
+    await kv.set(KV.sessions, SESSION, {
+      id: SESSION,
+      project: "p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      status: "active",
+      observationCount: 1,
+    });
+    const del = kv.delete;
+    kv.delete = async (scope: string, key: string) => {
+      if (scope.startsWith("mem:image")) throw new Error("database or disk is full");
+      return del(scope, key);
+    };
+    registerObserveFunction(sdk as never, kv as never, undefined, 1);
+
+    await sdk.trigger({
+      function_id: "mem::observe",
+      payload: {
+        sessionId: SESSION,
+        hookType: "post_tool_use",
+        timestamp: "2026-05-01T00:00:00Z",
+        data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+      },
+    });
+
+    expect(await kv.list(KV.observations(SESSION))).toHaveLength(1);
+    expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 1 });
+  });
+
   it("evicts nothing under the cap", async () => {
     const { ids } = await setup([stored("a", 1, "2026-01-01T00:00:00Z")], 3);
     expect(ids).toHaveLength(2);

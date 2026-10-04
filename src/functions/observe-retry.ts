@@ -10,7 +10,8 @@ export const OBSERVE_RETRY_INTERVAL_MS = 30_000;
 // The Engine rethrows handler errors as InprocInvocationError, which keeps the
 // message but not node:sqlite's errcode, so both checks match on message text.
 const SQLITE_FULL_MESSAGE = "database or disk is full";
-const UNSTORED_FULL_MESSAGE = "Observation not stored: " + SQLITE_FULL_MESSAGE;
+const UNSTORED_PREFIX = "Observation not stored: ";
+const UNSTORED_FULL_MESSAGE = UNSTORED_PREFIX + SQLITE_FULL_MESSAGE;
 
 export function isSqliteFull(err: unknown): boolean {
   return err instanceof Error && err.message.includes(SQLITE_FULL_MESSAGE);
@@ -44,7 +45,7 @@ export class ObserveRetryQueue {
         logger.error("Dropped Observation: the disk-full queue is at its cap", {
           sessionId: payload.sessionId,
         });
-        throw new Error("Observation not stored: disk-full queue is at its cap");
+        throw new Error(UNSTORED_PREFIX + "disk-full queue is at its cap");
       }
       void this.drain();
       return { queued: true };
