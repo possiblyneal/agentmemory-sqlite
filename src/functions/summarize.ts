@@ -25,9 +25,11 @@ import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 
 // Per-chunk prompt budget in tokens when a Session is too large to fit in
-// one LLM call. Measured on the Operator's broker: a 50k-token chunk
-// summarizes cold in 60–89s solo. Override via SUMMARIZE_CHUNK_TOKENS.
-const CHUNK_TOKENS_DEFAULT = 50_000;
+// one LLM call. On the Operator's broker a 49k-token prefill starved graph
+// extraction's decode on the other slot to under 1 tok/s, timing it out;
+// 16k keeps each prefill short enough to share. Override via
+// SUMMARIZE_CHUNK_TOKENS.
+const CHUNK_TOKENS_DEFAULT = 16_000;
 // Tokens the system prompt and chat template add on top of the rendered
 // Observations, measured on the Operator's broker.
 const PROMPT_OVERHEAD_TOKENS = 400;

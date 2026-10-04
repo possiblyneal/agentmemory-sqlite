@@ -157,7 +157,8 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - Timestamps: capture once with `new Date().toISOString()` and reuse
 - Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the caller's
   timeout exactly (falling back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s; the OpenAI LLM
-  provider resolves `OPENAI_TIMEOUT_MS` first). The in-process Engine has no invocation
+  provider resolves `OPENAI_TIMEOUT_MS` first). Embedding providers pass `EMBED_TIMEOUT_MS`
+  (30s) instead, so a hung embedder fails fast and the index fill backfills the row. The in-process Engine has no invocation
   timeout, so never reintroduce a ceiling that clamps that bound
   ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)).
 

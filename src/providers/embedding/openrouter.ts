@@ -1,6 +1,6 @@
 import type { EmbeddingProvider } from "../../types.js";
 import { getEnvVar } from "../../config.js";
-import { fetchWithTimeout } from "../_fetch.js";
+import { EMBED_TIMEOUT_MS, fetchWithTimeout } from "../_fetch.js";
 import { requestedDimensions, resolveDimensions } from "./_dimensions.js";
 
 const API_URL = "https://openrouter.ai/api/v1/embeddings";
@@ -41,7 +41,7 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
         input: texts,
         dimensions: requestedDimensions(this.model, this.dimensions),
       }),
-    });
+    }, EMBED_TIMEOUT_MS);
 
     if (!response.ok) {
       const err = await response.text();

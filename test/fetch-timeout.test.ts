@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { fetchWithTimeout } from "../src/providers/_fetch.js";
+import { EMBED_TIMEOUT_MS, fetchWithTimeout } from "../src/providers/_fetch.js";
 import { MinimaxProvider } from "../src/providers/minimax.js";
 import { OpenRouterProvider } from "../src/providers/openrouter.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
@@ -373,83 +373,36 @@ describe("Provider hang regression — OpenRouterProvider (covers Gemini LLM pat
   });
 });
 
-describe("Provider hang regression — GeminiEmbeddingProvider", () => {
+describe.each([
+  ["GeminiEmbeddingProvider", () => new GeminiEmbeddingProvider("test-key")],
+  ["OpenAIEmbeddingProvider", () => new OpenAIEmbeddingProvider("test-key")],
+  ["CohereEmbeddingProvider", () => new CohereEmbeddingProvider("test-key")],
+  ["VoyageEmbeddingProvider", () => new VoyageEmbeddingProvider("test-key")],
+  ["OpenRouterEmbeddingProvider", () => new OpenRouterEmbeddingProvider("test-key")],
+])("Provider hang regression — %s", (_name, makeProvider) => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.spyOn(globalThis, "fetch").mockImplementation(hangingFetch as typeof fetch);
-    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "50";
+    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "300000";
   });
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
   });
 
-  it("embedBatch() aborts after timeout when upstream hangs", async () => {
-    const provider = new GeminiEmbeddingProvider("test-key");
-    await expect(provider.embedBatch(["hello"])).rejects.toThrow();
-  });
-});
-
-describe("Provider hang regression — OpenAIEmbeddingProvider", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(hangingFetch as typeof fetch);
-    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "50";
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
-  });
-
-  it("embedBatch() aborts after timeout when upstream hangs", async () => {
-    const provider = new OpenAIEmbeddingProvider("test-key");
-    await expect(provider.embedBatch(["hello"])).rejects.toThrow();
-  });
-});
-
-describe("Provider hang regression — CohereEmbeddingProvider", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(hangingFetch as typeof fetch);
-    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "50";
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
-  });
-
-  it("embedBatch() aborts after timeout when upstream hangs", async () => {
-    const provider = new CohereEmbeddingProvider("test-key");
-    await expect(provider.embedBatch(["hello"])).rejects.toThrow();
-  });
-});
-
-describe("Provider hang regression — VoyageEmbeddingProvider", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(hangingFetch as typeof fetch);
-    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "50";
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
-  });
-
-  it("embedBatch() aborts after timeout when upstream hangs", async () => {
-    const provider = new VoyageEmbeddingProvider("test-key");
-    await expect(provider.embedBatch(["hello"])).rejects.toThrow();
-  });
-});
-
-describe("Provider hang regression — OpenRouterEmbeddingProvider", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(hangingFetch as typeof fetch);
-    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "50";
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
-  });
-
-  it("embedBatch() aborts after timeout when upstream hangs", async () => {
-    const provider = new OpenRouterEmbeddingProvider("test-key");
-    await expect(provider.embedBatch(["hello"])).rejects.toThrow();
+  it("embedBatch() aborts at EMBED_TIMEOUT_MS, not the LLM timeout", async () => {
+    let settled = false;
+    const call = makeProvider()
+      .embedBatch(["hello"])
+      .finally(() => {
+        settled = true;
+      });
+    const outcome = expect(call).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(EMBED_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
   });
 });
 

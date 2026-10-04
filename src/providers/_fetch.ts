@@ -11,6 +11,10 @@ const MAX_ATTEMPTS = 3;
 // the sleep; without this floor we'd sleep, fire, and get instantly cut off.
 const MIN_ATTEMPT_FLOOR_MS = 100;
 const RETRY_STATUS = new Set([429, 503]);
+// Embedding calls take p99 3 s on the Operator's broker. A hung embedder must
+// fail fast so the index fill backfills the row, not hold a caller for the
+// LLM timeout.
+export const EMBED_TIMEOUT_MS = 30_000;
 
 // A non-2xx provider response, carrying its status so callers can tell a busy
 // provider from a broken one. SDK errors (Anthropic) carry `status` the same way.

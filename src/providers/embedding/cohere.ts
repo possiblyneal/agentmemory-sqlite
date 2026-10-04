@@ -1,6 +1,6 @@
 import type { EmbeddingProvider } from "../../types.js";
 import { getEnvVar } from "../../config.js";
-import { fetchWithTimeout } from "../_fetch.js";
+import { EMBED_TIMEOUT_MS, fetchWithTimeout } from "../_fetch.js";
 
 const API_URL = "https://api.cohere.ai/v1/embed";
 
@@ -31,7 +31,7 @@ export class CohereEmbeddingProvider implements EmbeddingProvider {
         texts,
         input_type: "search_document",
       }),
-    });
+    }, EMBED_TIMEOUT_MS);
 
     if (!response.ok) {
       const err = await response.text();

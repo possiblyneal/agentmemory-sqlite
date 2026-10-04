@@ -197,7 +197,7 @@ export class OpenAIProvider implements MemoryProvider {
 // Resolves the outbound-fetch timeout for the OpenAI LLM path.
 // Precedence (preserving v0.9.17 behaviour):
 //   1. OPENAI_TIMEOUT_MS       — OpenAI-scoped alias (back-compat)
-//   2. AGENTMEMORY_LLM_TIMEOUT_MS — global LLM/embedding timeout (#446)
+//   2. AGENTMEMORY_LLM_TIMEOUT_MS — global LLM timeout (rohitg00/agentmemory#446)
 //   3. 60 000 ms default
 function resolveTimeout(): number {
   const openaiRaw = getEnvVar("OPENAI_TIMEOUT_MS");

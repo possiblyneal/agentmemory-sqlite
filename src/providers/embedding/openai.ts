@@ -1,6 +1,6 @@
 import type { EmbeddingProvider } from "../../types.js";
 import { getEnvVar } from "../../config.js";
-import { fetchWithTimeout } from "../_fetch.js";
+import { EMBED_TIMEOUT_MS, fetchWithTimeout } from "../_fetch.js";
 import {
   DEFAULT_AZURE_API_VERSION,
   buildAuthHeaders,
@@ -108,7 +108,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         input: texts,
         dimensions: requestedDimensions(this.model, this.dimensions),
       }),
-    });
+    }, EMBED_TIMEOUT_MS);
 
     if (!response.ok) {
       const err = await response.text();
