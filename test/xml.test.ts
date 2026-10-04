@@ -14,8 +14,23 @@ describe('getXmlTag', () => {
     expect(getXmlTag('<title>Hello</title>', 'missing')).toBe('')
   })
 
-  it('returns first match for duplicate tags', () => {
-    expect(getXmlTag('<title>First</title><title>Second</title>', 'title')).toBe('First')
+  it('returns the last complete occurrence for duplicate tags', () => {
+    expect(getXmlTag('<title>First</title><title>Second</title>', 'title')).toBe('Second')
+  })
+
+  it('ignores a tag in prose written before the payload', () => {
+    const response = [
+      'I will use a format like <title>Example title</title> for this.',
+      '<observation>',
+      '  <type>file_read</type>',
+      '  <title>Read src/foo.ts</title>',
+      '</observation>',
+    ].join('\n')
+    expect(getXmlTag(response, 'title')).toBe('Read src/foo.ts')
+  })
+
+  it('ignores a trailing unclosed occurrence', () => {
+    expect(getXmlTag('<title>Real</title> then <title>cut off', 'title')).toBe('Real')
   })
 
   it('returns empty string for empty tag', () => {
@@ -57,6 +72,11 @@ describe('getXmlChildren', () => {
   it('handles multiline children', () => {
     const xml = '<decisions><decision>Use JWT\nfor auth</decision></decisions>'
     expect(getXmlChildren(xml, 'decisions', 'decision')).toEqual(['Use JWT\nfor auth'])
+  })
+
+  it('reads children of the last complete parent occurrence', () => {
+    const xml = 'e.g. <facts><fact>example</fact></facts>\n<observation><facts><fact>One</fact><fact>Two</fact></facts></observation>'
+    expect(getXmlChildren(xml, 'facts', 'fact')).toEqual(['One', 'Two'])
   })
 
   it('returns empty for invalid parent tag name', () => {

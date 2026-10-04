@@ -123,6 +123,52 @@ describe("mem::compress never orphans an observation on failure", () => {
     expect(stored?.get(RAW.id), "observation was orphaned").toBeDefined();
   });
 
+  it("output fails validation on both attempts: stores no compressed observation, degrades as validation_failed", async () => {
+    let calls = 0;
+    const { result, stored, pending } = await runCompress(async () => {
+      calls++;
+      return `<observation>
+  <type>file_read</type>
+  <title>Read src/foo.ts</title>
+  <facts></facts>
+  <narrative>short</narrative>
+  <importance>3</importance>
+</observation>`;
+    });
+
+    expect(calls).toBe(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("validation_failed");
+    const obs = stored?.get(RAW.id) as { title: string; confidence: number };
+    expect(obs, "observation was orphaned").toBeDefined();
+    expect(obs.title).toBe("Read");
+    expect(obs.confidence).toBe(0.3);
+    expect(
+      (pending?.get(RAW.id) as { reason: string } | undefined)?.reason,
+    ).toBe("validation_failed");
+  });
+
+  it("output that passes validation on the retry is stored", async () => {
+    let calls = 0;
+    const { result, stored } = await runCompress(async () => {
+      calls++;
+      if (calls === 1) return "<observation><title>half</title></observation>";
+      return `<observation>
+  <type>file_read</type>
+  <title>Read src/foo.ts</title>
+  <facts><fact>a</fact></facts>
+  <narrative>Read the file to inspect its contents before editing it.</narrative>
+  <importance>3</importance>
+</observation>`;
+    });
+
+    expect(calls).toBe(2);
+    expect(result.success).toBe(true);
+    const obs = stored!.get(RAW.id) as { title: string; confidence: number };
+    expect(obs.title).toBe("Read src/foo.ts");
+    expect(obs.confidence).toBeGreaterThan(0.3);
+  });
+
   it("provider succeeds: stores the real compression, not the degraded one", async () => {
     const { result, stored } = await runCompress(
       async () => `<observation>

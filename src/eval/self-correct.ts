@@ -15,9 +15,12 @@ export async function compressWithRetry(
   // failed because the payload derailed the model, so retrying the identical
   // prompt with a sterner system suffix rarely changes the outcome.
   retryUserPrompt?: string,
-): Promise<{ response: string; retried: boolean }> {
+): Promise<
+  | { response: string; retried: boolean }
+  | { response: null; retried: true; errors: string[] }
+> {
   const first = await provider.compress(systemPrompt, userPrompt);
-  const result = validator(first);
+  let result = validator(first);
   if (result.valid) return { response: first, retried: false };
 
   for (let i = 0; i < maxRetries; i++) {
@@ -25,9 +28,9 @@ export async function compressWithRetry(
       systemPrompt + STRICTER_SUFFIX,
       retryUserPrompt ?? userPrompt,
     );
-    const retryResult = validator(retry);
-    if (retryResult.valid) return { response: retry, retried: true };
+    result = validator(retry);
+    if (result.valid) return { response: retry, retried: true };
   }
 
-  return { response: first, retried: true };
+  return { response: null, retried: true, errors: result.errors ?? [] };
 }
