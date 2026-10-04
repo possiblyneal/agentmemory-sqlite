@@ -469,12 +469,17 @@ describe("handleToolCall", () => {
 });
 
 describe("initialize protocol version negotiation", () => {
-  type InitResult = { protocolVersion: string };
+  type InitResult = { protocolVersion: string; capabilities: Record<string, unknown> };
   const handler = () =>
     vi.mocked(createStdioTransport).mock.calls[0][0] as (
       method: string,
       params?: unknown,
     ) => Promise<InitResult>;
+
+  it("advertises tools, resources and prompts (rohitg00/agentmemory#846)", async () => {
+    const res = await handler()("initialize", {});
+    expect(Object.keys(res.capabilities).sort()).toEqual(["prompts", "resources", "tools"]);
+  });
 
   it("echoes a supported requested version", async () => {
     const res = await handler()("initialize", { protocolVersion: "2025-06-18" });

@@ -527,6 +527,62 @@ export async function handleToolsList(): Promise<{ tools: unknown[] }> {
   return { tools: fallback };
 }
 
+async function proxyServerOnly(
+  what: string,
+  path: string,
+  init: { method: string; body?: string },
+): Promise<unknown> {
+  const handle = await resolveHandle();
+  announceMode(handle);
+  if (handle.mode !== "proxy") {
+    throw new Error(
+      `${what} needs a running agentmemory server (local fallback has none); start one and set AGENTMEMORY_URL`,
+    );
+  }
+  try {
+    return await handle.call(path, init);
+  } catch (err) {
+    if (!serverAnswered(err)) invalidateHandle();
+    throw err;
+  }
+}
+
+async function listFromServer(
+  what: string,
+  path: string,
+  key: "resources" | "prompts",
+): Promise<Record<string, unknown[]>> {
+  const handle = await resolveHandle();
+  if (handle.mode !== "proxy") return { [key]: [] };
+  const remote = (await proxyServerOnly(what, path, { method: "GET" })) as
+    | Record<string, unknown>
+    | null;
+  const items = remote?.[key];
+  return { [key]: Array.isArray(items) ? items : [] };
+}
+
+export function handleResourcesList() {
+  return listFromServer("resources/list", "/agentmemory/mcp/resources", "resources");
+}
+
+export function handleResourcesRead(uri: unknown) {
+  return proxyServerOnly("resources/read", "/agentmemory/mcp/resources/read", {
+    method: "POST",
+    body: JSON.stringify({ uri }),
+  });
+}
+
+export function handlePromptsList() {
+  return listFromServer("prompts/list", "/agentmemory/mcp/prompts", "prompts");
+}
+
+export function handlePromptsGet(name: unknown, args: unknown) {
+  return proxyServerOnly("prompts/get", "/agentmemory/mcp/prompts/get", {
+    method: "POST",
+    body: JSON.stringify({ name, arguments: args }),
+  });
+}
+
 const transport = createStdioTransport(async (method, params) => {
   switch (method) {
     case "initialize": {
@@ -539,7 +595,11 @@ const transport = createStdioTransport(async (method, params) => {
           : SUPPORTED_PROTOCOL_VERSIONS[0];
       return {
         protocolVersion,
-        capabilities: { tools: { listChanged: false } },
+        capabilities: {
+          tools: { listChanged: false },
+          resources: { listChanged: false },
+          prompts: { listChanged: false },
+        },
         serverInfo: {
           name: SERVER_INFO.name,
           version: SERVER_INFO.version,
@@ -552,6 +612,18 @@ const transport = createStdioTransport(async (method, params) => {
 
     case "tools/list":
       return handleToolsList();
+
+    case "resources/list":
+      return handleResourcesList();
+
+    case "resources/read":
+      return handleResourcesRead(params?.uri);
+
+    case "prompts/list":
+      return handlePromptsList();
+
+    case "prompts/get":
+      return handlePromptsGet(params?.name, params?.arguments);
 
     case "tools/call": {
       const toolName = params.name as string;
