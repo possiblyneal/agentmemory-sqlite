@@ -23,8 +23,8 @@ import * as p from "@clack/prompts";
 // reverse-proxied) deployments without doctor-warning duplicates (#375)
 // AND fresh installs that haven't exported envs (#510).
 export const AGENTMEMORY_MCP_BLOCK = {
-  command: "npx",
-  args: ["-y", "@agentmemory/mcp"],
+  command: "agentmemory",
+  args: ["mcp"],
   env: {
     AGENTMEMORY_URL: "${AGENTMEMORY_URL:-http://localhost:3111}",
     AGENTMEMORY_SECRET: "${AGENTMEMORY_SECRET:-}",

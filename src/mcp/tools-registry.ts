@@ -5,7 +5,7 @@ export const NOT_A_MEMORY_HINT =
 
 // rohitg00/agentmemory#1225: a bare "Filter by project" left the Agent guessing
 // what value to pass. There is no server-side default: the daemon cannot see
-// the Agent's cwd through the MCP proxy shim.
+// the Agent's cwd. `agentmemory mcp` fills an omitted project from its own cwd.
 export const PROJECT_NAME_DESCRIPTION =
   'Project name. Use the project="…" value from an injected <agentmemory-context> block ' +
   "when one is present; otherwise the basename of the repository's main checkout directory " +
