@@ -7,11 +7,14 @@ export const NOT_A_MEMORY_HINT =
 // what value to pass. There is no server-side default: the daemon cannot see
 // the Agent's cwd through the MCP proxy shim.
 export const PROJECT_NAME_DESCRIPTION =
-  "Project name: the basename of the repository's main checkout directory, shared by " +
-  'all of its worktrees. It is the name in the project="…" attribute of the injected ' +
-  "<agentmemory-context> block.";
+  'Project name. Use the project="…" value from an injected <agentmemory-context> block ' +
+  "when one is present; otherwise the basename of the repository's main checkout directory " +
+  "(shared by all its worktrees), unless AGENTMEMORY_PROJECT_NAME overrides it. " +
+  "Not a filesystem path.";
 
-export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} Leave it out to search every project.`;
+export const PROJECT_OMITTED_CLAUSE = "Leave it out to search every project.";
+
+export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} ${PROJECT_OMITTED_CLAUSE}`;
 
 export type McpToolDef = {
   name: string;
