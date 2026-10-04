@@ -181,6 +181,86 @@ describe("mem::observe auto-compress gate (#138)", () => {
   });
 });
 
+describe("buildSyntheticCompression hook payloads", () => {
+  const base = {
+    id: "obs_h",
+    sessionId: "ses_1",
+    timestamp: new Date().toISOString(),
+  };
+
+  it("titles a prompt from its text, not the hook name", async () => {
+    const { buildSyntheticCompression } = await import("../src/functions/compress-synthetic.js");
+    const synth = buildSyntheticCompression({
+      ...base,
+      hookType: "prompt_submit",
+      userPrompt: "  Fix the   flaky\nretry test in observe.ts  ",
+      raw: {},
+    });
+    expect(synth.title).toBe("Fix the flaky retry test in observe.ts");
+    expect(synth.narrative).toContain("flaky");
+    const long = buildSyntheticCompression({
+      ...base,
+      hookType: "prompt_submit",
+      userPrompt: "word ".repeat(100),
+      raw: {},
+    });
+    expect(long.title.length).toBeLessThanOrEqual(80);
+  });
+
+  it("extracts title and narrative from subagent, task and notification payloads", async () => {
+    const { buildSyntheticCompression } = await import("../src/functions/compress-synthetic.js");
+    const start = buildSyntheticCompression({
+      ...base,
+      hookType: "subagent_start",
+      raw: { agent_id: "a1", agent_type: "Explore" },
+    });
+    expect(start.type).toBe("subagent");
+    expect(start.title).toBe("Subagent started: Explore");
+    expect(start.narrative).toContain("a1");
+
+    const stop = buildSyntheticCompression({
+      ...base,
+      hookType: "subagent_stop",
+      raw: { agent_id: "a1", agent_type: "Explore", last_message: "Found three callers." },
+    });
+    expect(stop.title).toBe("Subagent finished: Explore");
+    expect(stop.narrative).toContain("Found three callers.");
+
+    const task = buildSyntheticCompression({
+      ...base,
+      hookType: "task_completed",
+      raw: { task_id: "7", task_subject: "Add retry", task_description: "Retry on ENOSPC", team_name: "core" },
+    });
+    expect(task.type).toBe("subagent");
+    expect(task.title).toBe("Task completed: Add retry");
+    expect(task.narrative).toContain("Retry on ENOSPC");
+
+    const note = buildSyntheticCompression({
+      ...base,
+      hookType: "notification",
+      raw: { notification_type: "permission_prompt", title: "Permission needed", message: "Claude wants to run rm" },
+    });
+    expect(note.type).toBe("notification");
+    expect(note.title).toBe("Permission needed");
+    expect(note.narrative).toContain("Claude wants to run rm");
+  });
+
+  it("titles a tool failure with the tool and keeps the error in the narrative", async () => {
+    const { buildSyntheticCompression } = await import("../src/functions/compress-synthetic.js");
+    const synth = buildSyntheticCompression({
+      ...base,
+      hookType: "post_tool_failure",
+      toolName: "Bash",
+      toolInput: { command: "npm test" },
+      toolOutput: "exit 1",
+      raw: {},
+    });
+    expect(synth.type).toBe("error");
+    expect(synth.title).toBe("Bash failed");
+    expect(synth.narrative).toContain("exit 1");
+  });
+});
+
 describe("buildSyntheticCompression", () => {
   it("maps common tool names to the right ObservationType", async () => {
     const { buildSyntheticCompression } = await import(
