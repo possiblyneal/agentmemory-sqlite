@@ -788,7 +788,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Engine serialization drops Memory.project, so project coverage can never pass."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/751
     mentioned_by_prs: [1195]
   - number: 754
@@ -924,7 +925,8 @@ issues:
     difficulty: high
     kind: bug
     note: "No path to rebuild or reset a >25K legacy graph; both paths heartbeat-crash."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/825
   - number: 826
     title: "feat: Expose post-tool-use and TaskCompleted hooks to Python plugin (Hermes integration)"
@@ -941,7 +943,8 @@ issues:
     difficulty: high
     kind: bug
     note: "graph-query traversal enumerates the full graph and crashes past ~25K nodes."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/828
     fix_prs: [893]
   - number: 833
@@ -1098,7 +1101,8 @@ issues:
     difficulty: med
     kind: bug
     note: "mesh/export has no pagination, so sync can never catch up after a long outage."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/890
     mentioned_by_prs: [1143]
   - number: 899
@@ -1884,7 +1888,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Orphaned index generations accumulate when the manifest read fails; the store grows until a core pegs."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1115
     fix_prs: [1256, 1282]
   - number: 1116
@@ -1918,7 +1923,8 @@ issues:
     difficulty: high
     kind: bug
     note: "One smart-search request unregisters all 271 functions for ~5s, taking the whole REST surface down."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1124
   - number: 1127
     title: "mem::graph-extract hangs to its own 180s invocation timeout on every batch, eventually stalling state::get and crashing the worker"
@@ -1926,7 +1932,8 @@ issues:
     difficulty: high
     kind: bug
     note: "graph-extract hangs to its 180s invocation timeout each batch, stalling state::get and crashing the worker."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1127
     fix_prs: [1128]
     mentioned_by_prs: [1384]
@@ -1967,7 +1974,8 @@ issues:
     difficulty: med
     kind: bug
     note: "GET /agentmemory/export past 16 MiB drops the worker and 404s every endpoint."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1142
     mentioned_by_prs: [1143, 1233]
   - number: 1148
@@ -2600,7 +2608,8 @@ issues:
     difficulty: high
     kind: bug
     note: "GET /agentmemory/sessions still hangs indefinitely on 0.9.29; kv.list(KV.sessions) never resolves."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1326
   - number: 1328
     title: "feat: Allow custom HTTP headers on LLM provider requests (needed for x-opencode-session)"
@@ -2671,7 +2680,8 @@ issues:
     difficulty: high
     kind: bug
     note: "graph/build's server-side batch loop outlives its response and burns LLM calls for hours."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1339
     mentioned_by_prs: [1384]
   - number: 1340
@@ -2699,7 +2709,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Unbounded sourceSessionIds/sourceMemoryIds plus unpaginated list endpoints hit the 16 MiB frame limit."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1360
   - number: 1361
     title: "Windows hardening: cross-platform build script, test normalization, and audit split"
@@ -2717,7 +2728,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Trailing garbage bytes appended to mem:insights.bin make GET /insights fail with Invocation stopped."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1364
   - number: 1365
     title: "session-end transcript back-fill extracts no prompts from a Claude Code transcript"
@@ -2777,7 +2789,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Any vector result triggers a blocking expandFromChunks, putting the worker in a heartbeat death loop."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1378
   - number: 1379
     title: "Bug: iii Console install prompt repeats after accepting installation in v0.9.29"
