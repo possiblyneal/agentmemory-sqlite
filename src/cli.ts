@@ -1697,15 +1697,15 @@ async function runImportJsonl(): Promise<void> {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = {};
-  if (pathArg) body["path"] = pathArg;
+  const importRoot = pathArg || join(getClaudeConfigDir(), "projects");
+  const body: Record<string, unknown> = { path: importRoot };
   if (maxFiles !== undefined) body["maxFiles"] = maxFiles;
 
   const headers: Record<string, string> = { "content-type": "application/json" };
   const secret = process.env["AGENTMEMORY_SECRET"];
   if (secret) headers["authorization"] = `Bearer ${secret}`;
 
-  p.log.info(`Importing JSONL from ${pathArg || join(getClaudeConfigDir(), "projects")}…`);
+  p.log.info(`Importing JSONL from ${importRoot}…`);
   const spinner = p.spinner();
   spinner.start("scanning files");
 

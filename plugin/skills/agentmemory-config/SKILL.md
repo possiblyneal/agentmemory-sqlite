@@ -22,7 +22,7 @@ AGENTMEMORY_INJECT_CONTEXT=true
 - Token-spending features ship OFF on purpose: `AGENTMEMORY_AUTO_COMPRESS` (LLM summaries) costs tokens per observation and `AGENTMEMORY_INJECT_CONTEXT` injects recalled context at session start plus up to three strong matches per user prompt.
 - Tool visibility: `AGENTMEMORY_TOOLS=all` (default) or `core` for the lean set.
 - Auth: set `AGENTMEMORY_SECRET` to require `Authorization: Bearer` on the REST API.
-- Claude Code paths: `connect`, `import-jsonl`, replay and the claude-bridge `MEMORY.md` follow `CLAUDE_CONFIG_DIR` when it is set, and use `~/.claude` (with `~/.claude.json`) otherwise.
+- Claude Code paths: `connect`, `import-jsonl`, replay and the claude-bridge `MEMORY.md` follow `CLAUDE_CONFIG_DIR` when it is set in the process environment (as for Claude Code, `~/.agentmemory/.env` does not set it), and use `~/.claude` (with `~/.claude.json`) otherwise.
 - Storage: one SQLite file at `<data-dir>/agentmemory.sqlite`. Move the directory with `--data-dir` / `AGENTMEMORY_DATA_DIR`, or the file alone with `AGENTMEMORY_SQLITE_PATH`.
 
 ## Ports

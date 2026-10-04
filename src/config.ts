@@ -198,16 +198,19 @@ export function getEnvVar(key: string): string | undefined {
   return getMergedEnv()[key];
 }
 
+// Claude Code reads only its own process environment, never ~/.agentmemory/.env.
+function claudeConfigDirOverride(): string | undefined {
+  const dir = process.env["CLAUDE_CONFIG_DIR"];
+  return hasRealValue(dir) ? dir : undefined;
+}
+
 export function getClaudeConfigDir(): string {
-  const dir = getEnvVar("CLAUDE_CONFIG_DIR");
-  return hasRealValue(dir) ? dir : join(homedir(), ".claude");
+  return claudeConfigDirOverride() ?? join(homedir(), ".claude");
 }
 
 export function getClaudeJsonPath(): string {
-  const dir = getEnvVar("CLAUDE_CONFIG_DIR");
-  return hasRealValue(dir)
-    ? join(dir, ".claude.json")
-    : join(homedir(), ".claude.json");
+  const dir = claudeConfigDirOverride();
+  return dir ? join(dir, ".claude.json") : join(homedir(), ".claude.json");
 }
 
 export function getSqlitePath(): string {
