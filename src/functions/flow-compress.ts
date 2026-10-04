@@ -4,6 +4,7 @@ import { KV, generateId } from "../state/schema.js";
 import type { Action, ActionEdge, RoutineRun, MemoryProvider } from "../types.js";
 import { recordAudit } from "./audit.js";
 import { getXmlPayload, getXmlTag } from "../prompts/xml.js";
+import { logger } from "../logger.js";
 
 const FLOW_COMPRESS_SYSTEM = `You are a workflow summarizer. Given a completed action chain, produce a concise summary capturing:
 1. The overall goal and outcome
@@ -113,15 +114,7 @@ export function registerFlowCompressFunction(
         });
 
         if (summary.lesson) {
-          await sdk.trigger({
-            function_id: "mem::lesson-save",
-            payload: {
-              content: summary.lesson,
-              project: data.project,
-              source: "flow",
-              sourceIds: [memory.id],
-            },
-          });
+          await saveFlowLesson(sdk, summary.lesson, memory.id, data.project, doneActions);
         }
 
         return {
@@ -139,6 +132,43 @@ export function registerFlowCompressFunction(
       }
     },
   );
+}
+
+async function saveFlowLesson(
+  sdk: ISdk,
+  lesson: string,
+  memoryId: string,
+  requestedProject: string | undefined,
+  actions: Action[],
+): Promise<void> {
+  const project = requestedProject ?? sharedProject(actions);
+  if (!project) {
+    logger.warn("Flow Lesson skipped: actions span no single project", {
+      memoryId,
+    });
+    return;
+  }
+  try {
+    const result = await sdk.trigger<unknown, { success?: boolean; error?: string }>({
+      function_id: "mem::lesson-save",
+      payload: {
+        content: lesson,
+        project,
+        source: "flow",
+        sourceIds: [memoryId],
+      },
+    });
+    if (result?.success === false) {
+      logger.warn("Flow Lesson save failed", { memoryId, error: result.error });
+    }
+  } catch (err) {
+    logger.warn("Flow Lesson save failed", { memoryId, error: String(err) });
+  }
+}
+
+function sharedProject(actions: Action[]): string | undefined {
+  const project = actions[0]?.project;
+  return actions.every((a) => a.project === project) ? project : undefined;
 }
 
 function buildFlowPrompt(
