@@ -19,6 +19,7 @@ import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { getFollowupStats } from "../functions/smart-search.js";
 import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
+import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import {
@@ -130,25 +131,6 @@ function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
-}
-
-function parseOptionalFiniteNumber(value: unknown): number | undefined | null {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function parseOptionalPositiveInt(value: unknown): number | undefined | null {
-  const parsed = parseOptionalFiniteNumber(value);
-  if (parsed === undefined || parsed === null) return parsed;
-  if (!Number.isInteger(parsed) || parsed < 1) return null;
-  return parsed;
 }
 
 const DEFAULT_PAGE_LIMIT = 100;

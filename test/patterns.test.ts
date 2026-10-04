@@ -8,51 +8,16 @@ import { registerPatternsFunction } from "../src/functions/patterns.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { registerMcpEndpoints } from "../src/mcp/server.js";
 import { KV } from "../src/state/schema.js";
+import { mockKV, mockSdk } from "./helpers/mocks.js";
 
 const SECRET = "patterns-test-secret";
 
-function mockKV() {
-  const store = new Map<string, Map<string, unknown>>();
-  return {
-    get: async <T>(scope: string, key: string): Promise<T | null> =>
-      (store.get(scope)?.get(key) as T) ?? null,
-    set: async <T>(scope: string, key: string, data: T): Promise<T> => {
-      if (!store.has(scope)) store.set(scope, new Map());
-      store.get(scope)!.set(key, data);
-      return data;
-    },
-    delete: async (scope: string, key: string): Promise<void> => {
-      store.get(scope)?.delete(key);
-    },
-    list: async <T>(scope: string): Promise<T[]> => {
-      const entries = store.get(scope);
-      return entries ? (Array.from(entries.values()) as T[]) : [];
-    },
-  };
-}
-
-function mockSdk() {
-  const functions = new Map<string, Function>();
-  return {
-    registerFunction: (id: string, handler: Function) => {
-      functions.set(id, handler);
-    },
-    registerTrigger: () => {},
-    trigger: async (input: { function_id: string; payload?: unknown }) => {
-      const fn = functions.get(input.function_id);
-      if (!fn) throw new Error(`No function: ${input.function_id}`);
-      return fn(input.payload);
-    },
-    functions,
-  };
-}
-
-type Pattern = { type: string; files: string[]; sessions: string[] };
+type Pattern = { type: string; files: string[]; frequency: number; sessions: string[] };
 
 async function seedSession(
   kv: ReturnType<typeof mockKV>,
   id: string,
-  startedAt: string,
+  startedAt: string | undefined,
   observations: Array<{ type: string; title: string; files?: string[] }>,
 ) {
   await kv.set(KV.sessions, id, {
@@ -108,6 +73,21 @@ describe("mem::patterns session window (rohitg00/agentmemory#1226)", () => {
     expect(repeat?.sessions).toHaveLength(50);
     expect(repeat?.sessions).not.toContain("s0");
   });
+
+  it("orders Sessions without a startedAt last instead of throwing", async () => {
+    const { kv, patterns } = setup();
+    await seedSession(kv, "dated", "2026-01-02T00:00:00.000Z", [
+      { type: "error", title: "Build failed", files: ["src/build.ts"] },
+    ]);
+    await seedSession(kv, "undated", undefined, [{ type: "error", title: "Build failed", files: ["src/build.ts"] }]);
+    await seedSession(kv, "older", "2026-01-01T00:00:00.000Z", [
+      { type: "error", title: "Build failed", files: ["src/build.ts"] },
+    ]);
+
+    const { patterns: found } = await patterns({ limit: 2 });
+    const repeat = found.find((p) => p.type === "error_repeat");
+    expect(repeat?.sessions.sort()).toEqual(["dated", "older"]);
+  });
 });
 
 describe("mem::patterns per-Session file cap", () => {
@@ -139,6 +119,20 @@ describe("mem::patterns per-Session file cap", () => {
       "z/two.ts",
     ]);
   });
+
+  it("credits a pair only to Sessions where it fell inside the first 50", async () => {
+    const { kv, patterns } = setup();
+    await seedWide(kv, 48);
+    const wide = Array.from({ length: 50 }, (_, i) => `d/f${String(i).padStart(2, "0")}.ts`);
+    await seedSession(kv, "d", "2026-01-01T00:00:00.000Z", [
+      { type: "file_edit", title: "edit", files: [...wide, "z/one.ts", "z/two.ts"] },
+    ]);
+
+    const { patterns: found } = await patterns({});
+    const pair = found.find((p) => p.type === "co_change");
+    expect(pair?.frequency).toBe(3);
+    expect(pair?.sessions.sort()).toEqual(["a", "b", "c"]);
+  });
 });
 
 describe("patterns limit at the boundary", () => {
@@ -146,12 +140,12 @@ describe("patterns limit at the boundary", () => {
     const sdk = mockSdk();
     const received: unknown[] = [];
     registerApiTriggers(sdk as never, mockKV() as never, SECRET);
-    sdk.functions.set("mem::patterns", (data: unknown) => {
+    sdk.fns.set("mem::patterns", async (data: unknown) => {
       received.push(data);
       return { patterns: [] };
     });
     const call = (body: unknown) =>
-      sdk.functions.get("api::patterns")!({
+      sdk.fns.get("api::patterns")!({
         headers: { authorization: `Bearer ${SECRET}` },
         body,
       });
@@ -162,12 +156,12 @@ describe("patterns limit at the boundary", () => {
     const sdk = mockSdk();
     const received: unknown[] = [];
     registerMcpEndpoints(sdk as never, mockKV() as never, SECRET);
-    sdk.functions.set("mem::patterns", (data: unknown) => {
+    sdk.fns.set("mem::patterns", async (data: unknown) => {
       received.push(data);
       return { patterns: [] };
     });
     const call = (args: Record<string, unknown>) =>
-      sdk.functions.get("mcp::tools::call")!({
+      sdk.fns.get("mcp::tools::call")!({
         headers: { authorization: `Bearer ${SECRET}` },
         body: { name: "memory_patterns", arguments: args },
       });
@@ -188,7 +182,17 @@ describe("patterns limit at the boundary", () => {
     expect(received).toEqual([{ project: "proj", limit: 120 }]);
   });
 
-  it.each([0, 501, 2.5, -1, "50", "abc"])("rejects limit %j", async (limit) => {
+  it.each([
+    ["REST", apiSurface],
+    ["MCP", mcpSurface],
+  ] as const)("%s accepts a numeric-string limit", async (_name, surface) => {
+    const { call, received } = surface();
+    const res = await call({ limit: "50" });
+    expect(res.status_code).toBe(200);
+    expect(received).toEqual([{ project: undefined, limit: 50 }]);
+  });
+
+  it.each([0, 501, 2.5, -1, "abc", "2.5"])("rejects limit %j", async (limit) => {
     const rest = apiSurface();
     const restRes = await rest.call({ limit });
     expect(restRes.status_code).toBe(400);
