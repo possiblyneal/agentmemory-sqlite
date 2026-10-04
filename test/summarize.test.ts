@@ -258,7 +258,10 @@ describe("mem::summarize chunking", () => {
     expect(stored?.observationCount).toBe(105);
   });
 
-  it("retries an intermediate merge that fails to parse instead of failing the Summarize", async () => {
+  it.each([
+    ["fails to parse", async () => "<garbage/>"],
+    ["throws", async (): Promise<string> => { throw new Error("broker 503"); }],
+  ])("retries an intermediate merge that %s instead of failing the Summarize", async (_, firstMerge) => {
     const budget = 300;
     process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + budget);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
@@ -271,7 +274,7 @@ describe("mem::summarize chunking", () => {
       const reply = await summarize(system, user);
       if (!system.includes("merging multiple partial summaries")) return reply;
       merges += 1;
-      return merges === 1 ? "<garbage/>" : reply;
+      return merges === 1 ? firstMerge() : reply;
     };
     const { handler } = await setupHandler({ sessionId: "ses_merge_retry", obsCount: 105, provider });
 

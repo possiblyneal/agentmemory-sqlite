@@ -340,15 +340,26 @@ async function mergeGroupWithRetry(
   sessionId: string,
   project: string,
 ): Promise<ReducePartial> {
+  let failure: unknown;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
-    const parsed = parseSummaryXml(xml, sessionId, project, 0);
-    if (parsed) {
-      return toReducePartial(parsed, group[0]!.obsRangeStart, group[group.length - 1]!.obsRangeEnd);
+    try {
+      const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
+      const parsed = parseSummaryXml(xml, sessionId, project, 0);
+      if (parsed) {
+        return toReducePartial(parsed, group[0]!.obsRangeStart, group[group.length - 1]!.obsRangeEnd);
+      }
+      failure = new Error("reduce_parse_failed: an intermediate merge did not parse");
+      logger.warn("Summarize intermediate merge parse failed", { sessionId, attempt });
+    } catch (err) {
+      failure = err;
+      logger.warn("Summarize intermediate merge LLM call failed", {
+        sessionId,
+        attempt,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-    logger.warn("Summarize intermediate merge parse failed", { sessionId, attempt });
   }
-  throw new Error("reduce_parse_failed: an intermediate merge did not parse");
+  throw failure;
 }
 
 // #783: many LLMs (DeepSeek, GPT variants, some Anthropic responses)
