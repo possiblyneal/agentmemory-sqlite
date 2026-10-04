@@ -757,8 +757,8 @@ prs:
       - test/remember-forget-audit.test.ts
     note: "mem::remember records no audit row and drops sessionId/tags from attribution."
     disposition: already-fixed
-    status: "fixed-here — implemented on fix/upstream-triage-run."
-    fixed_by: "4ac4774"
+    status: "fixed-here — CJK-aware dedup implemented on fix/upstream-triage-run; the negation guard was dropped by Operator decision: a correction supersedes the rule it flips, and the old rule stays as a prior version."
+    fixed_by: "4ac4774, 9115433"
     url: https://github.com/rohitg00/agentmemory/pull/468
   - number: 502
     title: "fix: run graph extraction on manual session end"

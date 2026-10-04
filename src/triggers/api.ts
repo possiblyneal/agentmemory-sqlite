@@ -750,6 +750,7 @@ export function registerApiTriggers(
             { type: "set", path: "cwd", value: cwd },
             { type: "set", path: "updatedAt", value: now },
             { type: "remove", path: "endedAt" },
+            { type: "remove", path: "idleClosed" },
             ...(firstPrompt && !existing.firstPrompt
               ? [{ type: "set", path: "firstPrompt", value: firstPrompt }]
               : []),
@@ -816,6 +817,7 @@ export function registerApiTriggers(
     await kv.update(KV.sessions, sessionId, [
       { type: "set", path: "endedAt", value: new Date().toISOString() },
       { type: "set", path: "status", value: "completed" },
+      { type: "remove", path: "idleClosed" },
     ]);
     // Fan out session-stopped lifecycle (non-blocking).
     try {

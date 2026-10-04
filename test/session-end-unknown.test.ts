@@ -108,6 +108,22 @@ describe("POST /agentmemory/session/end", () => {
     expect(stopped).toEqual(["ses_1"]);
   });
 
+  it("clears idleClosed so a normally ended Session stays ended", async () => {
+    await kv.set(KV.sessions, "ses_2", {
+      id: "ses_2",
+      project: "proj",
+      cwd: "/proj",
+      startedAt: "2026-09-01T00:00:00.000Z",
+      status: "active",
+      idleClosed: true,
+      observationCount: 2,
+    } satisfies Session);
+
+    await endSession({ sessionId: "ses_2" });
+
+    expect((await kv.get<Session>(KV.sessions, "ses_2"))?.idleClosed).toBeUndefined();
+  });
+
   it("still rejects a missing sessionId with 400", async () => {
     const res = await endSession({});
     expect(res.status_code).toBe(400);

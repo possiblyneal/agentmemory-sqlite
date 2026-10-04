@@ -292,9 +292,10 @@ export async function openGraphReadView(kv: StateKV): Promise<GraphReadView> {
 }
 
 // A bounded snapshot of live nodes and the edges incident to them, read
-// through the indexes. Empty while the graph is unreadable; never enumerates.
-// The limit counts only nodes that pass keep, so a filter applied here cannot
-// be starved by nodes it would have dropped.
+// through the indexes. Empty while the graph is unreadable. The limit counts
+// only nodes that pass keep, so a filter applied here cannot be starved by
+// nodes it would have dropped; a narrow keep may read every catalog node to
+// fill it.
 export async function readBoundedGraphSnapshot(
   kv: StateKV,
   nodeLimit: number,
