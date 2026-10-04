@@ -289,7 +289,9 @@ export class SearchIndex {
   // A title or subtitle hit counts for more than a narrative hit, so a record
   // that names the subject outranks a long one that merely mentions it. The
   // weight scales term frequency only; document length stays the raw token
-  // count so length normalisation is unchanged.
+  // count so length normalisation is unchanged. A title that is just the start
+  // of the record's own narrative (a prompt_submit title) adds no signal, so
+  // it keeps weight 1.
   private extractFields(
     obs: CompressedObservation,
   ): Array<{ terms: string[]; weight: number }> {
@@ -297,8 +299,12 @@ export class SearchIndex {
       terms: this.tokenize(parts.join(" ").toLowerCase()),
       weight,
     });
+    const collapse = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+    const title = collapse(obs.title).replace(/\u2026$/, "");
+    const restatesNarrative =
+      title.length > 0 && collapse(obs.narrative).startsWith(title);
     return [
-      field([obs.title], TITLE_WEIGHT),
+      field([obs.title], restatesNarrative ? 1 : TITLE_WEIGHT),
       field([obs.subtitle || ""], SUBTITLE_WEIGHT),
       field(
         [

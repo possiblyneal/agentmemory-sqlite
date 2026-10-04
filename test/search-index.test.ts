@@ -89,6 +89,32 @@ describe("SearchIndex", () => {
     expect(index.search("auth")).toEqual([]);
   });
 
+  describe("title weighting", () => {
+    it("does not boost a title that restates the start of its narrative", () => {
+      const base = { subtitle: undefined, facts: [], concepts: [], files: [] };
+      index.add(
+        makeObs({
+          ...base,
+          id: "restates",
+          title: "zebra crossing",
+          narrative: "zebra  crossing near school",
+        }),
+      );
+      index.add(
+        makeObs({
+          ...base,
+          id: "names",
+          title: "zebra crossing",
+          narrative: "school near zebra crossing",
+        }),
+      );
+      const scores = new Map(
+        index.search("zebra crossing", 5).map((r) => [r.obsId, r.score]),
+      );
+      expect(scores.get("names")!).toBeGreaterThan(scores.get("restates")!);
+    });
+  });
+
   // Regression coverage: deleted docs must not keep occupying result
   // slots after remove(). Without remove(), a limit-capped search can
   // return fewer live results than requested because the slot is held
