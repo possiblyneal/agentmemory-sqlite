@@ -3,6 +3,7 @@ import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Action, ActionEdge, RoutineRun, MemoryProvider } from "../types.js";
 import { recordAudit } from "./audit.js";
+import { getXmlPayload, getXmlTag } from "../prompts/xml.js";
 
 const FLOW_COMPRESS_SYSTEM = `You are a workflow summarizer. Given a completed action chain, produce a concise summary capturing:
 1. The overall goal and outcome
@@ -164,18 +165,13 @@ function parseFlowSummary(response: string): {
   discoveries: string;
   lesson: string;
 } {
-  const extract = (tag: string): string => {
-    const match = response.match(
-      new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`),
-    );
-    return match ? match[1].trim() : "";
-  };
+  const xml = getXmlPayload(response, "summary");
   return {
-    goal: extract("goal"),
-    outcome: extract("outcome"),
-    steps: extract("steps"),
-    discoveries: extract("discoveries"),
-    lesson: extract("lesson"),
+    goal: getXmlTag(xml, "goal"),
+    outcome: getXmlTag(xml, "outcome"),
+    steps: getXmlTag(xml, "steps"),
+    discoveries: getXmlTag(xml, "discoveries"),
+    lesson: getXmlTag(xml, "lesson"),
   };
 }
 
