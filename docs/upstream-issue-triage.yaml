@@ -2349,7 +2349,9 @@ issues:
     difficulty: med
     kind: bug
     note: "mem::patterns loads every observation, 500s, and takes the worker with it."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#126"
+    status: "fixed-here — #126: mem::patterns reads only the most recent `limit` Sessions (default 50, max 500) and pairs at most 50 files per Session (src/functions/patterns.ts). test/patterns.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1226
   - number: 1228
     title: "Unable to recompress raw observations; compression failures leave observations uncompressed with no recovery path"

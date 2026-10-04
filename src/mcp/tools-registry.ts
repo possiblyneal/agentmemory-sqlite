@@ -162,6 +162,11 @@ export const CORE_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
+        limit: {
+          type: "number",
+          description:
+            "How many of the most recent sessions to analyze (default 50, max 500)",
+        },
       },
     },
   },

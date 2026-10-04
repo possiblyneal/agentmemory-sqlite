@@ -18,6 +18,8 @@ import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { getFollowupStats } from "../functions/smart-search.js";
+import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
+import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import {
@@ -129,25 +131,6 @@ function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
-}
-
-function parseOptionalFiniteNumber(value: unknown): number | undefined | null {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function parseOptionalPositiveInt(value: unknown): number | undefined | null {
-  const parsed = parseOptionalFiniteNumber(value);
-  if (parsed === undefined || parsed === null) return parsed;
-  if (!Number.isInteger(parsed) || parsed < 1) return null;
-  return parsed;
 }
 
 const DEFAULT_PAGE_LIMIT = 100;
@@ -1342,13 +1325,20 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::patterns", 
-    async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
+    async (req: ApiRequest<{ project?: string; limit?: number }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const body = (req.body ?? {}) as Record<string, unknown>;
+      const limit = parsePatternsLimit(body.limit);
+      if (limit === null) {
+        return { status_code: 400, body: { error: PATTERNS_LIMIT_ERROR } };
+      }
       const result = await sdk.trigger({
         function_id: "mem::patterns",
-        payload: { project: typeof body.project === "string" ? body.project : undefined },
+        payload: {
+          project: typeof body.project === "string" ? body.project : undefined,
+          limit,
+        },
       });
       return { status_code: 200, body: result };
     },
