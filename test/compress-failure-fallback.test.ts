@@ -169,6 +169,18 @@ describe("mem::compress never orphans an observation on failure", () => {
     expect(obs.confidence).toBeGreaterThan(0.3);
   });
 
+  it("markup quoted inside the payload does not replace the payload's own fields", async () => {
+    const { result, stored } = await runCompress(
+      async () =>
+        `<observation><type>file_read</type><title>Read index.html</title><facts><fact>Page sets <title>Acme Home</title></fact></facts><narrative>Read the page; its pom declares <type>jar</type> packaging.</narrative><importance>3</importance></observation>`,
+    );
+
+    expect(result.success).toBe(true);
+    const obs = stored!.get(RAW.id) as { type: string; title: string };
+    expect(obs.type).toBe("file_read");
+    expect(obs.title).toBe("Read index.html");
+  });
+
   it("provider succeeds: stores the real compression, not the degraded one", async () => {
     const { result, stored } = await runCompress(
       async () => `<observation>

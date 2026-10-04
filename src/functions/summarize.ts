@@ -14,7 +14,7 @@ import {
   REDUCE_SYSTEM,
   buildReducePrompt,
 } from "../prompts/summary.js";
-import { getXmlTag, getXmlChildren } from "../prompts/xml.js";
+import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { SummaryOutputSchema } from "../eval/schemas.js";
 import { validateOutput } from "../eval/validator.js";
 import { scoreSummary } from "../eval/quality.js";
@@ -305,7 +305,7 @@ function parseSummaryXml(
   project: string,
   obsCount: number,
 ): SessionSummary | null {
-  const cleaned = stripXmlWrappers(xml);
+  const cleaned = getXmlPayload(stripXmlWrappers(xml), "summary");
   const title = getXmlTag(cleaned, "title");
   if (!title) return null;
 

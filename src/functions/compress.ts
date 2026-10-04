@@ -14,7 +14,7 @@ import {
   buildCompressionPrompt,
 } from "../prompts/compression.js";
 import { VISION_DESCRIPTION_PROMPT } from "../prompts/vision.js";
-import { getXmlTag, getXmlChildren } from "../prompts/xml.js";
+import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded } from "./search.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { CompressOutputSchema } from "../eval/schemas.js";
@@ -42,9 +42,12 @@ const VALID_TYPES = new Set<string>([
   "other",
 ]);
 
+export const XML_PARSE_FAILED = "xml_parse_failed";
+
 function parseCompressionXml(
-  xml: string,
+  response: string,
 ): Omit<CompressedObservation, "id" | "sessionId" | "timestamp"> | null {
+  const xml = getXmlPayload(response, "observation");
   const rawType = getXmlTag(xml, "type");
   const title = getXmlTag(xml, "title");
   if (!rawType || !title) return null;
@@ -187,17 +190,20 @@ export function registerCompressFunction(
       const prompt = buildCompressionPrompt(promptArgs);
 
       try {
+        let accepted: ReturnType<typeof parseCompressionXml> = null;
         const validator = (response: string) => {
           const parsed = parseCompressionXml(response);
-          if (!parsed) return { valid: false, errors: ["xml_parse_failed"] };
+          if (!parsed) return { valid: false, errors: [XML_PARSE_FAILED] };
           const result = validateOutput(
             CompressOutputSchema,
             parsed,
             "mem::compress",
           );
-          return result.valid
-            ? { valid: true }
-            : { valid: false, errors: result.result.errors };
+          if (!result.valid) {
+            return { valid: false, errors: result.result.errors };
+          }
+          accepted = parsed;
+          return { valid: true };
         };
 
         const attempt = await compressWithRetry(
@@ -209,14 +215,10 @@ export function registerCompressFunction(
           buildCompressionPrompt(promptArgs, { neutralize: true }),
         );
 
-        const parsed =
-          attempt.response === null ? null : parseCompressionXml(attempt.response);
-        if (!parsed) {
-          const reason =
-            attempt.response === null &&
-            !attempt.errors.includes("xml_parse_failed")
-              ? "validation_failed"
-              : "parse_failed";
+        if (attempt.response === null) {
+          const reason = attempt.errors.includes(XML_PARSE_FAILED)
+            ? "parse_failed"
+            : "validation_failed";
           const latencyMs = Date.now() - startMs;
           if (metricsStore) {
             await metricsStore.record("mem::compress", latencyMs, false);
@@ -224,11 +226,12 @@ export function registerCompressFunction(
           logger.warn("Compression output rejected", {
             obsId: data.observationId,
             reason,
-            errors: attempt.response === null ? attempt.errors : undefined,
+            errors: attempt.errors,
           });
           await storeDegraded(reason);
           return { success: false, error: reason };
         }
+        const parsed = accepted!;
 
         const qualityScore = scoreCompression(parsed);
 
