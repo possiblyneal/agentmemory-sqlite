@@ -25,13 +25,14 @@ Output XML:
   <strength>1-10 how confident/important this memory is</strength>
 </memory>`;
 
-import { getXmlTag, getXmlChildren } from "../prompts/xml.js";
+import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { logger } from "../logger.js";
 
 function parseMemoryXml(
-  xml: string,
+  response: string,
   sessionIds: string[],
 ): Omit<Memory, "id" | "createdAt" | "updatedAt"> | null {
+  const xml = getXmlPayload(response, "memory");
   const type = getXmlTag(xml, "type");
   const title = getXmlTag(xml, "title");
   const content = getXmlTag(xml, "content");

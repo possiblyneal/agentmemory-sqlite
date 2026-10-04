@@ -25,6 +25,18 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    update: async (
+      scope: string,
+      key: string,
+      ops: Array<{ type: string; path: string; value?: unknown }>,
+    ): Promise<unknown> => {
+      const row = store.get(scope)?.get(key) as Record<string, unknown>;
+      for (const op of ops) {
+        if (op.type === "set") row[op.path] = op.value;
+        else delete row[op.path];
+      }
+      return row;
+    },
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -151,6 +163,39 @@ describe("Auto-Forget Function", () => {
     };
 
     expect(result.lowValueObs).toContain("obs_old");
+  });
+
+  it("lowers the Session's observationCount by the Observations it deletes", async () => {
+    await kv.set("mem:sessions", "ses_1", {
+      id: "ses_1",
+      project: "my-project",
+      cwd: "/tmp",
+      startedAt: "2025-01-01T00:00:00Z",
+      status: "completed",
+      observationCount: 3,
+    } satisfies Session);
+    const observation = (id: string, timestamp: string): CompressedObservation => ({
+      id,
+      sessionId: "ses_1",
+      timestamp,
+      type: "other",
+      title: "trivial event",
+      facts: [],
+      narrative: "nothing important",
+      concepts: [],
+      files: [],
+      importance: 1,
+    });
+    await kv.set("mem:obs:ses_1", "old_a", observation("old_a", "2025-01-01T00:00:00Z"));
+    await kv.set("mem:obs:ses_1", "old_b", observation("old_b", "2025-01-02T00:00:00Z"));
+    await kv.set("mem:obs:ses_1", "recent", observation("recent", new Date().toISOString()));
+
+    await sdk.trigger("mem::auto-forget", {});
+
+    expect(await kv.list("mem:obs:ses_1")).toHaveLength(1);
+    expect(await kv.get<Session>("mem:sessions", "ses_1")).toMatchObject({
+      observationCount: 1,
+    });
   });
 
   it("dryRun mode identifies but does not delete anything", async () => {

@@ -23,17 +23,30 @@ vi.mock("node:util", async () => {
   };
 });
 
+const snapshotFile = vi.hoisted(() => ({
+  content: '{"version":"0.4.0","sessions":[],"memories":[]}',
+}));
+
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
-  readFileSync: vi
-    .fn()
-    .mockReturnValue('{"version":"0.4.0","sessions":[],"memories":[]}'),
+  writeFileSync: vi.fn((_path: string, content: string) => {
+    snapshotFile.content = content;
+  }),
+  readFileSync: vi.fn(() => snapshotFile.content),
 }));
 
 import { registerSnapshotFunction } from "../src/functions/snapshot.js";
-import type { Session, Memory, SnapshotMeta } from "../src/types.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToIndexDoc } from "../src/state/memory-utils.js";
+import type {
+  Session,
+  Memory,
+  Lesson,
+  SnapshotMeta,
+  GraphNode,
+  GraphEdge,
+} from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -162,6 +175,209 @@ describe("Snapshot Functions", () => {
 
     const audits = await kv.list("mem:audit");
     expect(audits.length).toBe(1);
+  });
+});
+
+function lesson(id: string, content: string): Lesson {
+  return {
+    id,
+    content,
+    context: "",
+    confidence: 0.5,
+    reinforcements: 0,
+    source: "manual",
+    sourceIds: [],
+    tags: [],
+    createdAt: "2026-02-01T00:00:00Z",
+    updatedAt: "2026-02-01T00:00:00Z",
+    decayRate: 0.05,
+  };
+}
+
+function memory(id: string, title: string): Memory {
+  return {
+    id,
+    createdAt: "2026-02-01T00:00:00Z",
+    updatedAt: "2026-02-01T00:00:00Z",
+    type: "pattern",
+    title,
+    content: `${title} about the deploy pipeline`,
+    concepts: [],
+    files: [],
+    sessionIds: ["ses_1"],
+    strength: 5,
+    version: 1,
+    isLatest: true,
+  };
+}
+
+function entity(id: string): GraphNode {
+  return {
+    id,
+    type: "file",
+    name: id,
+    properties: {},
+    sourceObservationIds: [],
+    createdAt: "2026-02-01T00:00:00Z",
+  };
+}
+
+function relation(id: string, sourceNodeId: string, targetNodeId: string): GraphEdge {
+  return {
+    id,
+    type: "uses",
+    sourceNodeId,
+    targetNodeId,
+    weight: 1,
+    sourceObservationIds: [],
+    createdAt: "2026-02-01T00:00:00Z",
+  };
+}
+
+type RestoreResult = {
+  success: boolean;
+  counts: Record<string, { written: number; removed: number }>;
+  notCaptured: string[];
+};
+
+describe("snapshot-restore replaces each captured store", () => {
+  let sdk: ReturnType<typeof mockSdk>;
+  let kv: ReturnType<typeof mockKV>;
+
+  beforeEach(async () => {
+    sdk = mockSdk();
+    kv = mockKV();
+    getSearchIndex().clear();
+    registerSnapshotFunction(sdk as never, kv as never, "/tmp/agentmemory-snapshots");
+    await kv.set("mem:memories", "mem_1", memory("mem_1", "Original"));
+    await kv.set("mem:lessons", "lsn_1", lesson("lsn_1", "Run tests before pushing"));
+    getSearchIndex().add(memoryToIndexDoc(memory("mem_1", "Original")));
+  });
+
+  it("removes rows added after the snapshot and brings back snapshot-time rows", async () => {
+    await sdk.trigger("mem::snapshot-create", { message: "before" });
+
+    await kv.set("mem:memories", "mem_2", memory("mem_2", "Added later"));
+    await kv.set("mem:lessons", "lsn_2", lesson("lsn_2", "Added later"));
+    await kv.delete("mem:lessons", "lsn_1");
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect(result.success).toBe(true);
+    expect((await kv.list<Memory>("mem:memories")).map((m) => m.id)).toEqual(["mem_1"]);
+    expect((await kv.list<Lesson>("mem:lessons")).map((l) => l.id)).toEqual(["lsn_1"]);
+    expect(result.counts.memories).toEqual({ written: 1, removed: 1 });
+    expect(result.counts.lessons).toEqual({ written: 1, removed: 1 });
+  });
+
+  it("leaves a store the snapshot never captured untouched and names it", async () => {
+    snapshotFile.content = JSON.stringify({
+      version: "0.9.29",
+      memories: [memory("mem_1", "Original")],
+    });
+    await kv.set("mem:lessons", "lsn_2", lesson("lsn_2", "Added later"));
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect(result.success).toBe(true);
+    expect((await kv.list<Lesson>("mem:lessons")).map((l) => l.id).sort()).toEqual([
+      "lsn_1",
+      "lsn_2",
+    ]);
+    expect(result.notCaptured).toContain("lessons");
+    expect(result.counts.lessons).toBeUndefined();
+  });
+
+  it("search over restored Memories returns only the restored set", async () => {
+    await sdk.trigger("mem::snapshot-create", { message: "before" });
+
+    const later = memory("mem_2", "Added later");
+    await kv.set("mem:memories", "mem_2", later);
+    getSearchIndex().add(memoryToIndexDoc(later));
+
+    await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" });
+
+    const hits = getSearchIndex().search("deploy pipeline").map((h) => h.obsId);
+    expect(hits).toEqual(["mem_1"]);
+  });
+
+  it("leaves live Entities alone for a legacy snapshot with empty graphNodes and no graphEdges", async () => {
+    await kv.set("mem:graph:nodes", "ent_1", entity("ent_1"));
+    snapshotFile.content = JSON.stringify({
+      version: "0.9.29",
+      memories: [memory("mem_1", "Original")],
+      graphNodes: [],
+    });
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect(result.success).toBe(true);
+    expect((await kv.list<GraphNode>("mem:graph:nodes")).map((n) => n.id)).toEqual(["ent_1"]);
+    expect(result.notCaptured).toEqual(
+      expect.arrayContaining(["graphNodes", "graphEdges"]),
+    );
+    expect(result.counts.graphNodes).toBeUndefined();
+  });
+
+  it("leaves the graph alone for a legacy snapshot with nodes but no edges", async () => {
+    await kv.set("mem:graph:nodes", "ent_live", entity("ent_live"));
+    await kv.set("mem:graph:edges", "rel_live", relation("rel_live", "ent_live", "ent_live"));
+    snapshotFile.content = JSON.stringify({
+      version: "0.9.29",
+      graphNodes: [entity("ent_old")],
+    });
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect(result.success).toBe(true);
+    expect((await kv.list<GraphNode>("mem:graph:nodes")).map((n) => n.id)).toEqual(["ent_live"]);
+    expect((await kv.list<GraphEdge>("mem:graph:edges")).map((e) => e.id)).toEqual(["rel_live"]);
+    expect(result.notCaptured).toEqual(
+      expect.arrayContaining(["graphNodes", "graphEdges"]),
+    );
+  });
+
+  it("fails snapshot-create when an Observation read fails instead of capturing none", async () => {
+    await kv.set("mem:sessions", "ses_1", { id: "ses_1" });
+    const failingKv = {
+      ...kv,
+      list: async <T>(scope: string): Promise<T[]> => {
+        if (scope.startsWith("mem:obs:")) throw new Error("read failed");
+        return kv.list<T>(scope);
+      },
+    };
+    const localSdk = mockSdk();
+    registerSnapshotFunction(localSdk as never, failingKv as never, "/tmp/agentmemory-snapshots");
+
+    const result = (await localSdk.trigger("mem::snapshot-create", {
+      message: "before",
+    })) as { success: boolean; error?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("read failed");
+  });
+
+  it("records per-store written and removed counts in the audit entry", async () => {
+    await sdk.trigger("mem::snapshot-create", { message: "before" });
+    await kv.set("mem:lessons", "lsn_2", lesson("lsn_2", "Added later"));
+
+    await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" });
+
+    const audits = await kv.list<{
+      functionId: string;
+      details: { counts: Record<string, { written: number; removed: number }> };
+    }>("mem:audit");
+    const entry = audits.find((a) => a.functionId === "mem::snapshot-restore");
+    expect(entry?.details.counts.lessons).toEqual({ written: 1, removed: 1 });
+    expect(entry?.details.counts.memories).toEqual({ written: 1, removed: 0 });
   });
 });
 

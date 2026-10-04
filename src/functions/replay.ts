@@ -20,6 +20,7 @@ import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { indexRecords } from "./search.js";
 import { logger } from "../logger.js";
 import { isHarnessPrompt } from "../utils/harness-message.js";
+import { getClaudeConfigDir } from "../config.js";
 
 export const MAX_FILES_DEFAULT = 200;
 export const MAX_FILES_UPPER_BOUND = 1000;
@@ -326,7 +327,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
         }
       | { success: false; error: string }
     > => {
-      const defaultRoot = join(homedir(), ".claude", "projects");
+      const defaultRoot = join(getClaudeConfigDir(), "projects");
       const rawPath = data.path || defaultRoot;
       if (typeof rawPath !== "string" || rawPath.length === 0) {
         return { success: false, error: "path must be a non-empty string" };

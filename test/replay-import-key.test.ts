@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -284,5 +285,47 @@ describe("import-jsonl skips Claude Code's own background transcripts (#1064)", 
     expect(await kv.get(KV.sessions, "sess-warmup")).toBeNull();
     expect(await kv.get(KV.sessions, "sess-summary")).toBeNull();
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("import-jsonl default root follows CLAUDE_CONFIG_DIR (rohitg00/agentmemory#1103)", () => {
+  const ORIG = process.env["CLAUDE_CONFIG_DIR"];
+  let configDir: string;
+
+  beforeEach(() => {
+    const repoTmp = fileURLToPath(new URL("../tmp", import.meta.url));
+    mkdirSync(repoTmp, { recursive: true });
+    configDir = mkdtempSync(join(repoTmp, "claude-config-"));
+    process.env["CLAUDE_CONFIG_DIR"] = configDir;
+  });
+
+  afterEach(() => {
+    if (ORIG === undefined) delete process.env["CLAUDE_CONFIG_DIR"];
+    else process.env["CLAUDE_CONFIG_DIR"] = ORIG;
+    rmSync(configDir, { recursive: true, force: true });
+  });
+
+  it("imports from $CLAUDE_CONFIG_DIR/projects when no path is given", async () => {
+    const dir = join(configDir, "projects", "proj");
+    mkdirSync(dir, { recursive: true });
+    const ts = "2026-04-17T10:00:00.000Z";
+    writeFileSync(
+      join(dir, "sess-alt.jsonl"),
+      [
+        { type: "user", uuid: "u1", sessionId: "sess-alt", timestamp: ts, cwd: configDir,
+          message: { role: "user", content: [{ type: "text", text: "Fix the login bug" }] } },
+        { type: "assistant", uuid: "a1", sessionId: "sess-alt", timestamp: ts,
+          message: { role: "assistant", content: [{ type: "text", text: "ok" }] } },
+      ].map((l) => JSON.stringify(l)).join("\n") + "\n",
+    );
+    const kv = mockKV();
+    const sdk = mockSdk(kv);
+    registerReplayFunctions(sdk, kv as never);
+
+    const result = (await sdk.trigger("mem::replay::import-jsonl", {})) as {
+      sessionIds: string[];
+    };
+
+    expect(result.sessionIds).toEqual(["sess-alt"]);
   });
 });

@@ -175,7 +175,10 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 Claude Code is the only supported host. The Operator installs it through the marketplace plugin
 (`plugin/.claude-plugin/plugin.json`, which loads `plugin/hooks/hooks.json`, `plugin/.mcp.json`
 and `plugin/skills/`). `agentmemory connect` (`installClaudeCode` in `src/cli/connect/claude-code.ts`)
-wires only the MCP server into `~/.claude.json`; `connect claude-code` is kept as an alias.
+wires only the MCP server into `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is
+set in the process environment); `connect claude-code` is kept as an alias. Build every path
+into Claude Code's config with `getClaudeConfigDir()` / `getClaudeJsonPath()` in
+`src/config.ts`; never join `homedir()` with `.claude` directly.
 `CONNECT_FLAGS` in `src/cli/connect/index.ts` is the source of truth for its accepted flags, the
 `--help` text and the generated `plugin/skills/agentmemory-agents/REFERENCE.md`. Do not add a
 host picker, connect adapters, per-host hook manifests or host payload shims in `src/hooks/` for

@@ -4,6 +4,10 @@ const STRICTER_SUFFIX = `
 
 IMPORTANT: Your previous response was invalid. Please ensure your output strictly follows the required XML format. Every required field must be present with valid values.`;
 
+export type RetryOutcome =
+  | { response: string; retried: boolean }
+  | { response: null; retried: true; errors: string[] };
+
 export async function compressWithRetry(
   provider: MemoryProvider,
   systemPrompt: string,
@@ -15,9 +19,9 @@ export async function compressWithRetry(
   // failed because the payload derailed the model, so retrying the identical
   // prompt with a sterner system suffix rarely changes the outcome.
   retryUserPrompt?: string,
-): Promise<{ response: string; retried: boolean }> {
+): Promise<RetryOutcome> {
   const first = await provider.compress(systemPrompt, userPrompt);
-  const result = validator(first);
+  let result = validator(first);
   if (result.valid) return { response: first, retried: false };
 
   for (let i = 0; i < maxRetries; i++) {
@@ -25,9 +29,9 @@ export async function compressWithRetry(
       systemPrompt + STRICTER_SUFFIX,
       retryUserPrompt ?? userPrompt,
     );
-    const retryResult = validator(retry);
-    if (retryResult.valid) return { response: retry, retried: true };
+    result = validator(retry);
+    if (result.valid) return { response: retry, retried: true };
   }
 
-  return { response: first, retried: true };
+  return { response: null, retried: true, errors: result.errors ?? [] };
 }
