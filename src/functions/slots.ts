@@ -407,10 +407,13 @@ export function registerSlotsFunctions(sdk: ISdk, kv: StateKV): void {
       const label = validateLabel(data?.label);
       if (!label) return { success: false, error: "label required" };
       const project = validateProject(data?.project);
+      // Delete never falls back to a global slot: that slot is injected into
+      // every project, so a project's delete must not reach it.
+      const scope: SlotScope = project ? "project" : "global";
+      const kvScope = project ? KV.projectSlots(project) : KV.globalSlots;
       return withKeyedLock(`slot:${label}`, async () => {
-        const found = await readSlot(kv, label, project);
-        if (!found) return { success: false, error: notFound(project) };
-        const { slot, scope, kvScope } = found;
+        const slot = await kv.get<MemorySlot>(kvScope, label);
+        if (!slot) return { success: false, error: notFound(project) };
         if (slot.readOnly) return { success: false, error: "slot is read-only" };
         await kv.delete(kvScope, label);
         await recordAudit(kv, "slot_delete", "mem::slot-delete", [label], {

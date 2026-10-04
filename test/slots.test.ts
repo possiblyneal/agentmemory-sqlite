@@ -146,6 +146,32 @@ describe("slots — primitive", () => {
     expect(get.success).toBe(false);
   });
 
+  it("delete with a project never removes a global slot of the same label", async () => {
+    await handlers["mem::slot-create"]({ label: "shared", content: "global-shared", scope: "global" });
+    const del = (await handlers["mem::slot-delete"]({ project: P, label: "shared" })) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(del.success).toBe(false);
+    expect(del.error).toMatch(/slot not found/);
+    const global = (await kv.get(KV.globalSlots, "shared")) as { content: string };
+    expect(global.content).toBe("global-shared");
+  });
+
+  it("delete with a project removes only the project's slot, unshadowing the global one", async () => {
+    await handlers["mem::slot-create"]({ label: "shared", content: "global-shared", scope: "global" });
+    await handlers["mem::slot-create"]({ project: P, label: "shared", content: "project-shared" });
+    const del = (await handlers["mem::slot-delete"]({ project: P, label: "shared" })) as { success: boolean };
+    expect(del.success).toBe(true);
+    expect(await kv.get(KV.projectSlots(P), "shared")).toBeNull();
+    const get = (await handlers["mem::slot-get"]({ project: P, label: "shared" })) as {
+      slot: { content: string };
+      scope: string;
+    };
+    expect(get.scope).toBe("global");
+    expect(get.slot.content).toBe("global-shared");
+  });
+
   it("project slot shadows global slot of the same label", async () => {
     // Default seed already created a global `persona`. Populate it through
     // the public handler, then create a project-scoped override through the
