@@ -12,6 +12,7 @@ import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { storeSyntheticCompression } from "./observe.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 import { logger } from "../logger.js";
 
 interface EvictionConfig {
@@ -167,6 +168,33 @@ async function recoverOrEvictStaleSession(
   return { recovered, evicted: true };
 }
 
+// Same lock and read-then-set as mem::observe's increment, so a concurrent
+// observe cannot write back a count read before this decrement.
+async function lowerObservationCounts(
+  kv: StateKV,
+  removedBySession: Map<string, number>,
+): Promise<void> {
+  for (const [sessionId, removed] of removedBySession) {
+    await withKeyedLock(`obs:${sessionId}`, async () => {
+      const session = await kv.get<Session>(KV.sessions, sessionId);
+      if (!session) return;
+      await kv.update(KV.sessions, sessionId, [
+        {
+          type: "set",
+          path: "observationCount",
+          value: Math.max(0, (session.observationCount || 0) - removed),
+        },
+      ]);
+    }).catch((err) => {
+      logger.warn("Eviction observation count update failed", {
+        sessionId,
+        removed,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+}
+
 export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
   let recoveryRunning = false;
   sdk.registerFunction("mem::evict", 
@@ -234,6 +262,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         }
       }
 
+      const removedBySession = new Map<string, number>();
+      const countRemoval = (sessionId: string) =>
+        removedBySession.set(sessionId, (removedBySession.get(sessionId) ?? 0) + 1);
       const projectObs = new Map<string, CompressedObservation[]>();
       for (const session of sessions) {
         const obs = await kv
@@ -255,6 +286,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               try {
                 await deleteIndexed(kv, KV.observations(session.id), o.id);
                 stats.lowImportanceObs++;
+                countRemoval(session.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "observation",
@@ -298,6 +330,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               try {
                 await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
                 stats.capEvictions++;
+                countRemoval(o.sessionId);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "observation",
@@ -319,6 +352,8 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           }
         }
       }
+
+      await lowerObservationCounts(kv, removedBySession);
 
       const memories = await kv.list<Memory>(KV.memories).catch(() => []);
       const evictedMemIds = new Set<string>();

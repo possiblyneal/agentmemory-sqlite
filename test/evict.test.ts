@@ -75,6 +75,15 @@ function mockKV(store: Store, listFailures: Set<string> = new Set()) {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    update: async (
+      scope: string,
+      key: string,
+      ops: Array<{ type: string; path: string; value?: unknown }>,
+    ): Promise<unknown> => {
+      const row = store.get(scope)?.get(key) as Record<string, unknown>;
+      for (const op of ops) if (op.type === "set") row[op.path] = op.value;
+      return row;
+    },
     list: async <T>(scope: string): Promise<T[]> => {
       if (listFailures.has(scope)) {
         throw new Error(`list failed for ${scope}`);
@@ -382,5 +391,125 @@ describe("mem::evict stale sessions", () => {
 
     expect(result.staleSessions).toBe(1);
     expect(await kv.get(KV.sessions, sessionId)).toBeNull();
+  });
+});
+
+describe("mem::evict session observation counts", () => {
+  function lowValueObservation(
+    sessionId: string,
+    id: string,
+  ): CompressedObservation {
+    return {
+      ...makeObservation(sessionId),
+      id,
+      timestamp: daysAgo(100),
+      importance: 1,
+    };
+  }
+
+  function liveSession(id: string, observationCount: number): Session {
+    return { ...makeSession(id), startedAt: daysAgo(1), observationCount };
+  }
+
+  function storeForSessions(
+    sessions: Array<{ session: Session; observations: CompressedObservation[] }>,
+  ): Store {
+    const store: Store = new Map([
+      [KV.sessions, new Map(sessions.map(({ session }) => [session.id, session]))],
+      [KV.summaries, new Map()],
+      [KV.config, new Map()],
+      [KV.audit, new Map()],
+    ]);
+    for (const { session, observations } of sessions) {
+      store.set(
+        KV.observations(session.id),
+        new Map(observations.map((o) => [o.id, o])),
+      );
+    }
+    return store;
+  }
+
+  async function evict(store: Store): Promise<ReturnType<typeof mockKV>> {
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    await sdk.trigger({ function_id: "mem::evict", payload: {} });
+    return kv;
+  }
+
+  it("lowers a Session's count by the number of Observations evicted from it", async () => {
+    const sessionId = "ses_live";
+    const kv = await evict(
+      storeForSessions([
+        {
+          session: liveSession(sessionId, 5),
+          observations: [
+            lowValueObservation(sessionId, "obs_a"),
+            lowValueObservation(sessionId, "obs_b"),
+            makeObservation(sessionId),
+          ],
+        },
+      ]),
+    );
+
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
+      observationCount: 3,
+    });
+  });
+
+  it("floors a count already below the number evicted at zero", async () => {
+    const sessionId = "ses_undercounted";
+    const kv = await evict(
+      storeForSessions([
+        {
+          session: liveSession(sessionId, 1),
+          observations: [
+            lowValueObservation(sessionId, "obs_a"),
+            lowValueObservation(sessionId, "obs_b"),
+            lowValueObservation(sessionId, "obs_c"),
+          ],
+        },
+      ]),
+    );
+
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
+      observationCount: 0,
+    });
+  });
+
+  it("lowers each Session by its own share of a project cap eviction", async () => {
+    const recentObservation = (sessionId: string, id: string, importance: number) => ({
+      ...makeObservation(sessionId),
+      id,
+      timestamp: daysAgo(1),
+      importance,
+    });
+    const store = storeForSessions([
+      {
+        session: liveSession("ses_a", 2),
+        observations: [
+          recentObservation("ses_a", "a1", 1),
+          recentObservation("ses_a", "a2", 2),
+        ],
+      },
+      {
+        session: liveSession("ses_b", 2),
+        observations: [
+          recentObservation("ses_b", "b1", 3),
+          recentObservation("ses_b", "b2", 9),
+        ],
+      },
+    ]);
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+
+    const kv = await evict(store);
+
+    expect(await kv.get<Session>(KV.sessions, "ses_a")).toMatchObject({
+      observationCount: 0,
+    });
+    expect(await kv.get<Session>(KV.sessions, "ses_b")).toMatchObject({
+      observationCount: 1,
+    });
   });
 });
