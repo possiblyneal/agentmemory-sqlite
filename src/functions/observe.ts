@@ -11,12 +11,13 @@ import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
 import { safeAudit } from "./audit.js";
-import { decrementImageRef } from "./image-refs.js";
+import { decrementImageRef, deleteUnreferencedImage, incrementImageRef } from "./image-refs.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { isSqliteFull, unstoredOnFullDisk } from "./observe-retry.js";
 
 export function extractImage(d: unknown): string | undefined {
   if (!d) return undefined;
@@ -72,11 +73,13 @@ const capWarnedSessions = new Set<string>();
 // A session at its cap still admits the newest observation: the work at the
 // end of a long session is what a later one most often needs. The least
 // important rows go first, oldest breaking ties (PR#1174).
-async function evictToAdmitOne(
+async function evictOverCap(
   sdk: ISdk,
   kv: StateKV,
   sessionId: string,
   cap: number,
+  admittedId: string,
+  pendingRefReleases: string[],
 ): Promise<number> {
   const scope = KV.observations(sessionId);
   const existing = await kv.list<{
@@ -86,9 +89,10 @@ async function evictToAdmitOne(
     imageData?: string;
     imageRef?: string;
   }>(scope);
-  const excess = existing.length - cap + 1;
+  const excess = existing.length - cap;
   if (excess <= 0) return 0;
   const victims = existing
+    .filter((obs) => obs.id !== admittedId)
     .sort(
       (a, b) =>
         (a.importance ?? UNSCORED_IMPORTANCE) - (b.importance ?? UNSCORED_IMPORTANCE) ||
@@ -108,8 +112,19 @@ async function evictToAdmitOne(
       });
       continue;
     }
-    if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
-    if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
+    // The row is gone, so it counts as evicted even if releasing its image
+    // fails; a failed release is retried with the others.
+    for (const filePath of new Set([obs.imageData, obs.imageRef].filter((p): p is string => !!p))) {
+      await decrementImageRef(kv, sdk, filePath).catch((err) => {
+        pendingRefReleases.push(filePath);
+        logger.warn("Failed to release image of evicted observation", {
+          sessionId,
+          obsId: obs.id,
+          imageRef: filePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
     await safeAudit(kv, "delete", "mem::observe", [obs.id], {
       resource: "observation",
       reason: "session_observation_cap",
@@ -177,6 +192,11 @@ export function registerObserveFunction(
   dedupMap?: DedupMap,
   maxObservationsPerSession?: number,
 ): void {
+  // An image ref whose rollback or eviction release failed on a full disk;
+  // retried on each later Observation until the disk has room. A restart
+  // forgets it, as it does the disk-full queue.
+  const pendingRefReleases: string[] = [];
+
   sdk.registerFunction("mem::observe", 
     async (payload: HookPayload) => {
 
@@ -282,11 +302,6 @@ export function registerObserveFunction(
       const pendingImageData = extractedImage;
 
       return withKeyedLock(`obs:${payload.sessionId}`, async () => {
-        const capEvicted =
-          maxObservationsPerSession && maxObservationsPerSession > 0
-            ? await evictToAdmitOne(sdk, kv, payload.sessionId, maxObservationsPerSession)
-            : 0;
-
         // Existing session is the source of truth for agentId (even
         // undefined). Env AGENT_ID only fires when no session row
         // exists yet — otherwise an unscoped session would get
@@ -304,11 +319,28 @@ export function registerObserveFunction(
           raw.agentId = inheritedAgentId;
         }
 
+        // Before this Observation saves its image, so a retried rollback cannot
+        // delete a file this Observation is about to reference. Another Session
+        // saving the same image is not covered, as with eviction's decrements.
+        for (const filePath of pendingRefReleases.splice(0)) {
+          await decrementImageRef(kv, sdk, filePath).catch((err) => {
+            pendingRefReleases.push(filePath);
+            logger.warn("Image ref release retry failed", {
+              imageRef: filePath,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+
+        let imageBytesWritten = 0;
         if (pendingImageData && (pendingImageData.startsWith("data:image/") || pendingImageData.startsWith("iVBORw0KGgo") || pendingImageData.startsWith("/9j/"))) {
-          const { filePath, bytesWritten } = await saveImageToDisk(pendingImageData);
+          const { filePath, bytesWritten } = await saveImageToDisk(pendingImageData).catch(
+            (error: NodeJS.ErrnoException) => {
+              throw error.code === "ENOSPC" ? unstoredOnFullDisk() : error;
+            },
+          );
           raw.imageData = filePath;
-          const { incrementImageRef } = await import("./image-refs.js");
-          await incrementImageRef(kv, filePath);
+          imageBytesWritten = bytesWritten;
           sdk.trigger({
             function_id: "mem::disk-size-delta",
             payload: { deltaBytes: bytesWritten },
@@ -327,30 +359,56 @@ export function registerObserveFunction(
           }
         }
 
+        let heldImageRef: string | undefined;
         try {
-
-          await kv.set(KV.observations(payload.sessionId), obsId, raw);
-
-        } catch (error) {
           if (raw.imageData) {
-            // Roll back the ref taken above. decrementImageRef deletes the file
-            // only when no other observation still references it (deduped images
-            // survive) and emits the disk-size delta itself — deleting the file
-            // directly here would orphan shared images and leave a stale ref.
-            // If the rollback itself fails, log it but still surface the
-            // original write error (the more useful failure to diagnose).
+            await incrementImageRef(kv, raw.imageData);
+            heldImageRef = raw.imageData;
+          }
+          await kv.set(KV.observations(payload.sessionId), obsId, raw);
+        } catch (error) {
+          if (heldImageRef) {
+            // decrementImageRef deletes the file only when no other observation
+            // still references it (deduped images survive) and emits the
+            // disk-size delta itself. A rollback that fails is retried later
+            // rather than leaving the file referenced forever.
             try {
-              const { decrementImageRef } = await import("./image-refs.js");
-              await decrementImageRef(kv, sdk, raw.imageData);
+              await decrementImageRef(kv, sdk, heldImageRef);
             } catch (rollbackError) {
+              pendingRefReleases.push(heldImageRef);
               logger.error("Failed to roll back image ref after observation write failure", {
-                imageRef: raw.imageData,
+                imageRef: heldImageRef,
                 error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
               });
             }
+          } else if (raw.imageData && imageBytesWritten > 0) {
+            await deleteUnreferencedImage(kv, sdk, raw.imageData).catch((err) => {
+              logger.warn("Failed to delete image after observation write failure", {
+                imageRef: raw.imageData,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
           }
+          if (isSqliteFull(error)) throw unstoredOnFullDisk();
           throw error;
         }
+
+        // Evicting only after the row is stored means a write that fails on a
+        // full disk, and each retry of it, costs the Session nothing.
+        // The row is stored, so an eviction error must not fail the observe:
+        // the hook would see a 500 and the Session's count would miss this row.
+        const capEvicted =
+          maxObservationsPerSession && maxObservationsPerSession > 0
+            ? await evictOverCap(sdk, kv, payload.sessionId, maxObservationsPerSession, obsId, pendingRefReleases).catch(
+                (err) => {
+                  logger.warn("Session cap eviction failed", {
+                    sessionId: payload.sessionId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                  return 0;
+                },
+              )
+            : 0;
 
         if (dedupMap && dedupHash) {
           dedupMap.record(dedupHash);

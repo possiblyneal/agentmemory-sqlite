@@ -173,6 +173,111 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
   });
 
+  it("evicts nothing when the new row's write fails on a full disk", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    for (const r of [stored("a", 2, "2026-01-01T00:00:00Z"), stored("b", 5, "2026-01-02T00:00:00Z")]) {
+      await kv.set(KV.observations(SESSION), r.id, r);
+    }
+    const set = kv.set;
+    kv.set = async <T>(scope: string, key: string, data: T): Promise<T> => {
+      if (scope === KV.observations(SESSION)) throw new Error("database or disk is full");
+      return set(scope, key, data);
+    };
+    registerObserveFunction(sdk as never, kv as never, undefined, 2);
+
+    await expect(
+      sdk.trigger({
+        function_id: "mem::observe",
+        payload: {
+          sessionId: SESSION,
+          hookType: "post_tool_use",
+          timestamp: "2026-05-01T00:00:00Z",
+          data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+        },
+      }),
+    ).rejects.toThrow("database or disk is full");
+    expect((await kv.list<{ id: string }>(KV.observations(SESSION))).map((o) => o.id)).toEqual(["a", "b"]);
+  });
+
+  it("stores the Observation and counts it when eviction fails", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    await kv.set(KV.observations(SESSION), "a", stored("a", 2, "2026-01-01T00:00:00Z"));
+    await kv.set(KV.sessions, SESSION, {
+      id: SESSION,
+      project: "p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      status: "active",
+      observationCount: 1,
+    });
+    const list = kv.list;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      if (scope === KV.observations(SESSION)) throw new Error("boom");
+      return list<T>(scope);
+    };
+    registerObserveFunction(sdk as never, kv as never, undefined, 1);
+
+    const result = (await sdk.trigger({
+      function_id: "mem::observe",
+      payload: {
+        sessionId: SESSION,
+        hookType: "post_tool_use",
+        timestamp: "2026-05-01T00:00:00Z",
+        data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+      },
+    })) as { observationId?: string };
+
+    expect(result.observationId).toBeTruthy();
+    expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
+  });
+
+  it("counts a row as evicted when releasing its image fails, and releases it later", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    await kv.set(KV.observations(SESSION), "a", {
+      ...stored("a", 2, "2026-01-01T00:00:00Z"),
+      imageData: "/nonexistent/a.png",
+    });
+    await kv.set(KV.sessions, SESSION, {
+      id: SESSION,
+      project: "p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      status: "active",
+      observationCount: 1,
+    });
+    await kv.set(KV.imageRefs, "/nonexistent/a.png", 1);
+    let full = true;
+    const del = kv.delete;
+    kv.delete = async (scope: string, key: string) => {
+      if (full && scope.startsWith("mem:image")) throw new Error("database or disk is full");
+      return del(scope, key);
+    };
+    registerObserveFunction(sdk as never, kv as never, undefined, 1);
+
+    const observe = (file: string) =>
+      sdk.trigger({
+        function_id: "mem::observe",
+        payload: {
+          sessionId: SESSION,
+          hookType: "post_tool_use",
+          timestamp: "2026-05-01T00:00:00Z",
+          data: { tool_name: "Read", tool_input: { file_path: file } },
+        },
+      });
+
+    await observe("new.ts");
+    expect(await kv.list(KV.observations(SESSION))).toHaveLength(1);
+    expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 1 });
+    expect(await kv.get(KV.imageRefs, "/nonexistent/a.png")).toBe(1);
+
+    full = false;
+    await observe("next.ts");
+    expect(await kv.get(KV.imageRefs, "/nonexistent/a.png")).toBeNull();
+  });
+
   it("evicts nothing under the cap", async () => {
     const { ids } = await setup([stored("a", 1, "2026-01-01T00:00:00Z")], 3);
     expect(ids).toHaveLength(2);

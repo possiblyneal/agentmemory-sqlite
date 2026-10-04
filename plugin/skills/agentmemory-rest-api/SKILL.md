@@ -42,6 +42,8 @@ than a record you can name.
 ## Conventions
 
 - Save returns `201`, reads return `200`, validation errors return `400`.
+- `POST /agentmemory/observe` returns `202 {queued: true}` when a full disk held the Observation
+  for retry; the daemon stores it once a write succeeds.
 - Handlers whitelist body fields and drop unknown ones, so passing extra keys is safe but ignored.
 - The port is configurable with `--port` or `--instance`; streams, viewer, and engine derive from it.
 
