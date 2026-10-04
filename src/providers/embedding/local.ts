@@ -1,4 +1,10 @@
 import type { EmbeddingProvider } from "../../types.js";
+import { getEnvVar } from "../../config.js";
+import { configureTransformers } from "../transformers-env.js";
+import { resolveDimensions } from "./_dimensions.js";
+
+const DEFAULT_MODEL = "Xenova/all-MiniLM-L6-v2";
+const DEFAULT_DIMENSIONS = "384";
 
 type FeatureExtractor = (
   texts: string[],
@@ -7,8 +13,19 @@ type FeatureExtractor = (
 
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly name = "local";
-  readonly dimensions = 384;
+  readonly dimensions: number;
+  private readonly modelId: string;
   private extractor: FeatureExtractor | null = null;
+
+  constructor() {
+    this.modelId = getEnvVar("AGENTMEMORY_LOCAL_EMBEDDING_MODEL") || DEFAULT_MODEL;
+    this.dimensions = resolveDimensions(
+      this.modelId,
+      getEnvVar("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS") ||
+        (this.modelId === DEFAULT_MODEL ? DEFAULT_DIMENSIONS : undefined),
+      "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS",
+    );
+  }
 
   async embed(text: string): Promise<Float32Array> {
     const [result] = await this.embedBatch([text]);
@@ -37,9 +54,10 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       }
       throw err;
     }
+    configureTransformers(transformers);
     this.extractor = (await transformers.pipeline(
       "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2",
+      this.modelId,
       { dtype: "q8" },
     )) as FeatureExtractor;
     return this.extractor;

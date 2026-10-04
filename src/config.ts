@@ -219,6 +219,14 @@ export function getSqlitePath(): string {
   );
 }
 
+export function getModelCacheDir(): string {
+  return (
+    getEnvVar("AGENTMEMORY_MODEL_CACHE_DIR") ||
+    getEnvVar("XENOVA_CACHE_HOME") ||
+    join(getEnvVar("AGENTMEMORY_DATA_DIR") || DATA_DIR, "models")
+  );
+}
+
 export function isDropStaleIndexEnabled(): boolean {
   return getMergedEnv()["AGENTMEMORY_DROP_STALE_INDEX"] === "true";
 }
