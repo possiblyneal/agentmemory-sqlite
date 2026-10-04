@@ -47,7 +47,7 @@ const IMPORT_CHUNK_SIZE = 20;
 // fully settles before chunk N+1 begins) while parallelizing within a
 // chunk. Errors propagate — a failing item rejects the whole import, same
 // as the original serial loops.
-async function runChunked<T>(
+export async function runChunked<T>(
   items: readonly T[],
   fn: (item: T) => Promise<void>,
 ): Promise<void> {

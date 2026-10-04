@@ -19,6 +19,7 @@ import { graphWritesDisabled } from "./graph.js";
 import {
   DURABLE_STORES,
   readDurableStores,
+  runChunked,
   type DurableStore,
   type DurableStoreField,
 } from "./export-import.js";
@@ -64,9 +65,6 @@ interface StoreCounts {
   removed: number;
 }
 
-// Replace one store with the snapshot's rows: drop rows the snapshot does not
-// hold, then write every snapshot row through the same index-keeping paths
-// the live writers use.
 async function replaceStore(
   kv: StateKV,
   store: DurableStore,
@@ -76,12 +74,13 @@ async function replaceStore(
   const existing = await kv.list<SnapshotRow>(store.scope);
   const stale = existing.map(store.keyOf).filter((key) => !keep.has(key));
 
-  for (const key of stale) {
-    if (store.field === "memories") await deleteIndexed(kv, store.scope, key);
-    else await kv.delete(store.scope, key);
-  }
+  await runChunked(stale, (key) =>
+    store.field === "memories"
+      ? deleteIndexed(kv, store.scope, key)
+      : kv.delete(store.scope, key),
+  );
 
-  for (const row of rows) {
+  await runChunked(rows, async (row) => {
     if (store.field === "graphNodes") {
       const node = capRecordProvenance(row as unknown as GraphNode);
       await kv.set(store.scope, node.id, node);
@@ -93,7 +92,7 @@ async function replaceStore(
     } else {
       await kv.set(store.scope, store.keyOf(row), row);
     }
-  }
+  });
 
   if (store.field === "memories") {
     const memories = rows as unknown as Memory[];
@@ -125,13 +124,13 @@ async function replaceObservations(
     const scope = KV.observations(sessionId);
     const rows = (snapshot[sessionId] ?? []) as unknown as CompressedObservation[];
     const keep = new Set(rows.map((o) => o.id));
-    const existing = await kv.list<CompressedObservation>(scope).catch(() => []);
-    for (const o of existing) {
-      if (keep.has(o.id)) continue;
-      await deleteIndexed(kv, scope, o.id);
-      removed++;
-    }
-    for (const o of rows) await kv.set(scope, o.id, o);
+    const existing = await kv.list<CompressedObservation>(scope);
+    const stale = existing.filter((o) => !keep.has(o.id));
+    await runChunked(stale, (o) => deleteIndexed(kv, scope, o.id));
+    removed += stale.length;
+    await runChunked(rows, async (o) => {
+      await kv.set(scope, o.id, o);
+    });
     await indexRecords(rows, []);
     written += rows.length;
   }
@@ -168,9 +167,7 @@ export function registerSnapshotFunction(
 
         const observations: Record<string, unknown[]> = {};
         for (const session of sessions) {
-          const obs = await kv
-            .list(KV.observations(session.id))
-            .catch(() => []);
+          const obs = await kv.list(KV.observations(session.id));
           if (obs.length > 0) {
             observations[session.id] = obs;
           }
@@ -282,25 +279,30 @@ export function registerSnapshotFunction(
         const content = readFileSync(join(snapshotDir, "state.json"), "utf-8");
         const state = JSON.parse(content) as SnapshotState;
 
-        const stores: Record<string, StoreCounts> = {};
+        const counts: Record<string, StoreCounts> = {};
         const notCaptured: string[] = [];
         const skipped: string[] = [];
 
         // Observations first: their scopes are found through the Sessions
         // that exist before the sessions store is replaced.
         if (state.observations) {
-          stores.observations = await replaceObservations(kv, state.observations);
+          counts.observations = await replaceObservations(kv, state.observations);
         } else {
           notCaptured.push("observations");
         }
+        // Snapshots written before graphEdges was captured stored
+        // `graphNodes: []` to mean "not enumerated", and replacing nodes
+        // alone would leave stale Relations behind: restore the graph only
+        // when both stores are present.
+        const graphCaptured = "graphNodes" in state && "graphEdges" in state;
         for (const store of DURABLE_STORES) {
           const rows = state[store.field];
-          if (!Array.isArray(rows)) {
+          if (!Array.isArray(rows) || (store.graph && !graphCaptured)) {
             notCaptured.push(store.field);
           } else if (store.graph && graphWritesDisabled()) {
             skipped.push(store.field);
           } else {
-            stores[store.field] = await replaceStore(kv, store, rows);
+            counts[store.field] = await replaceStore(kv, store, rows);
           }
         }
 
@@ -308,7 +310,7 @@ export function registerSnapshotFunction(
 
         await recordAudit(kv, "import", "mem::snapshot-restore", [], {
           commitHash: data.commitHash,
-          stores,
+          counts,
           notCaptured,
           skipped,
         });
@@ -319,7 +321,7 @@ export function registerSnapshotFunction(
         return {
           success: true,
           commitHash: data.commitHash,
-          stores,
+          counts,
           notCaptured,
           skipped,
         };
