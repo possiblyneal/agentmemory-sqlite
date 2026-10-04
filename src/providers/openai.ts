@@ -35,7 +35,7 @@ const TOKENIZE_TIMEOUT_MS = 10_000;
  *                              takes precedence over AGENTMEMORY_LLM_TIMEOUT_MS
  *                              for back-compat with the v0.9.17 shipping name).
  *   AGENTMEMORY_LLM_TIMEOUT_MS — outbound fetch timeout in ms shared across all
- *                              raw-fetch LLM + embedding providers. Used when
+ *                              raw-fetch LLM providers. Used when
  *                              OPENAI_TIMEOUT_MS is not set. Default: 60000.
  *   MAX_TOKENS               — max output tokens (default: from config or 4096)
  *   OPENAI_REASONING_EFFORT  — "low" | "medium" | "high" | "none"
@@ -140,7 +140,7 @@ export class OpenAIProvider implements MemoryProvider {
     // provider (minimax, openrouter, gemini, openrouter-embed, etc.).
     // OPENAI_TIMEOUT_MS keeps its v0.9.17 meaning (OpenAI-scoped alias,
     // takes precedence); when unset we fall through to
-    // AGENTMEMORY_LLM_TIMEOUT_MS and finally the 60s default. See #446.
+    // AGENTMEMORY_LLM_TIMEOUT_MS and finally the 60s default. See rohitg00/agentmemory#446.
     let response: Response;
     try {
       response = await fetchWithTimeout(
@@ -197,7 +197,7 @@ export class OpenAIProvider implements MemoryProvider {
 // Resolves the outbound-fetch timeout for the OpenAI LLM path.
 // Precedence (preserving v0.9.17 behaviour):
 //   1. OPENAI_TIMEOUT_MS       — OpenAI-scoped alias (back-compat)
-//   2. AGENTMEMORY_LLM_TIMEOUT_MS — global LLM/embedding timeout (#446)
+//   2. AGENTMEMORY_LLM_TIMEOUT_MS — global LLM timeout (rohitg00/agentmemory#446)
 //   3. 60 000 ms default
 function resolveTimeout(): number {
   const openaiRaw = getEnvVar("OPENAI_TIMEOUT_MS");

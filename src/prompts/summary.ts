@@ -65,7 +65,7 @@ Rules:
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome`
 
-export function buildReducePrompt(partials: Array<{
+export interface ReducePartial {
   title: string
   narrative: string
   keyDecisions: string[]
@@ -73,7 +73,9 @@ export function buildReducePrompt(partials: Array<{
   concepts: string[]
   obsRangeStart: number
   obsRangeEnd: number
-}>): string {
+}
+
+export function buildReducePrompt(partials: ReducePartial[]): string {
   const sections = partials.map((p, i) => {
     const decisions = p.keyDecisions.map((d) => `  - ${d}`).join('\n')
     const files = p.filesModified.map((f) => `  - ${f}`).join('\n')

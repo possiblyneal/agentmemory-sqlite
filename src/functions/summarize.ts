@@ -13,6 +13,7 @@ import {
   renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
+  type ReducePartial,
 } from "../prompts/summary.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { SummaryOutputSchema } from "../eval/schemas.js";
@@ -25,9 +26,11 @@ import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 
 // Per-chunk prompt budget in tokens when a Session is too large to fit in
-// one LLM call. Measured on the Operator's broker: a 50k-token chunk
-// summarizes cold in 60–89s solo. Override via SUMMARIZE_CHUNK_TOKENS.
-const CHUNK_TOKENS_DEFAULT = 50_000;
+// one LLM call. On the Operator's broker a 49k-token prefill starved graph
+// extraction's decode on the other slot to under 1 tok/s, timing it out;
+// 16k keeps each prefill short enough to share. Override via
+// SUMMARIZE_CHUNK_TOKENS.
+const CHUNK_TOKENS_DEFAULT = 16_000;
 // Tokens the system prompt and chat template add on top of the rendered
 // Observations, measured on the Operator's broker.
 const PROMPT_OVERHEAD_TOKENS = 400;
@@ -263,21 +266,100 @@ async function produceSummaryXml(
   const reduceInput = partials.map((p) => {
     const originalIdx = partialByIdx.indexOf(p);
     const start = chunkStarts[originalIdx] ?? 0;
-    return {
-      title: p.title,
-      narrative: p.narrative,
-      keyDecisions: p.keyDecisions,
-      filesModified: p.filesModified,
-      concepts: p.concepts,
-      obsRangeStart: start + 1,
-      obsRangeEnd: start + chunks[originalIdx]!.length,
-    };
+    return toReducePartial(p, start + 1, start + chunks[originalIdx]!.length);
   });
-  const response = await provider.summarize(
-    REDUCE_SYSTEM,
-    buildReducePrompt(reduceInput),
+  const response = await reducePartials(
+    provider,
+    reduceInput,
+    sessionId,
+    project,
+    concurrency,
   );
   return { response, mode: "chunked", chunks: chunks.length, skipped };
+}
+
+function toReducePartial(
+  summary: SessionSummary,
+  obsRangeStart: number,
+  obsRangeEnd: number,
+): ReducePartial {
+  return {
+    title: summary.title,
+    narrative: summary.narrative,
+    keyDecisions: summary.keyDecisions,
+    filesModified: summary.filesModified,
+    concepts: summary.concepts,
+    obsRangeStart,
+    obsRangeEnd,
+  };
+}
+
+// Consecutive partials whose merge prompt fits the budget. Every group but the
+// last takes at least two partials, so each round shrinks the list.
+function groupPartials(partials: ReducePartial[], budget: number): ReducePartial[][] {
+  const groups: ReducePartial[][] = [];
+  let current: ReducePartial[] = [];
+  for (const p of partials) {
+    const fits = estimateTokens(buildReducePrompt([...current, p])) <= budget;
+    if (current.length >= 2 && !fits) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(p);
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+// Merges partials in rounds of budget-sized groups until one prompt holds them
+// all, so the merge prefill is never longer than a chunk's: a long one starves
+// graph extraction on the Operator's broker just as a long chunk does.
+async function reducePartials(
+  provider: MemoryProvider,
+  partials: ReducePartial[],
+  sessionId: string,
+  project: string,
+  concurrency: number,
+): Promise<string> {
+  const budget = getChunkTokens() - PROMPT_OVERHEAD_TOKENS;
+  let groups = groupPartials(partials, budget);
+  while (groups.length > 1) {
+    const merged = await mapWithConcurrency(groups, concurrency, async (group) =>
+      group.length === 1 ? group[0]! : mergeGroupWithRetry(provider, group, sessionId, project),
+    );
+    groups = groupPartials(merged, budget);
+  }
+  return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!));
+}
+
+// An intermediate merge gets the same second try as a chunk, so one malformed
+// reply does not throw away every chunk call already made.
+async function mergeGroupWithRetry(
+  provider: MemoryProvider,
+  group: ReducePartial[],
+  sessionId: string,
+  project: string,
+): Promise<ReducePartial> {
+  let failure: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
+      const parsed = parseSummaryXml(xml, sessionId, project, 0);
+      if (parsed) {
+        return toReducePartial(parsed, group[0]!.obsRangeStart, group[group.length - 1]!.obsRangeEnd);
+      }
+      failure = new Error("reduce_parse_failed: an intermediate merge did not parse");
+      logger.warn("Summarize intermediate merge parse failed", { sessionId, attempt });
+    } catch (err) {
+      failure = err;
+      logger.warn("Summarize intermediate merge LLM call failed", {
+        sessionId,
+        attempt,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  throw failure;
 }
 
 // #783: many LLMs (DeepSeek, GPT variants, some Anthropic responses)

@@ -155,10 +155,12 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 - REST endpoints must whitelist fields — never pass raw request body to `sdk.trigger()`
 - Use `recordAudit()` for state-changing operations
 - Timestamps: capture once with `new Date().toISOString()` and reuse
-- Outbound LLM/embedding calls go through `fetchWithTimeout`, which honors the caller's
-  timeout exactly (falling back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s; the OpenAI LLM
-  provider resolves `OPENAI_TIMEOUT_MS` first). The in-process Engine has no invocation
-  timeout, so never reintroduce a ceiling that clamps that bound
+- Outbound LLM and embedding calls go through `fetchWithTimeout`, which honors the caller's
+  timeout exactly. One deadline covers every retry and the read of the response body. LLM
+  providers fall back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s (the OpenAI LLM provider
+  resolves `OPENAI_TIMEOUT_MS` first); embedding providers pass `EMBED_TIMEOUT_MS` (30s), so
+  a hung embedder fails fast and the index fill backfills the row. The in-process Engine has
+  no invocation timeout, so never reintroduce a ceiling that clamps that bound
   ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)).
 
 ## Testing
