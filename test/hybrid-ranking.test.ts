@@ -361,3 +361,39 @@ describe("hybrid ranking knobs", () => {
     expect(results.map((r) => r.observation.id)).not.toContain("obs_target");
   });
 });
+
+describe("recency decay", () => {
+  const old = new Date(Date.now() - 720 * 86_400_000).toISOString();
+
+  async function build(docs: CompressedObservation[]) {
+    const kv = mockKV();
+    const bm25 = new SearchIndex();
+    for (const d of docs) {
+      bm25.add(d);
+      await kv.set(`mem:obs:${d.sessionId}`, d.id, d);
+    }
+    return new HybridSearch(bm25, null, null, kv as never);
+  }
+
+  it("mildly demotes an old Observation below an equal fresh one, above the floor", async () => {
+    const h = await build([
+      { ...obs("obs_old", "ses_a", "kappa kappa kappa"), timestamp: old },
+      obs("obs_fresh", "ses_b", "kappa kappa kappa"),
+    ]);
+    const r = await h.search("kappa", 10);
+    const oldR = r.find((x) => x.observation.id === "obs_old")!;
+    const freshR = r.find((x) => x.observation.id === "obs_fresh")!;
+    expect(oldR.combinedScore).toBeLessThan(freshR.combinedScore);
+    expect(oldR.combinedScore).toBeGreaterThan(freshR.combinedScore * 0.6);
+  });
+
+  it("never decays a Memory", async () => {
+    const h = await build([
+      { ...obs("mem_old", "memory", "kappa kappa kappa"), timestamp: old },
+      obs("obs_x", "ses_b", "kappa kappa"),
+    ]);
+    const r = await h.search("kappa", 10);
+    expect(r[0].observation.id).toBe("mem_old");
+    expect(r[0].combinedScore).toBe(1 * (1 / 61));
+  });
+});

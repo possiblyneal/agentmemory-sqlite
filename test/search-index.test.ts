@@ -291,3 +291,34 @@ describe("SearchIndex", () => {
     expect(segmentCjk("项目 trailing")).toEqual(["项目", "trailing"]);
   });
 });
+
+describe("SearchIndex field weighting and CJK fallback", () => {
+  const base = (id: string, over: Record<string, unknown>) => ({
+    id,
+    sessionId: "s",
+    timestamp: new Date().toISOString(),
+    type: "decision",
+    title: "",
+    facts: [],
+    narrative: "",
+    concepts: [],
+    files: [],
+    importance: 5,
+    ...over,
+  }) as never;
+
+  it("ranks a title match above a narrative-only mention", () => {
+    const idx = new SearchIndex();
+    idx.add(base("mention", { title: "deploy notes", narrative: "talked to zorblax briefly" }));
+    idx.add(base("named", { title: "zorblax", narrative: "the deploy notes owner" }));
+    expect(idx.search("zorblax")[0].obsId).toBe("named");
+  });
+
+  it("matches a CJK substring when no segmenter splits the run", () => {
+    const idx = new SearchIndex();
+    idx.add(base("a", { title: "数据库迁移计划" }));
+    idx.add(base("b", { title: "前端样式调整" }));
+    const hits = idx.search("迁移");
+    expect(hits.map((h) => h.obsId)).toEqual(["a"]);
+  });
+});

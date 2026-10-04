@@ -1,7 +1,7 @@
 import type { CompressedObservation } from "../types.js";
 import { stem } from "./stemmer.js";
 import { getSynonyms } from "./synonyms.js";
-import { segmentCjk, hasCjk } from "./cjk-segmenter.js";
+import { segmentCjk, hasCjk, cjkBigrams } from "./cjk-segmenter.js";
 
 interface IndexEntry {
   obsId: string;
@@ -9,6 +9,9 @@ interface IndexEntry {
   termCount: number;
   files: string[];
 }
+
+const TITLE_WEIGHT = 3;
+const SUBTITLE_WEIGHT = 2;
 
 export class SearchIndex {
   private entries: Map<string, IndexEntry> = new Map();
@@ -28,13 +31,14 @@ export class SearchIndex {
     // corpus-wide. Remove first; remove() is a no-op for unknown ids.
     if (this.entries.has(obs.id)) this.remove(obs.id);
 
-    const terms = this.extractTerms(obs);
     const termFreq = new Map<string, number>();
     let termCount = 0;
 
-    for (const term of terms) {
-      termFreq.set(term, (termFreq.get(term) || 0) + 1);
-      termCount++;
+    for (const { terms, weight } of this.extractFields(obs)) {
+      for (const term of terms) {
+        termFreq.set(term, (termFreq.get(term) || 0) + weight);
+        termCount++;
+      }
     }
 
     this.entries.set(obs.id, {
@@ -282,20 +286,34 @@ export class SearchIndex {
     }
   }
 
-  private extractTerms(obs: CompressedObservation): string[] {
-    const parts = [
-      obs.title,
-      obs.subtitle || "",
-      obs.narrative,
-      ...obs.facts,
-      ...obs.concepts,
-      ...obs.files,
-      obs.type,
-      // Full prompt text (prompt_submit records only): makes every word of
-      // the user's prompt lexically searchable, not just the summary of it.
-      obs.userPrompt || "",
+  // A title or subtitle hit counts for more than a narrative hit, so a record
+  // that names the subject outranks a long one that merely mentions it. The
+  // weight scales term frequency only; document length stays the raw token
+  // count so length normalisation is unchanged.
+  private extractFields(
+    obs: CompressedObservation,
+  ): Array<{ terms: string[]; weight: number }> {
+    const field = (parts: string[], weight: number) => ({
+      terms: this.tokenize(parts.join(" ").toLowerCase()),
+      weight,
+    });
+    return [
+      field([obs.title], TITLE_WEIGHT),
+      field([obs.subtitle || ""], SUBTITLE_WEIGHT),
+      field(
+        [
+          obs.narrative,
+          ...obs.facts,
+          ...obs.concepts,
+          ...obs.files,
+          obs.type,
+          // Full prompt text (prompt_submit records only): makes every word of
+          // the user's prompt lexically searchable, not just the summary of it.
+          obs.userPrompt || "",
+        ],
+        1,
+      ),
     ];
-    return this.tokenize(parts.join(" ").toLowerCase());
   }
 
   private tokenize(text: string): string[] {
@@ -304,8 +322,15 @@ export class SearchIndex {
     for (const raw of cleaned.split(/\s+/)) {
       if (raw.length < 2) continue;
       if (hasCjk(raw)) {
-        for (const seg of segmentCjk(raw)) {
-          if (seg.length >= 1) out.push(seg);
+        const segs = segmentCjk(raw);
+        // One segment means no segmenter split the run (jieba/tiny-segmenter
+        // absent), so the whole run would be a single unmatchable token.
+        if (segs.length === 1 && hasCjk(segs[0])) {
+          out.push(...cjkBigrams(segs[0]));
+        } else {
+          for (const seg of segs) {
+            if (seg.length >= 1) out.push(seg);
+          }
         }
       } else {
         out.push(stem(raw));
