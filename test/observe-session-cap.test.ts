@@ -173,6 +173,33 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
   });
 
+  it("evicts nothing when the new row's write fails on a full disk", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    for (const r of [stored("a", 2, "2026-01-01T00:00:00Z"), stored("b", 5, "2026-01-02T00:00:00Z")]) {
+      await kv.set(KV.observations(SESSION), r.id, r);
+    }
+    const set = kv.set;
+    kv.set = async <T>(scope: string, key: string, data: T): Promise<T> => {
+      if (scope === KV.observations(SESSION)) throw new Error("database or disk is full");
+      return set(scope, key, data);
+    };
+    registerObserveFunction(sdk as never, kv as never, undefined, 2);
+
+    await expect(
+      sdk.trigger({
+        function_id: "mem::observe",
+        payload: {
+          sessionId: SESSION,
+          hookType: "post_tool_use",
+          timestamp: "2026-05-01T00:00:00Z",
+          data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+        },
+      }),
+    ).rejects.toThrow("database or disk is full");
+    expect((await kv.list<{ id: string }>(KV.observations(SESSION))).map((o) => o.id)).toEqual(["a", "b"]);
+  });
+
   it("evicts nothing under the cap", async () => {
     const { ids } = await setup([stored("a", 1, "2026-01-01T00:00:00Z")], 3);
     expect(ids).toHaveLength(2);

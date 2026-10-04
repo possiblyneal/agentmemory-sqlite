@@ -17,6 +17,7 @@ import { logger } from "../logger.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { isSqliteFull, unstoredOnFullDisk } from "./observe-retry.js";
 
 export function extractImage(d: unknown): string | undefined {
   if (!d) return undefined;
@@ -72,11 +73,12 @@ const capWarnedSessions = new Set<string>();
 // A session at its cap still admits the newest observation: the work at the
 // end of a long session is what a later one most often needs. The least
 // important rows go first, oldest breaking ties (PR#1174).
-async function evictToAdmitOne(
+async function evictOverCap(
   sdk: ISdk,
   kv: StateKV,
   sessionId: string,
   cap: number,
+  admittedId: string,
 ): Promise<number> {
   const scope = KV.observations(sessionId);
   const existing = await kv.list<{
@@ -86,9 +88,10 @@ async function evictToAdmitOne(
     imageData?: string;
     imageRef?: string;
   }>(scope);
-  const excess = existing.length - cap + 1;
+  const excess = existing.length - cap;
   if (excess <= 0) return 0;
   const victims = existing
+    .filter((obs) => obs.id !== admittedId)
     .sort(
       (a, b) =>
         (a.importance ?? UNSCORED_IMPORTANCE) - (b.importance ?? UNSCORED_IMPORTANCE) ||
@@ -282,11 +285,6 @@ export function registerObserveFunction(
       const pendingImageData = extractedImage;
 
       return withKeyedLock(`obs:${payload.sessionId}`, async () => {
-        const capEvicted =
-          maxObservationsPerSession && maxObservationsPerSession > 0
-            ? await evictToAdmitOne(sdk, kv, payload.sessionId, maxObservationsPerSession)
-            : 0;
-
         // Existing session is the source of truth for agentId (even
         // undefined). Env AGENT_ID only fires when no session row
         // exists yet — otherwise an unscoped session would get
@@ -305,10 +303,12 @@ export function registerObserveFunction(
         }
 
         if (pendingImageData && (pendingImageData.startsWith("data:image/") || pendingImageData.startsWith("iVBORw0KGgo") || pendingImageData.startsWith("/9j/"))) {
-          const { filePath, bytesWritten } = await saveImageToDisk(pendingImageData);
+          const { filePath, bytesWritten } = await saveImageToDisk(pendingImageData).catch(
+            (error: NodeJS.ErrnoException) => {
+              throw error.code === "ENOSPC" ? unstoredOnFullDisk() : error;
+            },
+          );
           raw.imageData = filePath;
-          const { incrementImageRef } = await import("./image-refs.js");
-          await incrementImageRef(kv, filePath);
           sdk.trigger({
             function_id: "mem::disk-size-delta",
             payload: { deltaBytes: bytesWritten },
@@ -327,12 +327,16 @@ export function registerObserveFunction(
           }
         }
 
+        let imageRefTaken = false;
         try {
-
-          await kv.set(KV.observations(payload.sessionId), obsId, raw);
-
-        } catch (error) {
           if (raw.imageData) {
+            const { incrementImageRef } = await import("./image-refs.js");
+            await incrementImageRef(kv, raw.imageData);
+            imageRefTaken = true;
+          }
+          await kv.set(KV.observations(payload.sessionId), obsId, raw);
+        } catch (error) {
+          if (imageRefTaken && raw.imageData) {
             // Roll back the ref taken above. decrementImageRef deletes the file
             // only when no other observation still references it (deduped images
             // survive) and emits the disk-size delta itself — deleting the file
@@ -349,8 +353,16 @@ export function registerObserveFunction(
               });
             }
           }
+          if (isSqliteFull(error)) throw unstoredOnFullDisk();
           throw error;
         }
+
+        // Evicting only after the row is stored means a write that fails on a
+        // full disk, and each retry of it, costs the Session nothing.
+        const capEvicted =
+          maxObservationsPerSession && maxObservationsPerSession > 0
+            ? await evictOverCap(sdk, kv, payload.sessionId, maxObservationsPerSession, obsId)
+            : 0;
 
         if (dedupMap && dedupHash) {
           dedupMap.record(dedupHash);

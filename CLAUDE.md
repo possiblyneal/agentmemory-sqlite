@@ -126,6 +126,15 @@ Auth is the inline `checkAuth(req, secret)` above, which is what nearly every en
 trigger is the minority form — follow whichever the endpoints around yours use, and do not
 put both on one endpoint.
 
+### Observations on a full disk
+Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
+(or its image file) hits a full disk, `api::observe` answers 202 `{queued: true}` and holds it
+in `ObserveRetryQueue` (`src/functions/observe-retry.ts`): in memory, capped at 64 MiB, and
+replayed every 30 s until a write succeeds. While anything is queued, new Observations queue
+behind it so each Session stores them in arrival order. A failure after the row is stored is
+never queued, since replaying it would duplicate the row. Session-cap eviction runs only after
+the row is stored. A daemon restart before the disk frees loses the queue.
+
 ### MCP Tool Handler
 ```typescript
 case "memory_your_tool": {
@@ -144,11 +153,6 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 
 - **Context-injecting hooks** (`pre-compact`, `prompt-submit`, `session-start`) write recalled context to stdout for Claude Code to inject. These MUST use `try/catch` with `await fetch(..., { signal: AbortSignal.timeout(N) })` — the script has to wait for the response before exiting, and the timeout is the only bound on hang time. `prompt-submit` injects only on Claude Code's `UserPromptSubmit` event, still sends its observe fire-and-forget, and arms the exit timer after the awaited Injection. On a timeout, connection error or non-2xx reply they call `recordMissedInjection()` (`src/hooks/_missed-injection.ts`), which appends to the size-capped `~/.agentmemory/missed-injections.jsonl` that `/diagnostics` (`injections`) reports; an empty reply is not a Missed Injection.
 - **Telemetry-only hooks** (`notification`, `post-tool-failure`, `post-tool-use`, `stop`, `session-end`, `subagent-start`, `subagent-stop`, `task-completed`) write nothing to stdout. These MUST use fire-and-forget `fetch(..., { signal: AbortSignal.timeout(N) }).catch(() => {})` paired with `setTimeout(() => process.exit(0), 500).unref()`. The unawaited fetch dispatches the request; the unref'd `setTimeout` force-exits the process after the request has been flushed to the local daemon's socket buffer (~500ms is enough for single-request hooks; use 1500ms for multi-request hooks like `stop` and `session-end` so all fetches have time to start, especially when `AGENTMEMORY_URL` points to a remote daemon). Without the `setTimeout` Node keeps the event loop alive waiting for any in-flight fetch to settle, which means the hook still blocks Claude Code's next-prompt boundary for up to the AbortSignal duration — exactly the bug fire-and-forget is meant to fix.
-
-Because telemetry hooks never retry, the daemon keeps what it can: `api::observe` answers an
-Observation that hits a full disk (SQLite `database or disk is full`) with 202 and holds it in
-`ObserveRetryQueue` (`src/functions/observe-retry.ts`), in memory and capped at 1,000, replaying
-it every 30 s until a write succeeds. A daemon restart before the disk frees loses the queue.
 
 ## Coding Standards
 
