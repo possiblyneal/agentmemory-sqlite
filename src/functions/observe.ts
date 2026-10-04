@@ -79,6 +79,7 @@ async function evictOverCap(
   sessionId: string,
   cap: number,
   admittedId: string,
+  pendingRefReleases: string[],
 ): Promise<number> {
   const scope = KV.observations(sessionId);
   const existing = await kv.list<{
@@ -111,15 +112,17 @@ async function evictOverCap(
       });
       continue;
     }
-    // The row is gone, so it counts as evicted even if releasing its image fails.
-    try {
-      if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
-      if (obs.imageRef && obs.imageRef !== obs.imageData) await decrementImageRef(kv, sdk, obs.imageRef);
-    } catch (err) {
-      logger.warn("Failed to release image of evicted observation", {
-        sessionId,
-        obsId: obs.id,
-        error: err instanceof Error ? err.message : String(err),
+    // The row is gone, so it counts as evicted even if releasing its image
+    // fails; a failed release is retried with the others.
+    for (const filePath of new Set([obs.imageData, obs.imageRef].filter((p): p is string => !!p))) {
+      await decrementImageRef(kv, sdk, filePath).catch((err) => {
+        pendingRefReleases.push(filePath);
+        logger.warn("Failed to release image of evicted observation", {
+          sessionId,
+          obsId: obs.id,
+          imageRef: filePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     }
     await safeAudit(kv, "delete", "mem::observe", [obs.id], {
@@ -189,10 +192,10 @@ export function registerObserveFunction(
   dedupMap?: DedupMap,
   maxObservationsPerSession?: number,
 ): void {
-  // An image ref whose rollback failed on a full disk; retried on each later
-  // Observation until the disk has room. A restart forgets it, as it does the
-  // disk-full queue.
-  const pendingRefRollbacks: string[] = [];
+  // An image ref whose rollback or eviction release failed on a full disk;
+  // retried on each later Observation until the disk has room. A restart
+  // forgets it, as it does the disk-full queue.
+  const pendingRefReleases: string[] = [];
 
   sdk.registerFunction("mem::observe", 
     async (payload: HookPayload) => {
@@ -319,10 +322,10 @@ export function registerObserveFunction(
         // Before this Observation saves its image, so a retried rollback cannot
         // delete a file this Observation is about to reference. Another Session
         // saving the same image is not covered, as with eviction's decrements.
-        for (const filePath of pendingRefRollbacks.splice(0)) {
+        for (const filePath of pendingRefReleases.splice(0)) {
           await decrementImageRef(kv, sdk, filePath).catch((err) => {
-            pendingRefRollbacks.push(filePath);
-            logger.warn("Image ref rollback retry failed", {
+            pendingRefReleases.push(filePath);
+            logger.warn("Image ref release retry failed", {
               imageRef: filePath,
               error: err instanceof Error ? err.message : String(err),
             });
@@ -372,7 +375,7 @@ export function registerObserveFunction(
             try {
               await decrementImageRef(kv, sdk, heldImageRef);
             } catch (rollbackError) {
-              pendingRefRollbacks.push(heldImageRef);
+              pendingRefReleases.push(heldImageRef);
               logger.error("Failed to roll back image ref after observation write failure", {
                 imageRef: heldImageRef,
                 error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
@@ -396,7 +399,7 @@ export function registerObserveFunction(
         // the hook would see a 500 and the Session's count would miss this row.
         const capEvicted =
           maxObservationsPerSession && maxObservationsPerSession > 0
-            ? await evictOverCap(sdk, kv, payload.sessionId, maxObservationsPerSession, obsId).catch(
+            ? await evictOverCap(sdk, kv, payload.sessionId, maxObservationsPerSession, obsId, pendingRefReleases).catch(
                 (err) => {
                   logger.warn("Session cap eviction failed", {
                     sessionId: payload.sessionId,

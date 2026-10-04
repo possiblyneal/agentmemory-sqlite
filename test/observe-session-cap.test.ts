@@ -233,7 +233,7 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
   });
 
-  it("counts a row as evicted when releasing its image fails", async () => {
+  it("counts a row as evicted when releasing its image fails, and releases it later", async () => {
     const kv = mockKV();
     const sdk = mockSdk();
     await kv.set(KV.observations(SESSION), "a", {
@@ -248,25 +248,34 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
       status: "active",
       observationCount: 1,
     });
+    await kv.set(KV.imageRefs, "/nonexistent/a.png", 1);
+    let full = true;
     const del = kv.delete;
     kv.delete = async (scope: string, key: string) => {
-      if (scope.startsWith("mem:image")) throw new Error("database or disk is full");
+      if (full && scope.startsWith("mem:image")) throw new Error("database or disk is full");
       return del(scope, key);
     };
     registerObserveFunction(sdk as never, kv as never, undefined, 1);
 
-    await sdk.trigger({
-      function_id: "mem::observe",
-      payload: {
-        sessionId: SESSION,
-        hookType: "post_tool_use",
-        timestamp: "2026-05-01T00:00:00Z",
-        data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
-      },
-    });
+    const observe = (file: string) =>
+      sdk.trigger({
+        function_id: "mem::observe",
+        payload: {
+          sessionId: SESSION,
+          hookType: "post_tool_use",
+          timestamp: "2026-05-01T00:00:00Z",
+          data: { tool_name: "Read", tool_input: { file_path: file } },
+        },
+      });
 
+    await observe("new.ts");
     expect(await kv.list(KV.observations(SESSION))).toHaveLength(1);
     expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 1 });
+    expect(await kv.get(KV.imageRefs, "/nonexistent/a.png")).toBe(1);
+
+    full = false;
+    await observe("next.ts");
+    expect(await kv.get(KV.imageRefs, "/nonexistent/a.png")).toBeNull();
   });
 
   it("evicts nothing under the cap", async () => {
