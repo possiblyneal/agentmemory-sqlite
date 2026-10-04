@@ -303,6 +303,8 @@ export interface MemorySlot {
   readOnly: boolean;
   scope: "project" | "global";
   project?: string;
+  version?: number;
+  previousContent?: string;
   createdAt: string;
   updatedAt: string;
 }

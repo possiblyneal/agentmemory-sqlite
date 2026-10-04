@@ -2666,12 +2666,13 @@ export function registerApiTriggers(
     if (!label || typeof content !== "string") {
       return { status_code: 400, body: { error: "label and content (string) required" } };
     }
-    const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content, project: asNonEmptyString(body["project"]) } });
+    const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content, project: asNonEmptyString(body["project"]), expectedVersion: body["expectedVersion"] } });
     const resp = result as { success?: boolean; error?: string };
     if (resp?.success === false) {
       const notFound = resp.error?.includes("not found");
       const overLimit = resp.error?.includes("exceed");
-      return { status_code: notFound ? 404 : overLimit ? 413 : 400, body: resp };
+      const conflict = resp.error?.startsWith("version conflict");
+      return { status_code: notFound ? 404 : conflict ? 409 : overLimit ? 413 : 400, body: resp };
     }
     return { status_code: 200, body: result };
   });
