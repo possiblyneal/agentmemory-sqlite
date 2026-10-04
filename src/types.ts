@@ -299,6 +299,7 @@ export interface MemorySlot {
   pinned: boolean;
   readOnly: boolean;
   scope: "project" | "global";
+  project?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -899,7 +900,7 @@ export interface Lesson {
   context: string;
   confidence: number;
   reinforcements: number;
-  source: "crystal" | "manual" | "consolidation";
+  source: "crystal" | "manual" | "consolidation" | "flow";
   sourceIds: string[];
   project?: string;
   tags: string[];

@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { lowerObservationCounts } from "./observe.js";
 import { refersToDifferentDates } from "../state/memory-utils.js";
 import { logger } from "../logger.js";
 
@@ -163,6 +164,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
         );
         obsPerSession.push(...results);
       }
+      const removedBySession = new Map<string, number>();
       for (let i = 0; i < sessions.length; i++) {
         for (const obs of obsPerSession[i]) {
           if (!obs.timestamp) continue;
@@ -178,6 +180,10 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                 deletedOk = false;
               }
               if (deletedOk) {
+                removedBySession.set(
+                  sessions[i].id,
+                  (removedBySession.get(sessions[i].id) ?? 0) + 1,
+                );
                 if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
                 if (obs.imageRef && obs.imageRef !== obs.imageData) {
                   await decrementImageRef(kv, sdk, obs.imageRef);
@@ -193,6 +199,8 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
           }
         }
       }
+
+      await lowerObservationCounts(kv, removedBySession);
 
       logger.info("Auto-forget complete", {
         ttlExpired: result.ttlExpired.length,

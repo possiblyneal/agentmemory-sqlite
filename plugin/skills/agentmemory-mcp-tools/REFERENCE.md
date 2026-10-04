@@ -35,7 +35,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_mesh_sync` |  | `peerId`: string, `direction`: string | Sync memories and actions with peer agentmemory instances for multi-agent collaboration. |
 | `memory_next` |  | `project`: string, `agentId`: string | Get the single most important next action to work on. Combines dependency resolution, priority, and recency into a score. |
 | `memory_obsidian_export` |  | `vaultDir`: string, `types`: string | Export memories, lessons, and crystals as Obsidian-compatible Markdown files with YAML frontmatter and wikilinks for graph view. |
-| `memory_patterns` |  | `project`: string | Detect recurring patterns across sessions. |
+| `memory_patterns` |  | `project`: string, `limit`: number | Detect recurring patterns across sessions. |
 | `memory_profile` |  | `project`*: string, `refresh`: string | User/project profile with top concepts and file patterns. |
 | `memory_recall` | yes | `query`*: string, `limit`: number, `format`: string, `token_budget`: number, `project`: string | Search past session observations for relevant context. Use when you need to recall what happened in previous sessions, find past decisions, or look up how a file was modified before. |
 | `memory_reflect` | yes | `project`: string, `maxClusters`: number | Traverse the knowledge graph, group related memories by concept clusters, and synthesize higher-order insights via LLM. Returns new and reinforced insights. |
@@ -49,12 +49,12 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_signal_send` |  | `from`*: string, `to`: string, `content`*: string, `type`: string, `replyTo`: string | Send a message to another agent or broadcast. Supports threading, typed messages, and TTL expiration. |
 | `memory_sketch_create` |  | `title`*: string, `description`: string, `expiresInMs`: number, `project`: string | Create an ephemeral action graph for exploratory work. Auto-expires after TTL. Can be promoted to permanent actions or discarded. |
 | `memory_sketch_promote` |  | `sketchId`*: string, `project`: string | Promote a sketch's ephemeral actions to permanent actions. Makes the exploratory work official. |
-| `memory_slot_append` |  | `label`*: string, `text`*: string | Append text to an existing slot. Fails with 413 if the append would exceed the slot's sizeLimit, agent must compact via memory_slot_replace first. |
-| `memory_slot_create` |  | `label`*: string, `content`: string, `sizeLimit`: number, `description`: string, `pinned`: string, `scope`: string | Create a new slot. Reject if a slot with the same label already exists. |
-| `memory_slot_delete` |  | `label`*: string | Delete a slot. Seeded default slots can be deleted unless marked readOnly. |
-| `memory_slot_get` |  | `label`*: string | Read a single slot by label. |
-| `memory_slot_list` |  | none | List all memory slots (pinned + project + global). Slots are editable, size-limited memory units the agent can read and modify across sessions. |
-| `memory_slot_replace` |  | `label`*: string, `content`*: string | Replace slot content in place. Fails if content exceeds sizeLimit. |
+| `memory_slot_append` |  | `label`*: string, `text`*: string, `project`: string | Append text to an existing slot. Fails with 413 if the append would exceed the slot's sizeLimit, agent must compact via memory_slot_replace first. Project slots are reached only through project; leave it out to reach global slots alone. |
+| `memory_slot_create` |  | `label`*: string, `content`: string, `sizeLimit`: number, `description`: string, `pinned`: string, `scope`: string, `project`: string | Create a new slot. Reject if a slot with the same label already exists. Project slots are reached only through project; leave it out to reach global slots alone. |
+| `memory_slot_delete` |  | `label`*: string, `project`: string | Delete a slot. Seeded default slots can be deleted unless marked readOnly. Project slots are reached only through project; leave it out to reach global slots alone. |
+| `memory_slot_get` |  | `label`*: string, `project`: string | Read a single slot by label. Project slots are reached only through project; leave it out to reach global slots alone. |
+| `memory_slot_list` |  | `project`: string | List the global slots and, given project, that project's slots. Slots are editable, size-limited memory units the agent can read and modify across sessions. `legacy` lists pre-upgrade project slots that no project owns and that are never injected; copy what is worth keeping into a project slot. Project slots are reached only through project; leave it out to reach global slots alone. |
+| `memory_slot_replace` |  | `label`*: string, `content`*: string, `project`: string | Replace slot content in place. Fails if content exceeds sizeLimit. Project slots are reached only through project; leave it out to reach global slots alone. |
 | `memory_smart_search` | yes | `query`*: string, `expandIds`: string, `limit`: number, `project`: string | Hybrid semantic+keyword search with progressive disclosure. |
 | `memory_snapshot_create` |  | `message`: string | Create a git-versioned snapshot of current memory state. |
 | `memory_team_feed` |  | `limit`: number | Get recent shared items from all team members. |

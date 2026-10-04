@@ -75,6 +75,15 @@ function mockKV(store: Store, listFailures: Set<string> = new Set()) {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    update: async (
+      scope: string,
+      key: string,
+      ops: Array<{ type: string; path: string; value?: unknown }>,
+    ): Promise<unknown> => {
+      const row = store.get(scope)?.get(key) as Record<string, unknown>;
+      for (const op of ops) if (op.type === "set") row[op.path] = op.value;
+      return row;
+    },
     list: async <T>(scope: string): Promise<T[]> => {
       if (listFailures.has(scope)) {
         throw new Error(`list failed for ${scope}`);
@@ -382,5 +391,150 @@ describe("mem::evict stale sessions", () => {
 
     expect(result.staleSessions).toBe(1);
     expect(await kv.get(KV.sessions, sessionId)).toBeNull();
+  });
+});
+
+describe("mem::evict session observation counts", () => {
+  function observation(
+    sessionId: string,
+    id: string,
+    { ageDays, importance }: { ageDays: number; importance: number },
+  ): CompressedObservation {
+    return {
+      ...makeObservation(sessionId),
+      id,
+      timestamp: daysAgo(ageDays),
+      importance,
+    };
+  }
+
+  const lowValue = { ageDays: 100, importance: 1 };
+
+  function liveSession(id: string, observationCount: number): Session {
+    return { ...makeSession(id), startedAt: daysAgo(1), observationCount };
+  }
+
+  function storeForSessions(
+    sessions: Array<{ session: Session; observations: CompressedObservation[] }>,
+  ): Store {
+    const store: Store = new Map([
+      [KV.sessions, new Map(sessions.map(({ session }) => [session.id, session]))],
+      [KV.summaries, new Map()],
+      [KV.config, new Map()],
+      [KV.audit, new Map()],
+    ]);
+    for (const { session, observations } of sessions) {
+      store.set(
+        KV.observations(session.id),
+        new Map(observations.map((o) => [o.id, o])),
+      );
+    }
+    return store;
+  }
+
+  async function evict(store: Store): Promise<ReturnType<typeof mockKV>> {
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    await sdk.trigger({ function_id: "mem::evict", payload: {} });
+    return kv;
+  }
+
+  it("lowers a Session's count by the number of Observations evicted from it", async () => {
+    const sessionId = "ses_live";
+    const kv = await evict(
+      storeForSessions([
+        {
+          session: liveSession(sessionId, 5),
+          observations: [
+            observation(sessionId, "obs_a", lowValue),
+            observation(sessionId, "obs_b", lowValue),
+            makeObservation(sessionId),
+          ],
+        },
+      ]),
+    );
+
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
+      observationCount: 3,
+    });
+  });
+
+  it("floors a count already below the number evicted at zero", async () => {
+    const sessionId = "ses_undercounted";
+    const kv = await evict(
+      storeForSessions([
+        {
+          session: liveSession(sessionId, 1),
+          observations: [
+            observation(sessionId, "obs_a", lowValue),
+            observation(sessionId, "obs_b", lowValue),
+            observation(sessionId, "obs_c", lowValue),
+          ],
+        },
+      ]),
+    );
+
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
+      observationCount: 0,
+    });
+  });
+
+  it("lowers each Session by its own share of a project cap eviction", async () => {
+    const store = storeForSessions([
+      {
+        session: liveSession("ses_a", 2),
+        observations: [
+          observation("ses_a", "a1", { ageDays: 1, importance: 1 }),
+          observation("ses_a", "a2", { ageDays: 1, importance: 2 }),
+        ],
+      },
+      {
+        session: liveSession("ses_b", 2),
+        observations: [
+          observation("ses_b", "b1", { ageDays: 1, importance: 3 }),
+          observation("ses_b", "b2", { ageDays: 1, importance: 9 }),
+        ],
+      },
+    ]);
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+
+    const kv = await evict(store);
+
+    expect(await kv.get<Session>(KV.sessions, "ses_a")).toMatchObject({
+      observationCount: 0,
+    });
+    expect(await kv.get<Session>(KV.sessions, "ses_b")).toMatchObject({
+      observationCount: 1,
+    });
+  });
+
+  it("counts an Observation removed by the low-importance pass only once when the cap also bites", async () => {
+    const sessionId = "ses_both";
+    const store = storeForSessions([
+      {
+        session: liveSession(sessionId, 5),
+        observations: [
+          observation(sessionId, "old_a", lowValue),
+          observation(sessionId, "old_b", lowValue),
+          observation(sessionId, "new_a", { ageDays: 1, importance: 4 }),
+          observation(sessionId, "new_b", { ageDays: 1, importance: 5 }),
+          observation(sessionId, "new_c", { ageDays: 1, importance: 6 }),
+        ],
+      },
+    ]);
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    const stats = await sdk.trigger({ function_id: "mem::evict", payload: {} });
+
+    expect(stats).toMatchObject({ lowImportanceObs: 2, capEvictions: 2 });
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
+      observationCount: 1,
+    });
   });
 });

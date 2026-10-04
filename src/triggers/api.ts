@@ -18,6 +18,8 @@ import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { getFollowupStats } from "../functions/smart-search.js";
+import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
+import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import {
@@ -129,25 +131,6 @@ function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
-}
-
-function parseOptionalFiniteNumber(value: unknown): number | undefined | null {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function parseOptionalPositiveInt(value: unknown): number | undefined | null {
-  const parsed = parseOptionalFiniteNumber(value);
-  if (parsed === undefined || parsed === null) return parsed;
-  if (!Number.isInteger(parsed) || parsed < 1) return null;
-  return parsed;
 }
 
 const DEFAULT_PAGE_LIMIT = 100;
@@ -1342,13 +1325,20 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::patterns", 
-    async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
+    async (req: ApiRequest<{ project?: string; limit?: number }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const body = (req.body ?? {}) as Record<string, unknown>;
+      const limit = parsePatternsLimit(body.limit);
+      if (limit === null) {
+        return { status_code: 400, body: { error: PATTERNS_LIMIT_ERROR } };
+      }
       const result = await sdk.trigger({
         function_id: "mem::patterns",
-        payload: { project: typeof body.project === "string" ? body.project : undefined },
+        payload: {
+          project: typeof body.project === "string" ? body.project : undefined,
+          limit,
+        },
       });
       return { status_code: 200, body: result };
     },
@@ -2559,7 +2549,7 @@ export function registerApiTriggers(
     const authErr = checkAuth(req, secret);
     if (authErr) return authErr;
     if (!isSlotsEnabled()) return slotsDisabledResponse();
-    const result = await sdk.trigger({ function_id: "mem::slot-list", payload: {} });
+    const result = await sdk.trigger({ function_id: "mem::slot-list", payload: { project: asNonEmptyString(req.query_params?.["project"]) } });
     return { status_code: 200, body: result };
   });
   sdk.registerTrigger({
@@ -2574,7 +2564,7 @@ export function registerApiTriggers(
     if (!isSlotsEnabled()) return slotsDisabledResponse();
     const label = asNonEmptyString(req.query_params?.["label"]);
     if (!label) return { status_code: 400, body: { error: "label query param required" } };
-    const result = await sdk.trigger({ function_id: "mem::slot-get", payload: { label } });
+    const result = await sdk.trigger({ function_id: "mem::slot-get", payload: { label, project: asNonEmptyString(req.query_params?.["project"]) } });
     const resp = result as { success?: boolean; error?: string };
     if (resp?.success === false) {
       return { status_code: resp.error?.includes("not found") ? 404 : 400, body: resp };
@@ -2618,7 +2608,7 @@ export function registerApiTriggers(
     if (sizeLimit !== undefined && sizeLimit > 20000) {
       return { status_code: 400, body: { error: "sizeLimit must be <= 20000" } };
     }
-    const payload: Record<string, unknown> = { label };
+    const payload: Record<string, unknown> = { label, project: asNonEmptyString(body["project"]) };
     if (typeof body["content"] === "string") payload["content"] = body["content"];
     if (typeof body["description"] === "string") payload["description"] = body["description"];
     if (sizeLimit !== undefined) payload["sizeLimit"] = sizeLimit;
@@ -2645,7 +2635,7 @@ export function registerApiTriggers(
     const label = asNonEmptyString(body["label"]);
     const text = typeof body["text"] === "string" ? body["text"] : null;
     if (!label || !text) return { status_code: 400, body: { error: "label and text required" } };
-    const result = await sdk.trigger({ function_id: "mem::slot-append", payload: { label, text } });
+    const result = await sdk.trigger({ function_id: "mem::slot-append", payload: { label, text, project: asNonEmptyString(body["project"]) } });
     const resp = result as { success?: boolean; error?: string };
     if (resp?.success === false) {
       const notFound = resp.error?.includes("not found");
@@ -2670,7 +2660,7 @@ export function registerApiTriggers(
     if (!label || typeof content !== "string") {
       return { status_code: 400, body: { error: "label and content (string) required" } };
     }
-    const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content } });
+    const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content, project: asNonEmptyString(body["project"]) } });
     const resp = result as { success?: boolean; error?: string };
     if (resp?.success === false) {
       const notFound = resp.error?.includes("not found");
@@ -2691,7 +2681,7 @@ export function registerApiTriggers(
     if (!isSlotsEnabled()) return slotsDisabledResponse();
     const label = asNonEmptyString(req.query_params?.["label"]);
     if (!label) return { status_code: 400, body: { error: "label query param required" } };
-    const result = await sdk.trigger({ function_id: "mem::slot-delete", payload: { label } });
+    const result = await sdk.trigger({ function_id: "mem::slot-delete", payload: { label, project: asNonEmptyString(req.query_params?.["project"]) } });
     const resp = result as { success?: boolean; error?: string };
     if (resp?.success === false) {
       return { status_code: resp.error?.includes("not found") ? 404 : 400, body: resp };

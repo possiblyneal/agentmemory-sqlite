@@ -105,7 +105,7 @@ describe("loadEnvFile", () => {
 });
 
 describe("hydrateProcessEnvFromFile", () => {
-  const TOUCHED = ["HYDRATE_ONLY", "HYDRATE_WINS", "AGENTMEMORY_VERBOSE"];
+  const TOUCHED = ["HYDRATE_ONLY", "HYDRATE_WINS", "AGENTMEMORY_VERBOSE", "CLAUDE_CONFIG_DIR"];
 
   beforeEach(() => {
     sandboxHome = mkdtempSync(join(tmpdir(), "agentmemory-hydrate-"));
@@ -137,6 +137,15 @@ describe("hydrateProcessEnvFromFile", () => {
     const cfg = await freshConfig();
     cfg.hydrateProcessEnvFromFile();
     expect(process.env["HYDRATE_WINS"]).toBe("from-process");
+  });
+
+  it("never takes CLAUDE_CONFIG_DIR from the .env, since Claude Code does not read it there", async () => {
+    writeEnv("CLAUDE_CONFIG_DIR=/srv/claude-alt");
+    const cfg = await freshConfig();
+    cfg.hydrateProcessEnvFromFile();
+    expect(process.env["CLAUDE_CONFIG_DIR"]).toBeUndefined();
+    expect(cfg.getClaudeConfigDir()).toBe(join(sandboxHome, ".claude"));
+    expect(cfg.getClaudeJsonPath()).toBe(join(sandboxHome, ".claude.json"));
   });
 
   it("turns on the boot log for AGENTMEMORY_VERBOSE set only in the .env", async () => {

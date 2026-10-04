@@ -77,7 +77,7 @@ async function evictToAdmitOne(
   kv: StateKV,
   sessionId: string,
   cap: number,
-): Promise<void> {
+): Promise<number> {
   const scope = KV.observations(sessionId);
   const existing = await kv.list<{
     id: string;
@@ -87,7 +87,7 @@ async function evictToAdmitOne(
     imageRef?: string;
   }>(scope);
   const excess = existing.length - cap + 1;
-  if (excess <= 0) return;
+  if (excess <= 0) return 0;
   const victims = existing
     .sort(
       (a, b) =>
@@ -116,13 +116,44 @@ async function evictToAdmitOne(
       sessionId,
     });
   }
-  if (capWarnedSessions.has(sessionId)) return;
-  capWarnedSessions.add(sessionId);
-  logger.warn("Session observation cap reached; evicting least important from now on", {
-    sessionId,
-    cap,
-    evicted,
-  });
+  if (!capWarnedSessions.has(sessionId)) {
+    capWarnedSessions.add(sessionId);
+    logger.warn("Session observation cap reached; evicting least important from now on", {
+      sessionId,
+      cap,
+      evicted,
+    });
+  }
+  return evicted;
+}
+
+// Same lock and read-then-set as mem::observe's increment, so a concurrent
+// observe cannot write back a count read before this decrement.
+export async function lowerObservationCounts(
+  kv: StateKV,
+  removedBySession: Map<string, number>,
+): Promise<void> {
+  await Promise.all(
+    [...removedBySession].map(([sessionId, removed]) =>
+      withKeyedLock(`obs:${sessionId}`, async () => {
+        const session = await kv.get<Session>(KV.sessions, sessionId);
+        if (!session) return;
+        await kv.update(KV.sessions, sessionId, [
+          {
+            type: "set",
+            path: "observationCount",
+            value: Math.max(0, (session.observationCount || 0) - removed),
+          },
+        ]);
+      }).catch((err) => {
+        logger.warn("Observation count update failed", {
+          sessionId,
+          removed,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    ),
+  );
 }
 
 function hasCompressibleContent(raw: RawObservation): boolean {
@@ -251,9 +282,10 @@ export function registerObserveFunction(
       const pendingImageData = extractedImage;
 
       return withKeyedLock(`obs:${payload.sessionId}`, async () => {
-        if (maxObservationsPerSession && maxObservationsPerSession > 0) {
-          await evictToAdmitOne(sdk, kv, payload.sessionId, maxObservationsPerSession);
-        }
+        const capEvicted =
+          maxObservationsPerSession && maxObservationsPerSession > 0
+            ? await evictToAdmitOne(sdk, kv, payload.sessionId, maxObservationsPerSession)
+            : 0;
 
         // Existing session is the source of truth for agentId (even
         // undefined). Env AGENT_ID only fires when no session row
@@ -353,7 +385,7 @@ export function registerObserveFunction(
             {
               type: "set",
               path: "observationCount",
-              value: (session.observationCount || 0) + 1,
+              value: Math.max(0, (session.observationCount || 0) - capEvicted) + 1,
             },
           ];
           if (!session.firstPrompt && typeof raw.userPrompt === "string") {

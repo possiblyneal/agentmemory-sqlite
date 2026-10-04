@@ -81,7 +81,9 @@ issues:
     difficulty: med
     kind: bug
     note: "flow-compress/consolidate extract lessons but never persist them via mem::lesson-save."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#132"
+    status: "fixed-here — #132: mem::flow-compress saves a non-empty <lesson> through mem::lesson-save with source \"flow\", the run's project and the Memory id, so a repeat run reinforces it. consolidate and consolidation-pipeline extract no lessons in this tree. test/flow-compress.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/274
     fix_prs: [279]
   - number: 276
@@ -788,7 +790,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Engine serialization drops Memory.project, so project coverage can never pass."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/751
     mentioned_by_prs: [1195]
   - number: 754
@@ -925,6 +928,7 @@ issues:
     kind: bug
     note: "No path to rebuild or reset a >25K legacy graph; both paths heartbeat-crash."
     disposition: candidate
+    status: "partly-present-here — the heartbeat crash is iii-only, but rebuild and reset of a large legacy graph still enumerate the whole graph and block the event loop; #114 only refuses an oversized rebuild"
     url: https://github.com/rohitg00/agentmemory/issues/825
   - number: 826
     title: "feat: Expose post-tool-use and TaskCompleted hooks to Python plugin (Hermes integration)"
@@ -942,6 +946,7 @@ issues:
     kind: bug
     note: "graph-query traversal enumerates the full graph and crashes past ~25K nodes."
     disposition: candidate
+    status: "partly-present-here — the heartbeat crash is iii-only, but graph-query traversal still enumerates the whole graph and blocks the event loop on a large store"
     url: https://github.com/rohitg00/agentmemory/issues/828
     fix_prs: [893]
   - number: 833
@@ -1099,6 +1104,7 @@ issues:
     kind: bug
     note: "mesh/export has no pagination, so sync can never catch up after a long outage."
     disposition: candidate
+    status: "partly-present-here — the WS frame limit is iii-only, but api::mesh-export still returns the whole delta unpaginated, so an oversized backlog 413s on every sync and never catches up"
     url: https://github.com/rohitg00/agentmemory/issues/890
     mentioned_by_prs: [1143]
   - number: 899
@@ -1735,7 +1741,8 @@ issues:
     difficulty: low
     kind: bug
     note: "connect claude-code hardcodes ~/.claude, ignoring CLAUDE_CONFIG_DIR; reports success but is inert."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#130"
     url: https://github.com/rohitg00/agentmemory/issues/1067
   - number: 1069
     title: "bug: session-end hook causes 'Hook cancelled' due to .unref() making setTimeout passive while fetch keeps event loop alive"
@@ -1831,7 +1838,8 @@ issues:
     difficulty: low
     kind: bug
     note: "import-jsonl and the claude-bridge MEMORY.md path also ignore CLAUDE_CONFIG_DIR."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#130"
     url: https://github.com/rohitg00/agentmemory/issues/1103
   - number: 1104
     title: "Community Windows + Codex Desktop plugin (auto-start, MCP, hooks, self-healing troubleshooting skill)"
@@ -1866,7 +1874,9 @@ issues:
     difficulty: med
     kind: bug
     note: "project-scoped memory slots share one flat namespace, so they are global in practice."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#134"
+    status: "fixed-here — #134: project slots live in KV.projectSlots(project) (src/state/schema.ts); every slot function, listPinnedSlots and the MCP/REST slot surfaces take project, and mem::context passes the Session's project (src/functions/slots.ts, src/functions/context.ts). Pre-upgrade flat rows are never injected and memory_slot_list returns them under `legacy`. test/slots.test.ts, test/context-slots.test.ts and test/slots-project-surfaces.test.ts cover it."
     url: https://github.com/rohitg00/agentmemory/issues/1108
     fix_prs: [1337]
   - number: 1114
@@ -1884,7 +1894,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Orphaned index generations accumulate when the manifest read fails; the store grows until a core pegs."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1115
     fix_prs: [1256, 1282]
   - number: 1116
@@ -1918,7 +1929,8 @@ issues:
     difficulty: high
     kind: bug
     note: "One smart-search request unregisters all 271 functions for ~5s, taking the whole REST surface down."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1124
   - number: 1127
     title: "mem::graph-extract hangs to its own 180s invocation timeout on every batch, eventually stalling state::get and crashing the worker"
@@ -1926,7 +1938,8 @@ issues:
     difficulty: high
     kind: bug
     note: "graph-extract hangs to its 180s invocation timeout each batch, stalling state::get and crashing the worker."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1127
     fix_prs: [1128]
     mentioned_by_prs: [1384]
@@ -1967,7 +1980,8 @@ issues:
     difficulty: med
     kind: bug
     note: "GET /agentmemory/export past 16 MiB drops the worker and 404s every endpoint."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1142
     mentioned_by_prs: [1143, 1233]
   - number: 1148
@@ -2005,7 +2019,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Eviction leaves session observationCount and graph provenance stale."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — src/functions/observe.ts lowerObservationCounts, shared by src/functions/evict.ts and src/functions/auto-forget.ts: mem::evict, observe's per-Session cap and auto-forget lower observationCount; graph Provenance deliberately left (capped evidence of origin, CONTEXT.md)"
+    fixed_by: "#128"
     url: https://github.com/rohitg00/agentmemory/issues/1157
   - number: 1158
     title: "Scheduled Git snapshots grow without a retention policy"
@@ -2209,7 +2225,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Snapshot restore is additive and omits durable stores, so it is not a recovery point."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — #127: src/functions/snapshot.ts restore replaces every captured store (rows the snapshot lacks are deleted, snapshot rows rewritten and re-indexed); test/snapshot.test.ts covers it."
+    fixed_by: "#127"
     url: https://github.com/rohitg00/agentmemory/issues/1190
   - number: 1191
     title: "Semantic and Procedural Memory need a bounded retention path"
@@ -2325,7 +2343,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Every project-scoped MCP tool asks the model for a project id nothing tells it."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#129"
+    status: "fixed-here — #129: every MCP project property and the detect_patterns prompt share PROJECT_NAME_DESCRIPTION (the injected project=\"…\" attribute first, else the main checkout basename, AGENTMEMORY_PROJECT_NAME overriding; not a path); filter tools add that omitting it searches every project (src/mcp/tools-registry.ts). test/mcp-project-description.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1225
   - number: 1226
     title: "mem::patterns walks every observation in the store — memory_patterns 500s \"Invocation stopped\" and drops the worker"
@@ -2333,7 +2353,9 @@ issues:
     difficulty: med
     kind: bug
     note: "mem::patterns loads every observation, 500s, and takes the worker with it."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#126"
+    status: "fixed-here — #126: mem::patterns reads only the most recent `limit` Sessions (default 50, max 500) and pairs at most 50 files per Session (src/functions/patterns.ts). test/patterns.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1226
   - number: 1228
     title: "Unable to recompress raw observations; compression failures leave observations uncompressed with no recovery path"
@@ -2604,7 +2626,8 @@ issues:
     difficulty: high
     kind: bug
     note: "GET /agentmemory/sessions still hangs indefinitely on 0.9.29; kv.list(KV.sessions) never resolves."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1326
   - number: 1328
     title: "feat: Allow custom HTTP headers on LLM provider requests (needed for x-opencode-session)"
@@ -2676,6 +2699,7 @@ issues:
     kind: bug
     note: "graph/build's server-side batch loop outlives its response and burns LLM calls for hours."
     disposition: candidate
+    status: "partly-present-here — 'Invocation stopped' is iii-only, but api::graph-build runs every batch inside the request and never notices a disconnected client, so LLM spend continues after the caller gives up"
     url: https://github.com/rohitg00/agentmemory/issues/1339
     mentioned_by_prs: [1384]
   - number: 1340
@@ -2704,6 +2728,7 @@ issues:
     kind: bug
     note: "Unbounded sourceSessionIds/sourceMemoryIds plus unpaginated list endpoints hit the 16 MiB frame limit."
     disposition: candidate
+    status: "partly-present-here — the 16 MiB frame limit is iii-only, but consolidation-pipeline appends sourceSessionIds without a cap (overlaps rohitg00/agentmemory#1168)"
     url: https://github.com/rohitg00/agentmemory/issues/1360
   - number: 1361
     title: "Windows hardening: cross-platform build script, test normalization, and audit split"
@@ -2721,7 +2746,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Trailing garbage bytes appended to mem:insights.bin make GET /insights fail with Invocation stopped."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1364
   - number: 1365
     title: "session-end transcript back-fill extracts no prompts from a Claude Code transcript"
@@ -2781,7 +2807,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Any vector result triggers a blocking expandFromChunks, putting the worker in a heartbeat death loop."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1378
   - number: 1379
     title: "Bug: iii Console install prompt repeats after accepting installation in v0.9.29"

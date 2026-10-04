@@ -73,7 +73,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       confidence?: number;
       project?: string;
       tags?: string[];
-      source?: "crystal" | "manual" | "consolidation";
+      source?: Lesson["source"];
       sourceIds?: string[];
     }) => {
       data = scrubFields(data, "content", "context");

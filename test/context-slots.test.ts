@@ -46,8 +46,9 @@ async function seedPinnedSlot(
   label: string,
   content: string,
   scope: "project" | "global" = "global",
+  project = "/tmp/proj",
 ) {
-  const target = scope === "global" ? KV.globalSlots : KV.slots;
+  const target = scope === "global" ? KV.globalSlots : KV.projectSlots(project);
   await kv.set(target, label, {
     label,
     content,
@@ -168,6 +169,48 @@ describe("mem::context — pinned slot injection", () => {
 
       expect(result.context).toContain("project-value");
       expect(result.context).not.toContain("global-value");
+    });
+
+    it("injects only the Session's own project slots, plus global slots in every project (rohitg00/agentmemory#1108)", async () => {
+      await seedPinnedSlot(kv, "user_preferences", "pref-shared", "global");
+      await seedPinnedSlot(kv, "project_context", "alpha-ctx", "project", "alpha");
+      await seedPinnedSlot(kv, "project_context", "beta-ctx", "project", "beta");
+
+      const a = await handler({ sessionId: "ses_a1", project: "alpha" });
+      const b = await handler({ sessionId: "ses_b1", project: "beta" });
+
+      expect(a.context).toContain("pref-shared");
+      expect(b.context).toContain("pref-shared");
+      expect(a.context).toContain("alpha-ctx");
+      expect(a.context).not.toContain("beta-ctx");
+      expect(b.context).toContain("beta-ctx");
+      expect(b.context).not.toContain("alpha-ctx");
+    });
+
+    it("trims the Session's project the way the slot tools do", async () => {
+      await seedPinnedSlot(kv, "project_context", "alpha-ctx", "project", "alpha");
+
+      const result = await handler({ sessionId: "ses_t", project: " alpha " });
+
+      expect(result.context).toContain("alpha-ctx");
+    });
+
+    it("never injects pre-upgrade flat project slots", async () => {
+      await kv.set(KV.legacySlots, "project_context", {
+        label: "project_context",
+        content: "legacy-flat-ctx",
+        description: "",
+        sizeLimit: 3000,
+        pinned: true,
+        readOnly: false,
+        scope: "project",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const result = await handler({ sessionId: "ses_l", project: "alpha" });
+
+      expect(result.context).not.toContain("legacy-flat-ctx");
     });
   });
 

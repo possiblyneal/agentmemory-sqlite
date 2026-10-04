@@ -94,7 +94,11 @@ export const KV = {
   accessLog: "mem:access",
   imageRefs: "mem:image-refs",
   imageEmbeddings: "mem:image-embeddings",
-  slots: "mem:slots",
+  // rohitg00/agentmemory#1108: the flat scope held every project's slots at
+  // once. Nothing writes or injects it now; slot-list shows its rows as
+  // `legacy` until a later Reclaim removes it.
+  legacySlots: "mem:slots",
+  projectSlots: (project: string) => `mem:slots:project:${project}`,
   globalSlots: "mem:slots:global",
   state: "mem:state",
   commits: "mem:commits",

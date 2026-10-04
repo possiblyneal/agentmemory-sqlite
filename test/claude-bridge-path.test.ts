@@ -14,6 +14,7 @@ describe("loadClaudeBridgeConfig path (#625)", () => {
     delete process.env["CLAUDE_MEMORY_BRIDGE"];
     delete process.env["CLAUDE_PROJECT_PATH"];
     delete process.env["CLAUDE_MEMORY_LINE_BUDGET"];
+    delete process.env["CLAUDE_CONFIG_DIR"];
   });
   afterEach(() => {
     process.env = { ...ORIG_ENV };
@@ -53,5 +54,25 @@ describe("loadClaudeBridgeConfig path (#625)", () => {
     process.env["CLAUDE_PROJECT_PATH"] = "C:\\Users\\x\\project";
     const cfg = loadClaudeBridgeConfig();
     expect(cfg.memoryFilePath).toMatch(/C:-Users-x-project[/\\]memory[/\\]MEMORY\.md$/);
+  });
+
+  it("resolves under CLAUDE_CONFIG_DIR when it is set (rohitg00/agentmemory#1103)", () => {
+    process.env["CLAUDE_MEMORY_BRIDGE"] = "true";
+    process.env["CLAUDE_PROJECT_PATH"] = "/home/user/repos/my-project";
+    process.env["CLAUDE_CONFIG_DIR"] = "/srv/claude-alt";
+    const cfg = loadClaudeBridgeConfig();
+    expect(cfg.memoryFilePath).toBe(
+      join("/srv/claude-alt", "projects", "-home-user-repos-my-project", "memory", "MEMORY.md"),
+    );
+  });
+
+  it("ignores a blank CLAUDE_CONFIG_DIR", () => {
+    process.env["CLAUDE_MEMORY_BRIDGE"] = "true";
+    process.env["CLAUDE_PROJECT_PATH"] = "/home/user/repos/my-project";
+    process.env["CLAUDE_CONFIG_DIR"] = "";
+    const cfg = loadClaudeBridgeConfig();
+    expect(cfg.memoryFilePath).toBe(
+      join(homedir(), ".claude", "projects", "-home-user-repos-my-project", "memory", "MEMORY.md"),
+    );
   });
 });

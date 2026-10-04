@@ -5,7 +5,7 @@ import { installClaudeCode, type ConnectOptions } from "./claude-code.js";
 export const CONNECT_ALIAS = "claude-code";
 
 export const CONNECT_FLAGS = {
-  "--dry-run": { option: "dryRun", help: "show what would change in ~/.claude.json, write nothing" },
+  "--dry-run": { option: "dryRun", help: "show what would change in ~/.claude.json ($CLAUDE_CONFIG_DIR/.claude.json when set), write nothing" },
   "--force": { option: "force", help: "rewrite the agentmemory entry even if already wired" },
 } as const satisfies Record<string, { option: keyof ConnectOptions; help: string }>;
 
