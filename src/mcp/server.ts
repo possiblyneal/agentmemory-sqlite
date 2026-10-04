@@ -1302,7 +1302,7 @@ export function registerMcpEndpoints(
             if (!label || typeof args.content !== "string") {
               return { status_code: 400, body: { error: "label and content (string) required" } };
             }
-            const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content: args.content, project: asNonEmptyString(args.project) } });
+            const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content: args.content, project: asNonEmptyString(args.project), expectedVersion: args.expectedVersion } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },

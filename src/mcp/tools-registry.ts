@@ -991,12 +991,13 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
   },
   {
     name: "memory_slot_replace",
-    description: `Replace slot content in place. Fails if content exceeds sizeLimit. ${SLOT_PROJECT_SENTENCE}`,
+    description: `Replace slot content in place. Fails if content exceeds sizeLimit. Pass expectedVersion (the slot's version from memory_slot_get) to fail with a version conflict if another write landed since; the previous content is kept as one undo copy. ${SLOT_PROJECT_SENTENCE}`,
     inputSchema: {
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label" },
         content: { type: "string", description: "New full content" },
+        expectedVersion: { type: "number", description: "Slot version you read; replace fails with a version conflict if the slot has changed since" },
         project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["label", "content"],
