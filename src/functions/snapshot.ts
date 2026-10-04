@@ -8,12 +8,27 @@ import type {
   Session,
   Memory,
   GraphNode,
-  AccessLogExport,
+  GraphEdge,
+  CompressedObservation,
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
-import { indexGraphNode, graphLegDisabled } from "../state/graph-indexes.js";
+import { indexGraphNode, indexGraphEdge } from "../state/graph-indexes.js";
 import { capRecordProvenance } from "./graph-provenance.js";
+import { graphWritesDisabled } from "./graph.js";
+import {
+  DURABLE_STORES,
+  readDurableStores,
+  type DurableStore,
+  type DurableStoreField,
+} from "./export-import.js";
+import {
+  deleteIndexed,
+  getSearchIndex,
+  indexRecords,
+  vectorIndexRemove,
+} from "./search.js";
+import { resetLessonIndex } from "./lessons.js";
 import { recordAudit } from "./audit.js";
 import { VERSION } from "../version.js";
 import { logger } from "../logger.js";
@@ -38,6 +53,92 @@ async function ensureGitRepo(dir: string): Promise<void> {
   }
 }
 
+type SnapshotRow = Record<string, unknown>;
+
+type SnapshotState = { [K in DurableStoreField]?: SnapshotRow[] } & {
+  observations?: Record<string, SnapshotRow[]>;
+};
+
+interface StoreCounts {
+  written: number;
+  removed: number;
+}
+
+// Replace one store with the snapshot's rows: drop rows the snapshot does not
+// hold, then write every snapshot row through the same index-keeping paths
+// the live writers use.
+async function replaceStore(
+  kv: StateKV,
+  store: DurableStore,
+  rows: SnapshotRow[],
+): Promise<StoreCounts> {
+  const keep = new Set(rows.map(store.keyOf));
+  const existing = await kv.list<SnapshotRow>(store.scope);
+  const stale = existing.map(store.keyOf).filter((key) => !keep.has(key));
+
+  for (const key of stale) {
+    if (store.field === "memories") await deleteIndexed(kv, store.scope, key);
+    else await kv.delete(store.scope, key);
+  }
+
+  for (const row of rows) {
+    if (store.field === "graphNodes") {
+      const node = capRecordProvenance(row as unknown as GraphNode);
+      await kv.set(store.scope, node.id, node);
+      await indexGraphNode(kv, node);
+    } else if (store.field === "graphEdges") {
+      const edge = capRecordProvenance(row as unknown as GraphEdge);
+      await kv.set(store.scope, edge.id, edge);
+      await indexGraphEdge(kv, edge);
+    } else {
+      await kv.set(store.scope, store.keyOf(row), row);
+    }
+  }
+
+  if (store.field === "memories") {
+    const memories = rows as unknown as Memory[];
+    for (const memory of memories) {
+      if (memory.isLatest === false) {
+        getSearchIndex().remove(memory.id);
+        vectorIndexRemove(memory.id);
+      }
+    }
+    await indexRecords([], memories);
+  }
+  if (store.field === "lessons") resetLessonIndex();
+
+  return { written: rows.length, removed: stale.length };
+}
+
+async function replaceObservations(
+  kv: StateKV,
+  snapshot: Record<string, SnapshotRow[]>,
+): Promise<StoreCounts> {
+  const sessionIds = new Set([
+    ...(await kv.list<Session>(KV.sessions)).map((s) => s.id),
+    ...Object.keys(snapshot),
+  ]);
+  let written = 0;
+  let removed = 0;
+
+  for (const sessionId of sessionIds) {
+    const scope = KV.observations(sessionId);
+    const rows = (snapshot[sessionId] ?? []) as unknown as CompressedObservation[];
+    const keep = new Set(rows.map((o) => o.id));
+    const existing = await kv.list<CompressedObservation>(scope).catch(() => []);
+    for (const o of existing) {
+      if (keep.has(o.id)) continue;
+      await deleteIndexed(kv, scope, o.id);
+      removed++;
+    }
+    for (const o of rows) await kv.set(scope, o.id, o);
+    await indexRecords(rows, []);
+    written += rows.length;
+  }
+
+  return { written, removed };
+}
+
 export function registerSnapshotFunction(
   sdk: ISdk,
   kv: StateKV,
@@ -60,16 +161,10 @@ export function registerSnapshotFunction(
         await ensureGitRepo(snapshotDir);
         const ts = new Date().toISOString();
 
-        const sessions = await kv.list<Session>(KV.sessions);
-        const memories = await kv.list<Memory>(KV.memories);
-        // B-mode: graph frozen — don't enumerate the graph scope for the
-        // snapshot; emit an empty node set instead.
-        const graphNodes = graphLegDisabled()
-          ? []
-          : await kv.list<GraphNode>(KV.graphNodes);
-        const accessLogs = await kv
-          .list<AccessLogExport>(KV.accessLog)
-          .catch(() => [] as AccessLogExport[]);
+        // A store's key is present (possibly empty) exactly when it was
+        // captured; restore treats a missing key as "not captured".
+        const stores = await readDurableStores(kv);
+        const sessions = stores.sessions ?? [];
 
         const observations: Record<string, unknown[]> = {};
         for (const session of sessions) {
@@ -84,11 +179,8 @@ export function registerSnapshotFunction(
         const state = {
           version: VERSION,
           timestamp: ts,
-          sessions,
-          memories,
-          graphNodes,
+          ...stores,
           observations,
-          accessLogs,
         };
 
         writeFileSync(
@@ -124,8 +216,8 @@ export function registerSnapshotFunction(
               (sum, arr) => sum + arr.length,
               0,
             ),
-            memories: memories.length,
-            graphNodes: graphNodes.length,
+            memories: stores.memories?.length ?? 0,
+            graphNodes: stores.graphNodes?.length ?? 0,
           },
         };
 
@@ -188,44 +280,27 @@ export function registerSnapshotFunction(
           "state.json",
         ]);
         const content = readFileSync(join(snapshotDir, "state.json"), "utf-8");
-        const state = JSON.parse(content) as {
-          sessions?: Array<{ id: string } & Record<string, unknown>>;
-          memories?: Array<{ id: string } & Record<string, unknown>>;
-          graphNodes?: Array<{ id: string } & Record<string, unknown>>;
-          observations?: Record<
-            string,
-            Array<{ id: string } & Record<string, unknown>>
-          >;
-          accessLogs?: AccessLogExport[];
-        };
+        const state = JSON.parse(content) as SnapshotState;
 
-        if (state.sessions) {
-          for (const session of state.sessions) {
-            await kv.set(KV.sessions, session.id, session);
-          }
-        }
-        if (state.memories) {
-          for (const memory of state.memories) {
-            await kv.set(KV.memories, memory.id, memory);
-          }
-        }
-        if (state.graphNodes) {
-          for (const node of state.graphNodes) {
-            const bounded = capRecordProvenance(node as unknown as GraphNode);
-            await kv.set(KV.graphNodes, bounded.id, bounded);
-            await indexGraphNode(kv, bounded);
-          }
-        }
+        const stores: Record<string, StoreCounts> = {};
+        const notCaptured: string[] = [];
+        const skipped: string[] = [];
+
+        // Observations first: their scopes are found through the Sessions
+        // that exist before the sessions store is replaced.
         if (state.observations) {
-          for (const [sessionId, obs] of Object.entries(state.observations)) {
-            for (const o of obs) {
-              await kv.set(KV.observations(sessionId), o.id, o);
-            }
-          }
+          stores.observations = await replaceObservations(kv, state.observations);
+        } else {
+          notCaptured.push("observations");
         }
-        if (state.accessLogs) {
-          for (const log of state.accessLogs) {
-            await kv.set(KV.accessLog, log.memoryId, log);
+        for (const store of DURABLE_STORES) {
+          const rows = state[store.field];
+          if (!Array.isArray(rows)) {
+            notCaptured.push(store.field);
+          } else if (store.graph && graphWritesDisabled()) {
+            skipped.push(store.field);
+          } else {
+            stores[store.field] = await replaceStore(kv, store, rows);
           }
         }
 
@@ -233,15 +308,21 @@ export function registerSnapshotFunction(
 
         await recordAudit(kv, "import", "mem::snapshot-restore", [], {
           commitHash: data.commitHash,
-          sessions: state.sessions?.length || 0,
-          memories: state.memories?.length || 0,
-          graphNodes: state.graphNodes?.length || 0,
+          stores,
+          notCaptured,
+          skipped,
         });
 
         logger.info("Snapshot restored", {
           commitHash: data.commitHash,
         });
-        return { success: true, commitHash: data.commitHash };
+        return {
+          success: true,
+          commitHash: data.commitHash,
+          stores,
+          notCaptured,
+          skipped,
+        };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error("Snapshot restore failed", { error: msg });

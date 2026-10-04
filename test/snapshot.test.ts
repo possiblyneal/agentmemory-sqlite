@@ -23,17 +23,23 @@ vi.mock("node:util", async () => {
   };
 });
 
+const snapshotFile = vi.hoisted(() => ({
+  content: '{"version":"0.4.0","sessions":[],"memories":[]}',
+}));
+
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
-  readFileSync: vi
-    .fn()
-    .mockReturnValue('{"version":"0.4.0","sessions":[],"memories":[]}'),
+  writeFileSync: vi.fn((_path: string, content: string) => {
+    snapshotFile.content = content;
+  }),
+  readFileSync: vi.fn(() => snapshotFile.content),
 }));
 
 import { registerSnapshotFunction } from "../src/functions/snapshot.js";
-import type { Session, Memory, SnapshotMeta } from "../src/types.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToIndexDoc } from "../src/state/memory-utils.js";
+import type { Session, Memory, Lesson, SnapshotMeta } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -162,6 +168,126 @@ describe("Snapshot Functions", () => {
 
     const audits = await kv.list("mem:audit");
     expect(audits.length).toBe(1);
+  });
+});
+
+function lesson(id: string, content: string): Lesson {
+  return {
+    id,
+    content,
+    context: "",
+    confidence: 0.5,
+    reinforcements: 0,
+    source: "manual",
+    sourceIds: [],
+    tags: [],
+    createdAt: "2026-02-01T00:00:00Z",
+    updatedAt: "2026-02-01T00:00:00Z",
+    decayRate: 0.05,
+  };
+}
+
+function memory(id: string, title: string): Memory {
+  return {
+    id,
+    createdAt: "2026-02-01T00:00:00Z",
+    updatedAt: "2026-02-01T00:00:00Z",
+    type: "pattern",
+    title,
+    content: `${title} about the deploy pipeline`,
+    concepts: [],
+    files: [],
+    sessionIds: ["ses_1"],
+    strength: 5,
+    version: 1,
+    isLatest: true,
+  };
+}
+
+type RestoreResult = {
+  success: boolean;
+  stores: Record<string, { written: number; removed: number }>;
+  notCaptured: string[];
+};
+
+describe("snapshot-restore replaces each captured store", () => {
+  let sdk: ReturnType<typeof mockSdk>;
+  let kv: ReturnType<typeof mockKV>;
+
+  beforeEach(async () => {
+    sdk = mockSdk();
+    kv = mockKV();
+    getSearchIndex().clear();
+    registerSnapshotFunction(sdk as never, kv as never, "/tmp/agentmemory-snapshots");
+    await kv.set("mem:memories", "mem_1", memory("mem_1", "Original"));
+    await kv.set("mem:lessons", "lsn_1", lesson("lsn_1", "Run tests before pushing"));
+    getSearchIndex().add(memoryToIndexDoc(memory("mem_1", "Original")));
+  });
+
+  it("removes rows added after the snapshot and brings back snapshot-time rows", async () => {
+    await sdk.trigger("mem::snapshot-create", { message: "before" });
+
+    await kv.set("mem:memories", "mem_2", memory("mem_2", "Added later"));
+    await kv.set("mem:lessons", "lsn_2", lesson("lsn_2", "Added later"));
+    await kv.delete("mem:lessons", "lsn_1");
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect(result.success).toBe(true);
+    expect((await kv.list<Memory>("mem:memories")).map((m) => m.id)).toEqual(["mem_1"]);
+    expect((await kv.list<Lesson>("mem:lessons")).map((l) => l.id)).toEqual(["lsn_1"]);
+    expect(result.stores.memories).toEqual({ written: 1, removed: 1 });
+    expect(result.stores.lessons).toEqual({ written: 1, removed: 1 });
+  });
+
+  it("leaves a store the snapshot never captured untouched and names it", async () => {
+    snapshotFile.content = JSON.stringify({
+      version: "0.9.29",
+      memories: [memory("mem_1", "Original")],
+    });
+    await kv.set("mem:lessons", "lsn_2", lesson("lsn_2", "Added later"));
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect(result.success).toBe(true);
+    expect((await kv.list<Lesson>("mem:lessons")).map((l) => l.id).sort()).toEqual([
+      "lsn_1",
+      "lsn_2",
+    ]);
+    expect(result.notCaptured).toContain("lessons");
+    expect(result.stores.lessons).toBeUndefined();
+  });
+
+  it("search over restored Memories returns only the restored set", async () => {
+    await sdk.trigger("mem::snapshot-create", { message: "before" });
+
+    const later = memory("mem_2", "Added later");
+    await kv.set("mem:memories", "mem_2", later);
+    getSearchIndex().add(memoryToIndexDoc(later));
+
+    await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" });
+
+    const hits = getSearchIndex().search("deploy pipeline").map((h) => h.obsId);
+    expect(hits).toEqual(["mem_1"]);
+  });
+
+  it("records per-store written and removed counts in the audit entry", async () => {
+    await sdk.trigger("mem::snapshot-create", { message: "before" });
+    await kv.set("mem:lessons", "lsn_2", lesson("lsn_2", "Added later"));
+
+    await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" });
+
+    const audits = await kv.list<{
+      functionId: string;
+      details: { stores: Record<string, { written: number; removed: number }> };
+    }>("mem:audit");
+    const entry = audits.find((a) => a.functionId === "mem::snapshot-restore");
+    expect(entry?.details.stores.lessons).toEqual({ written: 1, removed: 1 });
+    expect(entry?.details.stores.memories).toEqual({ written: 1, removed: 0 });
   });
 });
 
