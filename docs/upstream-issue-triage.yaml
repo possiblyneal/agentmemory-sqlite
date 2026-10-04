@@ -2004,8 +2004,9 @@ issues:
     severity: med
     difficulty: med
     kind: bug
-    note: "Eviction leaves session observationCount and graph provenance stale."
-    disposition: candidate
+    note: "Eviction leaves session observationCount and graph provenance stale. observationCount is fixed here; graph provenance is deliberately left, since Provenance is capped evidence of origin."
+    disposition: already-fixed
+    fixed_by: "#128"
     url: https://github.com/rohitg00/agentmemory/issues/1157
   - number: 1158
     title: "Scheduled Git snapshots grow without a retention policy"
