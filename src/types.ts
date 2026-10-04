@@ -252,6 +252,9 @@ export interface FunctionMetrics {
   failureCount: number;
   avgLatencyMs: number;
   avgQualityScore: number;
+  /** Newest-last outcomes (true = success), bounded; absent on records written before windowing. */
+  recentOutcomes?: boolean[];
+  lastFailureAt?: string;
 }
 
 // The verdict vocabulary. Defined here rather than beside the evaluator so a

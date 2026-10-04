@@ -3,6 +3,8 @@ import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 
+export const METRICS_WINDOW = 100;
+
 export class MetricsStore {
   private cache = new Map<string, FunctionMetrics>();
   private qualityCallCounts = new Map<string, number>();
@@ -45,7 +47,9 @@ export class MetricsStore {
       m.successCount += 1;
     } else {
       m.failureCount += 1;
+      m.lastFailureAt = new Date().toISOString();
     }
+    m.recentOutcomes = [...(m.recentOutcomes ?? []), success].slice(-METRICS_WINDOW);
     if (qualityScore !== undefined) {
       const prevQualityCalls = this.qualityCallCounts.get(functionId) || 0;
       m.avgQualityScore =
