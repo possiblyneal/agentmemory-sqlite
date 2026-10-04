@@ -84,7 +84,9 @@ prs:
       - src/state/vector-index.ts
       - test/vector-index.test.ts
     note: "sqlite-vec vector backend behind a Strategy interface — the closest upstream work to this fork's own storage model."
-    disposition: candidate
+    disposition: wont-fix
+    status: "present-here — search scans every vector in JS (src/state/vector-index.ts)."
+    wont_fix_reason: "Measured on fix/upstream-triage-run against the live 51.7k-row store: sqlite-vec 0.1.9 also brute-forces, so search went only 672 → 419 ms/query while the DB grew 846 MB → 1.67 GB. Smaller vectors cut the scan instead: local BGE-small (384-dim) matched wemm-embedding at 4096 dims on production hybrid search (nDCG@10 0.401 vs 0.412, MRR 0.776 vs 0.764) at 255 vs 2379 ms p50 and 76 vs 807 MB of index RAM."
     url: https://github.com/rohitg00/agentmemory/pull/300
   - number: 470
     title: "Add consistency guards for MCP tools and REST endpoint drift"
@@ -197,8 +199,9 @@ prs:
       - plugin/scripts/prompt-submit.mjs
       # +40 more
     note: "AGENTMEMORY_PROJECT_ISOLATION enforced across MCP, REST and search, including a cross-project leak in hybrid smart-search."
-    disposition: candidate
-    status: "present-here — no AGENTMEMORY_PROJECT_ISOLATION."
+    disposition: already-fixed
+    status: "fixed-here — implemented on fix/upstream-triage-run: the plugin and connect run this fork's agentmemory mcp, which fills an omitted project from its cwd (src/mcp/default-project.ts)."
+    fixed_by: "8ecc7b0, f688b13"
     url: https://github.com/rohitg00/agentmemory/pull/829
   - number: 878
     title: "Security: escape stored memory content in injected context (H1)"
