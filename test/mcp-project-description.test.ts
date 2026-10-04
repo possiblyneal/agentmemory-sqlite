@@ -27,6 +27,15 @@ const FILTER_TOOLS = [
   "memory_insight_list",
 ];
 
+const SLOT_TOOLS = [
+  "memory_slot_list",
+  "memory_slot_get",
+  "memory_slot_create",
+  "memory_slot_append",
+  "memory_slot_replace",
+  "memory_slot_delete",
+];
+
 function projectDescriptions(): Map<string, string> {
   const out = new Map<string, string>();
   for (const tool of getAllTools()) {
@@ -63,6 +72,13 @@ describe("MCP project argument description", () => {
       if (!FILTER_TOOLS.includes(tool)) {
         expect(description, tool).not.toContain(PROJECT_OMITTED_CLAUSE);
       }
+    }
+  });
+
+  it("slot tools carry the shared description exactly (rohitg00/agentmemory#1108)", () => {
+    const descriptions = projectDescriptions();
+    for (const tool of SLOT_TOOLS) {
+      expect(descriptions.get(tool), tool).toBe(PROJECT_NAME_DESCRIPTION);
     }
   });
 

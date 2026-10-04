@@ -1250,7 +1250,7 @@ export function registerMcpEndpoints(
           }
 
           case "memory_slot_list": {
-            const result = await sdk.trigger({ function_id: "mem::slot-list", payload: {} });
+            const result = await sdk.trigger({ function_id: "mem::slot-list", payload: { project: asNonEmptyString(args.project) } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
@@ -1260,7 +1260,7 @@ export function registerMcpEndpoints(
           case "memory_slot_get": {
             const label = asNonEmptyString(args.label);
             if (!label) return { status_code: 400, body: { error: "label required" } };
-            const result = await sdk.trigger({ function_id: "mem::slot-get", payload: { label } });
+            const result = await sdk.trigger({ function_id: "mem::slot-get", payload: { label, project: asNonEmptyString(args.project) } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
@@ -1270,7 +1270,7 @@ export function registerMcpEndpoints(
           case "memory_slot_create": {
             const label = asNonEmptyString(args.label);
             if (!label) return { status_code: 400, body: { error: "label required" } };
-            const payload: Record<string, unknown> = { label };
+            const payload: Record<string, unknown> = { label, project: asNonEmptyString(args.project) };
             if (typeof args.content === "string") payload.content = args.content;
             if (typeof args.description === "string") payload.description = args.description;
             if (typeof args.sizeLimit === "number") payload.sizeLimit = args.sizeLimit;
@@ -1290,7 +1290,7 @@ export function registerMcpEndpoints(
             const label = asNonEmptyString(args.label);
             const text = typeof args.text === "string" ? args.text : null;
             if (!label || !text) return { status_code: 400, body: { error: "label and text required" } };
-            const result = await sdk.trigger({ function_id: "mem::slot-append", payload: { label, text } });
+            const result = await sdk.trigger({ function_id: "mem::slot-append", payload: { label, text, project: asNonEmptyString(args.project) } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
@@ -1302,7 +1302,7 @@ export function registerMcpEndpoints(
             if (!label || typeof args.content !== "string") {
               return { status_code: 400, body: { error: "label and content (string) required" } };
             }
-            const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content: args.content } });
+            const result = await sdk.trigger({ function_id: "mem::slot-replace", payload: { label, content: args.content, project: asNonEmptyString(args.project) } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
@@ -1312,7 +1312,7 @@ export function registerMcpEndpoints(
           case "memory_slot_delete": {
             const label = asNonEmptyString(args.label);
             if (!label) return { status_code: 400, body: { error: "label required" } };
-            const result = await sdk.trigger({ function_id: "mem::slot-delete", payload: { label } });
+            const result = await sdk.trigger({ function_id: "mem::slot-delete", payload: { label, project: asNonEmptyString(args.project) } });
             return {
               status_code: 200,
               body: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },

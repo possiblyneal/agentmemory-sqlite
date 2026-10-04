@@ -46,3 +46,21 @@ key every other Session writer holds. A replay running against a live Session ca
 observe's count or a commit-link's `commitShas`.
 
 - **Done when.** Replay's read-modify-write of `mem:sessions` holds `obs:${id}`.
+
+## Finish moving slots to per-project scopes
+
+#134 moved project slots into `mem:slots:project:<project>` (`KV.projectSlots`). Two pieces
+were left for later.
+
+- **Legacy rows.** Pre-upgrade project slots stay in the flat `mem:slots` scope
+  (`KV.legacySlots`). Nothing injects them, and `memory_slot_list` shows the non-empty ones
+  under `legacy` so the Operator can copy them into a project slot. After one release, a
+  Reclaim deletes that scope and the `legacy` key goes away.
+- **Slot scopes in snapshot, export/import and governance-delete.** None of them covers
+  `mem:slots:global` or the per-project scopes. A per-project scope has no fixed name, so it
+  can only be found with `kv.listScopes("mem:slots:project:")`. This picks up #127's
+  follow-up that export and snapshot should carry slots once rohitg00/agentmemory#1108
+  lands.
+- **Done when.** `mem:slots` is gone and slot-list has no `legacy` key, and a snapshot,
+  export or governance-delete covers the global slot scope and every project slot scope it
+  enumerates.

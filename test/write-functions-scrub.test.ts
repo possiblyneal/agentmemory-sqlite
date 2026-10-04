@@ -196,16 +196,16 @@ const cases: Case[] = [
     name: "mem::slot-create content and description",
     register: registerSlotsFunctions,
     run: async (call) => {
-      await call("mem::slot-create", { label: "notes", content: `c ${SECRET}`, description: `d ${SECRET}` });
+      await call("mem::slot-create", { project: "p", label: "notes", content: `c ${SECRET}`, description: `d ${SECRET}` });
     },
   },
   {
     name: "mem::slot-append text and mem::slot-replace content",
     register: registerSlotsFunctions,
     run: async (call) => {
-      await call("mem::slot-create", { label: "notes", content: "clean" });
-      await call("mem::slot-append", { label: "notes", text: `a ${SECRET}` });
-      await call("mem::slot-replace", { label: "notes", content: `r ${SECRET}` });
+      await call("mem::slot-create", { project: "p", label: "notes", content: "clean" });
+      await call("mem::slot-append", { project: "p", label: "notes", text: `a ${SECRET}` });
+      await call("mem::slot-replace", { project: "p", label: "notes", content: `r ${SECRET}` });
     },
   },
   {
