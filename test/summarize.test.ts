@@ -258,6 +258,29 @@ describe("mem::summarize chunking", () => {
     expect(stored?.observationCount).toBe(105);
   });
 
+  it("retries an intermediate merge that fails to parse instead of failing the Summarize", async () => {
+    const budget = 300;
+    process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + budget);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "Part", narrative: "Long partial narrative. ".repeat(12), decisions: ["d"] }),
+    ]);
+    const summarize = provider.summarize;
+    let merges = 0;
+    provider.summarize = async (system: string, user: string) => {
+      const reply = await summarize(system, user);
+      if (!system.includes("merging multiple partial summaries")) return reply;
+      merges += 1;
+      return merges === 1 ? "<garbage/>" : reply;
+    };
+    const { handler } = await setupHandler({ sessionId: "ses_merge_retry", obsCount: 105, provider });
+
+    const result: any = await handler({ sessionId: "ses_merge_retry" });
+
+    expect(result.success).toBe(true);
+    expect(merges).toBeGreaterThan(2);
+  });
+
   it("SUMMARIZE_CHUNK_TOKENS env override is respected", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(50);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";

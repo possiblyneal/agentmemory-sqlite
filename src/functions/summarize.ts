@@ -13,6 +13,7 @@ import {
   renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
+  type ReducePartial,
 } from "../prompts/summary.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { SummaryOutputSchema } from "../eval/schemas.js";
@@ -265,15 +266,7 @@ async function produceSummaryXml(
   const reduceInput = partials.map((p) => {
     const originalIdx = partialByIdx.indexOf(p);
     const start = chunkStarts[originalIdx] ?? 0;
-    return {
-      title: p.title,
-      narrative: p.narrative,
-      keyDecisions: p.keyDecisions,
-      filesModified: p.filesModified,
-      concepts: p.concepts,
-      obsRangeStart: start + 1,
-      obsRangeEnd: start + chunks[originalIdx]!.length,
-    };
+    return toReducePartial(p, start + 1, start + chunks[originalIdx]!.length);
   });
   const response = await reducePartials(
     provider,
@@ -285,7 +278,21 @@ async function produceSummaryXml(
   return { response, mode: "chunked", chunks: chunks.length, skipped };
 }
 
-type ReducePartial = Parameters<typeof buildReducePrompt>[0][number];
+function toReducePartial(
+  summary: SessionSummary,
+  obsRangeStart: number,
+  obsRangeEnd: number,
+): ReducePartial {
+  return {
+    title: summary.title,
+    narrative: summary.narrative,
+    keyDecisions: summary.keyDecisions,
+    filesModified: summary.filesModified,
+    concepts: summary.concepts,
+    obsRangeStart,
+    obsRangeEnd,
+  };
+}
 
 // Consecutive partials whose merge prompt fits the budget. Every group but the
 // last takes at least two partials, so each round shrinks the list.
@@ -317,24 +324,31 @@ async function reducePartials(
   const budget = getChunkTokens() - PROMPT_OVERHEAD_TOKENS;
   let groups = groupPartials(partials, budget);
   while (groups.length > 1) {
-    const merged = await mapWithConcurrency(groups, concurrency, async (group) => {
-      if (group.length === 1) return group[0]!;
-      const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
-      const parsed = parseSummaryXml(xml, sessionId, project, 0);
-      if (!parsed) throw new Error("reduce_parse_failed: an intermediate merge did not parse");
-      return {
-        title: parsed.title,
-        narrative: parsed.narrative,
-        keyDecisions: parsed.keyDecisions,
-        filesModified: parsed.filesModified,
-        concepts: parsed.concepts,
-        obsRangeStart: group[0]!.obsRangeStart,
-        obsRangeEnd: group[group.length - 1]!.obsRangeEnd,
-      };
-    });
+    const merged = await mapWithConcurrency(groups, concurrency, async (group) =>
+      group.length === 1 ? group[0]! : mergeGroupWithRetry(provider, group, sessionId, project),
+    );
     groups = groupPartials(merged, budget);
   }
   return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!));
+}
+
+// An intermediate merge gets the same second try as a chunk, so one malformed
+// reply does not throw away every chunk call already made.
+async function mergeGroupWithRetry(
+  provider: MemoryProvider,
+  group: ReducePartial[],
+  sessionId: string,
+  project: string,
+): Promise<ReducePartial> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
+    const parsed = parseSummaryXml(xml, sessionId, project, 0);
+    if (parsed) {
+      return toReducePartial(parsed, group[0]!.obsRangeStart, group[group.length - 1]!.obsRangeEnd);
+    }
+    logger.warn("Summarize intermediate merge parse failed", { sessionId, attempt });
+  }
+  throw new Error("reduce_parse_failed: an intermediate merge did not parse");
 }
 
 // #783: many LLMs (DeepSeek, GPT variants, some Anthropic responses)

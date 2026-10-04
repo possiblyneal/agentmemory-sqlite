@@ -86,7 +86,7 @@ export async function fetchWithTimeout(
   // the headers arrive, so a server that stalls mid-body is cut off too.
   const start = Date.now();
   const deadline = new AbortController();
-  setTimeout(() => deadline.abort(), ms).unref?.();
+  setTimeout(() => deadline.abort(), ms).unref();
   const signal = init.signal
     ? AbortSignal.any([init.signal, deadline.signal])
     : deadline.signal;
