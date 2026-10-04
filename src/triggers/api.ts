@@ -22,6 +22,7 @@ import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.
 import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
+import { ObserveRetryQueue, isDiskFull } from "../functions/observe-retry.js";
 import {
   isGraphExtractionEnabled,
   isConsolidationEnabled,
@@ -382,6 +383,9 @@ export function registerApiTriggers(
     },
   });
 
+  const observeRetry = new ObserveRetryQueue((payload) =>
+    sdk.trigger({ function_id: "mem::observe", payload }),
+  );
   sdk.registerFunction("api::observe",
     async (req: ApiRequest): Promise<Response> => {
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -407,8 +411,15 @@ export function registerApiTriggers(
         timestamp,
         data: body.data,
       };
-      const result = await sdk.trigger({ function_id: "mem::observe", payload });
-      return { status_code: 201, body: result };
+      try {
+        const result = await sdk.trigger({ function_id: "mem::observe", payload });
+        return { status_code: 201, body: result };
+      } catch (err) {
+        if (isDiskFull(err) && observeRetry.enqueue(payload)) {
+          return { status_code: 202, body: { queued: true } };
+        }
+        throw err;
+      }
     },
   );
   sdk.registerTrigger({
