@@ -52,7 +52,7 @@ import { renderSplash } from "./cli/splash.js";
 import { isFirstRun, readPrefs, resetPrefs, writePrefs } from "./cli/preferences.js";
 import { runOnboarding } from "./cli/onboarding.js";
 import { setBootVerbose } from "./logger.js";
-import { hydrateProcessEnvFromFile } from "./config.js";
+import { getClaudeConfigDir, hydrateProcessEnvFromFile } from "./config.js";
 import { VERSION } from "./version.js";
 import { getAllTools, ESSENTIAL_TOOLS } from "./mcp/tools-registry.js";
 import { CONNECT_ALIAS, CONNECT_FLAGS } from "./cli/connect/index.js";
@@ -124,7 +124,7 @@ ${Object.entries(CONNECT_FLAGS)
                      --force also signals processes holding the REST port that
                      the pidfile does not claim (use when the pidfile is gone).
   mcp                Start standalone MCP shim. REST always available at :3111.
-  import-jsonl [p]   Import Claude Code JSONL transcripts (default: ~/.claude/projects)
+  import-jsonl [p]   Import Claude Code JSONL transcripts (default: ${join(getClaudeConfigDir(), "projects")})
                      --max-files <N> | --max-files=<N>: override scan cap (default 200, max 1000;
                      out-of-range is rejected; for trees >1000 files, batch by subdirectory)
 
@@ -613,7 +613,7 @@ function findLatestDebugLog(debugDir: string): string | undefined {
 }
 
 function checkClaudeCodeHooks(): CCHooksCheck {
-  const debugDir = join(homedir(), ".claude", "debug");
+  const debugDir = join(getClaudeConfigDir(), "debug");
   if (!existsSync(debugDir)) return { state: "no-cc-dir" };
 
   const logPath = findLatestDebugLog(debugDir);
@@ -1705,7 +1705,7 @@ async function runImportJsonl(): Promise<void> {
   const secret = process.env["AGENTMEMORY_SECRET"];
   if (secret) headers["authorization"] = `Bearer ${secret}`;
 
-  p.log.info(`Importing JSONL from ${pathArg || "~/.claude/projects"}…`);
+  p.log.info(`Importing JSONL from ${pathArg || join(getClaudeConfigDir(), "projects")}…`);
   const spinner = p.spinner();
   spinner.start("scanning files");
 
@@ -1780,7 +1780,7 @@ async function runImportJsonl(): Promise<void> {
       if (discovered > upper || json.traversalCapped) {
         p.log.warn(
           `${baseMsg} Tree exceeds the server's --max-files limit of ${upper}; ` +
-            `batch by subdirectory (run import-jsonl once per project under ~/.claude/projects).`,
+            `batch by subdirectory (run import-jsonl once per project under ${join(getClaudeConfigDir(), "projects")}).`,
         );
       } else {
         const suggested = Math.min(

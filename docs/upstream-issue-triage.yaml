@@ -1735,7 +1735,8 @@ issues:
     difficulty: low
     kind: bug
     note: "connect claude-code hardcodes ~/.claude, ignoring CLAUDE_CONFIG_DIR; reports success but is inert."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#PRNUM"
     url: https://github.com/rohitg00/agentmemory/issues/1067
   - number: 1069
     title: "bug: session-end hook causes 'Hook cancelled' due to .unref() making setTimeout passive while fetch keeps event loop alive"
@@ -1831,7 +1832,8 @@ issues:
     difficulty: low
     kind: bug
     note: "import-jsonl and the claude-bridge MEMORY.md path also ignore CLAUDE_CONFIG_DIR."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#PRNUM"
     url: https://github.com/rohitg00/agentmemory/issues/1103
   - number: 1104
     title: "Community Windows + Codex Desktop plugin (auto-start, MCP, hooks, self-healing troubleshooting skill)"

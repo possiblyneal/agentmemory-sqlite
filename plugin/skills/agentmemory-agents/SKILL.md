@@ -18,7 +18,7 @@ Restart the session, then confirm Claude Code lists agentmemory's tools under `/
 ## Workflow
 
 1. Prefer the plugin. It is the only path that installs the hooks, so it is the only path that captures memory automatically.
-2. Without the plugin, `agentmemory connect` merges the MCP server into `~/.claude.json`, backs the file up first and preserves any existing servers. It wires tools only: no hooks, no skills. `--dry-run` previews the change and `--force` rewrites an existing entry.
+2. Without the plugin, `agentmemory connect` merges the MCP server into `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is set), backs the file up first and preserves any existing servers. It wires tools only: no hooks, no skills. `--dry-run` previews the change and `--force` rewrites an existing entry.
 3. Verify: with a server running, Claude Code shows the full tool set. Only 7 tools means the MCP shim could not reach a server (see ../_shared/TROUBLESHOOTING.md).
 
 ## Notes
