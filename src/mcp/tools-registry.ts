@@ -3,6 +3,16 @@
 export const NOT_A_MEMORY_HINT =
   "These ids are not saved memories. Observations are deleted with memory_forget (sessionId + observationIds).";
 
+// rohitg00/agentmemory#1225: a bare "Filter by project" left the Agent guessing
+// what value to pass. There is no server-side default: the daemon cannot see
+// the Agent's cwd through the MCP proxy shim.
+export const PROJECT_NAME_DESCRIPTION =
+  "Project name: the basename of the repository's main checkout directory, shared by " +
+  'all of its worktrees. It is the name in the project="…" attribute of the injected ' +
+  "<agentmemory-context> block.";
+
+export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} Leave it out to search every project.`;
+
 export type McpToolDef = {
   name: string;
   description: string;
@@ -37,7 +47,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "number",
           description: "Optional token budget to trim returned results",
         },
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
       },
       required: ["query"],
     },
@@ -81,14 +91,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "string",
           description: "Comma-separated relevant file paths",
         },
-        project: {
-          type: "string",
-          description:
-            "Stable canonical project identifier this memory belongs to (e.g. a slug, " +
-            "UUID, or registry key). Must match the value used when the session was " +
-            "started. Do not use filesystem paths or ad-hoc display names — those " +
-            "change across machines and will silently break project scoping.",
-        },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
         global: {
           type: "boolean",
           description:
@@ -155,7 +158,7 @@ export const CORE_TOOLS: McpToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "Project path to analyze" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
       },
     },
   },
@@ -177,7 +180,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           description: "Comma-separated observation IDs to expand",
         },
         limit: { type: "number", description: "Max results (default 10)" },
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
       },
       required: ["query"],
     },
@@ -207,7 +210,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "string",
           description: "Anchor point: ISO date or keyword",
         },
-        project: { type: "string", description: "Filter by project path" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
         before: {
           type: "number",
           description: "Observations before anchor (default 5)",
@@ -226,7 +229,7 @@ export const CORE_TOOLS: McpToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "Project path" },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
         refresh: {
           type: "string",
           description: "Set to 'true' to force rebuild",
@@ -424,7 +427,7 @@ export const V050_TOOLS: McpToolDef[] = [
           type: "number",
           description: "Priority 1-10 (10 highest)",
         },
-        project: { type: "string", description: "Project path" },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
         tags: {
           type: "string",
           description: "Comma-separated tags",
@@ -470,7 +473,7 @@ export const V050_TOOLS: McpToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
         agentId: {
           type: "string",
           description: "Agent ID to check lease conflicts",
@@ -486,7 +489,7 @@ export const V050_TOOLS: McpToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
         agentId: { type: "string", description: "Current agent ID" },
       },
     },
@@ -524,7 +527,7 @@ export const V050_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         routineId: { type: "string", description: "Routine template ID" },
-        project: { type: "string", description: "Project context" },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
         initiatedBy: { type: "string", description: "Agent starting the run" },
       },
       required: ["routineId"],
@@ -678,7 +681,7 @@ export const V051_TOOLS: McpToolDef[] = [
         title: { type: "string", description: "Sketch title" },
         description: { type: "string", description: "What this sketch explores" },
         expiresInMs: { type: "number", description: "TTL in ms (default 1 hour)" },
-        project: { type: "string", description: "Project context" },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
       },
       required: ["title"],
     },
@@ -691,7 +694,10 @@ export const V051_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         sketchId: { type: "string", description: "Sketch ID to promote" },
-        project: { type: "string", description: "Override project for promoted actions" },
+        project: {
+          type: "string",
+          description: `Overrides the sketch's project for the promoted actions. ${PROJECT_NAME_DESCRIPTION}`,
+        },
       },
       required: ["sketchId"],
     },
@@ -707,7 +713,7 @@ export const V051_TOOLS: McpToolDef[] = [
           type: "string",
           description: "Comma-separated completed action IDs to crystallize",
         },
-        project: { type: "string", description: "Project context" },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
         sessionId: { type: "string", description: "Session context" },
       },
       required: ["actionIds"],
@@ -825,7 +831,7 @@ export const V070_TOOLS: McpToolDef[] = [
           type: "number",
           description: "Initial confidence 0.0-1.0 (default 0.5)",
         },
-        project: { type: "string", description: "Project this lesson is about" },
+        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
         tags: { type: "string", description: "Comma-separated tags" },
       },
       required: ["content"],
@@ -839,7 +845,7 @@ export const V070_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         query: { type: "string", description: "Search query" },
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
         minConfidence: {
           type: "number",
           description: "Minimum confidence threshold (default 0)",
@@ -889,7 +895,7 @@ export const V073_TOOLS: McpToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
         maxClusters: {
           type: "number",
           description: "Max concept clusters to process (default 10, max 20)",
@@ -904,7 +910,7 @@ export const V073_TOOLS: McpToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        project: { type: "string", description: "Filter by project" },
+        project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
         minConfidence: {
           type: "number",
           description: "Minimum confidence threshold (default 0)",
