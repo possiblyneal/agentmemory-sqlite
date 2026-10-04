@@ -1,7 +1,7 @@
 import type { ISdk } from "../engine/types.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   SnapshotMeta,
@@ -33,6 +33,7 @@ import { resetLessonIndex } from "./lessons.js";
 import { recordAudit } from "./audit.js";
 import { VERSION } from "../version.js";
 import { logger } from "../logger.js";
+import { writeFileAtomicNoSymlink } from "../utils/atomic-write.js";
 
 const COMMIT_HASH_RE = /^[0-9a-f]{7,40}$/i;
 
@@ -180,10 +181,9 @@ export function registerSnapshotFunction(
           observations,
         };
 
-        writeFileSync(
+        writeFileAtomicNoSymlink(
           join(snapshotDir, "state.json"),
           JSON.stringify(state, null, 2),
-          "utf-8",
         );
 
         await gitExec(snapshotDir, ["add", "."]);
