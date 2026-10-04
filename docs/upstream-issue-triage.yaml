@@ -1866,7 +1866,9 @@ issues:
     difficulty: med
     kind: bug
     note: "project-scoped memory slots share one flat namespace, so they are global in practice."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#134"
+    status: "fixed-here — #134: project slots live in KV.projectSlots(project) (src/state/schema.ts); every slot function, listPinnedSlots and the MCP/REST slot surfaces take project, and mem::context passes the Session's project (src/functions/slots.ts, src/functions/context.ts). Pre-upgrade flat rows are never injected and memory_slot_list returns them under `legacy`. test/slots.test.ts, test/context-slots.test.ts and test/slots-project-surfaces.test.ts cover it."
     url: https://github.com/rohitg00/agentmemory/issues/1108
     fix_prs: [1337]
   - number: 1114
