@@ -81,7 +81,9 @@ issues:
     difficulty: med
     kind: bug
     note: "flow-compress/consolidate extract lessons but never persist them via mem::lesson-save."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#132"
+    status: "fixed-here — #132: mem::flow-compress saves a non-empty <lesson> through mem::lesson-save with source \"flow\", the run's project and the Memory id, so a repeat run reinforces it. consolidate and consolidation-pipeline extract no lessons in this tree. test/flow-compress.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/274
     fix_prs: [279]
   - number: 276
