@@ -6,10 +6,6 @@ import type {
   SessionSummary,
   ProjectProfile,
   ExportData,
-  GraphNode,
-  GraphEdge,
-  SemanticMemory,
-  ProceduralMemory,
   Action,
   ActionEdge,
   Routine,
@@ -51,7 +47,7 @@ const IMPORT_CHUNK_SIZE = 20;
 // fully settles before chunk N+1 begins) while parallelizing within a
 // chunk. Errors propagate — a failing item rejects the whole import, same
 // as the original serial loops.
-async function runChunked<T>(
+export async function runChunked<T>(
   items: readonly T[],
   fn: (item: T) => Promise<void>,
 ): Promise<void> {
@@ -59,6 +55,62 @@ async function runChunked<T>(
     const chunk = items.slice(i, i + IMPORT_CHUNK_SIZE);
     await Promise.all(chunk.map(fn));
   }
+}
+
+// Every durable store a full export carries, in restore order: memories
+// precede accessLogs because deleting a Memory also drops its access row.
+// Snapshot create/restore reads this same list, so the two cannot drift.
+export type DurableStoreField = Exclude<
+  keyof ExportData,
+  "version" | "exportedAt" | "observations" | "pagination"
+>;
+
+export interface DurableStore {
+  field: DurableStoreField;
+  scope: string;
+  keyOf: (row: Record<string, unknown>) => string;
+  graph?: true;
+}
+
+const byId = (row: Record<string, unknown>) => String(row.id);
+
+export const DURABLE_STORES: readonly DurableStore[] = [
+  { field: "sessions", scope: KV.sessions, keyOf: byId },
+  { field: "memories", scope: KV.memories, keyOf: byId },
+  { field: "summaries", scope: KV.summaries, keyOf: (s) => String(s.sessionId) },
+  { field: "profiles", scope: KV.profiles, keyOf: (p) => String(p.project) },
+  { field: "graphNodes", scope: KV.graphNodes, keyOf: byId, graph: true },
+  { field: "graphEdges", scope: KV.graphEdges, keyOf: byId, graph: true },
+  { field: "semanticMemories", scope: KV.semantic, keyOf: byId },
+  { field: "proceduralMemories", scope: KV.procedural, keyOf: byId },
+  { field: "actions", scope: KV.actions, keyOf: byId },
+  { field: "actionEdges", scope: KV.actionEdges, keyOf: byId },
+  { field: "sentinels", scope: KV.sentinels, keyOf: byId },
+  { field: "sketches", scope: KV.sketches, keyOf: byId },
+  { field: "crystals", scope: KV.crystals, keyOf: byId },
+  { field: "facets", scope: KV.facets, keyOf: byId },
+  { field: "lessons", scope: KV.lessons, keyOf: byId },
+  { field: "insights", scope: KV.insights, keyOf: byId },
+  { field: "routines", scope: KV.routines, keyOf: byId },
+  { field: "signals", scope: KV.signals, keyOf: byId },
+  { field: "checkpoints", scope: KV.checkpoints, keyOf: byId },
+  { field: "accessLogs", scope: KV.accessLog, keyOf: (a) => String(a.memoryId) },
+];
+
+export type DurableRows = {
+  [K in DurableStoreField]?: NonNullable<ExportData[K]>;
+};
+
+// B-mode (graph leg off): the graph scopes are not enumerated, so their
+// fields are absent rather than empty.
+export async function readDurableStores(kv: StateKV): Promise<DurableRows> {
+  const readable = DURABLE_STORES.filter((s) => !(s.graph && graphLegDisabled()));
+  const lists = await Promise.all(readable.map((s) => kv.list(s.scope)));
+  return Object.fromEntries(readable.map((s, i) => [s.field, lists[i]]));
+}
+
+function nonEmpty<T>(rows: T[] | undefined): T[] | undefined {
+  return rows && rows.length > 0 ? rows : undefined;
 }
 
 export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
@@ -69,12 +121,13 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
       const rawOffset = Number(data?.offset);
       const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
 
-      const allSessions = await kv.list<Session>(KV.sessions);
+      const stores = await readDurableStores(kv);
+      const allSessions = stores.sessions ?? [];
       const paginatedSessions = maxSessions !== undefined
         ? allSessions.slice(offset, offset + maxSessions)
         : allSessions;
-      const memories = await kv.list<Memory>(KV.memories);
-      const summaries = await kv.list<SessionSummary>(KV.summaries);
+      const memories = stores.memories ?? [];
+      const summaries = stores.summaries ?? [];
 
       const observations: Record<string, CompressedObservation[]> = {};
       const obsResults = await Promise.all(
@@ -91,54 +144,10 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         }
       }
 
-      const profiles: ProjectProfile[] = [];
-      const uniqueProjects = [...new Set(paginatedSessions.map((s) => s.project))];
-      const profileResults = await Promise.all(
-        uniqueProjects.map((project) =>
-          kv.get<ProjectProfile>(KV.profiles, project).catch(() => null),
-        ),
+      const uniqueProjects = new Set(paginatedSessions.map((s) => s.project));
+      const profiles = (stores.profiles ?? []).filter((p) =>
+        uniqueProjects.has(p.project),
       );
-      for (const profile of profileResults) {
-        if (profile) profiles.push(profile);
-      }
-
-      const [
-        graphNodes,
-        graphEdges,
-        semanticMemories,
-        proceduralMemories,
-        actions,
-        actionEdges,
-        sentinels,
-        sketches,
-        crystals,
-        facets,
-        lessons,
-        insights,
-        routines,
-        signals,
-        checkpoints,
-        accessLogs,
-      ] = await Promise.all([
-        // B-mode: graph frozen — export omits the graph scope rather than
-        // enumerate it. Non-graph scopes export normally.
-        graphLegDisabled() ? [] : kv.list<GraphNode>(KV.graphNodes).catch(() => []),
-        graphLegDisabled() ? [] : kv.list<GraphEdge>(KV.graphEdges).catch(() => []),
-        kv.list<SemanticMemory>(KV.semantic).catch(() => []),
-        kv.list<ProceduralMemory>(KV.procedural).catch(() => []),
-        kv.list<Action>(KV.actions).catch(() => []),
-        kv.list<ActionEdge>(KV.actionEdges).catch(() => []),
-        kv.list<Sentinel>(KV.sentinels).catch(() => []),
-        kv.list<Sketch>(KV.sketches).catch(() => []),
-        kv.list<Crystal>(KV.crystals).catch(() => []),
-        kv.list<Facet>(KV.facets).catch(() => []),
-        kv.list<Lesson>(KV.lessons).catch(() => []),
-        kv.list<Insight>(KV.insights).catch(() => []),
-        kv.list<Routine>(KV.routines).catch(() => []),
-        kv.list<Signal>(KV.signals).catch(() => []),
-        kv.list<Checkpoint>(KV.checkpoints).catch(() => []),
-        kv.list<AccessLogExport>(KV.accessLog).catch(() => []),
-      ]);
 
       const exportData: ExportData = {
         version: VERSION,
@@ -147,25 +156,23 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         observations,
         memories,
         summaries,
-        profiles: profiles.length > 0 ? profiles : undefined,
-        graphNodes: graphNodes.length > 0 ? graphNodes : undefined,
-        graphEdges: graphEdges.length > 0 ? graphEdges : undefined,
-        semanticMemories:
-          semanticMemories.length > 0 ? semanticMemories : undefined,
-        proceduralMemories:
-          proceduralMemories.length > 0 ? proceduralMemories : undefined,
-        actions: actions.length > 0 ? actions : undefined,
-        actionEdges: actionEdges.length > 0 ? actionEdges : undefined,
-        sentinels: sentinels.length > 0 ? sentinels : undefined,
-        sketches: sketches.length > 0 ? sketches : undefined,
-        crystals: crystals.length > 0 ? crystals : undefined,
-        facets: facets.length > 0 ? facets : undefined,
-        lessons: lessons.length > 0 ? lessons : undefined,
-        insights: insights.length > 0 ? insights : undefined,
-        routines: routines.length > 0 ? routines : undefined,
-        signals: signals.length > 0 ? signals : undefined,
-        checkpoints: checkpoints.length > 0 ? checkpoints : undefined,
-        accessLogs: accessLogs.length > 0 ? accessLogs : undefined,
+        profiles: nonEmpty(profiles),
+        graphNodes: nonEmpty(stores.graphNodes),
+        graphEdges: nonEmpty(stores.graphEdges),
+        semanticMemories: nonEmpty(stores.semanticMemories),
+        proceduralMemories: nonEmpty(stores.proceduralMemories),
+        actions: nonEmpty(stores.actions),
+        actionEdges: nonEmpty(stores.actionEdges),
+        sentinels: nonEmpty(stores.sentinels),
+        sketches: nonEmpty(stores.sketches),
+        crystals: nonEmpty(stores.crystals),
+        facets: nonEmpty(stores.facets),
+        lessons: nonEmpty(stores.lessons),
+        insights: nonEmpty(stores.insights),
+        routines: nonEmpty(stores.routines),
+        signals: nonEmpty(stores.signals),
+        checkpoints: nonEmpty(stores.checkpoints),
+        accessLogs: nonEmpty(stores.accessLogs),
       };
 
       if (maxSessions !== undefined) {

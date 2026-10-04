@@ -2217,7 +2217,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Snapshot restore is additive and omits durable stores, so it is not a recovery point."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — #127: src/functions/snapshot.ts restore replaces every captured store (rows the snapshot lacks are deleted, snapshot rows rewritten and re-indexed); test/snapshot.test.ts covers it."
+    fixed_by: "#127"
     url: https://github.com/rohitg00/agentmemory/issues/1190
   - number: 1191
     title: "Semantic and Procedural Memory need a bounded retention path"
