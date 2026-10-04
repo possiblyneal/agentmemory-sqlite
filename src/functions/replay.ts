@@ -13,7 +13,7 @@ import { importOrigin } from "../types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId, fingerprintId } from "../state/schema.js";
 import { parseJsonlText } from "../replay/jsonl-parser.js";
-import { resetLessonIndex } from "./lessons.js";
+import { reinforceLesson, resetLessonIndex } from "./lessons.js";
 import { projectTimeline, type Timeline } from "../replay/timeline.js";
 import { safeAudit } from "./audit.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
@@ -50,16 +50,28 @@ async function isSymlink(path: string): Promise<boolean> {
   }
 }
 
+const HOOK_TYPE_BY_OBSERVATION_TYPE: Partial<
+  Record<CompressedObservation["type"], RawObservation["hookType"]>
+> = {
+  conversation: "prompt_submit",
+  error: "post_tool_failure",
+  notification: "notification",
+};
+
 function rawFromCompressed(obs: CompressedObservation): RawObservation {
+  const isConversation = obs.type === "conversation";
+  const content = [obs.title, obs.narrative, ...(obs.facts || [])]
+    .filter(Boolean)
+    .join("\n");
   return {
     id: obs.id,
     sessionId: obs.sessionId,
     timestamp: obs.timestamp,
-    hookType: "post_tool_use",
-    toolName: undefined,
+    hookType: HOOK_TYPE_BY_OBSERVATION_TYPE[obs.type] ?? "post_tool_use",
+    toolName: obs.toolName,
     toolInput: undefined,
-    toolOutput: undefined,
-    userPrompt: obs.type === "conversation" ? obs.narrative : undefined,
+    toolOutput: isConversation || !content ? undefined : content,
+    userPrompt: isConversation ? obs.narrative : undefined,
     assistantResponse: undefined,
     raw: { title: obs.title, narrative: obs.narrative, facts: obs.facts },
   };
@@ -147,19 +159,21 @@ async function deriveCrystalAndLessons(
       const existing = await kv.get<Lesson>(KV.lessons, lessonId);
       if (existing) {
         const existingSources = existing.sourceIds || [];
-        const mergedSources = existingSources.includes(sessionId)
-          ? existingSources
-          : [...existingSources, sessionId];
+        const isNewSource = !existingSources.includes(sessionId);
         const existingTags = existing.tags || [];
-        const mergedTags = existingTags.includes("auto-import")
-          ? existingTags
-          : [...existingTags, "auto-import"];
         const merged: Lesson = {
           ...existing,
-          sourceIds: mergedSources,
-          tags: mergedTags,
+          sourceIds: isNewSource
+            ? [...existingSources, sessionId]
+            : existingSources,
+          tags: existingTags.includes("auto-import")
+            ? existingTags
+            : [...existingTags, "auto-import"],
           updatedAt: createdAt,
         };
+        // A second session teaching the same lesson is new evidence; the
+        // same session re-imported is not, so it must not inflate confidence.
+        if (isNewSource) reinforceLesson(merged);
         await kv.set(KV.lessons, lessonId, merged);
       } else {
         const lesson: Lesson = {

@@ -54,7 +54,7 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
   return lessonIndex ?? ensureLessonIndex(kv);
 }
 
-function reinforceLesson(lesson: Lesson): void {
+export function reinforceLesson(lesson: Lesson): void {
   const now = new Date().toISOString();
   lesson.reinforcements++;
   lesson.confidence = Math.min(

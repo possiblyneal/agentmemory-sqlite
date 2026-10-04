@@ -117,4 +117,33 @@ describe("import-jsonl lesson re-derivation (#1292)", () => {
     expect(lessons[0].reinforcements).toBe(0);
     expect(lessons[0].lastReinforcedAt).toBeUndefined();
   });
+
+  it("reinforces a lesson when a different session teaches it again", async () => {
+    const root = mkdtempSync(join(tmpdir(), "replay-lessons-"));
+    const dir = join(root, "proj");
+    mkdirSync(dir);
+    const ts = "2026-04-17T10:00:00.000Z";
+    for (const id of ["sess-a", "sess-b"]) {
+      writeFileSync(
+        join(dir, `${id}.jsonl`),
+        [
+          { type: "user", sessionId: id, timestamp: ts, cwd: root,
+            message: { role: "user", content: [{ type: "text", text: "hello " + id }] } },
+          { type: "assistant", sessionId: id, timestamp: ts,
+            message: { role: "assistant", content: [{ type: "text", text: "Always run the migration before seeding." }] } },
+        ].map((l) => JSON.stringify(l)).join("\n") + "\n",
+      );
+    }
+    const kv = mockKV();
+    const sdk = mockSdk();
+    registerReplayFunctions(sdk, kv as never);
+
+    await sdk.trigger({ function_id: "mem::replay::import-jsonl", payload: { path: root } });
+
+    const [lesson] = await kv.list<Lesson>(KV.lessons);
+    expect(lesson.sourceIds).toHaveLength(2);
+    expect(lesson.reinforcements).toBe(1);
+    expect(lesson.confidence).toBeCloseTo(0.46);
+    expect(lesson.lastReinforcedAt).toBeDefined();
+  });
 });
