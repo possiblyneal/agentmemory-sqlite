@@ -8,7 +8,7 @@ import type {
   GraphNode,
   GraphEdge,
 } from "../types.js";
-import { getVisibleTools } from "./tools-registry.js";
+import { getVisibleTools, PROJECT_FILTER_DESCRIPTION } from "./tools-registry.js";
 import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
@@ -1711,7 +1711,7 @@ export function registerMcpEndpoints(
       arguments: [
         {
           name: "project",
-          description: "Project path to analyze (optional)",
+          description: PROJECT_FILTER_DESCRIPTION,
           required: false,
         },
       ],
