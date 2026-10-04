@@ -36,9 +36,9 @@ import { recordAudit } from "./audit.js";
 import { getSearchIndex } from "./search.js";
 import { logger } from "../logger.js";
 
-// #753: keep the response payload below the iii state channel ceiling.
-// 500 nodes + their incident edges hold well under the limit on the
-// reported 11k-node / 28k-edge corpus, and 5,000 is the upper bound a
+// #753: keep the response payload small enough to serialize and render.
+// 500 nodes + their incident edges stay small on the reported
+// 11k-node / 28k-edge corpus, and 5,000 is the upper bound a
 // caller can request explicitly. Tuned conservatively because edges
 // fan out faster than nodes.
 const DEFAULT_GRAPH_QUERY_LIMIT = 500;
@@ -52,30 +52,6 @@ const MAX_GRAPH_QUERY_LIMIT = 5000;
 // fresh during rebuild and stored alongside.
 const SNAPSHOT_TOP_NODES = DEFAULT_GRAPH_QUERY_LIMIT;
 const SNAPSHOT_KEY = "current";
-
-// `state::list` over a 75K-node scope is slow. The query handler races
-// the enumeration against this budget and falls back to the snapshot (or
-// a warning envelope) when the live path is too slow.
-const LIVE_ENUMERATION_BUDGET_MS = 6000;
-
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(
-      () => reject(new Error(`${label}: exceeded ${ms}ms budget`)),
-      ms,
-    );
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (err) => {
-        clearTimeout(t);
-        reject(err);
-      },
-    );
-  });
-}
 
 // #1171: the snapshot is derived and disposable, so it holds a projection of
 // each node and edge with provenance stripped. Origin is read from the record.
@@ -204,15 +180,9 @@ function paginateFromSnapshot(
   };
 }
 
-// #814 v2: the rebuild path won't terminate on corpora large enough
-// that kv.list returns a payload too big to JSON.parse without
-// starving the iii heartbeat. We don't actually know the corpus size
-// without enumerating, but we can refuse to start a rebuild if the
-// snapshot's recorded `totalNodes` already exceeds this threshold —
-// the rebuild path is unreliable above it, and an incremental
-// extract-driven snapshot is the right approach for those corpora.
-// Operators above the threshold should use mem::graph-reset and let
-// future extracts rebuild incrementally.
+// state::list is synchronous, so each scope a rebuild enumerates blocks
+// the event loop for the whole read. The rebuild lists nodes alone and
+// refuses above this ceiling before it reads edges.
 const REBUILD_SAFE_NODE_CEILING = GRAPH_INDEX_NODE_CEILING;
 
 // Bounds the index-served BFS in mem::graph-query so a dense corpus
@@ -812,9 +782,9 @@ export function extractGraphHeuristics(
 // duplicating.
 //
 // #814 v2: targeted name-index lookups replace the O(n) scan over
-// `kv.list<GraphNode>(KV.graphNodes)`. At 75K nodes the list payload
-// exceeds the iii heartbeat budget and the worker dies before merge can
-// complete. Each name-index entry is a single small kv.get/set pair.
+// `kv.list<GraphNode>(KV.graphNodes)`, which blocks the event loop for the
+// whole scope on every extract. Each name-index entry is a single small
+// kv.get/set pair.
 // Fork posture (graph-off): a graph WRITE is allowed only when extraction is
 // armed (GRAPH_EXTRACTION_ENABLED) AND the graph leg is not killed
 // (AGENTMEMORY_GRAPH_LEG=off). Stock 0.9.29 writes heuristic nodes with no
@@ -1256,9 +1226,7 @@ export function registerGraphFunction(
   // #753: every branch now applies a default cap and reports the
   // unbounded `total*` counts. Before this change, an unfiltered POST
   // /graph/query body (`{}`) on a corpus with ~10k+ nodes serialized
-  // to a payload large enough that the iii state response channel
-  // rejected it with HTTP 500 "Invocation stopped", leaving the viewer
-  // graph tab silently blank.
+  // the whole graph into one response.
   sdk.registerFunction("mem::graph-query",
     async (data: {
       startNodeId?: string;
@@ -1392,11 +1360,7 @@ export function registerGraphFunction(
   // #814 v2: explicit rebuild backfills the snapshot AND the name /
   // edge-key / degree indexes from existing graphNodes/graphEdges
   // scopes. This is the path operators run once after upgrading to a
-  // post-#814 build to bring legacy corpora online. It enumerates via
-  // kv.list — the same pair that breaks at 75K+ — so we refuse to
-  // run on corpora large enough that the response payload would
-  // block the worker heartbeat. Above the ceiling the only safe path
-  // is mem::graph-reset followed by incremental re-extraction.
+  // post-#814 build to bring legacy corpora online.
   sdk.registerFunction(
     "mem::graph-snapshot-rebuild",
     async (data?: { force?: boolean }) => {
@@ -1411,17 +1375,10 @@ export function registerGraphFunction(
           error: "Graph leg is off (B-mode); snapshot rebuild is disabled.",
         };
       }
-      // #825: pre-flight refusal for legacy corpora. The old guard
-      // checked node count AFTER kv.list, but the heartbeat dies at
-      // ~0.35s on a 75K-node response — long before the wall-clock
-      // budget can fire. We can't safely enumerate to discover size.
-      //
-      // Heuristic: if no snapshot exists, the corpus is either empty
-      // or legacy. The empty case has nothing to rebuild; the legacy
-      // case will crash. Refuse both unless `force: true` is passed
-      // (operator opt-in to attempt rebuild on a corpus they know is
-      // small enough — typically under 10K nodes on the default iii
-      // state adapter).
+      // #825: pre-flight refusal for legacy corpora. If no snapshot
+      // exists, the corpus is either empty or legacy. Refuse both
+      // unless `force: true` is passed (operator opt-in on a corpus
+      // they know is small enough).
       // Strict boolean check on force — accept only literal `true`,
       // never truthy strings/numbers, so a hand-crafted JSON payload
       // can't accidentally bypass the legacy-corpus safeguard.
@@ -1436,9 +1393,9 @@ export function registerGraphFunction(
             success: false,
             legacyCorpus: true,
             error:
-              "No prior snapshot found. Rebuild would call kv.list on " +
-              "KV.graphNodes/Edges, which heartbeat-crashes the worker " +
-              "on corpora past the iii state response budget (~25K nodes). " +
+              "No prior snapshot found. Rebuild would enumerate " +
+              "KV.graphNodes/Edges, which blocks the daemon on large " +
+              `corpora (refused past ${REBUILD_SAFE_NODE_CEILING} nodes). ` +
               "Either (a) call POST /agentmemory/graph/reset to drop into " +
               "incremental-only mode and rebuild from new extracts, or " +
               "(b) re-send with `force: true` if you're certain the " +
@@ -1453,14 +1410,7 @@ export function registerGraphFunction(
       }
 
       try {
-        const [nodes, edges] = await withTimeout(
-          Promise.all([
-            kv.list<GraphNode>(KV.graphNodes),
-            kv.list<GraphEdge>(KV.graphEdges),
-          ]),
-          LIVE_ENUMERATION_BUDGET_MS,
-          "graph-snapshot-rebuild enumeration",
-        );
+        const nodes = await kv.list<GraphNode>(KV.graphNodes);
 
       if (nodes.length > REBUILD_SAFE_NODE_CEILING) {
         logger.warn("Graph snapshot rebuild aborted: corpus too large", {
@@ -1478,6 +1428,11 @@ export function registerGraphFunction(
             `to wipe and let future extracts rebuild incrementally.`,
         };
       }
+
+      // An extract between the two reads can leave edges whose nodes
+      // this snapshot lacks; the snapshot is disposable, so that skew is
+      // accepted over listing edges for a corpus about to be refused.
+      const edges = await kv.list<GraphEdge>(KV.graphEdges);
 
       // Backfill the targeted-lookup indexes so post-rebuild
       // graph-extract calls hit the O(1) path instead of falling
@@ -1543,13 +1498,9 @@ export function registerGraphFunction(
   });
 
   // #814 v2 + #825: clean-restart escape hatch for corpora of any
-  // size, including the legacy 75K+ case that crashes kv.list.
+  // size, including those past REBUILD_SAFE_NODE_CEILING.
   //
-  // Previous reset walked kv.list<GraphNode/Edge>(...) which is the
-  // exact primitive that heartbeat-crashes the worker on the corpus
-  // this reset was meant to recover (Allan's repro, 0.35s death).
-  //
-  // The new design is enumeration-free: write an empty snapshot and
+  // It is enumeration-free: write an empty snapshot and
   // return. The hot path (mem::graph-query empty-body, mem::graph-stats)
   // reads ONLY the snapshot post-#816, so a fresh empty snapshot
   // makes the graph behave as if it were empty for every read.

@@ -893,9 +893,17 @@ describe("Graph Functions", () => {
         );
       }
       await Promise.all(sets);
+      const listed: string[] = [];
+      const recordingKv = {
+        ...localKv,
+        list: <T>(scope: string) => {
+          listed.push(scope);
+          return localKv.list<T>(scope);
+        },
+      };
 
       const localSdk = mockSdk();
-      registerGraphFunction(localSdk as never, localKv as never, mockProvider as never);
+      registerGraphFunction(localSdk as never, recordingKv as never, mockProvider as never);
 
       const result = (await localSdk.trigger(
         "mem::graph-snapshot-rebuild",
@@ -904,6 +912,7 @@ describe("Graph Functions", () => {
       expect(result.success).toBe(false);
       expect(result.tooLarge).toBe(true);
       expect(result.totalNodes).toBeGreaterThanOrEqual(25001);
+      expect(listed).toEqual(["mem:graph:nodes"]);
     });
 
     // #825: new pre-flight refusal when no snapshot exists (signals
