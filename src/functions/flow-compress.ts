@@ -112,6 +112,18 @@ export function registerFlowCompressFunction(
           project: data.project,
         });
 
+        if (summary.lesson) {
+          await sdk.trigger({
+            function_id: "mem::lesson-save",
+            payload: {
+              content: summary.lesson,
+              project: data.project,
+              source: "flow",
+              sourceIds: [memory.id],
+            },
+          });
+        }
+
         return {
           success: true,
           compressed: doneActions.length,

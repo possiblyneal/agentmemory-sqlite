@@ -899,7 +899,7 @@ export interface Lesson {
   context: string;
   confidence: number;
   reinforcements: number;
-  source: "crystal" | "manual" | "consolidation";
+  source: "crystal" | "manual" | "consolidation" | "flow";
   sourceIds: string[];
   project?: string;
   tags: string[];
