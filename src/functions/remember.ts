@@ -27,14 +27,17 @@ function safeSlice(text: string, length: number): string {
 }
 
 // Signs that a caller mis-encoded its tool call and the arguments after content
-// were absorbed into it as literal text. No /g flag: reused across calls.
+// were absorbed into it as literal text. /g so match() counts every marker.
 const XML_LEAK_MARKERS = [
   /<\/(?:[a-z]+:)?(?:parameter|invoke|function_calls)>/gi,
   /<parameter\s+name=/gi,
   /<\/content>/gi,
 ];
-// A JSON argument list that closed content's string and went on to the next key.
-const JSON_LEAK = /["\u201d]\s*,\s*["\u201c](?:type|concepts|files|project)["\u201d]\s*:/;
+// A JSON argument list that closed content's string and went on to the next
+// key. type counts only with a Memory type as its value, so quoted JSON such as
+// a package.json "type": "module" still saves.
+const JSON_LEAK =
+  /["\u201d]\s*,\s*["\u201c](?:concepts["\u201d]\s*:|type["\u201d]\s*:\s*["\u201c](?:pattern|preference|architecture|bug|workflow|fact)["\u201d])/;
 
 // More than one XML marker is required so content that legitimately mentions
 // a single tag still saves.

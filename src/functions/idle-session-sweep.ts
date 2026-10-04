@@ -31,11 +31,11 @@ export function registerIdleSessionSweepFunction(
           // Re-read so an Observation recorded since the listing keeps the Session open.
           const fresh = await kv.get<Session>(KV.sessions, candidate.id);
           if (!isIdle(fresh, cutoff)) continue;
-          await sdk.trigger({
+          const ended = await sdk.trigger<unknown, { status_code: number }>({
             function_id: "api::session::end",
             payload: { body: { sessionId: candidate.id } },
           });
-          closed++;
+          if (ended?.status_code === 200) closed++;
         } catch (err) {
           logger.warn("Idle session close failed", {
             sessionId: candidate.id,

@@ -176,7 +176,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       for (let i = 0; i < hits.length; i++) {
         const l = lessonRecords.get(hits[i].obsId);
         if (!l || l.deleted || l.confidence < minConfidence) continue;
-        if (data.project && l.project !== data.project) continue;
+        if (data.project && l.project && l.project !== data.project) continue;
 
         const relevance = maxHit > 0 ? hits[i].score / maxHit : 0;
         const daysSinceReinforced = l.lastReinforcedAt

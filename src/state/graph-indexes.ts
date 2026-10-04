@@ -282,7 +282,10 @@ export async function openGraphReadView(kv: StateKV): Promise<GraphReadView> {
   return {
     reader,
     loadCatalog: () => {
-      entry.catalog ??= loadNameCatalog(kv);
+      entry.catalog ??= loadNameCatalog(kv).catch((err) => {
+        entry.catalog = undefined;
+        throw err;
+      });
       return entry.catalog;
     },
   };
@@ -290,20 +293,24 @@ export async function openGraphReadView(kv: StateKV): Promise<GraphReadView> {
 
 // A bounded snapshot of live nodes and the edges incident to them, read
 // through the indexes. Empty while the graph is unreadable; never enumerates.
+// The limit counts only nodes that pass keep, so a filter applied here cannot
+// be starved by nodes it would have dropped.
 export async function readBoundedGraphSnapshot(
   kv: StateKV,
   nodeLimit: number,
+  keep: (node: GraphNode) => boolean = () => true,
 ): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
   if (!(await graphReadable(kv))) return { nodes: [], edges: [] };
   const { reader, loadCatalog } = await openGraphReadView(kv);
-  const catalog = [...(await loadCatalog())]
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .slice(0, nodeLimit);
+  const catalog = [...(await loadCatalog())].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
   const nodes: GraphNode[] = [];
   const edges = new Map<string, GraphEdge>();
   for (const entry of catalog) {
+    if (nodes.length >= nodeLimit) break;
     const node = await reader.getNode(entry.id);
-    if (!node) continue;
+    if (!node || !keep(node)) continue;
     nodes.push(node);
     for (const edge of await reader.getIncidentEdges(node.id)) {
       edges.set(edge.id, edge);

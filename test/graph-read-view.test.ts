@@ -135,6 +135,17 @@ describe("readBoundedGraphSnapshot", () => {
     expect(snap.edges.map((e) => e.id)).toEqual(["e1"]);
   });
 
+  it("counts only kept nodes toward the limit", async () => {
+    const { kv } = storeBackedKV();
+    const nodes = ["a", "b", "c"].map((n) => node(`node_${n}`, n, `obs_${n}`));
+    for (const n of nodes) await kv.set(KV.graphNodes, n.id, n);
+    await backfillGraphIndexes(kv, nodes, []);
+
+    const snap = await readBoundedGraphSnapshot(kv, 1, (n) => n.id === "node_c");
+
+    expect(snap.nodes.map((n) => n.id)).toEqual(["node_c"]);
+  });
+
   it("is empty while the indexes are not armed", async () => {
     const { kv } = storeBackedKV();
     const n = node("n1", "x", "obs_1");

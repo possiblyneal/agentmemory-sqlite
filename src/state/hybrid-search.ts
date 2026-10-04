@@ -48,7 +48,7 @@ const DAY_MS = 86_400_000;
 function isDurableRecord(obsId: string, sessionId: string): boolean {
   return (
     obsId.startsWith("mem_") ||
-    obsId.startsWith("lse_") ||
+    obsId.startsWith("lsn_") ||
     sessionId === MEMORY_SESSION ||
     sessionId === "lesson"
   );

@@ -153,6 +153,12 @@ describe("mem::remember fixes", () => {
       });
     }
 
+    it("saves quoted JSON whose keys share a name with remember's", async () => {
+      const { remember } = setup();
+      const r = await remember({ content: 'package.json declares "name": "x", "type": "module", "files": ["dist"]' });
+      expect(r.success).toBe(true);
+    });
+
     it("saves content that merely mentions one tag", async () => {
       const { remember } = setup();
       const r = await remember({ content: "the parser chokes on a stray </parameter> tag" });

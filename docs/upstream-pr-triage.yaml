@@ -200,7 +200,7 @@ prs:
       # +40 more
     note: "AGENTMEMORY_PROJECT_ISOLATION enforced across MCP, REST and search, including a cross-project leak in hybrid smart-search."
     disposition: already-fixed
-    status: "fixed-here — implemented on fix/upstream-triage-run: the plugin and connect run this fork's agentmemory mcp, which fills an omitted project from its cwd (src/mcp/default-project.ts)."
+    status: "fixed-here — implemented on fix/upstream-triage-run: the plugin and connect run this fork's agentmemory mcp, which fills an omitted project from its cwd (src/mcp/default-project.ts). REST and the daemon's /mcp endpoint still read every project when project is omitted; no AGENTMEMORY_PROJECT_ISOLATION switch."
     fixed_by: "8ecc7b0, f688b13"
     url: https://github.com/rohitg00/agentmemory/pull/829
   - number: 878

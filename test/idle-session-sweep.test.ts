@@ -70,6 +70,13 @@ describe("mem::idle-session-sweep", () => {
     expect(result.closed).toBe(2);
   });
 
+  it("does not count a Session the end path did not find", async () => {
+    await seed(session("gone", { updatedAt: ago(7) }));
+    sdk.registerFunction("api::session::end", async () => ({ status_code: 404 }));
+
+    expect((await sweep()).closed).toBe(0);
+  });
+
   it("is idempotent", async () => {
     await seed(session("idle", { updatedAt: ago(7) }));
     await sweep();
