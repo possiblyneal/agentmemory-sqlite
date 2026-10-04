@@ -124,7 +124,7 @@ ${Object.entries(CONNECT_FLAGS)
   stop [--force]     Stop the running daemon started by this CLI.
                      --force also signals processes holding the REST port that
                      the pidfile does not claim (use when the pidfile is gone).
-  mcp                Start standalone MCP shim. REST always available at :3111.
+  mcp                Start standalone MCP server. REST always available at :3111.
   import-jsonl [p]   Import Claude Code JSONL transcripts (default: ${join(getClaudeConfigDir(), "projects")})
                      --max-files <N> | --max-files=<N>: override scan cap (default 200, max 1000;
                      out-of-range is rejected; for trees >1000 files, batch by subdirectory)
@@ -157,7 +157,6 @@ Quick start:
   agentmemory status   # health + memory count + flags
   agentmemory upgrade  # upgrade agentmemory
   agentmemory mcp      # standalone MCP server
-  npx @agentmemory/mcp # same as above (shim package, proxies to this server)
 `);
   process.exit(0);
 }

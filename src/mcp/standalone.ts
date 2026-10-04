@@ -6,6 +6,8 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
+import { resolveProject } from "../hooks/_project.js";
+import { withDefaultProject } from "./default-project.js";
 import { hydrateEnvFromFile } from "../hooks/_env.js";
 import {
   isBlankOrPlaceholder,
@@ -422,11 +424,15 @@ function serverAnswered(err: unknown): boolean {
   return typeof status === "number" && !GATEWAY_DOWN.has(status);
 }
 
+let cwdProject: string | undefined;
+
 export async function handleToolCall(
   toolName: string,
-  args: Record<string, unknown>,
+  rawArgs: Record<string, unknown>,
   kvInstance: InMemoryKV = kv,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+  cwdProject ??= resolveProject();
+  const args = withDefaultProject(toolName, rawArgs, cwdProject);
   const handle = await resolveHandle();
   announceMode(handle);
 

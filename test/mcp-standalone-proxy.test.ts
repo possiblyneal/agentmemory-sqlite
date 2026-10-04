@@ -17,6 +17,7 @@ function installFetch(handler: (url: string, init?: RequestInit) => Response): F
 }
 
 const BASE = "http://localhost:3111";
+process.env["AGENTMEMORY_PROJECT_NAME"] = "cwd-project";
 
 describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
   const originalFetch = globalThis.fetch;
@@ -114,6 +115,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       limit: 5,
       format: "full",
       token_budget: 800,
+      project: "cwd-project",
     });
     expect(calls.find((c) => c.url.endsWith("/agentmemory/smart-search"))).toBeUndefined();
   });
@@ -203,7 +205,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     const localKv = new InMemoryKV(undefined);
     await handleToolCall("memory_save", { content: "scoped here", project: "here" }, localKv);
     await handleToolCall("memory_save", { content: "scoped there", project: "there" }, localKv);
-    await handleToolCall("memory_save", { content: "scoped nowhere" }, localKv);
+    await handleToolCall("memory_save", { content: "scoped nowhere", global: true }, localKv);
     const res = await handleToolCall(
       "memory_smart_search",
       { query: "scoped", project: "here" },
@@ -353,7 +355,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].body).toEqual({
       name: "memory_lesson_save",
-      arguments: { title: "Always pin lockfiles", content: "..." },
+      arguments: { title: "Always pin lockfiles", content: "...", project: "cwd-project" },
     });
   });
 
@@ -614,5 +616,25 @@ describe("@agentmemory/mcp standalone — explicit daemon must not fall back (ro
     });
     const res = await handleToolCall("memory_save", { content: "local ok" }, new InMemoryKV());
     expect(res.content[0].text).toContain("saved");
+  });
+});
+
+describe("agentmemory mcp — current project default", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    resetHandleForTests();
+    globalThis.fetch = originalFetch;
+  });
+
+  it("proxies the cwd project when omitted and keeps an explicit one", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      bodies.push(JSON.parse((init?.body as string) || "{}"));
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    });
+    await handleToolCall("memory_recall", { query: "x" });
+    await handleToolCall("memory_recall", { query: "x", project: "other" });
+    expect(bodies.map((b) => b["project"])).toEqual(["cwd-project", "other"]);
   });
 });

@@ -125,8 +125,8 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     expect(first.kind).toBe("installed");
 
     const config = JSON.parse(readFileSync(join(tmpHome, ".claude.json"), "utf-8"));
-    expect(config.mcpServers.agentmemory.command).toBe("npx");
-    expect(config.mcpServers.agentmemory.args).toContain("@agentmemory/mcp");
+    expect(config.mcpServers.agentmemory.command).toBe("agentmemory");
+    expect(config.mcpServers.agentmemory.args).toEqual(["mcp"]);
     expect(config.mcpServers.other.command).toBe("x");
 
     const second = await install({ dryRun: false, force: false });
@@ -159,6 +159,25 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
     );
     expect(entry.env.AGENTMEMORY_SECRET).toBe("${AGENTMEMORY_SECRET:-}");
     expect(entry.env.AGENTMEMORY_TOOLS).toBe("${AGENTMEMORY_TOOLS:-all}");
+  });
+
+  it("install() migrates an entry that still runs the upstream npx shim without --force", async () => {
+    mkdirSync(join(tmpHome, ".claude"), { recursive: true });
+    writeFileSync(
+      join(tmpHome, ".claude.json"),
+      JSON.stringify({
+        mcpServers: {
+          agentmemory: { command: "npx", args: ["-y", "@agentmemory/mcp"] },
+        },
+      }),
+    );
+
+    const install = await loadInstall();
+    const result = await install({ dryRun: false, force: false });
+    expect(result.kind).toBe("installed");
+    const config = JSON.parse(readFileSync(join(tmpHome, ".claude.json"), "utf-8"));
+    expect(config.mcpServers.agentmemory.command).toBe("agentmemory");
+    expect(config.mcpServers.agentmemory.args).toEqual(["mcp"]);
   });
 
   it("install() with --force re-writes even when already wired", async () => {
@@ -227,7 +246,8 @@ describe("agentmemory connect — claude-code adapter (mock filesystem)", () => 
       expect(result.kind).toBe("installed");
 
       const config = JSON.parse(readFileSync(join(configDir, ".claude.json"), "utf-8"));
-      expect(config.mcpServers.agentmemory.args).toContain("@agentmemory/mcp");
+      expect(config.mcpServers.agentmemory.command).toBe("agentmemory");
+      expect(config.mcpServers.agentmemory.args).toEqual(["mcp"]);
       expect(existsSync(join(tmpHome, ".claude.json"))).toBe(false);
       expect(existsSync(join(tmpHome, ".claude"))).toBe(false);
     });

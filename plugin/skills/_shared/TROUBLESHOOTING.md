@@ -5,7 +5,7 @@ Troubleshooting section points here instead of duplicating the block.
 
 ## "MCP tool not available"
 
-If a `memory_*` MCP tool does not appear, the stdio MCP shim never started.
+If a `memory_*` MCP tool does not appear, the `agentmemory mcp` stdio server never started. Confirm `agentmemory` is on `PATH` (`npm link` from the clone).
 Walk these in order:
 
 1. Run `/plugin list` in the host and confirm `agentmemory` shows as enabled.
