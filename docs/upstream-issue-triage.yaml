@@ -2474,7 +2474,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Unanchored getXmlTag takes the first match anywhere and compressWithRetry commits a response its validator rejected."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#131"
+    status: "fixed-here — #131: getXmlTag/getXmlChildren take the last complete occurrence (src/prompts/xml.ts); compressWithRetry returns no response when every attempt fails validation and mem::compress degrades with reason validation_failed."
     url: https://github.com/rohitg00/agentmemory/issues/1271
   - number: 1273
     title: "Governance delete finds a captured observation but deletes nothing (deleted:0)"
