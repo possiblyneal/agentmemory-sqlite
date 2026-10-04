@@ -24,9 +24,10 @@ describe("LocalEmbeddingProvider (with loaded pipeline)", () => {
       tolist: () => texts.map(() => [0.1, 0.2, 0.3]),
     }));
     const pipeline = vi.fn(() => Promise.resolve(extractor));
-    vi.doMock("@huggingface/transformers", () => ({ pipeline }));
+    const env: Record<string, unknown> = {};
+    vi.doMock("@huggingface/transformers", () => ({ env, pipeline }));
     vi.resetModules();
-    return { pipeline, extractor };
+    return { pipeline, extractor, env };
   }
 
   it("calls pipeline with dtype: q8, passes extractor opts, returns mapped Float32Array", async () => {
@@ -58,5 +59,60 @@ describe("LocalEmbeddingProvider (with loaded pipeline)", () => {
 
     expect(vecs).toHaveLength(3);
     for (const v of vecs) expect(v).toBeInstanceOf(Float32Array);
+  });
+
+  it("sets the transformers cache dir and HF mirror once from env", async () => {
+    vi.stubEnv("AGENTMEMORY_MODEL_CACHE_DIR", "/cache/models");
+    vi.stubEnv("HF_ENDPOINT", "https://hf-mirror.example");
+    const { env } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    await new Fresh().embed("hello");
+    expect(env["cacheDir"]).toBe("/cache/models");
+    expect(env["remoteHost"]).toBe("https://hf-mirror.example/");
+    vi.unstubAllEnvs();
+  });
+
+  it("defaults the cache dir under the data dir", async () => {
+    vi.stubEnv("AGENTMEMORY_MODEL_CACHE_DIR", "");
+    vi.stubEnv("XENOVA_CACHE_HOME", "");
+    vi.stubEnv("AGENTMEMORY_DATA_DIR", "/data");
+    const { env } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    await new Fresh().embed("hello");
+    expect(env["cacheDir"]).toBe("/data/models");
+    vi.unstubAllEnvs();
+  });
+
+  it("honors a model and dimensions override", async () => {
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "Xenova/bge-small-en-v1.5");
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", "512");
+    const { pipeline } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    const provider = new Fresh();
+    await provider.embed("hello");
+    expect(provider.dimensions).toBe(512);
+    expect(pipeline).toHaveBeenCalledWith(
+      "feature-extraction",
+      "Xenova/bge-small-en-v1.5",
+      { dtype: "q8" },
+    );
+    vi.unstubAllEnvs();
+  });
+
+  it("refuses a custom model without declared dimensions", async () => {
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "Xenova/bge-small-en-v1.5");
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", "");
+    mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    expect(() => new Fresh()).toThrow("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS");
+    vi.unstubAllEnvs();
   });
 });

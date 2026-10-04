@@ -1,19 +1,20 @@
 import { readFile } from "node:fs/promises";
 import type { RawImage } from "@huggingface/transformers";
 import type { EmbeddingProvider } from "../../types.js";
+import { configureTransformers } from "../transformers-env.js";
 
 type TransformersModule = typeof import("@huggingface/transformers");
 type ClipPipeline = (
-  input: string[] | RawImage | RawImage[],
-  options?: { pooling?: string; normalize?: boolean },
+  input: RawImage | RawImage[],
 ) => Promise<{ tolist: () => number[][]; data: Float32Array }>;
+type ClipTextEncoder = (texts: string[]) => Promise<number[][]>;
 
 const DEFAULT_MODEL = "Xenova/clip-vit-base-patch32";
 
 export class ClipEmbeddingProvider implements EmbeddingProvider {
   readonly name = "clip";
   readonly dimensions = 512;
-  private textExtractor: ClipPipeline | null = null;
+  private textEncoder: ClipTextEncoder | null = null;
   private imageExtractor: ClipPipeline | null = null;
   private readonly modelId: string;
 
@@ -27,9 +28,8 @@ export class ClipEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
-    const extractor = await this.getTextExtractor();
-    const output = await extractor(texts, { pooling: "mean", normalize: true });
-    return output.tolist().map((v) => new Float32Array(v));
+    const encode = await this.getTextEncoder();
+    return (await encode(texts)).map((v) => normalize(new Float32Array(v)));
   }
 
   async embedImage(src: string): Promise<Float32Array> {
@@ -41,11 +41,19 @@ export class ClipEmbeddingProvider implements EmbeddingProvider {
     return normalize(vec);
   }
 
-  private async getTextExtractor(): Promise<ClipPipeline> {
-    if (this.textExtractor) return this.textExtractor;
+  private async getTextEncoder(): Promise<ClipTextEncoder> {
+    if (this.textEncoder) return this.textEncoder;
     const t = await loadTransformers();
-    this.textExtractor = (await t.pipeline("feature-extraction", this.modelId, { dtype: "q8" })) as ClipPipeline;
-    return this.textExtractor;
+    const [tokenizer, model] = await Promise.all([
+      t.AutoTokenizer.from_pretrained(this.modelId),
+      t.CLIPTextModelWithProjection.from_pretrained(this.modelId, { dtype: "q8" }),
+    ]);
+    this.textEncoder = async (texts) => {
+      const inputs = tokenizer(texts, { padding: true, truncation: true });
+      const { text_embeds } = await model(inputs);
+      return text_embeds.tolist() as number[][];
+    };
+    return this.textEncoder;
   }
 
   private async getImageExtractor(): Promise<ClipPipeline> {
@@ -58,7 +66,7 @@ export class ClipEmbeddingProvider implements EmbeddingProvider {
 
 async function loadTransformers(): Promise<TransformersModule> {
   try {
-    return await import("@huggingface/transformers");
+    return configureTransformers(await import("@huggingface/transformers"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") {
       throw new Error(
