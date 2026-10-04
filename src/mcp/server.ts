@@ -214,6 +214,10 @@ export function registerMcpEndpoints(
               typeof args.agentId === "string" && args.agentId.trim().length > 0
                 ? (args.agentId as string).trim()
                 : undefined;
+            const saveSessionId =
+              typeof args.sessionId === "string" && args.sessionId.trim().length > 0
+                ? args.sessionId.trim()
+                : undefined;
             if (args.global !== undefined && typeof args.global !== "boolean") {
               return { status_code: 400, body: { error: "global must be a boolean" } };
             }
@@ -228,6 +232,7 @@ export function registerMcpEndpoints(
               files,
               ...(project !== undefined && { project }),
               ...(saveAgentId !== undefined && { agentId: saveAgentId }),
+              ...(saveSessionId !== undefined && { sessionId: saveSessionId }),
               ...(args.global === true && { global: true }),
             } });
             return {
