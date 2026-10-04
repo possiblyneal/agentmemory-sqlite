@@ -140,15 +140,10 @@ export function registerConsolidateFunction(
           .join("\n\n");
 
         try {
-          const response = await Promise.race([
-            provider.compress(
-              CONSOLIDATION_SYSTEM,
-              `Concept: "${concept}"\n\nObservations:\n${prompt}`,
-            ),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("compress timeout")), 30_000),
-            ),
-          ]);
+          const response = await provider.compress(
+            CONSOLIDATION_SYSTEM,
+            `Concept: "${concept}"\n\nObservations:\n${prompt}`,
+          );
           llmCallCount++;
           const parsed = parseMemoryXml(response, sessionIds);
           if (!parsed) continue;
