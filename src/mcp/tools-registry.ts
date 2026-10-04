@@ -12,7 +12,7 @@ export const PROJECT_NAME_DESCRIPTION =
   "(shared by all its worktrees), unless AGENTMEMORY_PROJECT_NAME overrides it. " +
   "Not a filesystem path.";
 
-export const PROJECT_OMITTED_CLAUSE = "Leave it out to search every project.";
+export const PROJECT_OMITTED_CLAUSE = "Leave it out to use the current project; name another project to search it.";
 
 export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} ${PROJECT_OMITTED_CLAUSE}`;
 
