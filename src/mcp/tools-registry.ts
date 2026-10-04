@@ -18,7 +18,7 @@ export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} ${PROJECT
 
 // rohitg00/agentmemory#1108: a project slot belongs to one project.
 const SLOT_PROJECT_SENTENCE =
-  "Project slots are reached only through project; leave it out to reach global slots alone.";
+  "Leave project out to use the current project's slots; a label the project lacks falls back to the global slot.";
 
 export type McpToolDef = {
   name: string;

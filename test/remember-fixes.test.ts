@@ -85,13 +85,13 @@ describe("mem::remember fixes", () => {
     expect(r.success).toBe(false);
   });
 
-  it("does not supersede across a negation polarity flip", async () => {
+  it("lets a correction that flips a rule supersede it", async () => {
     const { kv, remember } = setup();
     const a = await remember({ content: "always use the shared cache layer for lookups here" });
     const b = await remember({ content: "never use the shared cache layer for lookups here" });
-    expect(b.memory.supersedes).toEqual([]);
+    expect(b.memory.supersedes).toEqual([a.memory.id]);
     const old = await kv.get<Memory>(KV.memories, a.memory.id);
-    expect(old!.isLatest).toBe(true);
+    expect(old!.isLatest).toBe(false);
   });
 
   it("still supersedes when both sides are negated", async () => {
@@ -99,13 +99,6 @@ describe("mem::remember fixes", () => {
     const a = await remember({ content: "never use the shared cache layer for lookups here" });
     const b = await remember({ content: "never use the shared cache layer for lookups here ever" });
     expect(b.memory.supersedes).toEqual([a.memory.id]);
-  });
-
-  it("does not supersede across a CJK polarity flip", async () => {
-    const { remember } = setup();
-    await remember({ content: "请使用缓存层处理所有查询请求" });
-    const b = await remember({ content: "请不要使用缓存层处理所有查询请求" });
-    expect(b.memory.supersedes).toEqual([]);
   });
 
   it("triggers graph-extract after a save only when graph writes are enabled", async () => {

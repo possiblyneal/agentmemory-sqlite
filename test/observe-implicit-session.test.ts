@@ -147,6 +147,38 @@ describe("observe implicit session create (#638)", () => {
     expect(session.observationCount).toBe(4);
   });
 
+  it("reopens a Session the idle sweep closed", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    await kv.set("mem:sessions", "ses_swept", {
+      id: "ses_swept",
+      project: "/p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T07:00:00Z",
+      status: "completed",
+      idleClosed: true,
+      observationCount: 3,
+    });
+
+    await sdk.trigger("mem::observe", {
+      sessionId: "ses_swept",
+      project: "/p",
+      cwd: "/p",
+      hookType: "post_tool_use",
+      timestamp: new Date().toISOString(),
+      data: { tool_name: "Read" },
+    });
+
+    const session = kv.store.get("mem:sessions")!.get("ses_swept") as Record<string, unknown>;
+    expect(session.status).toBe("active");
+    expect(session).not.toHaveProperty("endedAt");
+    expect(session).not.toHaveProperty("idleClosed");
+  });
+
   it("leaves a Session that ended normally ended", async () => {
     const { registerObserveFunction } = await import("../src/functions/observe.js");
     const sdk = mockSdk();

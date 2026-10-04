@@ -6,6 +6,7 @@ export interface Session {
   updatedAt?: string;
   endedAt?: string;
   status: "active" | "completed" | "abandoned";
+  idleClosed?: boolean;
   observationCount: number;
   model?: string;
   tags?: string[];

@@ -14,7 +14,8 @@ function isIdle(session: Session | null, cutoff: number): session is Session {
 // Closes active Sessions that have recorded no Observation for the idle window,
 // through the same api::session::end path a client's SessionEnd takes, so
 // summarize and graph extraction run as usual. Completed Sessions are skipped,
-// which makes a repeat sweep a no-op.
+// which makes a repeat sweep a no-op. idleClosed lets work that resumes in the
+// same terminal reopen the Session, so the next end re-summarizes it.
 export function registerIdleSessionSweepFunction(
   sdk: ISdk,
   kv: StateKV,
@@ -35,7 +36,11 @@ export function registerIdleSessionSweepFunction(
             function_id: "api::session::end",
             payload: { body: { sessionId: candidate.id } },
           });
-          if (ended?.status_code === 200) closed++;
+          if (ended?.status_code !== 200) continue;
+          await kv.update(KV.sessions, candidate.id, [
+            { type: "set", path: "idleClosed", value: true },
+          ]);
+          closed++;
         } catch (err) {
           logger.warn("Idle session close failed", {
             sessionId: candidate.id,

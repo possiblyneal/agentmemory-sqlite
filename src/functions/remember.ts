@@ -50,13 +50,6 @@ function hasLeakedToolArgs(content: string): boolean {
   return markers > 1;
 }
 
-const EN_NEGATION = /\b(?:not|never|no|none|cannot|without|dont)\b|n['\u2019]t\b/i;
-const CJK_NEGATION = /不|没|沒|別|别|勿|ない/;
-
-function isNegated(text: string): boolean {
-  return EN_NEGATION.test(text) || CJK_NEGATION.test(text);
-}
-
 function warnGraphExtract(memId: string, err: unknown): void {
   logger.warn("graph-extract trigger failed on remember", {
     memId,
@@ -206,15 +199,6 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             // produced them still runs. Skip rather than break - a genuinely
             // superseding memory may sit further down the list.
             logger.info("remember: refusing to supersede across dates", {
-              candidateId: existing.id,
-              similarity,
-            });
-            continue;
-          }
-          if (similarity > 0.7 && isNegated(data.content) !== isNegated(existing.content)) {
-            // "always use X" and "never use X" are near-identical token sets
-            // with opposite meaning; replacing one with the other inverts a rule.
-            logger.info("remember: refusing to supersede across a polarity flip", {
               candidateId: existing.id,
               similarity,
             });

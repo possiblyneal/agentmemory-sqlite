@@ -68,6 +68,8 @@ describe("mem::idle-session-sweep", () => {
 
     expect(ended.sort()).toEqual(["idle", "never-observed-old"]);
     expect(result.closed).toBe(2);
+    expect((await kv.get<Session>(KV.sessions, "idle"))?.idleClosed).toBe(true);
+    expect((await kv.get<Session>(KV.sessions, "done"))?.idleClosed).toBeUndefined();
   });
 
   it("does not count a Session the end path did not find", async () => {
