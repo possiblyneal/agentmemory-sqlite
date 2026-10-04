@@ -11,8 +11,7 @@ import { StateKV } from "../state/kv.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
-import { storeSyntheticCompression } from "./observe.js";
-import { withKeyedLock } from "../state/keyed-mutex.js";
+import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
 import { logger } from "../logger.js";
 
 interface EvictionConfig {
@@ -168,33 +167,6 @@ async function recoverOrEvictStaleSession(
   return { recovered, evicted: true };
 }
 
-// Same lock and read-then-set as mem::observe's increment, so a concurrent
-// observe cannot write back a count read before this decrement.
-async function lowerObservationCounts(
-  kv: StateKV,
-  removedBySession: Map<string, number>,
-): Promise<void> {
-  for (const [sessionId, removed] of removedBySession) {
-    await withKeyedLock(`obs:${sessionId}`, async () => {
-      const session = await kv.get<Session>(KV.sessions, sessionId);
-      if (!session) return;
-      await kv.update(KV.sessions, sessionId, [
-        {
-          type: "set",
-          path: "observationCount",
-          value: Math.max(0, (session.observationCount || 0) - removed),
-        },
-      ]);
-    }).catch((err) => {
-      logger.warn("Eviction observation count update failed", {
-        sessionId,
-        removed,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-  }
-}
-
 export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
   let recoveryRunning = false;
   sdk.registerFunction("mem::evict", 
@@ -271,6 +243,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           .list<CompressedObservation>(KV.observations(session.id))
           .catch(() => []);
         const compressed = obs.filter((o) => o.title);
+        const lowImportanceIds = new Set<string>();
 
         for (const o of compressed) {
           if (!o.timestamp) continue;
@@ -282,10 +255,12 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           ) {
             if (dryRun) {
               stats.lowImportanceObs++;
+              lowImportanceIds.add(o.id);
             } else {
               try {
                 await deleteIndexed(kv, KV.observations(session.id), o.id);
                 stats.lowImportanceObs++;
+                lowImportanceIds.add(o.id);
                 countRemoval(session.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
@@ -310,7 +285,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
 
         const project = session.project || "unknown";
         const existing = projectObs.get(project) || [];
-        existing.push(...compressed);
+        existing.push(...compressed.filter((o) => !lowImportanceIds.has(o.id)));
         projectObs.set(project, existing);
       }
 

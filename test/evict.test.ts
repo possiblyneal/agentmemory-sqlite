@@ -395,17 +395,20 @@ describe("mem::evict stale sessions", () => {
 });
 
 describe("mem::evict session observation counts", () => {
-  function lowValueObservation(
+  function observation(
     sessionId: string,
     id: string,
+    { ageDays, importance }: { ageDays: number; importance: number },
   ): CompressedObservation {
     return {
       ...makeObservation(sessionId),
       id,
-      timestamp: daysAgo(100),
-      importance: 1,
+      timestamp: daysAgo(ageDays),
+      importance,
     };
   }
+
+  const lowValue = { ageDays: 100, importance: 1 };
 
   function liveSession(id: string, observationCount: number): Session {
     return { ...makeSession(id), startedAt: daysAgo(1), observationCount };
@@ -444,8 +447,8 @@ describe("mem::evict session observation counts", () => {
         {
           session: liveSession(sessionId, 5),
           observations: [
-            lowValueObservation(sessionId, "obs_a"),
-            lowValueObservation(sessionId, "obs_b"),
+            observation(sessionId, "obs_a", lowValue),
+            observation(sessionId, "obs_b", lowValue),
             makeObservation(sessionId),
           ],
         },
@@ -465,9 +468,9 @@ describe("mem::evict session observation counts", () => {
         {
           session: liveSession(sessionId, 1),
           observations: [
-            lowValueObservation(sessionId, "obs_a"),
-            lowValueObservation(sessionId, "obs_b"),
-            lowValueObservation(sessionId, "obs_c"),
+            observation(sessionId, "obs_a", lowValue),
+            observation(sessionId, "obs_b", lowValue),
+            observation(sessionId, "obs_c", lowValue),
           ],
         },
       ]),
@@ -479,25 +482,19 @@ describe("mem::evict session observation counts", () => {
   });
 
   it("lowers each Session by its own share of a project cap eviction", async () => {
-    const recentObservation = (sessionId: string, id: string, importance: number) => ({
-      ...makeObservation(sessionId),
-      id,
-      timestamp: daysAgo(1),
-      importance,
-    });
     const store = storeForSessions([
       {
         session: liveSession("ses_a", 2),
         observations: [
-          recentObservation("ses_a", "a1", 1),
-          recentObservation("ses_a", "a2", 2),
+          observation("ses_a", "a1", { ageDays: 1, importance: 1 }),
+          observation("ses_a", "a2", { ageDays: 1, importance: 2 }),
         ],
       },
       {
         session: liveSession("ses_b", 2),
         observations: [
-          recentObservation("ses_b", "b1", 3),
-          recentObservation("ses_b", "b2", 9),
+          observation("ses_b", "b1", { ageDays: 1, importance: 3 }),
+          observation("ses_b", "b2", { ageDays: 1, importance: 9 }),
         ],
       },
     ]);
@@ -509,6 +506,34 @@ describe("mem::evict session observation counts", () => {
       observationCount: 0,
     });
     expect(await kv.get<Session>(KV.sessions, "ses_b")).toMatchObject({
+      observationCount: 1,
+    });
+  });
+
+  it("counts an Observation removed by the low-importance pass only once when the cap also bites", async () => {
+    const sessionId = "ses_both";
+    const store = storeForSessions([
+      {
+        session: liveSession(sessionId, 5),
+        observations: [
+          observation(sessionId, "old_a", lowValue),
+          observation(sessionId, "old_b", lowValue),
+          observation(sessionId, "new_a", { ageDays: 1, importance: 4 }),
+          observation(sessionId, "new_b", { ageDays: 1, importance: 5 }),
+          observation(sessionId, "new_c", { ageDays: 1, importance: 6 }),
+        ],
+      },
+    ]);
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    const stats = await sdk.trigger({ function_id: "mem::evict", payload: {} });
+
+    expect(stats).toMatchObject({ lowImportanceObs: 2, capEvictions: 2 });
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
       observationCount: 1,
     });
   });

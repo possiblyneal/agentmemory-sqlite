@@ -2004,8 +2004,9 @@ issues:
     severity: med
     difficulty: med
     kind: bug
-    note: "Eviction leaves session observationCount and graph provenance stale. observationCount is fixed here; graph provenance is deliberately left, since Provenance is capped evidence of origin."
+    note: "Eviction leaves session observationCount and graph provenance stale."
     disposition: already-fixed
+    status: "fixed-here — src/functions/observe.ts lowerObservationCounts, shared by src/functions/evict.ts and src/functions/auto-forget.ts: mem::evict, observe's per-Session cap and auto-forget lower observationCount; graph Provenance deliberately left (capped evidence of origin, CONTEXT.md)"
     fixed_by: "#128"
     url: https://github.com/rohitg00/agentmemory/issues/1157
   - number: 1158

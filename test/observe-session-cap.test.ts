@@ -22,6 +22,18 @@ function mockKV() {
     delete: async (scope: string, key: string) => {
       store.get(scope)?.delete(key);
     },
+    update: async (
+      scope: string,
+      key: string,
+      ops: Array<{ type: string; path: string; value?: unknown }>,
+    ): Promise<unknown> => {
+      const row = store.get(scope)?.get(key) as Record<string, unknown>;
+      for (const op of ops) {
+        if (op.type === "set") row[op.path] = op.value;
+        else delete row[op.path];
+      }
+      return row;
+    },
     list: async <T>(scope: string): Promise<T[]> =>
       Array.from(store.get(scope)?.values() ?? []) as T[],
   };
@@ -126,6 +138,39 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
 
     const capWarns = vi.mocked(logger.warn).mock.calls.filter((c) => String(c[0]).startsWith("Session observation cap reached"));
     expect(capWarns).toHaveLength(1);
+  });
+
+  it("keeps the Session's count equal to its rows when the cap evicts", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    const rows = [
+      stored("a", 2, "2026-01-01T00:00:00Z"),
+      stored("b", 5, "2026-01-02T00:00:00Z"),
+      stored("c", 8, "2026-01-03T00:00:00Z"),
+    ];
+    for (const r of rows) await kv.set(KV.observations(SESSION), r.id, r);
+    await kv.set(KV.sessions, SESSION, {
+      id: SESSION,
+      project: "p",
+      cwd: "/p",
+      startedAt: "2026-01-01T00:00:00Z",
+      status: "active",
+      observationCount: 3,
+    });
+    registerObserveFunction(sdk as never, kv as never, undefined, 2);
+
+    await sdk.trigger({
+      function_id: "mem::observe",
+      payload: {
+        sessionId: SESSION,
+        hookType: "post_tool_use",
+        timestamp: "2026-05-01T00:00:00Z",
+        data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+      },
+    });
+
+    expect(await kv.list(KV.observations(SESSION))).toHaveLength(2);
+    expect(await kv.get(KV.sessions, SESSION)).toMatchObject({ observationCount: 2 });
   });
 
   it("evicts nothing under the cap", async () => {
