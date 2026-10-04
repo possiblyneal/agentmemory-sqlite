@@ -90,6 +90,73 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
 }
 
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function oneLine(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+// Titles and narrative for hooks whose payload carries no tool fields. The
+// payload shapes are what src/hooks/{subagent-start,subagent-stop,
+// task-completed,notification}.ts send.
+function describeHook(
+  raw: RawObservation,
+): { title: string; narrative: string } | undefined {
+  const d =
+    raw.raw && typeof raw.raw === "object"
+      ? (raw.raw as Record<string, unknown>)
+      : {};
+  const join = (parts: string[]) => parts.filter(Boolean).join(" | ");
+  switch (raw.hookType) {
+    case "subagent_start": {
+      const kind = str(d["agent_type"]);
+      const id = str(d["agent_id"]);
+      if (!kind && !id) return undefined;
+      return {
+        title: `Subagent started: ${kind || id}`,
+        narrative: join([kind && `type ${kind}`, id && `id ${id}`]),
+      };
+    }
+    case "subagent_stop": {
+      const kind = str(d["agent_type"]);
+      const id = str(d["agent_id"]);
+      const last = str(d["last_message"]);
+      if (!kind && !id && !last) return undefined;
+      return {
+        title: `Subagent finished: ${kind || id || oneLine(last)}`,
+        narrative: join([last, id && `id ${id}`]),
+      };
+    }
+    case "task_completed": {
+      const subject = str(d["task_subject"]);
+      const description = str(d["task_description"]);
+      if (!subject && !description) return undefined;
+      return {
+        title: `Task completed: ${subject || oneLine(description)}`,
+        narrative: join([
+          subject,
+          description,
+          str(d["teammate_name"]) && `teammate ${str(d["teammate_name"])}`,
+          str(d["team_name"]) && `team ${str(d["team_name"])}`,
+        ]),
+      };
+    }
+    case "notification": {
+      const title = str(d["title"]);
+      const message = str(d["message"]);
+      if (!title && !message) return undefined;
+      return {
+        title: oneLine(title || message),
+        narrative: join([title, message]),
+      };
+    }
+    default:
+      return undefined;
+  }
+}
+
 export function buildSyntheticCompression(
   raw: RawObservation,
 ): CompressedObservation {
@@ -102,17 +169,28 @@ export function buildSyntheticCompression(
     (s) => s.length > 0,
   );
 
+  const hook = describeHook(raw);
+  let title = toolName || "observation";
+  if (hook) title = hook.title;
+  else if (raw.hookType === "prompt_submit" && oneLine(promptStr))
+    title = oneLine(promptStr);
+  else if (raw.hookType === "post_tool_failure" && raw.toolName)
+    title = `${raw.toolName} failed`;
+
   const result: CompressedObservation = {
     id: raw.id,
     sessionId: raw.sessionId,
     timestamp: raw.timestamp,
     type: inferType(toolName, raw.hookType),
-    title: truncate(toolName || "observation", 80),
+    title: truncate(title, 80),
     subtitle: inputStr ? truncate(inputStr, 120) : undefined,
     facts: [],
     // Middle-out at 2000 (was head-only at 400): the tail of a log or prompt
     // is usually the part that matters, and 400 chars of head lost it.
-    narrative: truncateMiddleOut(narrativeParts.join(" | "), 2000),
+    narrative: truncateMiddleOut(
+      hook ? hook.narrative : narrativeParts.join(" | "),
+      2000,
+    ),
     concepts: [],
     files: extractFiles(raw.toolInput),
     importance: 5,

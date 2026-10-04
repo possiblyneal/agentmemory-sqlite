@@ -258,10 +258,12 @@ export function registerContextFunction(
       for (let j = 0; j < sessionsNeedingObs.length; j++) {
         const i = sessionsNeedingObs[j];
         const observations = obsResults[j];
-        const titled = observations.filter((o) => o.title);
+        const recallable = observations.filter(
+          (o) => o.title && o.narrative?.trim(),
+        );
 
-        if (titled.length > 0) {
-          const top = titled
+        if (recallable.length > 0) {
+          const top = recallable
             .sort(
               (a, b) =>
                 b.importance - a.importance ||
