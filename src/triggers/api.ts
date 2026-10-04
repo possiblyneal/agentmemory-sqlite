@@ -18,6 +18,7 @@ import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { getFollowupStats } from "../functions/smart-search.js";
+import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import {
@@ -1342,13 +1343,20 @@ export function registerApiTriggers(
   });
 
   sdk.registerFunction("api::patterns", 
-    async (req: ApiRequest<{ project?: string }>): Promise<Response> => {
+    async (req: ApiRequest<{ project?: string; limit?: number }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const body = (req.body ?? {}) as Record<string, unknown>;
+      const limit = parsePatternsLimit(body.limit);
+      if (limit === null) {
+        return { status_code: 400, body: { error: PATTERNS_LIMIT_ERROR } };
+      }
       const result = await sdk.trigger({
         function_id: "mem::patterns",
-        payload: { project: typeof body.project === "string" ? body.project : undefined },
+        payload: {
+          project: typeof body.project === "string" ? body.project : undefined,
+          limit,
+        },
       });
       return { status_code: 200, body: result };
     },

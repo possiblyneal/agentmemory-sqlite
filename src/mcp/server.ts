@@ -14,6 +14,7 @@ import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
 import { logger } from "../logger.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
+import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
 
 type McpResponse = {
   status_code: number;
@@ -318,8 +319,13 @@ export function registerMcpEndpoints(
           }
 
           case "memory_patterns": {
+            const limit = parsePatternsLimit(args.limit);
+            if (limit === null) {
+              return { status_code: 400, body: { error: PATTERNS_LIMIT_ERROR } };
+            }
             const result = await sdk.trigger({ function_id: "mem::patterns", payload: {
               project: args.project as string,
+              limit,
             } });
             return {
               status_code: 200,

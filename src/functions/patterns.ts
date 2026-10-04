@@ -12,15 +12,30 @@ interface Pattern {
   sessions: string[];
 }
 
+const DEFAULT_SESSION_LIMIT = 50;
+const MAX_SESSION_LIMIT = 500;
+const MAX_PAIRED_FILES_PER_SESSION = 50;
+
+export const PATTERNS_LIMIT_ERROR = `limit must be an integer between 1 and ${MAX_SESSION_LIMIT}`;
+
+export function parsePatternsLimit(value: unknown): number | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isInteger(value)) return null;
+  const n = value as number;
+  return n >= 1 && n <= MAX_SESSION_LIMIT ? n : null;
+}
+
 export function registerPatternsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::patterns", 
-    async (data: { project?: string }) => {
+    async (data: { project?: string; limit?: number }) => {
       const patterns: Pattern[] = [];
 
       const sessions = await kv.list<Session>(KV.sessions);
-      const filtered = data.project
-        ? sessions.filter((s) => s.project === data.project)
-        : sessions;
+      const filtered = (
+        data.project ? sessions.filter((s) => s.project === data.project) : sessions
+      )
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+        .slice(0, data.limit ?? DEFAULT_SESSION_LIMIT);
 
       const fileCoOccurrences = new Map<string, number>();
       const fileSessionMap = new Map<string, Set<string>>();
@@ -68,7 +83,9 @@ export function registerPatternsFunction(sdk: ISdk, kv: StateKV): void {
             }
           }
 
-          const fileList = [...sessionFiles].sort();
+          const fileList = [...sessionFiles]
+            .sort()
+            .slice(0, MAX_PAIRED_FILES_PER_SESSION);
           for (let i = 0; i < fileList.length; i++) {
             for (let j = i + 1; j < fileList.length; j++) {
               const pair = `${fileList[i]}::${fileList[j]}`;
