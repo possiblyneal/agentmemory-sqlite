@@ -64,3 +64,12 @@ were left for later.
 - **Done when.** `mem:slots` is gone and slot-list has no `legacy` key, and a snapshot,
   export or governance-delete covers the global slot scope and every project slot scope it
   enumerates.
+
+## Retry only the reduce when a merged Session Summary fails schema
+
+On a chunked Session, a merged Session Summary that fails schema re-runs every chunk call
+plus the reduce (`src/functions/summarize.ts`, the 2-attempt loop around
+`produceSummaryXml`). Retry only the reduce step.
+
+- **Done when.** A schema-rejected merged summary retries the reduce call alone, and the
+  chunked-path test in `test/summarize.test.ts` asserts 3 chunk calls + 2 reduce calls.

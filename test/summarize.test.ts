@@ -13,14 +13,6 @@ vi.mock("../src/state/schema.js", () => ({
   },
 }));
 
-vi.mock("../src/eval/schemas.js", () => ({
-  SummaryOutputSchema: {},
-}));
-
-vi.mock("../src/eval/validator.js", () => ({
-  validateOutput: () => ({ valid: true, result: { errors: [] } }),
-}));
-
 vi.mock("../src/eval/quality.js", () => ({
   scoreSummary: () => 100,
 }));
@@ -112,6 +104,9 @@ function makeProvider(responses: string[]): MemoryProvider & {
   };
 }
 
+const VALID_NARRATIVE = "A narrative long enough to pass the schema.";
+const SHORT_NARRATIVE = "too short";
+
 function summaryXml(opts: {
   title: string;
   narrative?: string;
@@ -124,7 +119,7 @@ function summaryXml(opts: {
   const c = (opts.concepts ?? []).map((x) => `<concept>${x}</concept>`).join("");
   return `<summary>
 <title>${opts.title}</title>
-<narrative>${opts.narrative ?? "narrative"}</narrative>
+<narrative>${opts.narrative ?? VALID_NARRATIVE}</narrative>
 <decisions>${d}</decisions>
 <files>${f}</files>
 <concepts>${c}</concepts>
@@ -526,7 +521,6 @@ describe("mem::summarize chunking", () => {
   it("parses a summary even when the LLM wraps XML in markdown fences", async () => {
     const wrappedXml = "Here's the summary:\n```xml\n" + summaryXml({
       title: "wrapped",
-      narrative: "n",
       decisions: ["d1"],
       files: ["src/a.ts"],
       concepts: ["c1"],
@@ -631,6 +625,98 @@ describe("mem::summarize chunking", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("parse_failed");
+  });
+
+  it("retries a first response that fails schema and stores the valid second one", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "short", narrative: SHORT_NARRATIVE }),
+      summaryXml({ title: "second-attempt" }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_invalid_once", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_invalid_once" });
+
+    expect(result.success).toBe(true);
+    expect(provider.calls).toHaveLength(2);
+    const stored: any = await kv.get("summaries", "ses_invalid_once");
+    expect(stored.title).toBe("second-attempt");
+  });
+
+  it("returns validation_failed and stores nothing when both attempts fail schema", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "short one", narrative: SHORT_NARRATIVE }),
+      summaryXml({ title: "short two", narrative: SHORT_NARRATIVE }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_invalid_twice", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_invalid_twice" });
+
+    expect(result).toMatchObject({ success: false, error: "validation_failed" });
+    expect(provider.calls).toHaveLength(2);
+    expect(await kv.get("summaries", "ses_invalid_twice")).toBeNull();
+  });
+
+  it("returns parse_failed when the last attempt fails to parse after a schema failure", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "short", narrative: SHORT_NARRATIVE }),
+      "garbage",
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_invalid_then_garbage", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_invalid_then_garbage" });
+
+    expect(result).toMatchObject({ success: false, error: "parse_failed" });
+  });
+
+  it("returns validation_failed when the last attempt fails schema after a parse failure", async () => {
+    const provider = makeProvider([
+      "garbage",
+      summaryXml({ title: "short", narrative: SHORT_NARRATIVE }),
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_garbage_then_invalid", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_garbage_then_invalid" });
+
+    expect(result).toMatchObject({ success: false, error: "validation_failed" });
+  });
+
+  it("returns empty_provider_response when the last attempt is empty after a schema failure", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "short", narrative: SHORT_NARRATIVE }),
+      "",
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_invalid_then_empty", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_invalid_then_empty" });
+
+    expect(result).toMatchObject({ success: false, error: "empty_provider_response" });
+  });
+
+  it("on a chunked Session, a merged summary that fails schema re-runs every chunk and the reduce", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "Chunk 1" }),
+      summaryXml({ title: "Chunk 2" }),
+      summaryXml({ title: "Chunk 3" }),
+      summaryXml({ title: "Merged short", narrative: SHORT_NARRATIVE }),
+      summaryXml({ title: "Chunk 1" }),
+      summaryXml({ title: "Chunk 2" }),
+      summaryXml({ title: "Chunk 3" }),
+      summaryXml({ title: "Merged" }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_chunked_invalid", obsCount: 250, provider });
+
+    const result: any = await handler({ sessionId: "ses_chunked_invalid" });
+
+    expect(result.success).toBe(true);
+    // 3 chunks + 1 reduce per attempt, two attempts.
+    expect(provider.calls).toHaveLength(8);
+    expect(provider.calls[3].system).toContain("merging multiple partial summaries");
+    expect(provider.calls[7].system).toContain("merging multiple partial summaries");
+    const stored: any = await kv.get("summaries", "ses_chunked_invalid");
+    expect(stored.title).toBe("Merged");
+    expect(stored.narrative).toBe(VALID_NARRATIVE);
   });
 });
 

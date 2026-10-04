@@ -2419,7 +2419,9 @@ issues:
     difficulty: med
     kind: bug
     note: "summarize asks for freehand XML with no response_format; 19% first-attempt parse failure."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "#133"
+    status: "fixed-here — #133: mem::summarize retries a schema-validation failure in the same two-attempt loop as a parse failure and returns the last attempt's error (src/functions/summarize.ts); provider-native response_format deliberately not adopted (#115)."
     url: https://github.com/rohitg00/agentmemory/issues/1240
   - number: 1244
     title: "Session summarisation re-runs on already-summarised sessions (954x on one session; 150x more calls than material)"
