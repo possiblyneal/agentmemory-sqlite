@@ -392,13 +392,14 @@ export function registerSummarizeFunction(
       }
 
       try {
-        // #783: chunk-level produceSummaryXml retries internally, but
-        // the final merge used to parse once and bail. Wrap the
-        // produce-and-parse pair in the same 2-attempt loop so a
-        // markdown-wrapped or otherwise wrapped response gets a
-        // second roll-of-the-dice instead of dropping the summary.
+        // #783: chunk-level produceSummaryXml retries internally, but the
+        // final merge used to parse once and bail. Produce, parse and
+        // validate share one 2-attempt loop, so a wrapped, unparseable or
+        // schema-rejected response gets a second roll of the dice. The
+        // returned error names the last attempt's failure.
         let summary: SessionSummary | null = null;
-        let response = "";
+        let lastError: "empty_provider_response" | "parse_failed" | "validation_failed" =
+          "empty_provider_response";
         let mode = "single";
         let chunks = 1;
         const concurrency = Math.min(getChunkConcurrency(), data.maxChunkConcurrency ?? Infinity);
@@ -411,10 +412,11 @@ export function registerSummarizeFunction(
             session.project,
             concurrency,
           );
-          response = produced.response;
+          const response = produced.response;
           mode = produced.mode;
           chunks = produced.chunks;
           if (!response || !response.trim()) {
+            lastError = "empty_provider_response";
             logger.warn("Empty provider response on summarize", {
               sessionId,
               provider: provider.name,
@@ -425,25 +427,44 @@ export function registerSummarizeFunction(
             });
             continue;
           }
-          summary = parseSummaryXml(
+          const parsed = parseSummaryXml(
             response,
             sessionId,
             session.project,
             compressed.length,
           );
-          if (summary) {
-            summary.lastObservationId = lastObservationId;
-            break;
+          if (!parsed) {
+            lastError = "parse_failed";
+            logger.warn("Failed to parse summary XML", { sessionId, attempt });
+            continue;
           }
-          logger.warn("Failed to parse summary XML", { sessionId, attempt });
-        }
-
-        if (!response || !response.trim()) {
-          const latencyMs = Date.now() - startMs;
-          if (metricsStore) {
-            await metricsStore.record("mem::summarize", latencyMs, false);
+          const validation = validateOutput(
+            SummaryOutputSchema,
+            {
+              title: parsed.title,
+              narrative: parsed.narrative,
+              keyDecisions: parsed.keyDecisions,
+              filesModified: parsed.filesModified,
+              concepts: parsed.concepts,
+            },
+            "mem::summarize",
+          );
+          if (!validation.valid) {
+            lastError = "validation_failed";
+            logger.warn("Summary validation failed", {
+              sessionId,
+              mode,
+              chunks,
+              attempt,
+              errors: validation.result.errors,
+              narrative: parsed.narrative.slice(0, 200),
+              narrativeLength: parsed.narrative.length,
+            });
+            continue;
           }
-          return { success: false, error: "empty_provider_response" };
+          parsed.lastObservationId = lastObservationId;
+          summary = parsed;
+          break;
         }
 
         if (!summary) {
@@ -451,39 +472,10 @@ export function registerSummarizeFunction(
           if (metricsStore) {
             await metricsStore.record("mem::summarize", latencyMs, false);
           }
-          return { success: false, error: "parse_failed" };
+          return { success: false, error: lastError };
         }
 
-        const summaryForValidation = {
-          title: summary.title,
-          narrative: summary.narrative,
-          keyDecisions: summary.keyDecisions,
-          filesModified: summary.filesModified,
-          concepts: summary.concepts,
-        };
-        const validation = validateOutput(
-          SummaryOutputSchema,
-          summaryForValidation,
-          "mem::summarize",
-        );
-
-        if (!validation.valid) {
-          const latencyMs = Date.now() - startMs;
-          if (metricsStore) {
-            await metricsStore.record("mem::summarize", latencyMs, false);
-          }
-          logger.warn("Summary validation failed", {
-            sessionId,
-            mode,
-            chunks,
-            errors: validation.result.errors,
-            narrative: summary.narrative.slice(0, 200),
-            narrativeLength: summary.narrative.length,
-          });
-          return { success: false, error: "validation_failed" };
-        }
-
-        const qualityScore = scoreSummary(summaryForValidation);
+        const qualityScore = scoreSummary(summary);
 
         await kv.set(KV.summaries, sessionId, summary);
         await safeAudit(kv, "compress", "mem::summarize", [sessionId], {
@@ -506,7 +498,6 @@ export function registerSummarizeFunction(
           title: summary.title,
           decisions: summary.keyDecisions.length,
           qualityScore,
-          valid: validation.valid,
         });
 
         return { success: true, summary, qualityScore };
