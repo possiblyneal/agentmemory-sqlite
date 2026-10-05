@@ -960,8 +960,8 @@ issues:
     difficulty: high
     kind: bug
     note: "No path to rebuild or reset a >25K legacy graph; both paths heartbeat-crash."
-    disposition: candidate
-    status: "partly-present-here — the heartbeat crash is iii-only and mem::graph-reset enumerates nothing (src/functions/graph.ts:1517-1543), but snapshot-rebuild still lists every node (graph.ts:1413) and refuses past 25,000 (src/state/graph-indexes.ts:7), so a larger graph has no rebuild path; reset also leaves adjacency and obs-nodes rows on disk."
+    disposition: already-fixed
+    fixed_by: "mem::graph-snapshot-rebuild pages nodes and edges through StateKV.listPage and rebuilds the side indexes page by page, with no 25,000-node refusal (src/functions/graph.ts rebuildIndexesAndSnapshot); mem::graph-reset deletes adjacency and obs-nodes rows in pages (clearGraphSideIndexes, src/state/graph-indexes.ts). Covered by test/graph.test.ts (#825)."
     url: https://github.com/rohitg00/agentmemory/issues/825
   - number: 826
     title: "feat: Expose post-tool-use and TaskCompleted hooks to Python plugin (Hermes integration)"

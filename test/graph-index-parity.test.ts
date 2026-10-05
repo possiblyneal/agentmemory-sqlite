@@ -46,6 +46,16 @@ function mockKV(nodes: GraphNode[] = [], edges: GraphEdge[] = []) {
       store.get(scope)?.delete(key);
       noteGraphWrite(scope);
     },
+    listPage: async <T>(
+      scope: string,
+      after: string | undefined,
+      limit: number,
+    ): Promise<Array<{ key: string; value: T }>> =>
+      [...(store.get(scope)?.entries() ?? [])]
+        .filter(([key]) => key > (after ?? ""))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .slice(0, limit)
+        .map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       listCalls.set(scope, (listCalls.get(scope) ?? 0) + 1);
       const entries = store.get(scope);

@@ -22,6 +22,7 @@ import type {
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
+    store,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
@@ -33,6 +34,16 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(
+      scope: string,
+      after: string | undefined,
+      limit: number,
+    ): Promise<Array<{ key: string; value: T }>> =>
+      [...(store.get(scope)?.entries() ?? [])]
+        .filter(([key]) => key > (after ?? ""))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .slice(0, limit)
+        .map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -872,14 +883,8 @@ describe("Graph Functions", () => {
       expect(result.nodes).toEqual([]);
     });
 
-    it("graph-snapshot-rebuild refuses corpora past REBUILD_SAFE_NODE_CEILING", async () => {
-      // Direct-poke the mock store with > 25K node values so kv.list
-      // returns them without paying the per-set cost. Each node only
-      // needs id/type/name/stale=false for the rebuild path.
+    it("graph-snapshot-rebuild rebuilds a corpus past 25,000 nodes in pages without listing it (#825)", async () => {
       const localKv = mockKV();
-      // Walk the implementation detail: mockKV stores entries in a
-      // Map under the scope key. Push directly to that map via the
-      // public `set` API in a tight loop.
       const COUNT = 25001;
       const sets: Array<Promise<unknown>> = [];
       for (let i = 0; i < COUNT; i++) {
@@ -889,12 +894,24 @@ describe("Graph Functions", () => {
             type: "concept",
             name: `bulk-${i}`,
             properties: {},
-            sourceObservationIds: [],
+            sourceObservationIds: i === 0 ? ["obs_a"] : [],
             createdAt: "2026-01-01T00:00:00Z",
             stale: false,
           }),
         );
       }
+      sets.push(
+        localKv.set("mem:graph:edges", "be_0", {
+          id: "be_0",
+          type: "related_to",
+          sourceNodeId: "bn_0",
+          targetNodeId: "bn_1",
+          weight: 1,
+          sourceObservationIds: [],
+          createdAt: "2026-01-01T00:00:00Z",
+          stale: false,
+        }),
+      );
       await Promise.all(sets);
       const listed: string[] = [];
       const recordingKv = {
@@ -911,11 +928,14 @@ describe("Graph Functions", () => {
       const result = (await localSdk.trigger(
         "mem::graph-snapshot-rebuild",
         { force: true },
-      )) as { success: boolean; tooLarge?: boolean; totalNodes?: number };
-      expect(result.success).toBe(false);
-      expect(result.tooLarge).toBe(true);
-      expect(result.totalNodes).toBeGreaterThanOrEqual(25001);
-      expect(listed).toEqual(["mem:graph:nodes"]);
+      )) as { success: boolean; totalNodes?: number; totalEdges?: number };
+      expect(result.success).toBe(true);
+      expect(result.totalNodes).toBe(COUNT);
+      expect(result.totalEdges).toBe(1);
+      expect(listed).toEqual([]);
+      expect(await localKv.get("mem:graph:obs-nodes", "obs_a")).toEqual(["bn_0"]);
+      expect(await localKv.get("mem:graph:adjacency", "bn_1")).toEqual(["be_0"]);
+      expect(localKv.store.get("mem:graph:name-shards")?.size).toBe(64);
     });
 
     // #825: new pre-flight refusal when no snapshot exists (signals
@@ -943,6 +963,17 @@ describe("Graph Functions", () => {
       expect(result.success).toBe(false);
       expect(result.legacyCorpus).toBe(true);
       expect(result.error).toMatch(/graph\/reset|force/);
+    });
+
+    it("graph-reset deletes adjacency and obs-nodes rows from before the reset (#825)", async () => {
+      await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+      expect(kv.store.get("mem:graph:obs-nodes")?.size).toBeGreaterThan(0);
+      expect(kv.store.get("mem:graph:adjacency")?.size).toBeGreaterThan(0);
+
+      await sdk.trigger("mem::graph-reset", {});
+
+      expect(kv.store.get("mem:graph:obs-nodes")?.size ?? 0).toBe(0);
+      expect(kv.store.get("mem:graph:adjacency")?.size ?? 0).toBe(0);
     });
 
     it("graph-reset is enumeration-free (does not call kv.list)", async () => {
