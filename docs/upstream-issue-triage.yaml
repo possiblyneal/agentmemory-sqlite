@@ -2866,8 +2866,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Unbounded provenance inflates a 4062-node graph to 192MB; every traversal drops the worker."
-    disposition: candidate
-    status: "partly-present-here — node/edge sourceObservationIds are capped (src/functions/graph.ts:403), but the obs→node index mem:graph:obs-nodes is unbounded per row and never pruned (src/state/graph-indexes.ts:87-100), and expandFromChunks fetches every listed node per search (src/functions/graph-retrieval.ts:245-254); it is ~636 MB, about a third of the live store."
+    disposition: already-fixed
+    fixed_by: "The obs-nodes row is capped with capSourceIds (src/state/graph-indexes.ts), deleted when its Observation is evicted (unlinkObservationNodes in src/functions/evict.ts and observe.ts), and expandFromChunks fetches at most MAX_EXPANSION_NODES nodes (src/functions/graph-retrieval.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1374
   - number: 1377
     title: "[mcp] Some MCP host bridges receive empty inputSchema from tools/list — parameterized tool calls fail"

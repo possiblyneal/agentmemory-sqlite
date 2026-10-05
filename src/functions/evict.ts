@@ -11,6 +11,7 @@ import { StateKV } from "../state/kv.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { unlinkObservationNodes } from "../state/graph-indexes.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
 import { logger } from "../logger.js";
 
@@ -262,6 +263,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 stats.lowImportanceObs++;
                 lowImportanceIds.add(o.id);
                 countRemoval(session.id);
+                await unlinkObservationNodes(kv, o.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "observation",
@@ -306,6 +308,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
                 stats.capEvictions++;
                 countRemoval(o.sessionId);
+                await unlinkObservationNodes(kv, o.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "observation",

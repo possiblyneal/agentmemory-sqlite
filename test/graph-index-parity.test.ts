@@ -406,4 +406,48 @@ describe("graph index parity", () => {
     expect((await retrieval.temporalQuery("React")).entity).toBeNull();
     expect(kv.listCallCount()).toBe(0);
   });
+
+  it("caps an obs-nodes row to the newest node ids on incremental and bulk paths", async () => {
+    process.env.AGENTMEMORY_GRAPH_MAX_SOURCE_IDS = "3";
+    try {
+      const nodes = Array.from({ length: 5 }, (_, i) =>
+        makeNode(`n${i}`, `Node${i}`, "concept", ["obs_hot"]),
+      );
+      for (const kv of [
+        await incrementalKV(nodes, []),
+        await indexedKV(nodes, []),
+      ]) {
+        expect(await kv.get("mem:graph:obs-nodes", "obs_hot")).toEqual([
+          "n2",
+          "n3",
+          "n4",
+        ]);
+      }
+    } finally {
+      delete process.env.AGENTMEMORY_GRAPH_MAX_SOURCE_IDS;
+    }
+  });
+
+  it("expandFromChunks reads at most a bounded number of nodes per search", async () => {
+    const nodes = Array.from({ length: 500 }, (_, i) =>
+      makeNode(`n${i}`, `Node${i}`, "concept", ["obs_hot"]),
+    );
+    const kv = await indexedKV(nodes, []);
+    await kv.set(
+      "mem:graph:obs-nodes",
+      "obs_hot",
+      nodes.map((n) => n.id),
+    );
+    const fetched = new Set<string>();
+    const get = kv.get;
+    kv.get = (async (scope: string, key: string) => {
+      if (scope === "mem:graph:nodes") fetched.add(key);
+      return get(scope, key);
+    }) as typeof kv.get;
+
+    await new GraphRetrieval(kv as never).expandFromChunks(["obs_hot"]);
+
+    expect(fetched.size).toBeGreaterThan(0);
+    expect(fetched.size).toBeLessThanOrEqual(200);
+  });
 });

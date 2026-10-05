@@ -12,6 +12,8 @@ import {
   loadNodeIdsForObservations,
 } from "../state/graph-indexes.js";
 
+const MAX_EXPANSION_NODES = 200;
+
 export interface GraphRetrievalResult {
   obsId: string;
   sessionId: string;
@@ -242,7 +244,9 @@ export class GraphRetrieval {
   ): Promise<GraphRetrievalResult[]> {
     if (await graphReadable(this.kv)) {
       const { reader } = await openGraphReadView(this.kv);
-      const candidateIds = await loadNodeIdsForObservations(this.kv, obsIds);
+      const candidateIds = (
+        await loadNodeIdsForObservations(this.kv, obsIds)
+      ).slice(-MAX_EXPANSION_NODES);
       const linkedNodes: GraphNode[] = [];
       for (const nodeId of candidateIds) {
         const node = await reader.getNode(nodeId);

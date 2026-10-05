@@ -537,4 +537,36 @@ describe("mem::evict session observation counts", () => {
       observationCount: 1,
     });
   });
+
+  it("deletes the obs-nodes row of every Observation it evicts and keeps the rest", async () => {
+    const sessionId = "ses_graph";
+    const store = storeForSessions([
+      {
+        session: liveSession(sessionId, 3),
+        observations: [
+          observation(sessionId, "old_a", lowValue),
+          observation(sessionId, "new_a", { ageDays: 1, importance: 4 }),
+          observation(sessionId, "new_b", { ageDays: 1, importance: 9 }),
+        ],
+      },
+    ]);
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    store.set(
+      KV.graphObsNodes,
+      new Map([
+        ["old_a", ["n1"]],
+        ["new_a", ["n2"]],
+        ["new_b", ["n3"]],
+      ]),
+    );
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    await sdk.trigger({ function_id: "mem::evict", payload: {} });
+
+    expect(await kv.get(KV.graphObsNodes, "old_a")).toBeNull();
+    expect(await kv.get(KV.graphObsNodes, "new_a")).toBeNull();
+    expect(await kv.get(KV.graphObsNodes, "new_b")).toEqual(["n3"]);
+  });
 });
