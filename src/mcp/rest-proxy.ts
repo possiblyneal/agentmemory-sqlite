@@ -2,6 +2,14 @@ const DEFAULT_URL = "http://localhost:3111";
 const DEFAULT_HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const CALL_TIMEOUT_MS = 15_000;
 const LOCAL_MODE_TTL_MS = 30_000;
+const DEFAULT_LLM_TIMEOUT_MS = 60_000;
+
+export function llmCallTimeoutMs(): number {
+  const n = Number(process.env["AGENTMEMORY_LLM_TIMEOUT_MS"]);
+  return Number.isFinite(n) && n > 0
+    ? Math.max(CALL_TIMEOUT_MS, Math.floor(n))
+    : DEFAULT_LLM_TIMEOUT_MS;
+}
 
 function probeTimeoutMs(): number {
   const raw = process.env["AGENTMEMORY_PROBE_TIMEOUT_MS"];
@@ -18,7 +26,7 @@ function forceProxy(): boolean {
 export interface ProxyHandle {
   mode: "proxy";
   baseUrl: string;
-  call: (path: string, init?: RequestInit) => Promise<unknown>;
+  call: (path: string, init?: RequestInit, timeoutMs?: number) => Promise<unknown>;
 }
 
 export interface LocalHandle {
@@ -152,7 +160,7 @@ export async function resolveHandle(): Promise<Handle> {
       const handle: ProxyHandle = {
         mode: "proxy",
         baseUrl: url,
-        call: async (path, init) => {
+        call: async (path, init, timeoutMs = CALL_TIMEOUT_MS) => {
           const res = await fetch(`${url}${path}`, {
             ...init,
             headers: {
@@ -160,7 +168,7 @@ export async function resolveHandle(): Promise<Handle> {
               ...authHeader(),
               ...(init?.headers as Record<string, string> | undefined),
             },
-            signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+            signal: AbortSignal.timeout(timeoutMs),
           });
           if (!res.ok) {
             // Carry the status: the caller treats "the server answered 503"
