@@ -1209,8 +1209,8 @@ issues:
     difficulty: med
     kind: bug
     note: "remember skill preserves exact phrasing, storing user secrets verbatim (Snyk W007)."
-    disposition: candidate
-    status: "partly-present-here — mem::remember scrubs token-shaped secrets (src/functions/remember.ts:74, src/functions/privacy.ts:5-28), but plain passwords and short keys miss the 20+-char patterns, the shim's local fallback stores content unscrubbed (src/mcp/standalone.ts:301-321), and the remember skill still says to keep the user's phrasing (plugin/skills/remember/SKILL.md:29, 52)."
+    disposition: already-fixed
+    fixed_by: "labelled secrets (password=, secret:, api_key= and similar) are scrubbed at any length by stripPrivateData (src/functions/privacy.ts); the shim's local memory_save fallback runs scrubFields (src/mcp/standalone.ts); the remember skill says never to save credentials (plugin/skills/remember/SKILL.md); tests in test/privacy.test.ts and test/mcp-standalone.test.ts"
     url: https://github.com/rohitg00/agentmemory/issues/911
     mentioned_by_prs: [941]
   - number: 912

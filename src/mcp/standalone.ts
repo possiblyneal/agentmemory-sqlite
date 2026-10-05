@@ -6,6 +6,7 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
+import { scrubFields } from "../functions/privacy.js";
 import { resolveProject } from "../hooks/_project.js";
 import { withDefaultProject } from "./default-project.js";
 import { hydrateEnvFromFile } from "../hooks/_env.js";
@@ -307,6 +308,7 @@ async function handleLocal(
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   switch (v.tool) {
     case "memory_save": {
+      v = scrubFields(v, "content");
       const id = generateId("mem");
       const isoNow = new Date().toISOString();
       await kvInstance.set("mem:memories", id, {

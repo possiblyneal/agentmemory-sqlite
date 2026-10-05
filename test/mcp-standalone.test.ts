@@ -186,6 +186,14 @@ describe("handleToolCall", () => {
     );
   });
 
+  it("memory_save offline fallback stores labelled secrets redacted", async () => {
+    const kv = new InMemoryKV();
+    await handleToolCall("memory_save", { content: "password=hunter2" }, kv);
+    const [row] = await kv.list<{ content: string; title: string }>("mem:memories");
+    expect(row.content).toBe("[REDACTED_SECRET]");
+    expect(row.title).toBe("[REDACTED_SECRET]");
+  });
+
   it("memory_save without persist path does not call writeFileSync", async () => {
     const kv = new InMemoryKV();
     await handleToolCall("memory_save", { content: "No persist path" }, kv);
