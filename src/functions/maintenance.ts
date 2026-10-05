@@ -3,9 +3,11 @@
 // `mem::backup` (POST /agentmemory/backup): a `VACUUM INTO` snapshot of the
 // live SQLite file written under a unique name, opened read-only and checked
 // (integrity_check, row counts against the live DB), then renamed over
-// `agentmemory-snapshot.sqlite`. Any failure leaves no partial file and
-// answers 500, so the backup job that calls it fails loudly instead of
-// tarring yesterday's copy.
+// `agentmemory-backup-<UTC timestamp>.sqlite`, after which only files with
+// that name pattern beyond the newest AGENTMEMORY_BACKUP_KEEP are deleted. Any
+// failure leaves no partial file and answers 500, so the backup job that calls
+// it fails loudly instead of tarring yesterday's copy. The daemon also runs it
+// daily (`mem::backup-sweep`) into the directory beside the live DB.
 //
 // `mem::index-debug-legs` (POST /agentmemory/index-debug-legs): the raw BM25
 // and vector legs for a query, full scored lists, for the acceptance
@@ -13,12 +15,12 @@
 // switched off again after acceptance.
 //
 // Both routes run behind the daemon's `middleware::api-auth`.
-import { existsSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ApiRequest, ISdk } from "../engine/types.js";
 
-import { getSqlitePath } from "../config.js";
+import { getBackupKeep, getSqlitePath } from "../config.js";
 import type { SqliteState } from "../engine/inproc/state.js";
 import { logger } from "../logger.js";
 import { getEmbeddingProvider, getSearchIndex, getVectorIndex } from "./search.js";
@@ -30,16 +32,27 @@ export type SnapshotResult = {
   kvRows: number;
   vectorRows: number;
   integrity: string;
+  pruned: string[];
 };
 
-const SNAPSHOT_NAME = "agentmemory-snapshot.sqlite";
+const BACKUP_NAME = /^agentmemory-backup-\d{8}T\d{6}Z\.sqlite$/;
+
+const backupName = (at: Date): string =>
+  `agentmemory-backup-${at.toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "")}.sqlite`;
+
+export function pruneBackups(dir: string, keep: number): string[] {
+  if (keep <= 0) return [];
+  const stale = readdirSync(dir).filter((f) => BACKUP_NAME.test(f)).sort().reverse().slice(keep);
+  for (const f of stale) unlinkSync(join(dir, f));
+  return stale;
+}
 
 const count = (db: DatabaseSync, table: string): number =>
   (db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
 
-export function snapshotDatabase(db: DatabaseSync, dir: string): SnapshotResult {
+export function snapshotDatabase(db: DatabaseSync, dir: string, keep = getBackupKeep()): SnapshotResult {
   const t0 = performance.now();
-  const final = join(dir, SNAPSHOT_NAME);
+  const final = join(dir, backupName(new Date()));
   // VACUUM INTO refuses an existing non-empty file, hence the unique name.
   const tmp = join(dir, `agentmemory-snapshot.${Date.now()}.${process.pid}.sqlite`);
   const sidecars = [`${tmp}-wal`, `${tmp}-shm`];
@@ -67,7 +80,8 @@ export function snapshotDatabase(db: DatabaseSync, dir: string): SnapshotResult 
       throw new Error(`snapshot holds ${kvRows} kv / ${vectorRows} vector rows, live DB ${liveKv} / ${liveVectors}`);
     }
     renameSync(tmp, final);
-    return { path: final, bytes: statSync(final).size, ms: Math.round(performance.now() - t0), kvRows, vectorRows, integrity };
+    const pruned = pruneBackups(dir, keep);
+    return { path: final, bytes: statSync(final).size, ms: Math.round(performance.now() - t0), kvRows, vectorRows, integrity, pruned };
   } catch (err) {
     for (const f of [tmp, ...sidecars]) if (existsSync(f)) unlinkSync(f);
     throw err;
@@ -130,6 +144,15 @@ export function registerMaintenanceFunctions(sdk: ISdk, state: SqliteState): voi
       config: { api_path: path, http_method: "POST", middleware_function_ids: ["middleware::api-auth"] },
     });
   };
+
+  sdk.registerFunction("mem::backup-sweep", async () => {
+    const dir = dirname(getSqlitePath());
+    try {
+      logger.info("daily backup written", snapshotDatabase(state.db, dir));
+    } catch (err) {
+      logger.error("daily backup FAILED", { dir, error: message(err) });
+    }
+  });
 
   route("mem::backup", "/agentmemory/backup", async (req: ApiRequest<{ dir?: string }>) => {
     const dir = typeof req.body?.dir === "string" && req.body.dir ? req.body.dir : dirname(getSqlitePath());

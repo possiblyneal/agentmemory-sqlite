@@ -511,6 +511,13 @@ export function getIdleSessionMs(): number {
   return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
 }
 
+const BACKUP_KEEP_DEFAULT = 7;
+
+export function getBackupKeep(): number {
+  const keep = safeParseInt(getMergedEnv()["AGENTMEMORY_BACKUP_KEEP"], BACKUP_KEEP_DEFAULT);
+  return keep >= 0 ? keep : BACKUP_KEEP_DEFAULT;
+}
+
 export function isConsolidationEnabled(): boolean {
   const env = getMergedEnv();
   const explicit = env["CONSOLIDATION_ENABLED"];
