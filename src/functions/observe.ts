@@ -289,6 +289,9 @@ export function registerObserveFunction(
         if (payload.hookType === "prompt_submit") {
           raw.userPrompt = d["prompt"] as string | undefined;
         }
+        if (payload.hookType === "subagent_stop" && typeof d["last_message"] === "string") {
+          raw.assistantResponse = d["last_message"];
+        }
 
         extractedImage = extractImage(sanitizedRaw);
         if (extractedImage) {

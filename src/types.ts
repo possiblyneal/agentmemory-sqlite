@@ -97,6 +97,10 @@ export interface CompressedObservation {
   // so every word of the prompt is lexically searchable; the vector leg still
   // embeds title + narrative only.
   userPrompt?: string;
+  // Raw tool input and assistant reply, scrubbed and size-capped, kept beside
+  // the synthetic narrative so replay shows what happened rather than a summary.
+  toolInput?: string;
+  assistantResponse?: string;
 }
 
 export type ObservationType =

@@ -67,12 +67,12 @@ function rawFromCompressed(obs: CompressedObservation): RawObservation {
     id: obs.id,
     sessionId: obs.sessionId,
     timestamp: obs.timestamp,
-    hookType: HOOK_TYPE_BY_OBSERVATION_TYPE[obs.type] ?? "post_tool_use",
+    hookType: obs.assistantResponse ? "stop" : (HOOK_TYPE_BY_OBSERVATION_TYPE[obs.type] ?? "post_tool_use"),
     toolName: obs.toolName,
-    toolInput: undefined,
+    toolInput: obs.toolInput,
     toolOutput: isConversation || !content ? undefined : content,
     userPrompt: isConversation ? obs.narrative : undefined,
-    assistantResponse: undefined,
+    assistantResponse: obs.assistantResponse,
     raw: { title: obs.title, narrative: obs.narrative, facts: obs.facts },
   };
 }

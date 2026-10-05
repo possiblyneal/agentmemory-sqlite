@@ -2323,8 +2323,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Default synthetic compression caps the narrative at 400 chars, so replay loses raw content."
-    disposition: candidate
-    status: "partly-present-here — the synthetic narrative is now middle-out at 2000 chars and keeps toolName and userPrompt (src/functions/compress-synthetic.ts:188-200), but observe overwrites the raw row (src/functions/observe.ts:49-50) and replay rebuilds it with toolInput and assistantResponse undefined (src/functions/replay.ts:72, 75)."
+    disposition: already-fixed
+    fixed_by: "buildSyntheticCompression keeps the scrubbed, size-capped toolInput and assistantResponse beside the narrative (src/functions/compress-synthetic.ts), and replay reads them back (src/functions/replay.ts rawFromCompressed); covered by test/replay-raw-fields.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1196
   - number: 1197
     title: "memory_save MCP path drops agentId at three more points — schema never exposes it, and two forwarding hops drop it independently of #1159/#1160"
