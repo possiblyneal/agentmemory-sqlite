@@ -6,6 +6,7 @@ import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
+import { getLessonTombstoneMs } from "../config.js";
 import { loadProjectTime } from "../state/project-time.js";
 
 // Dedicated BM25 index for lessons, with the full records cached
@@ -315,8 +316,17 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         afterDeleted: boolean;
       }> = [];
 
+      const tombstoneMs = getLessonTombstoneMs();
+      const cutoff = Date.parse(timestamp) - tombstoneMs;
+      const expired: Array<{ key: string; updatedAt: string }> = [];
+
       for (const lesson of lessons) {
-        if (lesson.deleted) continue;
+        if (lesson.deleted) {
+          if (tombstoneMs > 0 && Date.parse(lesson.updatedAt) < cutoff) {
+            expired.push({ key: lesson.id, updatedAt: lesson.updatedAt });
+          }
+          continue;
+        }
 
         const baseline = lesson.lastDecayedAt || lesson.lastReinforcedAt || lesson.createdAt;
         const activeWeeks = activeWeeksSince(lesson.project, baseline, timestamp);
@@ -382,7 +392,25 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         });
       }
 
-      return { success: true, decayed, softDeleted, total: lessons.length };
+      const purgedIds =
+        expired.length > 0 ? await kv.deleteManyIfUnchanged(KV.lessons, expired) : [];
+      if (purgedIds.length > 0) {
+        await recordAudit(kv, "lesson_delete", "mem::lesson-decay-sweep", purgedIds, {
+          action: "purge",
+          actor: "system",
+          reason: "tombstone-expired",
+          purged: purgedIds.length,
+          purgedIds,
+        });
+      }
+
+      return {
+        success: true,
+        decayed,
+        softDeleted,
+        purged: purgedIds.length,
+        total: lessons.length,
+      };
     },
   );
 }
