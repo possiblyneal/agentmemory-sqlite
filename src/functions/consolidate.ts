@@ -113,9 +113,7 @@ export function registerConsolidateFunction(
 
       let consolidated = 0;
       const existingMemories = await kv.list<Memory>(KV.memories);
-      const existingTitles = new Set(
-        existingMemories.map((m) => m.title.toLowerCase()),
-      );
+      const writtenTitles = new Set<string>();
 
       const MAX_LLM_CALLS = 10;
       let llmCallCount = 0;
@@ -146,7 +144,7 @@ export function registerConsolidateFunction(
           );
           llmCallCount++;
           const parsed = parseMemoryXml(response, sessionIds);
-          if (!parsed) continue;
+          if (!parsed || writtenTitles.has(parsed.title.toLowerCase())) continue;
 
           const now = new Date().toISOString();
           const obsIds = [...new Set(top.map((o) => o.id))];
@@ -200,7 +198,7 @@ export function registerConsolidateFunction(
               newId: evolved.id,
               concept,
             });
-            existingTitles.add(evolved.title.toLowerCase());
+            writtenTitles.add(evolved.title.toLowerCase());
             consolidated++;
           } else {
             const memory: Memory = {
@@ -218,7 +216,7 @@ export function registerConsolidateFunction(
               action: "create_memory",
               concept,
             });
-            existingTitles.add(memory.title.toLowerCase());
+            writtenTitles.add(memory.title.toLowerCase());
             consolidated++;
           }
         } catch (err) {

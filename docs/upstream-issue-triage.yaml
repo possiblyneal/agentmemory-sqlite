@@ -810,8 +810,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Consolidation ignores memories created in the same run, producing duplicates and orphans."
-    disposition: candidate
-    status: "present-here — mem::consolidate matches titles against the stale existingMemories snapshot (src/functions/consolidate.ts:166-171) and existingTitles is written but never read; only legacy POST /agentmemory/consolidate reaches it (src/triggers/api.ts:1324)."
+    disposition: already-fixed
+    fixed_by: "mem::consolidate skips a candidate whose title this run already wrote (writtenTitles in src/functions/consolidate.ts); test/consolidate-project-scope.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/747
   - number: 751
     title: "memory_save accepts `project` parameter but iii engine serialization drops it — `memory-project-coverage` diagnose perpetually fails"
@@ -1912,8 +1912,8 @@ issues:
     difficulty: low
     kind: bug
     note: "memory_action_create never forwards createdBy, so every action is created by unknown."
-    disposition: candidate
-    status: "present-here — memory_action_create forwards no createdBy (src/mcp/server.ts:771-779) and its schema has no agentId, so MCP-created actions record 'unknown' (src/functions/actions.ts:38); REST forwards it (src/triggers/api.ts:2749). Matters only with several agents."
+    disposition: already-fixed
+    fixed_by: "memory_action_create forwards createdBy (alias agentId) to mem::action-create (src/mcp/server.ts, src/mcp/tools-registry.ts); test/mcp-action-create.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1105
     fix_prs: [1107]
   - number: 1106
