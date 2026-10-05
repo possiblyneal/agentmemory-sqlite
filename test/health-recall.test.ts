@@ -47,6 +47,8 @@ function hit(id: string): HybridSearchResult {
       files: [],
     },
     sessionId: "s1",
+    bm25Score: 8,
+    vectorScore: 0,
     combinedScore: 0.8,
   } as unknown as HybridSearchResult;
 }
