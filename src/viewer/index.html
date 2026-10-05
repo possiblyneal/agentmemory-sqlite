@@ -401,11 +401,11 @@
     .btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
     .btn-primary:hover { background: var(--ink-secondary); box-shadow: 3px 3px 0px 0px var(--ink-muted); }
 
+    #view-graph { padding: 0; }
     .graph-container {
       display: flex;
-      height: calc(100vh - 178px);
+      height: 100%;
       min-height: 460px;
-      margin: -24px;
       border-top: 1px solid var(--border-light);
     }
     .graph-canvas-wrap {
@@ -1469,7 +1469,9 @@
 
     async function loadDashboard() {
       var el = document.getElementById('view-dashboard');
-      if (!state.dashboard.loaded) el.innerHTML = '<div class="loading">Loading dashboard...</div>';
+      // Only an empty panel gets the placeholder: swapping it in on a
+      // refresh collapses the panel and throws away the Operator's scroll.
+      if (!el.hasChildNodes()) el.innerHTML = '<div class="loading">Loading dashboard...</div>';
       try {
         var results = await Promise.all([
           api('health', { readErrorBody: true }),
@@ -1495,7 +1497,7 @@
         // A failed request resolves to null; the count cards show a dash for
         // it so the Operator can tell an unreachable count from an empty one.
         state.dashboard.failed = {
-          sessions: !results[1], memories: !results[2], graph: !results[3], semantic: !results[5],
+          health: !results[0], sessions: !results[1], memories: !results[2], graph: !results[3], semantic: !results[5],
           lessons: !results[8], crystals: !results[9], insights: !results[10]
         };
         state.dashboard.procedural = (results[6] && results[6].procedures) || (results[6] && results[6].procedural) || [];
@@ -1549,6 +1551,13 @@
       function valueOrDash(count, isFailed) { return isFailed ? '&ndash;' : count; }
 
       var html = '';
+      var failedNames = Object.keys(failed).filter(function(k) { return failed[k]; });
+      if (failedNames.length > 0) {
+        html += '<div role="alert" style="margin-bottom:14px;padding:10px 12px;border:1px solid var(--accent);background:var(--bg-alt);font-size:12px;color:var(--ink);line-height:1.4;">';
+        html += '<div style="font-weight:600;margin-bottom:4px;">Some dashboard requests failed</div>';
+        html += '<div style="font-size:11px;color:var(--ink-muted);">No answer for: ' + esc(failedNames.join(', ')) + '. Their cards show &ndash; until a refresh succeeds; the browser console has the HTTP status.</div>';
+        html += '</div>';
+      }
       // First-run hero: empty dashboard = guided next step
       if (d.sessions.length === 0 && !failed.sessions) {
         html += '<div class="card" style="margin-bottom:14px;padding:24px 28px;background:var(--bg-subtle);border-left:3px solid var(--accent);">' +
@@ -1587,9 +1596,8 @@
         html += '<div class="sub">' + (cb.failures || 0) + ' failures</div></div>';
       }
       var totalObs = d.sessions.reduce(function(a, s) { return a + (s.observationCount || 0); }, 0);
-      var tokenBudget = parseInt(new URLSearchParams(window.location.search).get('tokenBudget') || '2000', 10) || 2000;
       var estFull = totalObs * 80;
-      var estInjected = d.sessions.length * tokenBudget;
+      var estInjected = Math.min(totalObs, 50) * 38;
       var savings = estFull > 0 ? Math.round((1 - estInjected / Math.max(estFull, 1)) * 100) : 0;
       if (savings < 0) savings = 0;
       var tokensSaved = Math.max(0, estFull - estInjected);
