@@ -2,6 +2,7 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Signal } from "../types.js";
+import { getSignalDefaultTtlMs } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
 
@@ -32,6 +33,7 @@ export function registerSignalsFunction(sdk: ISdk, kv: StateKV): void {
         }
       }
 
+      const ttlMs = data.expiresInMs || getSignalDefaultTtlMs();
       const signal: Signal = {
         id: generateId("sig"),
         from: data.from,
@@ -42,8 +44,8 @@ export function registerSignalsFunction(sdk: ISdk, kv: StateKV): void {
         replyTo: data.replyTo,
         metadata: data.metadata,
         createdAt: now.toISOString(),
-        expiresAt: data.expiresInMs
-          ? new Date(now.getTime() + data.expiresInMs).toISOString()
+        expiresAt: ttlMs
+          ? new Date(now.getTime() + ttlMs).toISOString()
           : undefined,
       };
 
@@ -183,10 +185,15 @@ export function registerSignalsFunction(sdk: ISdk, kv: StateKV): void {
     async () => {
       const signals = await kv.list<Signal>(KV.signals);
       const now = Date.now();
+      const defaultTtlMs = getSignalDefaultTtlMs();
       let removed = 0;
 
       for (const sig of signals) {
-        if (sig.expiresAt && new Date(sig.expiresAt).getTime() <= now) {
+        const expired = sig.expiresAt
+          ? new Date(sig.expiresAt).getTime() <= now
+          : defaultTtlMs > 0 &&
+            new Date(sig.createdAt).getTime() + defaultTtlMs <= now;
+        if (expired) {
           await recordAudit(kv, "delete", "mem::signal-cleanup", [sig.id], {
             action: "delete",
             resource: "Signal",

@@ -634,6 +634,13 @@ async function main() {
   }, 60 * 60 * 1000);
   idleSessionSweepTimer.unref();
 
+  const signalCleanupTimer = setInterval(async () => {
+    try {
+      await sdk.trigger({ function_id: "mem::signal-cleanup", payload: {} });
+    } catch {}
+  }, 60 * 60 * 1000);
+  signalCleanupTimer.unref();
+
   const injectionsSweepTimer = setInterval(async () => {
     try {
       await sdk.trigger({ function_id: "mem::injections-sweep", payload: {} });

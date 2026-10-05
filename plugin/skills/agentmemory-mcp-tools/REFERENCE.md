@@ -46,7 +46,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_sentinel_trigger` |  | `sentinelId`*: string, `result`: string | Externally fire a sentinel, providing an optional result payload. Unblocks any gated actions. |
 | `memory_sessions` | yes | none | List recent sessions with their status and observation counts. |
 | `memory_signal_read` |  | `agentId`*: string, `unreadOnly`: string, `threadId`: string, `limit`: number | Read messages for an agent. Marks delivered messages as read. |
-| `memory_signal_send` |  | `from`*: string, `to`: string, `content`*: string, `type`: string, `replyTo`: string | Send a message to another agent or broadcast. Supports threading, typed messages, and TTL expiration. |
+| `memory_signal_send` |  | `from`*: string, `to`: string, `content`*: string, `type`: string, `replyTo`: string, `expiresInMs`: number | Send a message to another agent or broadcast. Supports threading, typed messages, and TTL expiration. |
 | `memory_sketch_create` |  | `title`*: string, `description`: string, `expiresInMs`: number, `project`: string | Create an ephemeral action graph for exploratory work. Auto-expires after TTL. Can be promoted to permanent actions or discarded. |
 | `memory_sketch_promote` |  | `sketchId`*: string, `project`: string | Promote a sketch's ephemeral actions to permanent actions. Makes the exploratory work official. |
 | `memory_slot_append` |  | `label`*: string, `text`*: string, `project`: string | Append text to an existing slot. Fails with 413 if the append would exceed the slot's sizeLimit, agent must compact via memory_slot_replace first. Leave project out to use the current project's slots; a label the project lacks falls back to the global slot. |
