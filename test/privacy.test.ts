@@ -84,8 +84,14 @@ describe("stripPrivateData", () => {
     expect(result).not.toContain("ghp_");
   });
 
-  it("does not strip short strings", () => {
-    expect(stripPrivateData("api_key=short")).toBe("api_key=short");
+  it("strips short labelled passwords and keys", () => {
+    expect(stripPrivateData("password=hunter2")).toBe("[REDACTED_SECRET]");
+    expect(stripPrivateData("api_key=short")).toBe("[REDACTED_SECRET]");
+    expect(stripPrivateData("db api_key: abc123 ok")).toBe("db [REDACTED_SECRET] ok");
+  });
+
+  it("does not strip short unlabelled strings", () => {
+    expect(stripPrivateData("short=value")).toBe("short=value");
   });
 
   it("returns empty string unchanged", () => {
