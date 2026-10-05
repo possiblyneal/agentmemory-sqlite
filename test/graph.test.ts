@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -1412,5 +1415,71 @@ describe("graph-extract importance and concepts (#90)", () => {
 
     expect(result.success).toBe(false);
     expect(await stored("obs_a")).toEqual(original);
+  });
+});
+
+describe("graph file identity across worktrees", () => {
+  const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, stdio: "pipe" });
+  let root: string;
+  let main: string;
+  let worktree: string;
+  let sdk: ReturnType<typeof mockSdk>;
+  let kv: ReturnType<typeof mockKV>;
+  const ORIG_GRAPH_FLAG = process.env["GRAPH_EXTRACTION_ENABLED"];
+
+  const noopProvider = { name: "noop", compress: vi.fn(), summarize: vi.fn() };
+
+  async function extract(sessionId: string, cwd: string, files: string[]) {
+    const session: Session = {
+      id: sessionId,
+      project: "proj",
+      cwd,
+      startedAt: "2026-02-01T10:00:00Z",
+      status: "active",
+      observationCount: 1,
+    };
+    await kv.set("mem:sessions", sessionId, session);
+    await sdk.trigger("mem::graph-extract", {
+      observations: [{ ...testObs, id: `obs_${sessionId}`, sessionId, concepts: [], files }],
+    });
+  }
+
+  async function fileNames(): Promise<string[]> {
+    const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+    return nodes.filter((n) => n.type === "file").map((n) => n.name);
+  }
+
+  beforeEach(() => {
+    mkdirSync("tmp", { recursive: true });
+    root = realpathSync(mkdtempSync(join("tmp", "graph-files-")));
+    main = join(root, "main");
+    worktree = join(root, "wt");
+    mkdirSync(main);
+    sh("git init -q -b main", main);
+    sh("git -c user.email=a@b -c user.name=n commit -q --allow-empty -m init", main);
+    sh(`git worktree add -q ${worktree}`, main);
+    sdk = mockSdk();
+    kv = mockKV();
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
+    registerGraphFunction(sdk as never, kv as never, noopProvider as never);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (ORIG_GRAPH_FLAG === undefined) delete process.env["GRAPH_EXTRACTION_ENABLED"];
+    else process.env["GRAPH_EXTRACTION_ENABLED"] = ORIG_GRAPH_FLAG;
+  });
+
+  it("gives the same file one node across two worktrees of a repo", async () => {
+    await extract("ses_a", main, [join(main, "src/index.ts")]);
+    await extract("ses_b", worktree, [join(worktree, "src/index.ts")]);
+
+    expect(await fileNames()).toEqual(["src/index.ts"]);
+  });
+
+  it("keeps a path outside every checkout absolute", async () => {
+    await extract("ses_a", main, ["/etc/hosts", join(main, "a.ts")]);
+
+    expect((await fileNames()).sort()).toEqual(["/etc/hosts", "a.ts"]);
   });
 });
