@@ -488,7 +488,7 @@ async function runStatus() {
   const up = await isDaemonRunning();
   if (!up) {
     p.log.error(`Not running — no response at ${base}`);
-    p.log.info("Start with: npx @agentmemory/agentmemory");
+    p.log.info("Start with: agentmemory");
     process.exit(1);
   }
 
@@ -793,7 +793,7 @@ async function passiveServerChecks(): Promise<DoctorCheck[]> {
     ok: serverUp,
     hint: serverUp
       ? undefined
-      : `Start with: npx @agentmemory/agentmemory (tried ${base})`,
+      : `Start with: agentmemory (tried ${base})`,
   });
   if (!serverUp) return checks;
 
@@ -1258,8 +1258,8 @@ async function runInit() {
       "",
       "Common next steps:",
       "  1. Pick an LLM provider key (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / etc.)",
-      "  2. Run `npx @agentmemory/agentmemory doctor` to verify the daemon sees them",
-      "  3. Run `npx @agentmemory/agentmemory` to start the worker",
+      "  2. Run `agentmemory doctor` to verify the daemon sees them",
+      "  3. Run `agentmemory` to start the worker",
     ].join("\n"),
     "Next steps",
   );
@@ -1291,8 +1291,8 @@ async function runDemo() {
     p.log.error(
       `agentmemory worker not reachable on port ${port} (livez probe failed). Something may be on the port but it isn't serving /agentmemory/*.`,
     );
-    p.log.info("Start it with: npx @agentmemory/agentmemory");
-    p.log.info("Or run a one-command demo with: npx @agentmemory/agentmemory demo --serve");
+    p.log.info("Start it with: agentmemory");
+    p.log.info("Or run a one-command demo with: agentmemory demo --serve");
     process.exit(1);
   }
 
@@ -1619,7 +1619,7 @@ async function runStop(): Promise<void> {
     p.log.error("One or more processes survived SIGKILL. Investigate with `ps`.");
     process.exit(1);
   }
-  p.outro("Stopped. Memories persisted to disk; restart anytime with: npx @agentmemory/agentmemory");
+  p.outro("Stopped. Memories persisted to disk; restart anytime with: agentmemory");
 }
 
 async function runMcp(): Promise<void> {
@@ -1693,7 +1693,7 @@ async function runImportJsonl(): Promise<void> {
   }
   if (!probeOk) {
     p.log.error(
-      `agentmemory livez probe failed on port ${port}: ${probeDetail}. Start it with \`npx @agentmemory/agentmemory\` in another terminal, then re-run this command.`,
+      `agentmemory livez probe failed on port ${port}: ${probeDetail}. Start it with \`agentmemory\` in another terminal, then re-run this command.`,
     );
     process.exit(1);
   }
