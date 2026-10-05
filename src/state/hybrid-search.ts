@@ -208,7 +208,7 @@ export class HybridSearch {
     if (this.vector && this.embeddingProvider && this.vector.size > 0) {
       try {
         queryEmbedding = await this.embeddingProvider.embed(query);
-        vectorResults = this.vector.search(queryEmbedding, depth);
+        vectorResults = await this.vector.search(queryEmbedding, depth);
       } catch {
         // fall through to BM25-only
       }

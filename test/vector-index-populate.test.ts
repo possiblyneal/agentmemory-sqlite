@@ -52,8 +52,8 @@ function mockSdk() {
 // the old contract; under chunking a memory owns as many vectors as it
 // has chunks, and what callers actually depend on is that it resolves to
 // exactly one retrievable row.
-function distinctParents(idx: VectorIndex): Set<string> {
-  const ids = idx.search(new Float32Array([0.1, 0.2, 0.3]), 1000);
+async function distinctParents(idx: VectorIndex): Promise<Set<string>> {
+  const ids = await idx.search(new Float32Array([0.1, 0.2, 0.3]), 1000);
   return new Set(ids.map((r) => r.obsId));
 }
 
@@ -95,7 +95,7 @@ describe("vector index population on remember", () => {
     });
 
     expect((result as { success: boolean }).success).toBe(true);
-    expect(distinctParents(vectorIndex).size).toBe(1);
+    expect((await distinctParents(vectorIndex)).size).toBe(1);
   });
 
   it("writes exactly one vector per memory when chunking is OFF", async () => {
@@ -111,7 +111,7 @@ describe("vector index population on remember", () => {
     });
 
     expect(vectorIndex.size).toBe(1);
-    const [only] = [...distinctParents(vectorIndex)];
+    const [only] = [...(await distinctParents(vectorIndex))];
     expect(only).not.toContain("#");
   });
 
@@ -135,7 +135,7 @@ describe("vector index population on remember", () => {
     expect(result.success).toBe(true);
     expect(vectorIndex.size).toBeGreaterThan(1);
     // …and every one of them collapses back to the single parent id.
-    expect([...distinctParents(vectorIndex)]).toEqual([result.memory.id]);
+    expect([...(await distinctParents(vectorIndex))]).toEqual([result.memory.id]);
   });
 
   it("calls vectorIndex.add() with short content (0% similarity dedup)", async () => {
@@ -152,7 +152,7 @@ describe("vector index population on remember", () => {
       payload: { content: "Second completely different memory", type: "fact" },
     });
 
-    expect(distinctParents(vectorIndex).size).toBe(2);
+    expect((await distinctParents(vectorIndex)).size).toBe(2);
   });
 
   it("handles missing embedder gracefully (vectorIndex stays null)", async () => {

@@ -44,8 +44,9 @@ issues:
     difficulty: high
     kind: bug
     note: "Vector search blocks the single Node thread; fixing it means moving CPU work off the event loop."
-    disposition: candidate
-    status: "present-here — VectorIndex.search scans every vector synchronously on the main thread (src/state/vector-index.ts:181-194)."
+    disposition: already-fixed
+    fixed_by: "#159"
+    status: "fixed-here — #159: VectorIndex.search is async and yields to the event loop every 256 vectors (src/state/vector-index.ts), so a 50k-vector scan no longer stalls hooks and REST. test/vector-index.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/195
   - number: 259
     title: "Support custom metadata fields per session"

@@ -97,8 +97,7 @@ describe("superseding a memory de-indexes the old version", () => {
     // The stale version is gone from both live indexes…
     expect(getSearchIndex().has(first.memory.id)).toBe(false);
     expect(getSearchIndex().has(second.memory.id)).toBe(true);
-    const vectorIds = getVectorIndex()!
-      .search(new Float32Array([0.1, 0.2, 0.3]), 10)
+    const vectorIds = (await getVectorIndex()!.search(new Float32Array([0.1, 0.2, 0.3]), 10))
       .map((r) => r.obsId);
     expect(vectorIds).toEqual([second.memory.id]);
 

@@ -47,6 +47,14 @@ export function parentIdOf(vectorId: string): string {
 // page. Only applied when the index actually contains chunks.
 const CHUNK_FANOUT = 4;
 
+// A search yields to the event loop every this many vectors, so hooks and REST
+// keep being served while a ~50k-vector store is scanned (about 3 ms per slice
+// at 768 dimensions).
+const SEARCH_SLICE = 256;
+
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
+
 export type VectorRow = {
   id: string;
   sessionId: string;
@@ -158,10 +166,10 @@ export class VectorIndex {
     }
   }
 
-  search(
+  async search(
     query: Float32Array,
     limit = 20,
-  ): Array<{ obsId: string; sessionId: string; score: number }> {
+  ): Promise<Array<{ obsId: string; sessionId: string; score: number }>> {
     // UNGATED collapse, on purpose. This is the rollback contract: the
     // WRITING of chunks is flag-gated, the READING of them never is. If
     // this were gated too, turning the chunking flag off against an
@@ -178,7 +186,9 @@ export class VectorIndex {
     }> = [];
     let minScore = -Infinity;
 
+    let scanned = 0;
     for (const [obsId, entry] of this.vectors) {
+      if (++scanned % SEARCH_SLICE === 0) await yieldToEventLoop();
       const score = cosineSimilarity(query, entry.embedding);
       if (results.length < scanLimit) {
         results.push({ obsId, sessionId: entry.sessionId, score });

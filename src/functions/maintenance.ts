@@ -113,7 +113,7 @@ export async function indexDebugLegs(input: { query?: unknown; depth?: unknown; 
     bm25Docs: bm25.size,
     vectorRows: vi?.size ?? 0,
     bm25: bm25.search(input.query, depth),
-    vector: vi && embedding ? vi.search(embedding, depth) : null,
+    vector: vi && embedding ? await vi.search(embedding, depth) : null,
     embedding: computed && embedding ? Array.from(embedding) : null,
   };
 }
