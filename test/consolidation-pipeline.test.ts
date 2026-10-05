@@ -6,6 +6,7 @@ vi.mock("../src/logger.js", () => ({
 
 vi.mock("../src/config.js", () => ({
   getConsolidationDecayDays: () => 30,
+  getConsolidatedMemoryForgetDays: () => 180,
   isConsolidationEnabled: vi.fn(() => true),
 }));
 
@@ -36,6 +37,20 @@ function mockKV() {
     setManyCalls,
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
+    },
+    deleteManyIfUnchanged: async (
+      scope: string,
+      entries: Array<{ key: string; updatedAt: string }>,
+    ): Promise<string[]> => {
+      const deleted: string[] = [];
+      for (const e of entries) {
+        const row = store.get(scope)?.get(e.key) as { updatedAt: string } | undefined;
+        if (row && row.updatedAt === e.updatedAt) {
+          store.get(scope)!.delete(e.key);
+          deleted.push(e.key);
+        }
+      }
+      return deleted;
     },
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
@@ -287,7 +302,7 @@ describe("Consolidation Pipeline: decay writes and single flight", () => {
     registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
     await kv.set("mem:semantic", "fresh", semantic("fresh", 1, 0.8));
     await kv.set("mem:semantic", "old", semantic("old", 60, 0.8));
-    await kv.set("mem:semantic", "floor", semantic("floor", 400, 0.1));
+    await kv.set("mem:semantic", "floor", semantic("floor", 100, 0.1));
 
     const result = (await sdk.trigger("mem::consolidate-pipeline", { tier: "decay" })) as {
       success: boolean;
@@ -295,7 +310,7 @@ describe("Consolidation Pipeline: decay writes and single flight", () => {
     };
 
     expect(result.success).toBe(true);
-    expect(result.results.decay).toEqual({ semantic: 3, procedural: 0, semanticWritten: 1, proceduralWritten: 0 });
+    expect(result.results.decay).toEqual({ semantic: 3, procedural: 0, semanticWritten: 1, proceduralWritten: 0, semanticForgotten: 0, proceduralForgotten: 0 });
     expect(kv.setManyCalls).toEqual([
       { scope: "mem:semantic", keys: ["old"] },
       { scope: "mem:procedural", keys: [] },
@@ -303,6 +318,40 @@ describe("Consolidation Pipeline: decay writes and single flight", () => {
     const old = (await kv.get("mem:semantic", "old")) as SemanticMemory;
     expect(old.strength).toBeCloseTo(0.8 * 0.9 * 0.9, 6);
     expect(((await kv.get("mem:semantic", "fresh")) as SemanticMemory).strength).toBe(0.8);
+  });
+
+  it("decay tier forgets floor-strength, never-accessed rows idle past the forget window, with one audit row", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    const accessed = semantic("accessed", 400, 0.1);
+    accessed.accessCount = 2;
+    await kv.set("mem:semantic", "stale", semantic("stale", 400, 0.1));
+    await kv.set("mem:semantic", "accessed", accessed);
+    await kv.set("mem:semantic", "recent", semantic("recent", 100, 0.1));
+    await kv.set("mem:semantic", "strong", semantic("strong", 400, 0.5));
+    const { accessCount: _a, fact: _f, confidence: _c, sourceMemoryIds: _m, ...base } = semantic("proc", 400, 0.1);
+    await kv.set("mem:procedural", "proc", { ...base, name: "p", steps: [], triggerCondition: "", frequency: 1 });
+
+    const result = (await sdk.trigger("mem::consolidate-pipeline", { tier: "decay" })) as {
+      results: { decay: Record<string, number> };
+    };
+
+    expect(result.results.decay.semanticForgotten).toBe(1);
+    expect(result.results.decay.proceduralForgotten).toBe(1);
+    expect(await kv.get("mem:semantic", "stale")).toBeNull();
+    expect(await kv.get("mem:procedural", "proc")).toBeNull();
+    expect(await kv.get("mem:semantic", "accessed")).not.toBeNull();
+    expect(await kv.get("mem:semantic", "recent")).not.toBeNull();
+    const audits = (await kv.list("mem:audit")) as Array<{
+      operation: string;
+      targetIds: string[];
+      details: { semanticIds: string[]; proceduralIds: string[] };
+    }>;
+    const forgets = audits.filter((a) => a.operation === "forget");
+    expect(forgets).toHaveLength(1);
+    expect(forgets[0].details.semanticIds).toEqual(["stale"]);
+    expect(forgets[0].details.proceduralIds).toEqual(["proc"]);
   });
 
   it("a second run while one is in flight is skipped, not queued", async () => {
