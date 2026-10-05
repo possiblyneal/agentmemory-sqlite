@@ -296,25 +296,28 @@ export function registerMeshFunction(
 
           if (direction === "pull" || direction === "both") {
             try {
-              const response = await fetch(
-                `${peer.url}/agentmemory/mesh/export?since=${peer.lastSyncAt || ""}`,
-                {
+              let cursor: string | null = null;
+              do {
+                const url: string =
+                  `${peer.url}/agentmemory/mesh/export?since=${peer.lastSyncAt || ""}` +
+                  (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "");
+                const response: Response = await fetch(url, {
                   headers: {
                     Authorization: `Bearer ${meshAuthToken}`,
                   },
                   signal: AbortSignal.timeout(30000),
                   redirect: "error",
-                },
-              );
-              if (response.ok) {
-                const pullData = (await response.json()) as {
-                  memories?: Memory[];
-                  actions?: Action[];
+                });
+                if (!response.ok) {
+                  result.errors.push(`pull failed: HTTP ${response.status}`);
+                  break;
+                }
+                const pullData = (await response.json()) as MeshSyncPayload & {
+                  nextCursor?: string | null;
                 };
-                result.pulled = await applySyncData(kv, pullData, scopes);
-              } else {
-                result.errors.push(`pull failed: HTTP ${response.status}`);
-              }
+                result.pulled += await applySyncData(kv, pullData, scopes);
+                cursor = pullData.nextCursor ?? null;
+              } while (cursor);
             } catch (err) {
               result.errors.push(`pull failed: ${String(err)}`);
             }
@@ -404,6 +407,50 @@ export function registerMeshFunction(
       return { success: true };
     },
   );
+}
+
+export const MESH_PAGE_BYTES = 8 * 1024 * 1024;
+
+function meshItemKey(item: unknown): string {
+  const r = item as { id?: string; sourceId: string; targetId: string; type: string };
+  return r.id ?? `${r.sourceId}:${r.targetId}:${r.type}`;
+}
+
+export function pageMeshDelta(
+  delta: Record<string, unknown[]>,
+  cursor: string | undefined,
+  pageBytes: number = MESH_PAGE_BYTES,
+): { page: Record<string, unknown[]>; nextCursor: string | null } | null {
+  const fields = Object.keys(delta);
+  let startField = 0;
+  let afterKey: string | null = null;
+  if (cursor) {
+    const sep = cursor.indexOf(":");
+    startField = sep < 0 ? NaN : Number(cursor.slice(0, sep));
+    if (!Number.isInteger(startField) || startField < 0 || startField >= fields.length) {
+      return null;
+    }
+    afterKey = cursor.slice(sep + 1);
+  }
+  const page: Record<string, unknown[]> = Object.fromEntries(fields.map((f) => [f, []]));
+  let bytes = 0;
+  let last: { field: number; key: string } | null = null;
+  for (let f = startField; f < fields.length; f++) {
+    const keyed = delta[fields[f]]
+      .map((item) => ({ item, key: meshItemKey(item) }))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    for (const { item, key } of keyed) {
+      if (f === startField && afterKey !== null && key <= afterKey) continue;
+      const size = Buffer.byteLength(JSON.stringify(item), "utf8");
+      if (last && bytes + size > pageBytes) {
+        return { page, nextCursor: `${last.field}:${last.key}` };
+      }
+      page[fields[f]].push(item);
+      bytes += size;
+      last = { field: f, key };
+    }
+  }
+  return { page, nextCursor: null };
 }
 
 function deltaFilter<T>(

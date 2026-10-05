@@ -233,6 +233,45 @@ describe("Mesh Functions", () => {
 
       vi.unstubAllGlobals();
     });
+
+    it("follows the export cursor until the peer's backlog is pulled", async () => {
+      const authedSdk = mockSdk();
+      const authedKv = mockKV();
+      registerMeshFunction(authedSdk as never, authedKv as never, "mesh-secret");
+      const mem = (id: string) => ({
+        id, type: "pattern", title: id, content: id,
+        createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+        concepts: [], files: [], sessionIds: [], strength: 5, version: 1, isLatest: true,
+      });
+      const urls: string[] = [];
+      const fetchMock = vi.fn(async (url: string) => {
+        urls.push(url);
+        const cursor = new URL(url).searchParams.get("cursor");
+        const body = !cursor
+          ? { memories: [mem("m1")], nextCursor: "0:m1" }
+          : cursor === "0:m1"
+            ? { memories: [mem("m2")], nextCursor: "0:m2" }
+            : { memories: [mem("m3")], nextCursor: null };
+        return new Response(JSON.stringify(body), { status: 200 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const reg = (await authedSdk.trigger("mem::mesh-register", {
+        url: "https://peer3.example.com",
+        name: "peer-3",
+      })) as { peer: MeshPeer };
+      const result = (await authedSdk.trigger("mem::mesh-sync", {
+        peerId: reg.peer.id,
+        direction: "pull",
+      })) as { results: Array<{ pulled: number; errors: string[] }> };
+
+      expect(urls).toHaveLength(3);
+      expect(result.results[0].errors).toEqual([]);
+      expect(result.results[0].pulled).toBe(3);
+      expect((await authedKv.list("mem:memories")).length).toBe(3);
+
+      vi.unstubAllGlobals();
+    });
   });
 
   describe("mesh-receive", () => {

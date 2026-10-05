@@ -1136,8 +1136,8 @@ issues:
     difficulty: med
     kind: bug
     note: "mesh/export has no pagination, so sync can never catch up after a long outage."
-    disposition: candidate
-    status: "partly-present-here — the WS frame limit is iii-only, but api::mesh-export still returns the whole delta unpaginated (src/triggers/api.ts:3211-3240), so a backlog past the peer's 16 MiB body cap (src/engine/inproc/sdk.ts:81) 413s on every sync and never catches up."
+    disposition: already-fixed
+    fixed_by: "api::mesh-export returns the delta in cursor pages of at most 8 MiB (nextCursor) and mem::mesh-sync follows the cursor until it is null (src/functions/mesh.ts pageMeshDelta; test/mesh-export-project-scope.test.ts, test/mesh.test.ts)"
     url: https://github.com/rohitg00/agentmemory/issues/890
     mentioned_by_prs: [1143]
   - number: 899

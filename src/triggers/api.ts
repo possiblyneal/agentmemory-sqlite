@@ -5,6 +5,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { checkPayloadSize, isOversizedPayload } from "../state/payload-bound.js";
+import { pageMeshDelta } from "../functions/mesh.js";
 import { getLatestHealth } from "../health/monitor.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import type { ResilientProvider } from "../providers/resilient.js";
@@ -3216,7 +3217,7 @@ export function registerApiTriggers(
         memories = memories.filter((m) => m.project === project || m.global === true);
         actions = actions.filter((a) => a.project === project);
       }
-      const body: Record<string, unknown> = {
+      const delta: Record<string, unknown[]> = {
         memories: df(memories, "updatedAt"),
         actions: df(actions, "updatedAt"),
       };
@@ -3224,21 +3225,24 @@ export function registerApiTriggers(
         const semantic = await kv.list<import("../types.js").SemanticMemory>(KV.semantic);
         const procedural = await kv.list<import("../types.js").ProceduralMemory>(KV.procedural);
         const relations = await kv.list<import("../types.js").MemoryRelation>(KV.relations);
-        body.semantic = df(semantic, "updatedAt");
-        body.procedural = df(procedural, "updatedAt");
-        body.relations = df(relations, "createdAt");
+        delta.semantic = df(semantic, "updatedAt");
+        delta.procedural = df(procedural, "updatedAt");
+        delta.relations = df(relations, "createdAt");
         // B-mode: graph frozen — never enumerate the graph scope for the
         // mesh-sync delta body.
         if (!graphLegDisabled()) {
           const graphNodes = await kv.list<import("../types.js").GraphNode>(KV.graphNodes);
           const graphEdges = await kv.list<import("../types.js").GraphEdge>(KV.graphEdges);
-          body.graphNodes = graphNodes.filter(
+          delta.graphNodes = graphNodes.filter(
             (n) => new Date(n.updatedAt || n.createdAt).getTime() > sinceTime,
           );
-          body.graphEdges = df(graphEdges, "createdAt");
+          delta.graphEdges = df(graphEdges, "createdAt");
         }
       }
-      // Fail an oversized export with 413 rather than on heap.
+      const cursor = req.query_params?.["cursor"] as string | undefined;
+      const paged = pageMeshDelta(delta, cursor);
+      if (!paged) return { status_code: 400, body: { error: "Invalid 'cursor'" } };
+      const body = { ...paged.page, nextCursor: paged.nextCursor };
       const oversized = checkPayloadSize(
         body,
         "use ?since to fetch only changes after a timestamp, or ?project to scope the export",
