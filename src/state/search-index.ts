@@ -333,7 +333,7 @@ export class SearchIndex {
   private rarestIndexedTerms(terms: string[]): string[] {
     const unique = [...new Set(terms)];
     if (unique.length <= MAX_QUERY_TERMS) return unique;
-    const df = (t: string) => this.invertedIndex.get(t)?.size || Infinity;
+    const df = (t: string) => this.invertedIndex.get(t)?.size || Number.MAX_SAFE_INTEGER;
     return unique.sort((a, b) => df(a) - df(b)).slice(0, MAX_QUERY_TERMS);
   }
 

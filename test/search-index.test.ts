@@ -367,6 +367,18 @@ describe("SearchIndex long queries", () => {
   });
 });
 
+describe("SearchIndex short queries", () => {
+  it("keeps every term, common or unseen, up to the cap", () => {
+    const idx = new SearchIndex();
+    idx.add(makeObs({ id: "rare", title: "rareword" }));
+    for (let i = 0; i < 10; i++) idx.add(makeObs({ id: `c${i}`, title: "commonword" }));
+
+    const ids = idx.search("commonword rareword qzxunseen", 100).map((h) => h.obsId);
+
+    expect(ids).toHaveLength(11);
+  });
+});
+
 describe("SearchIndex long queries with unseen terms", () => {
   it("keeps indexed terms ahead of terms the index has never seen", () => {
     const idx = new SearchIndex();
