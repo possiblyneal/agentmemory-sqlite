@@ -502,9 +502,15 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
       }
     }
 
+    const disconnect = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) disconnect.abort();
+    });
+
     let result: any;
     try {
       result = await invoke(match.route.functionId, {
+        signal: disconnect.signal,
         query_params,
         path_params: match.pathParams,
         headers,

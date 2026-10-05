@@ -42,6 +42,7 @@ export type ApiRequest<TBody = unknown> = {
   headers: Record<string, string | string[]>;
   method: string;
   request_body?: unknown;
+  signal?: AbortSignal;
 };
 
 export type ApiResponse<

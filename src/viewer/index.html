@@ -1999,7 +1999,7 @@
         html += '<div style="margin:8px 0;padding:10px 12px;border:1px solid var(--accent);background:var(--bg-alt);font-size:12px;color:var(--ink);line-height:1.4;">';
         html += '<div style="font-weight:600;margin-bottom:4px;">Graph query failed</div>';
         html += '<div style="font-size:11px;color:var(--ink-muted);">' + esc(state.graph.queryError) + '</div>';
-        html += '<button class="btn" data-action="rebuild-graph" style="margin-top:8px;font-size:11px;">Retry</button>';
+        html += '<button class="btn" data-action="rebuild-graph" style="margin-top:8px;font-size:11px;"' + ((state.graph.rebuild || {}).running ? ' disabled' : '') + '>Retry</button>';
         html += '</div>';
       } else if (state.graph.truncated) {
         // #753: surface the cap so operators know they're not seeing
@@ -2041,7 +2041,11 @@
       });
       html += '</div>';
 
-      html += '<button class="btn" style="margin-top:14px;width:100%;font-size:11px;padding:8px;letter-spacing:0.06em;transition:all 0.15s ease;" data-action="rebuild-graph">↻ Rebuild Graph</button>';
+      var rebuild = state.graph.rebuild || {};
+      html += '<button class="btn" style="margin-top:14px;width:100%;font-size:11px;padding:8px;letter-spacing:0.06em;transition:all 0.15s ease;" data-action="rebuild-graph"' + (rebuild.running ? ' disabled' : '') + '>' + (rebuild.running ? 'Rebuilding...' : '↻ Rebuild Graph') + '</button>';
+      if (rebuild.message) {
+        html += '<div id="graph-rebuild-status" style="margin-top:6px;font-size:11px;color:var(--ink-muted);line-height:1.4;">' + esc(rebuild.message) + '</div>';
+      }
       html += '<div id="selected-node-panel"></div>';
       var __focus = captureSearchFocus(['graph-search']);
       sb.innerHTML = html;
@@ -2395,9 +2399,33 @@
     }
 
     async function rebuildGraph() {
-      var sb = document.getElementById('graph-sidebar');
-      if (sb) sb.innerHTML = '<h3>Graph</h3><p style="font-size:12px;color:var(--ink-faint);font-style:italic;">Rebuilding graph from observations...</p>';
-      await apiPost('graph/build', {});
+      if (state.graph.rebuild && state.graph.rebuild.running) return;
+      var preview = await apiPost('graph/build', { dryRun: true });
+      if (!preview || typeof preview.observations !== 'number') {
+        state.graph.rebuild = { running: false, message: 'Could not count observations; rebuild not started.' };
+        renderGraphSidebar();
+        return;
+      }
+      if (!window.confirm('Rebuild the graph? This replays ' + preview.observations + ' observations through the LLM and may take a long time and cost tokens.')) return;
+      state.graph.rebuild = { running: true, message: 'Replaying ' + preview.observations + ' observations...' };
+      renderGraphSidebar();
+      var result = await api('graph/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        readErrorBody: true
+      });
+      var message;
+      if (result && result.progress) {
+        message = 'Refused: a build is already running (' + result.progress.sessionsDone + ' of ' + result.progress.sessions + ' sessions done).';
+      } else if (result && result.cancelled) {
+        message = 'Build cancelled after ' + result.batches + ' batches.';
+      } else if (result && result.success) {
+        message = 'Done: ' + result.nodes + ' nodes, ' + result.edges + ' edges from ' + result.batches + ' batches.';
+      } else {
+        message = 'Build failed' + (result && result.error ? ': ' + result.error : '.');
+      }
+      state.graph.rebuild = { running: false, message: message };
       state.graph.loaded = false;
       loadGraph();
     }
