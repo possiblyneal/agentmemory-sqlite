@@ -120,7 +120,7 @@ export class SearchIndex {
 
     const queryTerms: Array<{ term: string; weight: number }> = [];
     const seen = new Set<string>();
-    for (const term of this.mostDistinctive(rawTerms)) {
+    for (const term of this.rarestIndexedTerms(rawTerms)) {
       if (!seen.has(term)) {
         seen.add(term);
         queryTerms.push({ term, weight: 1.0 });
@@ -327,11 +327,13 @@ export class SearchIndex {
   // prompt's common words ("the", "in", and every index term they prefix)
   // dominate it while adding almost no score. Keep the rarest terms, as
   // Lucene's MoreLikeThis does: a 4,000-char prompt took 1.7 s on a 54k-doc
-  // index against the prompt hook's 1.5 s budget.
-  private mostDistinctive(terms: string[]): string[] {
+  // index against the prompt hook's 1.5 s budget. A term the index has never
+  // seen sorts last: it scores nothing exact, and ranking it rarest let a
+  // prompt's hashes and typos crowd out every term that matches.
+  private rarestIndexedTerms(terms: string[]): string[] {
     const unique = [...new Set(terms)];
     if (unique.length <= MAX_QUERY_TERMS) return unique;
-    const df = (t: string) => this.invertedIndex.get(t)?.size ?? 0;
+    const df = (t: string) => this.invertedIndex.get(t)?.size || Infinity;
     return unique.sort((a, b) => df(a) - df(b)).slice(0, MAX_QUERY_TERMS);
   }
 

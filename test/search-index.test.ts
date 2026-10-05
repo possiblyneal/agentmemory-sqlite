@@ -366,3 +366,16 @@ describe("SearchIndex long queries", () => {
     expect(ids.some((id) => id.startsWith("c"))).toBe(false);
   });
 });
+
+describe("SearchIndex long queries with unseen terms", () => {
+  it("keeps indexed terms ahead of terms the index has never seen", () => {
+    const idx = new SearchIndex();
+    idx.add(makeObs({ id: "hit", title: "sqlite migration lockfile" }));
+    for (let i = 0; i < 20; i++) idx.add(makeObs({ id: `f${i}`, title: `filler${i}` }));
+    const unseen = Array.from({ length: 25 }, (_, i) => `qzx${String.fromCharCode(97 + i)}unseen`);
+
+    const ids = idx.search(["sqlite", "migration", ...unseen].join(" ")).map((h) => h.obsId);
+
+    expect(ids).toContain("hit");
+  });
+});
