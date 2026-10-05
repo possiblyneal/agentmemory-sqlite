@@ -82,7 +82,7 @@ describe("inproc vector store", () => {
     process.env = { ...savedEnv };
   });
 
-  it("commits an embedding only when the content row still calls for that text", () => {
+  it("commits an embedding only when the content row still calls for that text", async () => {
     const mem = memory("mem_a", "alpha content");
     state.set(KV.memories, "mem_a", mem);
     const text = mem.title + " " + mem.content;
@@ -97,7 +97,7 @@ describe("inproc vector store", () => {
     state.set(KV.memories, "mem_a", memory("mem_a", "alpha content, revised"));
     expect(store.commitEmbedding(vi, { id: "mem_a", sessionId: "memory", text, kind: "memory" }, v(0, 1))).toBe(false);
     expect(rows()[0].input_hash).toBe(embedInputHash(text));
-    expect(vi.search(v(1, 0), 1)[0].score).toBeCloseTo(1, 6);
+    expect((await vi.search(v(1, 0), 1))[0].score).toBeCloseTo(1, 6);
 
     // Superseded or deleted: nothing is written.
     state.set(KV.memories, "mem_a", memory("mem_a", "alpha content, revised", { isLatest: false }));
@@ -122,7 +122,7 @@ describe("inproc vector store", () => {
     expect(rows().map((r) => r.id)).toEqual(["obs_1"]);
   });
 
-  it("updates the in-memory map only after the enclosing transaction commits, never after a rollback", () => {
+  it("updates the in-memory map only after the enclosing transaction commits, never after a rollback", async () => {
     state.transaction(() => {
       vi.add("mem_x", "memory", v(1, 0), "h");
       expect(vi.size).toBe(0);
@@ -137,11 +137,11 @@ describe("inproc vector store", () => {
       }),
     ).toThrow("boom");
     expect(vi.size).toBe(1);
-    expect(vi.search(v(1, 0), 5).map((r) => r.obsId)).toEqual(["mem_x"]);
+    expect((await vi.search(v(1, 0), 5)).map((r) => r.obsId)).toEqual(["mem_x"]);
     expect(rows().map((r) => r.id)).toEqual(["mem_x"]);
   });
 
-  it("persists chunk rows, hydrates parent-level search and parent deletion after a restart", () => {
+  it("persists chunk rows, hydrates parent-level search and parent deletion after a restart", async () => {
     process.env.AGENTMEMORY_MEMORY_CHUNKING = "true";
     process.env.AGENTMEMORY_CHUNK_MAX_CHARS = "40";
     process.env.AGENTMEMORY_CHUNK_OVERLAP_CHARS = "0";
@@ -160,7 +160,7 @@ describe("inproc vector store", () => {
     restarted.attachStore(store);
     expect(store.hydrate(restarted)).toBe(jobs.length + 1);
     expect(restarted.size).toBe(jobs.length + 1);
-    const hits = restarted.search(v(1, 0), 10);
+    const hits = await restarted.search(v(1, 0), 10);
     expect(hits.map((h) => h.obsId)).toEqual(["mem_c", "obs_solo"]);
     expect(hits[0].score).toBeCloseTo(1, 6);
 

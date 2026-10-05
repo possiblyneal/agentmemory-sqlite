@@ -202,7 +202,7 @@ describe("mem::index-fill-missing", () => {
       expect(r).toMatchObject({ expected: jobs.length, present: jobs.length, missing: 0, embedded: 0, pruned: 1 });
       expect(rows().map((row) => row.id).sort()).toEqual(jobs.map((j) => j.id).sort());
       expect(vi.size).toBe(jobs.length);
-      expect(vi.search(v(1, 0), 5).map((h) => h.obsId)).toEqual(["mem_c"]);
+      expect((await vi.search(v(1, 0), 5)).map((h) => h.obsId)).toEqual(["mem_c"]);
       expect(provider.calls).toHaveLength(0);
     } finally {
       delete process.env.AGENTMEMORY_MEMORY_CHUNKING;

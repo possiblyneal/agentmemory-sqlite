@@ -23,17 +23,17 @@ describe("VectorIndex", () => {
     expect(index.size).toBe(0);
   });
 
-  it("returns empty array when searching empty index", () => {
-    const results = index.search(new Float32Array([0.1, 0.2, 0.3]));
+  it("returns empty array when searching empty index", async () => {
+    const results = await index.search(new Float32Array([0.1, 0.2, 0.3]));
     expect(results).toEqual([]);
   });
 
-  it("returns results sorted by cosine similarity", () => {
+  it("returns results sorted by cosine similarity", async () => {
     index.add("obs_close", "ses_1", new Float32Array([1, 0, 0]));
     index.add("obs_far", "ses_1", new Float32Array([0, 1, 0]));
     index.add("obs_medium", "ses_1", new Float32Array([0.7, 0.7, 0]));
 
-    const results = index.search(new Float32Array([1, 0, 0]));
+    const results = await index.search(new Float32Array([1, 0, 0]));
     expect(results[0].obsId).toBe("obs_close");
     expect(results[0].score).toBeCloseTo(1.0, 5);
     expect(results[1].obsId).toBe("obs_medium");
@@ -41,23 +41,23 @@ describe("VectorIndex", () => {
     expect(results[2].score).toBeCloseTo(0.0, 5);
   });
 
-  it("respects the limit parameter", () => {
+  it("respects the limit parameter", async () => {
     for (let i = 0; i < 10; i++) {
       index.add(`obs_${i}`, "ses_1", new Float32Array([i * 0.1, 0.5, 0.5]));
     }
-    const results = index.search(new Float32Array([0.9, 0.5, 0.5]), 3);
+    const results = await index.search(new Float32Array([0.9, 0.5, 0.5]), 3);
     expect(results.length).toBe(3);
   });
 
-  it("clears all vectors", () => {
+  it("clears all vectors", async () => {
     index.add("obs_1", "ses_1", new Float32Array([0.1, 0.2, 0.3]));
     index.add("obs_2", "ses_1", new Float32Array([0.4, 0.5, 0.6]));
     index.clear();
     expect(index.size).toBe(0);
-    expect(index.search(new Float32Array([0.1, 0.2, 0.3]))).toEqual([]);
+    expect(await index.search(new Float32Array([0.1, 0.2, 0.3]))).toEqual([]);
   });
 
-  it("serialize and deserialize round-trip preserves data", () => {
+  it("serialize and deserialize round-trip preserves data", async () => {
     index.add("obs_1", "ses_1", new Float32Array([0.1, 0.2, 0.3]));
     index.add("obs_2", "ses_2", new Float32Array([0.4, 0.5, 0.6]));
 
@@ -65,19 +65,19 @@ describe("VectorIndex", () => {
     const restored = VectorIndex.deserialize(json);
 
     expect(restored.size).toBe(2);
-    const results = restored.search(new Float32Array([0.1, 0.2, 0.3]), 2);
+    const results = await restored.search(new Float32Array([0.1, 0.2, 0.3]), 2);
     expect(results.length).toBe(2);
     expect(results[0].obsId).toBe("obs_1");
     expect(results[0].sessionId).toBe("ses_1");
   });
 
-  it("handles zero vectors without error", () => {
+  it("handles zero vectors without error", async () => {
     index.add("obs_zero", "ses_1", new Float32Array([0, 0, 0]));
-    const results = index.search(new Float32Array([1, 0, 0]));
+    const results = await index.search(new Float32Array([1, 0, 0]));
     expect(results[0].score).toBe(0);
   });
 
-  it("round-trip preserves dim + identity for pooled-Buffer sizes (#587)", () => {
+  it("round-trip preserves dim + identity for pooled-Buffer sizes (#587)", async () => {
     // 384-dim floats = 1536 bytes, comfortably inside Node's 8KB Buffer
     // pool. Without explicit byteOffset/byteLength in the base64 round-trip,
     // deserialise reads pool offset 0 and reports the entire pool as a
@@ -96,13 +96,13 @@ describe("VectorIndex", () => {
     const { mismatches } = restored.validateDimensions(DIM);
     expect(mismatches).toEqual([]);
     for (let n = 0; n < 5; n++) {
-      const results = restored.search(vecs[n], 1);
+      const results = await restored.search(vecs[n], 1);
       expect(results[0].obsId).toBe(`obs_${n}`);
       expect(results[0].score).toBeCloseTo(1.0, 4);
     }
   });
 
-  it("preserves bytes when source Float32Array is itself a sliced view (#587)", () => {
+  it("preserves bytes when source Float32Array is itself a sliced view (#587)", async () => {
     // The encode side has the same risk: passing arr.buffer drops the
     // slice metadata if arr is a sub-view (subarray / typedArray.set).
     const backing = new Float32Array(8);
@@ -111,8 +111,35 @@ describe("VectorIndex", () => {
 
     index.add("obs_slice", "ses_1", slice);
     const restored = VectorIndex.deserialize(index.serialize());
-    const results = restored.search(new Float32Array([2, 3, 4, 5]), 1);
+    const results = await restored.search(new Float32Array([2, 3, 4, 5]), 1);
     expect(results[0].obsId).toBe("obs_slice");
     expect(results[0].score).toBeCloseTo(1.0, 4);
+  });
+
+  it("keeps the event loop turning while scanning 50k vectors", async () => {
+    const dims = 64;
+    const target = new Float32Array(dims).fill(1);
+    for (let i = 0; i < 50_000; i++) {
+      const v = new Float32Array(dims);
+      v[i % dims] = 1;
+      v[(i * 7 + 1) % dims] += 0.5;
+      index.add(`obs_${i}`, "ses_1", v);
+    }
+    index.add("obs_target", "ses_1", target);
+
+    let ticks = 0;
+    let running = true;
+    const probe = (async () => {
+      while (running) {
+        await new Promise((resolve) => setImmediate(resolve));
+        ticks++;
+      }
+    })();
+    const results = await index.search(target, 5);
+    running = false;
+    await probe;
+
+    expect(results[0].obsId).toBe("obs_target");
+    expect(ticks).toBeGreaterThanOrEqual(Math.floor(50_001 / 256) - 1);
   });
 });

@@ -134,8 +134,7 @@ describe("index exclusion by toolName prefix", () => {
     expect(getSearchIndex().has("obs_real")).toBe(true);
     expect(getSearchIndex().has("obs_echo")).toBe(false);
     expect(
-      getVectorIndex()!
-        .search(new Float32Array([0.1, 0.2, 0.3]), 10)
+      (await getVectorIndex()!.search(new Float32Array([0.1, 0.2, 0.3]), 10))
         .map((r) => r.obsId),
     ).toEqual(["obs_real"]);
 
