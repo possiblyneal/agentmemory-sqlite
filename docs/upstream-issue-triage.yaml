@@ -2770,8 +2770,8 @@ issues:
     difficulty: high
     kind: bug
     note: "graph/build's server-side batch loop outlives its response and burns LLM calls for hours."
-    disposition: candidate
-    status: "partly-present-here — 'Invocation stopped' is iii-only, but api::graph-build runs every batch inside the request and never notices a disconnected client, so LLM spend continues after the caller gives up"
+    disposition: already-fixed
+    fixed_by: "api::graph-build stops issuing mem::graph-extract batches once its caller disconnects (the engine hands each handler an AbortSignal that fires when the socket closes) or POST /agentmemory/graph/build/cancel is called (src/triggers/api.ts api::graph-build). test/graph-build-single-flight.test.ts counts extract calls after an abort."
     url: https://github.com/rohitg00/agentmemory/issues/1339
     mentioned_by_prs: [1384]
   - number: 1340
@@ -2922,7 +2922,7 @@ issues:
     difficulty: low
     kind: bug
     note: "Viewer Rebuild Graph fires a full corpus replay with no confirmation, in-flight guard or result handling."
-    disposition: candidate
-    status: "present-here — rebuildGraph posts graph/build with no confirmation or in-flight guard and ignores the result (src/viewer/index.html:2374-2380), and the server has no single-flight (src/triggers/api.ts:1868-1921), so a second click starts a second full LLM replay."
+    disposition: already-fixed
+    fixed_by: "The viewer's Rebuild Graph counts observations with a graph/build dryRun, asks window.confirm before posting, disables itself while the build runs and renders done, cancelled, refused or failed (src/viewer/index.html rebuildGraph); api::graph-build answers a second concurrent build 409 with progress (src/triggers/api.ts). test/viewer-graph-rebuild.test.ts and test/graph-build-single-flight.test.ts cover it."
     url: https://github.com/rohitg00/agentmemory/issues/1383
     fix_prs: [1386]

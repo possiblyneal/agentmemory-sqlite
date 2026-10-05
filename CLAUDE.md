@@ -247,7 +247,7 @@ unchecked: the note is still upstream's claim, not a verified defect.
 ## Current Stats (v0.9.29)
 
 - 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
-- 133 REST endpoints
+- 134 REST endpoints
 - 6 MCP resources, 3 MCP prompts
 - 10 hooks, 17 skills
 - 260+ registered functions

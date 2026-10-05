@@ -1865,26 +1865,53 @@ export function registerApiTriggers(
   // Viewer calls this when the graph is empty (#666). Iterates every
   // session, collects observations that have a `title` (compressed only),
   // and feeds them through `mem::graph-extract` in batches.
+  let graphBuild: {
+    controller: AbortController;
+    progress: { running: true; sessions: number; sessionsDone: number; batches: number };
+  } | null = null;
+
   sdk.registerFunction("api::graph-build",
-    async (req: ApiRequest<{ batchSize?: number }>): Promise<Response> => {
+    async (req: ApiRequest<{ batchSize?: number; dryRun?: boolean }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const batchSize = Math.max(
         1,
         Math.min(100, Number((req.body as { batchSize?: number })?.batchSize) || 25),
       );
+      const compressedOf = async (sid: string) =>
+        (await kv.list<CompressedObservation>(KV.observations(sid))).filter(
+          (o) => o && typeof o.title === "string" && o.title.length > 0,
+        );
+      if (graphBuild) {
+        return {
+          status_code: 409,
+          body: { error: "A graph build is already running", progress: graphBuild.progress },
+        };
+      }
+      const controller = new AbortController();
+      const onDisconnect = () => controller.abort();
+      req.signal?.addEventListener("abort", onDisconnect);
       try {
         const sessions = await kv.list<Session>(KV.sessions);
+        const sessionIds = sessions
+          .map((s) => s?.id)
+          .filter((sid): sid is string => typeof sid === "string" && sid.length > 0);
+        if (req.body?.dryRun === true) {
+          let observations = 0;
+          for (const sid of sessionIds) observations += (await compressedOf(sid)).length;
+          return {
+            status_code: 200,
+            body: { dryRun: true, sessions: sessions.length, observations },
+          };
+        }
+        const progress = { running: true as const, sessions: sessionIds.length, sessionsDone: 0, batches: 0 };
+        graphBuild = { controller, progress };
         let totalNodes = 0;
         let totalEdges = 0;
-        let batchesRun = 0;
-        for (const session of sessions) {
-          const sid = session?.id;
-          if (typeof sid !== "string" || sid.length === 0) continue;
-          const observations = await kv.list<CompressedObservation>(KV.observations(sid));
-          const compressed = observations.filter((o) => o && typeof o.title === "string" && o.title.length > 0);
-          if (compressed.length === 0) continue;
+        for (const sid of sessionIds) {
+          const compressed = await compressedOf(sid);
           for (let i = 0; i < compressed.length; i += batchSize) {
+            if (controller.signal.aborted) break;
             const batch = compressed.slice(i, i + batchSize);
             try {
               const result = (await sdk.trigger({
@@ -1895,7 +1922,7 @@ export function registerApiTriggers(
                 totalNodes += Number(result.nodesAdded) || 0;
                 totalEdges += Number(result.edgesAdded) || 0;
               }
-              batchesRun++;
+              progress.batches++;
             } catch (err) {
               logger.warn("graph-build batch failed", {
                 sessionId: sid,
@@ -1904,19 +1931,25 @@ export function registerApiTriggers(
               });
             }
           }
+          if (controller.signal.aborted) break;
+          progress.sessionsDone++;
         }
         return {
           status_code: 200,
           body: {
-            success: true,
+            success: !controller.signal.aborted,
+            cancelled: controller.signal.aborted,
             sessions: sessions.length,
-            batches: batchesRun,
+            batches: progress.batches,
             nodes: totalNodes,
             edges: totalEdges,
           },
         };
       } catch {
         return graphDisabledResponse();
+      } finally {
+        req.signal?.removeEventListener("abort", onDisconnect);
+        if (graphBuild?.controller === controller) graphBuild = null;
       }
     },
   );
@@ -1924,6 +1957,20 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::graph-build",
     config: { api_path: "/agentmemory/graph/build", http_method: "POST" },
+  });
+
+  sdk.registerFunction("api::graph-build-cancel",
+    async (req: ApiRequest): Promise<Response> => {
+      const authErr = checkAuth(req, secret);
+      if (authErr) return authErr;
+      graphBuild?.controller.abort();
+      return { status_code: 200, body: { cancelled: graphBuild !== null } };
+    },
+  );
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::graph-build-cancel",
+    config: { api_path: "/agentmemory/graph/build/cancel", http_method: "POST" },
   });
 
   // Import graphify's structural graph (graphify-out/graph.json) into the
