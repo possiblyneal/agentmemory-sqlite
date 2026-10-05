@@ -1558,7 +1558,12 @@
       function valueOrDash(count, isFailed) { return isFailed ? '&ndash;' : count; }
 
       var html = '';
-      var failedNames = Object.keys(failed).filter(function(k) { return failed[k]; });
+      var failedTitles = {
+        health: 'Health', sessions: 'Sessions', memories: 'Memories', graph: 'Graph Nodes', audit: 'Recent Activity',
+        semantic: 'Semantic Facts', procedural: 'Procedural Memory', relations: 'Memory Relations', lessons: 'Lessons',
+        crystals: 'Crystals', insights: 'Insights'
+      };
+      var failedNames = Object.keys(failed).filter(function(k) { return failed[k]; }).map(function(k) { return failedTitles[k]; });
       if (failedNames.length > 0) {
         html += '<div role="alert" style="margin-bottom:14px;padding:10px 12px;border:1px solid var(--accent);background:var(--bg-alt);font-size:12px;color:var(--ink);line-height:1.4;">';
         html += '<div style="font-weight:600;margin-bottom:4px;">Some dashboard requests failed</div>';
@@ -1603,6 +1608,7 @@
         html += '<div class="sub">' + (cb.failures || 0) + ' failures</div></div>';
       }
       var totalObs = d.sessions.reduce(function(a, s) { return a + (s.observationCount || 0); }, 0);
+      // Same estimate as `agentmemory status` (src/cli.ts); change both together.
       var estFull = totalObs * 80;
       var estInjected = Math.min(totalObs, 50) * 38;
       var savings = estFull > 0 ? Math.round((1 - estInjected / Math.max(estFull, 1)) * 100) : 0;

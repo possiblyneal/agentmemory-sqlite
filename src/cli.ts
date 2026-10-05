@@ -521,6 +521,7 @@ async function runStatus() {
       0,
     );
     const memCount = Number(memoriesRes?.latestCount ?? memoriesRes?.total ?? 0) || 0;
+    // Same estimate as the viewer dashboard (src/viewer/index.html); change both together.
     const estFullTokens = obsCount * 80;
     const estInjectedTokens = Math.min(obsCount, 50) * 38;
     const tokensSaved = estFullTokens - estInjectedTokens;

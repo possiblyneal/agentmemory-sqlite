@@ -319,7 +319,7 @@ describe("viewer dashboard", () => {
 
     const html = getElement("view-dashboard").innerHTML;
     expect(html).toContain("Some dashboard requests failed");
-    expect(html).toContain("No answer for: graph.");
+    expect(html).toContain("No answer for: Graph Nodes.");
   });
 
   it("names every dashboard request that failed, not only the counted cards", async () => {
@@ -328,7 +328,7 @@ describe("viewer dashboard", () => {
 
     await sandbox.loadDashboard();
 
-    expect(getElement("view-dashboard").innerHTML).toContain("No answer for: audit.");
+    expect(getElement("view-dashboard").innerHTML).toContain("No answer for: Recent Activity.");
   });
 
   it("lets only the newest of overlapping loads redraw the dashboard", async () => {
