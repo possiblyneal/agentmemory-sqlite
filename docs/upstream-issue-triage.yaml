@@ -45,6 +45,7 @@ issues:
     kind: bug
     note: "Vector search blocks the single Node thread; fixing it means moving CPU work off the event loop."
     disposition: candidate
+    status: "present-here — VectorIndex.search scans every vector synchronously on the main thread (src/state/vector-index.ts:181-194)."
     url: https://github.com/rohitg00/agentmemory/issues/195
   - number: 259
     title: "Support custom metadata fields per session"
@@ -102,7 +103,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Viewer JS hardcodes :3113, so every panel is empty behind a reverse proxy."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "With no port in the URL the viewer calls REST on window.location.origin (src/viewer/index.html:1106-1111) and the viewer server proxies /agentmemory/* to the REST port (src/viewer/server.ts:415-424); the live WebSocket still targets hostname:streamsPort (index.html:4560-4564), so behind a proxy the viewer falls back to 10 s polling."
     url: https://github.com/rohitg00/agentmemory/issues/299
     mentioned_by_prs: [1083]
   - number: 301
@@ -168,6 +170,7 @@ issues:
     kind: bug
     note: "Local embedding stays at none despite a correct xenova config."
     disposition: candidate
+    status: "partly-present-here — EMBEDDING_PROVIDER=local works, but an unrecognised value falls to `default: return null` (src/providers/embedding/index.ts:47) and the misnamed AGENTMEMORY_EMBEDDING_PROVIDER is never read (src/config.ts:269), so boot logs BM25-only (src/index.ts:195) with no warning."
     url: https://github.com/rohitg00/agentmemory/issues/395
     fix_prs: [412, 1283]
   - number: 399
@@ -283,6 +286,7 @@ issues:
     kind: bug
     note: "Stale index dimension mismatch makes the worker refuse to start; REST unreachable."
     disposition: candidate
+    status: "partly-present-here — boot still refuses on a vector dimension mismatch unless AGENTMEMORY_DROP_STALE_INDEX=true (src/index.ts:447-481), but the drop deletes only the vectors table (src/engine/inproc/vectors.ts:110-112) and the fill pass re-embeds from content (src/index.ts:529-534), so nothing is lost; the daemon is still down by default. The message's re-embed option has no caller (migrateVectorIndex, src/functions/migrate-vector-index.ts:44)."
     url: https://github.com/rohitg00/agentmemory/issues/455
     fix_prs: [575]
     mentioned_by_prs: [525]
@@ -293,6 +297,7 @@ issues:
     kind: bug
     note: "Same 2048-vs-384 dimension mismatch crashing startup on macOS."
     disposition: candidate
+    status: "partly-present-here — same guard as rohitg00/agentmemory#455: a deliberate refusal rather than a crash (src/index.ts:447-481), lossless to clear with AGENTMEMORY_DROP_STALE_INDEX, but it still keeps the daemon down until the Operator acts."
     url: https://github.com/rohitg00/agentmemory/issues/469
     fix_prs: [575]
     mentioned_by_prs: [525]
@@ -331,6 +336,7 @@ issues:
     kind: bug
     note: "Server becomes unresponsive under three concurrent Claude Code sessions."
     disposition: candidate
+    status: "unresolved — upstream never found a cause on its iii engine and there is no repro here; the live daemon does log prompt-submit Missed Injections under concurrent sessions (missed-injections.jsonl), but no hang."
     url: https://github.com/rohitg00/agentmemory/issues/499
   - number: 505
     title: "Viewer Rebuild Graph button calls missing /agentmemory/graph/build endpoint"
@@ -348,7 +354,8 @@ issues:
     difficulty: med
     kind: bug
     note: "MCP tools not loaded by Claude Code despite a healthy server."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "plugin/.mcp.json runs this fork's `agentmemory mcp` with defaulted ${AGENTMEMORY_URL:-…} env, not upstream's npx shim."
     url: https://github.com/rohitg00/agentmemory/issues/510
   - number: 511
     title: "npm install shows peer dependency conflict with @anthropic-ai/sdk (0.39.0 vs >=0.93.0)"
@@ -375,7 +382,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Codex worktrees keyed by worktree cwd, fragmenting project-scoped memory."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "1dc4d43 — resolveProject names a linked worktree after its main checkout via --git-common-dir (src/hooks/_project.ts:11-21); every hook and the MCP shim use it (src/mcp/standalone.ts:434). The Codex payload is out of scope."
     url: https://github.com/rohitg00/agentmemory/issues/515
     fix_prs: [717]
   - number: 518
@@ -438,7 +446,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Graph stays empty on macOS with GRAPH_EXTRACTION_ENABLED=true."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "/session/end triggers event::session::stopped (src/triggers/api.ts:825), which runs mem::graph-extract (src/triggers/events.ts:141-163)."
     url: https://github.com/rohitg00/agentmemory/issues/559
   - number: 586
     title: "Feature request: signal detector hook (on_turn_start) for entity extraction"
@@ -465,6 +474,7 @@ issues:
     kind: feature
     note: "mem::context and smart-search never read KV.insights or KV.semantic."
     disposition: candidate
+    status: "partly-present-here — mem::context and smart-search now read KV.insights (src/functions/context.ts:107, src/functions/smart-search.ts:219), but neither reads KV.semantic, so semantic facts are never recalled."
     url: https://github.com/rohitg00/agentmemory/issues/590
   - number: 595
     title: "Expose privacy-safe memory governance/delete receipts"
@@ -525,7 +535,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Large mem-live WebSocket sync backlog grows Chrome by GBs and freezes it."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "the iii engine's stream sync — the in-process stream server only broadcasts live events after join (src/engine/inproc/sdk.ts:259-276, 576-584) and never sends a sync backlog."
     url: https://github.com/rohitg00/agentmemory/issues/609
     fix_prs: [623, 1302]
   - number: 620
@@ -570,6 +581,7 @@ issues:
     kind: bug
     note: "Semantic consolidate and reflect time out from sequential KV operations."
     disposition: candidate
+    status: "present-here — the MCP shim forwards memory_reflect/memory_consolidate with a fixed 15 s CALL_TIMEOUT_MS (src/mcp/rest-proxy.ts:3, 163, via src/mcp/standalone.ts:409) while reflect makes up to 20 sequential LLM calls (src/functions/reflect.ts:302, 373); the sequential-KV cause does not apply (consolidation-pipeline.ts:290 uses setMany)."
     url: https://github.com/rohitg00/agentmemory/issues/655
     mentioned_by_prs: [867]
   - number: 658
@@ -598,7 +610,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Graph nodes jump on every poll; no position preservation or velocity cap."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "The poll loop never reloads the graph tab (src/viewer/index.html:3860-3876) and the simulation caps node velocity (index.html:2295, 2323-2326)."
     url: https://github.com/rohitg00/agentmemory/issues/691
   - number: 695
     title: "Feature request: Transparent fallback mode — indicate local storage in tool response & add strict/no-fallback option"
@@ -650,7 +663,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Local embedding fails with fetch failed although the model is already downloaded."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Local embeddings run on @huggingface/transformers with the model cache under the data dir and HF_ENDPOINT honored (src/providers/transformers-env.ts:9-11, src/config.ts:222-228)."
     url: https://github.com/rohitg00/agentmemory/issues/713
   - number: 714
     title: "Any plans for OpenClaw plugin with hook-based auto-capture?"
@@ -685,7 +699,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Per-turn system prompt mutation drops the prompt cache hit rate ~10pp."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "a host other than Claude Code — the system-prompt mutation lives in the opencode plugin; Claude Code receives Injection through hook output."
     url: https://github.com/rohitg00/agentmemory/issues/720
     fix_prs: [1281]
     mentioned_by_prs: [1325]
@@ -751,6 +766,7 @@ issues:
     kind: bug
     note: "git-toplevel basename project identity collides across same-named repos."
     disposition: candidate
+    status: "partly-present-here — worktrees share one project through --git-common-dir (src/hooks/_project.ts:19-20), but identity is still a directory basename with no remote, so same-named repos collide."
     url: https://github.com/rohitg00/agentmemory/issues/733
     fix_prs: [738]
   - number: 736
@@ -795,6 +811,7 @@ issues:
     kind: bug
     note: "Consolidation ignores memories created in the same run, producing duplicates and orphans."
     disposition: candidate
+    status: "present-here — mem::consolidate matches titles against the stale existingMemories snapshot (src/functions/consolidate.ts:166-171) and existingTitles is written but never read; only legacy POST /agentmemory/consolidate reaches it (src/triggers/api.ts:1324)."
     url: https://github.com/rohitg00/agentmemory/issues/747
   - number: 751
     title: "memory_save accepts `project` parameter but iii engine serialization drops it — `memory-project-coverage` diagnose perpetually fails"
@@ -941,7 +958,7 @@ issues:
     kind: bug
     note: "No path to rebuild or reset a >25K legacy graph; both paths heartbeat-crash."
     disposition: candidate
-    status: "partly-present-here — the heartbeat crash is iii-only, but rebuild and reset of a large legacy graph still enumerate the whole graph and block the event loop; #114 only refuses an oversized rebuild"
+    status: "partly-present-here — the heartbeat crash is iii-only and mem::graph-reset enumerates nothing (src/functions/graph.ts:1517-1543), but snapshot-rebuild still lists every node (graph.ts:1413) and refuses past 25,000 (src/state/graph-indexes.ts:7), so a larger graph has no rebuild path; reset also leaves adjacency and obs-nodes rows on disk."
     url: https://github.com/rohitg00/agentmemory/issues/825
   - number: 826
     title: "feat: Expose post-tool-use and TaskCompleted hooks to Python plugin (Hermes integration)"
@@ -958,8 +975,8 @@ issues:
     difficulty: high
     kind: bug
     note: "graph-query traversal enumerates the full graph and crashes past ~25K nodes."
-    disposition: candidate
-    status: "partly-present-here — the heartbeat crash is iii-only, but graph-query traversal still enumerates the whole graph and blocks the event loop on a large store"
+    disposition: already-fixed
+    fixed_by: "A query or startNodeId walk goes through the bounded side indexes (queryViaIndexes/traverseViaIndexes, src/functions/graph.ts:247-300, 1279-1290, capped at TRAVERSAL_VISIT_CAP); with the indexes unarmed it returns the snapshot and never enumerates (graph.ts:1293-1300)."
     url: https://github.com/rohitg00/agentmemory/issues/828
     fix_prs: [893]
   - number: 833
@@ -1100,6 +1117,7 @@ issues:
     kind: bug
     note: "Slot tools return opaque Internal error when AGENTMEMORY_SLOTS is off."
     disposition: candidate
+    status: "present-here — the slot tool cases call sdk.trigger with no isSlotsEnabled() guard (src/mcp/server.ts:1257), so the unregistered function falls to the catch-all 500 'Internal error' (server.ts:1370-1378); REST has the guard (src/triggers/api.ts:2563)."
     url: https://github.com/rohitg00/agentmemory/issues/888
     fix_prs: [894]
   - number: 889
@@ -1109,6 +1127,7 @@ issues:
     kind: bug
     note: "expandIds is a no-op end to end: shim drops it and the engine cannot expand mem_ ids."
     disposition: candidate
+    status: "partly-present-here — the engine resolves mem_ ids (src/functions/smart-search.ts:439-440) and server.ts forwards expandIds (src/mcp/server.ts:364-370), but `agentmemory mcp` runs src/mcp/standalone.ts, whose validation requires query and drops expandIds (standalone.ts:175-197, 255-264)."
     url: https://github.com/rohitg00/agentmemory/issues/889
     fix_prs: [1230]
   - number: 890
@@ -1118,7 +1137,7 @@ issues:
     kind: bug
     note: "mesh/export has no pagination, so sync can never catch up after a long outage."
     disposition: candidate
-    status: "partly-present-here — the WS frame limit is iii-only, but api::mesh-export still returns the whole delta unpaginated, so an oversized backlog 413s on every sync and never catches up"
+    status: "partly-present-here — the WS frame limit is iii-only, but api::mesh-export still returns the whole delta unpaginated (src/triggers/api.ts:3211-3240), so a backlog past the peer's 16 MiB body cap (src/engine/inproc/sdk.ts:81) 413s on every sync and never catches up."
     url: https://github.com/rohitg00/agentmemory/issues/890
     mentioned_by_prs: [1143]
   - number: 899
@@ -1155,6 +1174,7 @@ issues:
     kind: bug
     note: "Viewer Actions tab hangs forever if any action has tags as a string."
     disposition: candidate
+    status: "present-here — api::actions forwards tags unchecked (src/triggers/api.ts:2749) and mem::action-create stores them as given (src/functions/actions.ts:40), while the viewer calls (a.tags || []).join/.map (src/viewer/index.html:3488, 3528), which throw on a string."
     url: https://github.com/rohitg00/agentmemory/issues/906
   - number: 907
     title: "Request to add available APIs for batch session deletion and graph cleanup"
@@ -1170,7 +1190,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Claude Code can no longer connect to the MCP server on 0.9.27."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "initialize echoes the client's protocolVersion when it is in SUPPORTED_PROTOCOL_VERSIONS (src/mcp/standalone.ts:32-36, 610-617); the iii-engine and doctor parts do not exist here."
     url: https://github.com/rohitg00/agentmemory/issues/908
   - number: 909
     title: "agentmemory hangs ~90s on shutdown (systemd black screen) — iii-sdk telemetry shutdown never resolves"
@@ -1189,6 +1210,7 @@ issues:
     kind: bug
     note: "remember skill preserves exact phrasing, storing user secrets verbatim (Snyk W007)."
     disposition: candidate
+    status: "partly-present-here — mem::remember scrubs token-shaped secrets (src/functions/remember.ts:74, src/functions/privacy.ts:5-28), but plain passwords and short keys miss the 20+-char patterns, the shim's local fallback stores content unscrubbed (src/mcp/standalone.ts:301-321), and the remember skill still says to keep the user's phrasing (plugin/skills/remember/SKILL.md:29, 52)."
     url: https://github.com/rohitg00/agentmemory/issues/911
     mentioned_by_prs: [941]
   - number: 912
@@ -1282,6 +1304,7 @@ issues:
     kind: bug
     note: "Local embedding provider never activates in 0.9.27; smart-search silently BM25-only."
     disposition: candidate
+    status: "partly-present-here — boot now logs 'Embedding provider: none (BM25-only mode)' (src/index.ts:195), but local is never auto-detected (src/config.ts:265-278) and plugin/skills/agentmemory-config/SKILL.md:21 says no key means BM25 plus local embeddings."
     url: https://github.com/rohitg00/agentmemory/issues/931
     fix_prs: [1284]
     mentioned_by_prs: [1283]
@@ -1336,6 +1359,7 @@ issues:
     kind: bug
     note: "Dashboard MEMORIES tile counts only memory_save facts, reading 1 on a healthy install."
     disposition: candidate
+    status: "present-here — the Memories tile renders d.memories.length from memories?latest=true&limit=500 (src/viewer/index.html:1481, 1585), which counts mem:memories only, not semantic facts."
     url: https://github.com/rohitg00/agentmemory/issues/951
     fix_prs: [973]
   - number: 952
@@ -1401,7 +1425,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Graph extraction fires an LLM call on every Stop hook rather than at real session end."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "A Stop-hook turn end waits out SESSION_IDLE_END_MS before ending the Session (src/triggers/api.ts:138, 854), extraction takes only Observations past the graphExtractedThrough watermark (src/triggers/events.ts:141-162), and GRAPH_EXTRACTION_BATCH_SIZE is honored (src/functions/graph.ts:1197)."
     url: https://github.com/rohitg00/agentmemory/issues/978
     fix_prs: [1280]
   - number: 979
@@ -1484,7 +1509,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Zero-LLM summarize no-op skips are recorded as failures, inflating failureCount."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "22ccb00 — mem::summarize returns no_provider before any metricsStore.record (src/functions/summarize.ts:464-473)."
     url: https://github.com/rohitg00/agentmemory/issues/996
   - number: 998
     title: "Codex-visible hook skill should distinguish Codex hooks from Claude Code hooks"
@@ -1696,7 +1722,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Synthetic compression hardcodes empty concepts, so legacy consolidate never groups."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "graph-extract writes the extracted concepts back onto the Observation (src/functions/graph.ts:633-641, 661-668)."
     url: https://github.com/rohitg00/agentmemory/issues/1059
   - number: 1060
     title: "AGENTMEMORY_TOOLS=core in ~/.agentmemory/.env is ignored (getVisibleTools reads process.env directly)"
@@ -1724,8 +1751,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Session stop re-extracts the full observation set with no change detection."
-    disposition: candidate
-    status: "present-here — event::session::stopped sends every session observation to mem::graph-extract with no watermark (src/triggers/events.ts:116-124, src/functions/graph.ts:898-958); gated off by default."
+    disposition: already-fixed
+    fixed_by: "Session stop sends only Observations newer than session.graphExtractedThrough, holding back ones still awaiting compression (src/triggers/events.ts:141-162); mem::graph-extract advances the watermark per successful batch (src/functions/graph.ts:1164)."
     url: https://github.com/rohitg00/agentmemory/issues/1063
     fix_prs: [1061, 1280]
   - number: 1064
@@ -1755,6 +1782,7 @@ issues:
     kind: bug
     note: "memory_heal reports project backfill fixable but fixes nothing."
     disposition: candidate
+    status: "present-here — memory-project-coverage is marked fixable (src/functions/diagnostics.ts:531, 539), but mem::heal's memories branch only clears isLatest on superseded rows (diagnostics.ts:1324-1369) and inferMemoryProjects leaves session-less memories ambiguous (src/functions/migrate.ts:47-50)."
     url: https://github.com/rohitg00/agentmemory/issues/1066
   - number: 1067
     title: "connect claude-code hardcodes ~/.claude.json / ~/.claude/settings.json, ignoring CLAUDE_CONFIG_DIR"
@@ -1781,7 +1809,8 @@ issues:
     difficulty: low
     kind: bug
     note: "standalone memory_save drops title and tags and stores content as the title."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "memory_save advertises no title or tags (src/mcp/tools-registry.ts:78-108); every surface derives the title from content (src/functions/remember.ts:235, src/mcp/standalone.ts:308) and forwards concepts."
     url: https://github.com/rohitg00/agentmemory/issues/1073
   - number: 1077
     title: "import-jsonl in server-hosted mode is fundamentally confusing"
@@ -1799,6 +1828,7 @@ issues:
     kind: bug
     note: "expandIds only searches observations and project is inconsistently applied to durable memories."
     disposition: candidate
+    status: "partly-present-here — expandIds resolves mem_ ids through KV.memories (src/functions/smart-search.ts:440-441) and compact results are project-filtered (:215-222), but the expandIds branch applies no project filter (:172-174)."
     url: https://github.com/rohitg00/agentmemory/issues/1080
     fix_prs: [1091]
   - number: 1081
@@ -1827,7 +1857,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Dashboard truncates long memory content with no way to expand the entry."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Memories rows are clickable (select-memory, src/viewer/index.html:2761) and expand to the full content plus the raw record (index.html:2782-2797)."
     url: https://github.com/rohitg00/agentmemory/issues/1092
   - number: 1093
     title: "Idle CPU leak: `iii` worker threads busy-wait, growing to a full core over ~40h uptime"
@@ -1844,7 +1875,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Path-keyed project identity makes infer-memory-projects permanently ambiguous after a directory move."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Project identity is the checkout basename shared across worktrees, not a raw cwd (src/hooks/_project.ts:19-22), and the migration takes a strict-majority vote (src/functions/migrate.ts:64-75); the false 'fixable' claim that remains is rohitg00/agentmemory#1066."
     url: https://github.com/rohitg00/agentmemory/issues/1094
   - number: 1097
     title: "Droid: MCP tools force approval at every autonomy level — no risk annotations"
@@ -1881,6 +1913,7 @@ issues:
     kind: bug
     note: "memory_action_create never forwards createdBy, so every action is created by unknown."
     disposition: candidate
+    status: "present-here — memory_action_create forwards no createdBy (src/mcp/server.ts:771-779) and its schema has no agentId, so MCP-created actions record 'unknown' (src/functions/actions.ts:38); REST forwards it (src/triggers/api.ts:2749). Matters only with several agents."
     url: https://github.com/rohitg00/agentmemory/issues/1105
     fix_prs: [1107]
   - number: 1106
@@ -2062,8 +2095,8 @@ issues:
     difficulty: low
     kind: bug
     note: "REST shims drop agentId on remember and observe, making per-request multi-agent scoping impossible."
-    disposition: candidate
-    status: "partly-present-here — /agentmemory/remember does forward agentId (src/triggers/api.ts:1046-1048). /observe does not, but by design: mem::observe treats the session row as the source of truth and falls back to env AGENT_ID only when no row exists (src/functions/observe.ts:157-170)."
+    disposition: already-fixed
+    fixed_by: "/remember forwards agentId (src/triggers/api.ts:1237-1239); /session/start takes body.agentId (api.ts:735-739) and mem::observe inherits it from the session row (src/functions/observe.ts:305-320)."
     url: https://github.com/rohitg00/agentmemory/issues/1159
     fix_prs: [1202, 1272]
     mentioned_by_prs: [1198, 1199, 1201]
@@ -2140,6 +2173,7 @@ issues:
     kind: bug
     note: "Unbounded provenance arrays are ~97% of collection bytes and are what push collections past the worker limit."
     disposition: candidate
+    status: "partly-present-here — graph node/edge provenance is capped (capSourceIds, src/functions/graph-provenance.ts:11) and since c8819da insight sourceMemoryIds are bounded only by the reflect prompt budget (src/functions/reflect.ts:28, 366, 410), with no explicit cap; insights written before then still hold up to 2,553 ids."
     url: https://github.com/rohitg00/agentmemory/issues/1168
     fix_prs: [1295, 1349]
     mentioned_by_prs: [1233, 1353]
@@ -2244,6 +2278,7 @@ issues:
     kind: bug
     note: "graph-reset leaves pre-reset rows queryable and races a concurrent graph-extract."
     disposition: candidate
+    status: "partly-present-here — pre-reset rows are filtered on read by isLiveGraphRecord (src/state/graph-indexes.ts:182-188), but persistGraphDelta loads the snapshot (src/functions/graph.ts:821) and writes it back (:953) with no lock against mem::graph-reset (:1529), so a concurrent extract can overwrite the reset."
     url: https://github.com/rohitg00/agentmemory/issues/1189
   - number: 1190
     title: "Bug: snapshot restore is additive and omits durable stores"
@@ -2286,6 +2321,7 @@ issues:
     kind: bug
     note: "Default synthetic compression caps the narrative at 400 chars, so replay loses raw content."
     disposition: candidate
+    status: "partly-present-here — the synthetic narrative is now middle-out at 2000 chars and keeps toolName and userPrompt (src/functions/compress-synthetic.ts:188-200), but observe overwrites the raw row (src/functions/observe.ts:49-50) and replay rebuilds it with toolInput and assistantResponse undefined (src/functions/replay.ts:72, 75)."
     url: https://github.com/rohitg00/agentmemory/issues/1196
   - number: 1197
     title: "memory_save MCP path drops agentId at three more points — schema never exposes it, and two forwarding hops drop it independently of #1159/#1160"
@@ -2314,6 +2350,7 @@ issues:
     kind: bug
     note: "logger sends info and warn to stderr, so log platforms tag every line an error."
     disposition: candidate
+    status: "present-here — every log level goes to stderr (src/logger.ts:39); harmless under systemd/journald, which stores both streams at one priority."
     url: https://github.com/rohitg00/agentmemory/issues/1204
   - number: 1208
     title: "feat: DeepSeek Harness (dsh) integration — connect adapter + cordis plugin"
@@ -2352,6 +2389,7 @@ issues:
     kind: bug
     note: "Graph file-node identity is the absolute path, duplicating nodes across worktrees."
     disposition: candidate
+    status: "present-here — file nodes are keyed by the raw lowercased obs.files string (src/functions/graph.ts:704, 757) with no repo-relative normalisation, so one file appears as a separate node per worktree or scratch checkout."
     url: https://github.com/rohitg00/agentmemory/issues/1221
   - number: 1223
     title: "Health reports critical from heapUsed/heapTotal, so /agentmemory/health returns 503 on a healthy process"
@@ -2399,6 +2437,7 @@ issues:
     kind: bug
     note: "Viewer renders array-valued session summaries as [object Object]."
     disposition: candidate
+    status: "present-here — api::sessions replaces summary with the SessionSummary object (src/triggers/api.ts:1082-1083) and the viewer renders s.firstPrompt || s.summary through esc(truncate(...)) (src/viewer/index.html:3234, 3298), printing [object Object] when firstPrompt is missing."
     url: https://github.com/rohitg00/agentmemory/issues/1229
     fix_prs: [1332]
   - number: 1232
@@ -2419,6 +2458,7 @@ issues:
     kind: bug
     note: "CPU percent is single-core scale but thresholds assume total capacity, so multi-core hosts report critical."
     disposition: candidate
+    status: "present-here — CPU percent is per-core (src/health/monitor.ts:36-37) but is compared against 80/90 machine-wide thresholds (src/health/thresholds.ts:79-84, src/config.ts:430-431); AGENTMEMORY_HEALTH_CPU_*_PERCENT is the only workaround."
     url: https://github.com/rohitg00/agentmemory/issues/1235
     fix_prs: [1236, 1286]
     mentioned_by_prs: [1237]
@@ -2498,6 +2538,7 @@ issues:
     kind: bug
     note: "vision-search silently ignores limit while every sibling honors it."
     disposition: candidate
+    status: "present-here — mem::vision-search reads only topK and ignores limit (src/functions/vision-search.ts:84-87, src/triggers/api.ts:2508)."
     url: https://github.com/rohitg00/agentmemory/issues/1254
     fix_prs: [1255]
   - number: 1264
@@ -2575,6 +2616,7 @@ issues:
     kind: bug
     note: "Dashboard Memories card uses the length of a limited fetch, capping at 500."
     disposition: candidate
+    status: "present-here — the tile is the .length of a limit=500 fetch rather than the response's total (src/viewer/index.html:1481, 1585), so it sticks at 500; same edit as rohitg00/agentmemory#951."
     url: https://github.com/rohitg00/agentmemory/issues/1279
     fix_prs: [1347]
   - number: 1292
@@ -2701,6 +2743,7 @@ issues:
     kind: bug
     note: "The oversized export refusal ships under HTTP 200 after materialising 18.5GB of RSS."
     disposition: candidate
+    status: "partly-present-here — REST already refuses with 413 (src/triggers/api.ts:1590), but mem::export reads every durable store and stringifies the whole payload before refusing (src/functions/export-import.ts:121-201, src/state/payload-bound.ts:35), and /mcp/call's memory_export still returns the refusal under 200 (src/mcp/server.ts:455-458)."
     url: https://github.com/rohitg00/agentmemory/issues/1334
   - number: 1335
     title: "Shutdown index save is lost to a container teardown race, and boot only reconciles a completely empty index"
@@ -2738,6 +2781,7 @@ issues:
     kind: bug
     note: "Viewer conflates fetch failure with empty, flipping between stats and the new-install hero."
     disposition: candidate
+    status: "partly-present-here — the panel no longer blanks (src/viewer/index.html:1476) and failure is kept apart from empty (:1504-1508, 1574), but every live event still fires all 11 dashboard requests with no coalescing (:4026-4029, 1478-1490)."
     url: https://github.com/rohitg00/agentmemory/issues/1340
     fix_prs: [1342]
   - number: 1341
@@ -2796,6 +2840,7 @@ issues:
     kind: bug
     note: "Viewer randomly loses its connection while the backend stays healthy; only a refresh recovers."
     disposition: candidate
+    status: "unresolved — no repro; the viewer already reconnects with backoff, falls back to polling and re-probes the stream (src/viewer/index.html:3875-3881, 3947-3961), and upstream's fix targets the iii stream join this tree does not carry."
     url: https://github.com/rohitg00/agentmemory/issues/1370
   - number: 1372
     title: "Semantic search silently stops saving new memories once the store passes a size set by the embedding width, and a restart does not rebuild them"
@@ -2803,7 +2848,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Semantic search silently stops saving once the serialized index passes the string-length ceiling."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Vectors persist one BLOB row each (src/engine/inproc/vectors.ts:26-34), so there is no serialized-index size limit, and the boot/hourly fill pass re-embeds missing rows (src/index.ts:529-534)."
     url: https://github.com/rohitg00/agentmemory/issues/1372
   - number: 1373
     title: "Semantic search never stores anything with most non-OpenAI embedding models unless the operator sets the dimension variable by hand"
@@ -2821,6 +2867,7 @@ issues:
     kind: bug
     note: "Unbounded provenance inflates a 4062-node graph to 192MB; every traversal drops the worker."
     disposition: candidate
+    status: "partly-present-here — node/edge sourceObservationIds are capped (src/functions/graph.ts:403), but the obs→node index mem:graph:obs-nodes is unbounded per row and never pruned (src/state/graph-indexes.ts:87-100), and expandFromChunks fetches every listed node per search (src/functions/graph-retrieval.ts:245-254); it is ~636 MB, about a third of the live store."
     url: https://github.com/rohitg00/agentmemory/issues/1374
   - number: 1377
     title: "[mcp] Some MCP host bridges receive empty inputSchema from tools/list — parameterized tool calls fail"
@@ -2828,7 +2875,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Some MCP host bridges receive an empty inputSchema from tools/list, so parameterized calls fail."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "a host other than Claude Code, through upstream's npm shim; here every tool carries an object inputSchema and tools/list returns it unchanged (src/mcp/standalone.ts:494-549)."
     url: https://github.com/rohitg00/agentmemory/issues/1377
   - number: 1378
     title: "Worker heartbeat death loop on large legacy graph corpus: any vector result triggers blocking expandFromChunks (plus DROP_STALE_INDEX full-rebuild variant)"
@@ -2865,6 +2913,7 @@ issues:
     kind: bug
     note: "paginateFromSnapshot can report a total below the node count it returns; the truncated banner never fires."
     disposition: candidate
+    status: "present-here — paginateFromSnapshot reports snap.stats.totalNodes with no floor at the returned node count, so truncated can be false while nodes are hidden (src/functions/graph.ts:162-176)."
     url: https://github.com/rohitg00/agentmemory/issues/1382
     fix_prs: [1385]
   - number: 1383
@@ -2874,5 +2923,6 @@ issues:
     kind: bug
     note: "Viewer Rebuild Graph fires a full corpus replay with no confirmation, in-flight guard or result handling."
     disposition: candidate
+    status: "present-here — rebuildGraph posts graph/build with no confirmation or in-flight guard and ignores the result (src/viewer/index.html:2374-2380), and the server has no single-flight (src/triggers/api.ts:1868-1921), so a second click starts a second full LLM replay."
     url: https://github.com/rohitg00/agentmemory/issues/1383
     fix_prs: [1386]
