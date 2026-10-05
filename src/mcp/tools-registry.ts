@@ -444,6 +444,11 @@ export const V050_TOOLS: McpToolDef[] = [
           description: "Priority 1-10 (10 highest)",
         },
         project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        createdBy: {
+          type: "string",
+          description: "Agent ID recorded as the action's creator (alias: agentId)",
+        },
+        agentId: { type: "string", description: "Alias for createdBy" },
         tags: {
           type: "string",
           description: "Comma-separated tags",
