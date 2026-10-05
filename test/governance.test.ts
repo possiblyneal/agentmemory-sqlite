@@ -13,7 +13,9 @@ import type { Memory, AuditEntry } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
+  const listNewestCalls: Array<{ scope: string; opts: Record<string, unknown> }> = [];
   return {
+    listNewestCalls,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
@@ -28,6 +30,25 @@ function mockKV() {
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
+    },
+    listNewest: async <T>(
+      scope: string,
+      opts: { limit: number; operation?: string; from?: string; to?: string },
+    ): Promise<T[]> => {
+      listNewestCalls.push({ scope, opts });
+      const rows = Array.from(store.get(scope)?.values() ?? []) as Array<{
+        timestamp: string;
+        operation: string;
+      }>;
+      return rows
+        .filter(
+          (e) =>
+            (opts.operation === undefined || e.operation === opts.operation) &&
+            (opts.from === undefined || e.timestamp >= opts.from) &&
+            (opts.to === undefined || e.timestamp <= opts.to),
+        )
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, opts.limit) as T[];
     },
   };
 }

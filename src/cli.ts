@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { importZeroFilesMessage } from "./cli/import-jsonl-result.js";
+import { postJsonUntimed } from "./cli/post-untimed.js";
 import { spawn, execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -1711,13 +1712,12 @@ async function runImportJsonl(): Promise<void> {
   spinner.start("scanning files");
 
   try {
-    const res = await fetch(`${base}/agentmemory/replay/import-jsonl`, {
-      method: "POST",
+    const res = await postJsonUntimed(
+      `${base}/agentmemory/replay/import-jsonl`,
       headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120_000),
-    });
-    const text = await res.text();
+      JSON.stringify(body),
+    );
+    const text = res.text;
     let json: {
       success?: boolean;
       error?: string;
@@ -1803,11 +1803,7 @@ async function runImportJsonl(): Promise<void> {
     }
   } catch (err) {
     spinner.stop("failed");
-    if (err instanceof Error && err.name === "TimeoutError") {
-      p.log.error("import timed out after 2 minutes");
-    } else {
-      p.log.error(err instanceof Error ? err.message : String(err));
-    }
+    p.log.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 }

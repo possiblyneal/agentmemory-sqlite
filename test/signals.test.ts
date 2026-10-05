@@ -124,6 +124,17 @@ describe("Signals Functions", () => {
       expect(reply.signal.replyTo).toBe(parent.signal.id);
     });
 
+    it("applies the default TTL when expiresInMs is omitted", async () => {
+      const result = (await sdk.trigger("mem::signal-send", {
+        from: "agent-a",
+        content: "ttl",
+      })) as { signal: Signal };
+      const span =
+        new Date(result.signal.expiresAt!).getTime() -
+        new Date(result.signal.createdAt).getTime();
+      expect(span).toBe(30 * 86400000);
+    });
+
     it("sets expiresAt when expiresInMs is provided", async () => {
       const result = (await sdk.trigger("mem::signal-send", {
         from: "agent-a",
@@ -406,6 +417,42 @@ describe("Signals Functions", () => {
       const remaining = await kv.list<Signal>("mem:signals");
       expect(remaining.length).toBe(1);
       expect(remaining[0].id).toBe("sig_keep");
+    });
+
+    it("removes unexpiring signals older than the default TTL", async () => {
+      const old: Signal = {
+        id: "sig_old",
+        from: "agent-a",
+        content: "old",
+        type: "info",
+        threadId: "thr_old",
+        createdAt: new Date(Date.now() - 31 * 86400000).toISOString(),
+      };
+      await kv.set("mem:signals", old.id, old);
+
+      const result = (await sdk.trigger("mem::signal-cleanup", {})) as {
+        removed: number;
+      };
+      expect(result.removed).toBe(1);
+    });
+
+    it("keeps old unexpiring signals when the TTL is 0", async () => {
+      vi.stubEnv("AGENTMEMORY_SIGNAL_TTL_DAYS", "0");
+      const old: Signal = {
+        id: "sig_old",
+        from: "agent-a",
+        content: "old",
+        type: "info",
+        threadId: "thr_old",
+        createdAt: new Date(Date.now() - 400 * 86400000).toISOString(),
+      };
+      await kv.set("mem:signals", old.id, old);
+
+      const result = (await sdk.trigger("mem::signal-cleanup", {})) as {
+        removed: number;
+      };
+      vi.unstubAllEnvs();
+      expect(result.removed).toBe(0);
     });
   });
 });

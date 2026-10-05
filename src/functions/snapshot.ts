@@ -39,9 +39,39 @@ const COMMIT_HASH_RE = /^[0-9a-f]{7,40}$/i;
 
 const execFileAsync = promisify(execFile);
 
-async function gitExec(dir: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd: dir });
+async function gitExec(
+  dir: string,
+  args: string[],
+  env?: Record<string, string>,
+): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: dir,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
   return stdout.trim();
+}
+
+async function pruneSnapshotHistory(dir: string, keep: number): Promise<void> {
+  const count = Number(await gitExec(dir, ["rev-list", "--count", "HEAD"]));
+  if (count <= keep) return;
+
+  const kept = (
+    await gitExec(dir, ["rev-list", "--reverse", `--max-count=${keep}`, "HEAD"])
+  ).split("\n");
+  let parent: string | null = null;
+  for (const commit of kept) {
+    const tree = await gitExec(dir, ["rev-parse", `${commit}^{tree}`]);
+    const date = await gitExec(dir, ["log", "-1", "--format=%aI", commit]);
+    const message = await gitExec(dir, ["log", "-1", "--format=%B", commit]);
+    parent = await gitExec(
+      dir,
+      ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message],
+      { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+    );
+  }
+  await gitExec(dir, ["update-ref", "HEAD", parent as string]);
+  await gitExec(dir, ["reflog", "expire", "--expire=now", "--all"]);
+  await gitExec(dir, ["gc", "--prune=now", "--quiet"]);
 }
 
 async function ensureGitRepo(dir: string): Promise<void> {
@@ -143,6 +173,7 @@ export function registerSnapshotFunction(
   sdk: ISdk,
   kv: StateKV,
   snapshotDir: string,
+  keep = 0,
 ): void {
   // Serialize snapshots: the periodic timer, REST (api::snapshot-create), and
   // MCP can all trigger this concurrently. Two runs writing state.json and
@@ -198,6 +229,17 @@ export function registerSnapshotFunction(
             return { success: true, message: "No changes to snapshot" };
           }
           throw commitErr;
+        }
+
+        if (keep > 0) {
+          try {
+            await pruneSnapshotHistory(snapshotDir, keep);
+          } catch (pruneErr) {
+            logger.warn("Snapshot prune failed", {
+              error:
+                pruneErr instanceof Error ? pruneErr.message : String(pruneErr),
+            });
+          }
         }
 
         const commitHash = await gitExec(snapshotDir, ["rev-parse", "HEAD"]);

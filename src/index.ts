@@ -13,6 +13,7 @@ import {
   isConsolidationEnabled,
   isContextInjectionEnabled,
   getSqlitePath,
+  getBackupKeep,
 } from "./config.js";
 import { createInprocSdk } from "./engine/inproc/sdk.js";
 import { SqliteVectorStore } from "./engine/inproc/vectors.js";
@@ -361,7 +362,7 @@ async function main() {
 
   const snapshotConfig = loadSnapshotConfig();
   if (snapshotConfig.enabled) {
-    registerSnapshotFunction(sdk, kv, snapshotConfig.dir);
+    registerSnapshotFunction(sdk, kv, snapshotConfig.dir, snapshotConfig.keep);
     // The boot line promised "every <interval>s" but nothing ever fired
     // mem::snapshot-create. Drive it on a periodic timer (unref'd so it
     // never keeps the process alive), mirroring the auto-forget timer.
@@ -378,7 +379,7 @@ async function main() {
     }, snapshotConfig.interval * 1000);
     snapshotTimer.unref();
     bootLog(
-      `Git snapshots: ${snapshotConfig.dir} (every ${snapshotConfig.interval}s)`,
+      `Git snapshots: ${snapshotConfig.dir} (every ${snapshotConfig.interval}s, keep ${snapshotConfig.keep || "all"})`,
     );
   }
 
@@ -595,6 +596,17 @@ async function main() {
     bootLog(`Eviction sweep: enabled (5 min after boot, then every 24h)`);
   }
 
+  if (process.env.AGENTMEMORY_BACKUP_ENABLED !== "false") {
+    const runBackup = async () => {
+      try {
+        await sdk.trigger({ function_id: "mem::backup-sweep", payload: {} });
+      } catch {}
+    };
+    setTimeout(runBackup, FIRST_SWEEP_DELAY_MS).unref();
+    setInterval(runBackup, 86400000).unref();
+    bootLog(`Backup: enabled (5 min after boot, then every 24h, newest ${getBackupKeep() || "all"} kept)`);
+  }
+
   const runAuditEviction = async () => {
     try {
       await evictOldestAudit(kv);
@@ -633,6 +645,13 @@ async function main() {
     } catch {}
   }, 60 * 60 * 1000);
   idleSessionSweepTimer.unref();
+
+  const signalCleanupTimer = setInterval(async () => {
+    try {
+      await sdk.trigger({ function_id: "mem::signal-cleanup", payload: {} });
+    } catch {}
+  }, 60 * 60 * 1000);
+  signalCleanupTimer.unref();
 
   const injectionsSweepTimer = setInterval(async () => {
     try {

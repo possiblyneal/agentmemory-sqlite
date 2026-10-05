@@ -871,7 +871,7 @@ prs:
     url: https://github.com/rohitg00/agentmemory/pull/689
   - number: 742
     title: "fix: LLM provider works with subscription proxies + honor SUMMARIZE_CHUNK_SIZE from .env"
-    kind: feature
+    kind: fix
     relevance: med
     in_fork: 2/2
     churn: 19
@@ -879,7 +879,9 @@ prs:
       - src/functions/summarize.ts
       - src/providers/anthropic.ts
     note: "Folds the Anthropic system prompt into messages for subscription proxies, and honors SUMMARIZE_CHUNK_SIZE."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "hydrateProcessEnvFromFile"
+    status: "fixed-here — hydrateProcessEnvFromFile() copies ~/.agentmemory/.env into unset process.env keys at boot (src/index.ts:169, src/config.ts:31-41), so getChunkTokens/getChunkConcurrency (src/functions/summarize.ts:52,60) see file values; the fork's setting is SUMMARIZE_CHUNK_TOKENS. The subscription-proxy half is out of scope."
     url: https://github.com/rohitg00/agentmemory/pull/742
   - number: 802
     title: "fix: prefer embedding API key for OpenAI embeddings"
@@ -1612,14 +1614,16 @@ prs:
     url: https://github.com/rohitg00/agentmemory/pull/606
   - number: 607
     title: "feat(cli): allow AGENTMEMORY_IMPORT_TIMEOUT_MS override for import-jsonl"
-    kind: feature
+    kind: fix
     relevance: low
     in_fork: 1/1
     churn: 20
     paths:
       - src/cli.ts
     note: "AGENTMEMORY_IMPORT_TIMEOUT_MS instead of a hardcoded 120s import ceiling."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "postJsonUntimed"
+    status: "fixed-here — agentmemory import-jsonl posts through postJsonUntimed (src/cli/post-untimed.ts), which has neither the old 120 s AbortSignal nor fetch's 300 s headers timeout, so a long import waits for the daemon's reply."
     url: https://github.com/rohitg00/agentmemory/pull/607
   - number: 617
     title: "feat: add privacy-safe audit receipts"

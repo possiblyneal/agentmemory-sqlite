@@ -163,28 +163,26 @@ export async function queryAudit(
   },
 ): Promise<AuditEntry[]> {
   if (auditStoreOff()) return [];
-  const all = await kv.list<AuditEntry>(KV.audit);
-  let entries = [...all].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  );
-
-  if (filter?.operation) {
-    entries = entries.filter((e) => e.operation === filter.operation);
-  }
+  let from: string | undefined;
   if (filter?.dateFrom) {
-    const from = new Date(filter.dateFrom).getTime();
-    if (Number.isNaN(from)) {
+    const t = new Date(filter.dateFrom).getTime();
+    if (Number.isNaN(t)) {
       throw new Error(`Invalid dateFrom: ${filter.dateFrom}`);
     }
-    entries = entries.filter((e) => new Date(e.timestamp).getTime() >= from);
+    from = new Date(t).toISOString();
   }
+  let to: string | undefined;
   if (filter?.dateTo) {
-    const to = new Date(filter.dateTo).getTime();
-    if (Number.isNaN(to)) {
+    const t = new Date(filter.dateTo).getTime();
+    if (Number.isNaN(t)) {
       throw new Error(`Invalid dateTo: ${filter.dateTo}`);
     }
-    entries = entries.filter((e) => new Date(e.timestamp).getTime() <= to);
+    to = new Date(t).toISOString();
   }
-
-  return entries.slice(0, filter?.limit || 100);
+  return kv.listNewest<AuditEntry>(KV.audit, {
+    limit: filter?.limit || 100,
+    operation: filter?.operation,
+    from,
+    to,
+  });
 }

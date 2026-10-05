@@ -575,6 +575,11 @@ export const V050_TOOLS: McpToolDef[] = [
           type: "string",
           description: "Signal ID to reply to (auto-threads)",
         },
+        expiresInMs: {
+          type: "number",
+          description:
+            "Lifetime in milliseconds before the signal is removed (default: AGENTMEMORY_SIGNAL_TTL_DAYS, 30 days)",
+        },
       },
       required: ["from", "content"],
     },

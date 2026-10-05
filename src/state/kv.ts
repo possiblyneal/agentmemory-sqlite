@@ -129,6 +129,16 @@ export class StateKV {
     })
   }
 
+  async listNewest<T = unknown>(
+    scope: string,
+    opts: { limit: number; operation?: string; from?: string; to?: string },
+  ): Promise<T[]> {
+    return this.sdk.trigger<{ scope: string; opts: typeof opts }, T[]>({
+      function_id: 'state::list-newest',
+      payload: { scope, opts },
+    })
+  }
+
   async bytes(scope: string): Promise<number> {
     return this.sdk.trigger<{ scope: string }, number>({
       function_id: 'state::bytes',

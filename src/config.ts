@@ -365,11 +365,13 @@ export function isAgentScopeIsolated(): boolean {
 // this floor is treated as a misconfiguration and falls back to the default.
 const SNAPSHOT_INTERVAL_DEFAULT_SECONDS = 3600;
 const MIN_SNAPSHOT_INTERVAL_SECONDS = 1;
+const SNAPSHOT_KEEP_DEFAULT = 48;
 
 export function loadSnapshotConfig(): {
   enabled: boolean;
   interval: number;
   dir: string;
+  keep: number;
 } {
   const env = getMergedEnv();
   const rawInterval = safeParseInt(
@@ -380,9 +382,11 @@ export function loadSnapshotConfig(): {
     rawInterval >= MIN_SNAPSHOT_INTERVAL_SECONDS
       ? rawInterval
       : SNAPSHOT_INTERVAL_DEFAULT_SECONDS;
+  const rawKeep = safeParseInt(env["SNAPSHOT_KEEP"], SNAPSHOT_KEEP_DEFAULT);
   return {
     enabled: env["SNAPSHOT_ENABLED"] === "true",
     interval,
+    keep: rawKeep >= 0 ? rawKeep : SNAPSHOT_KEEP_DEFAULT,
     dir: env["SNAPSHOT_DIR"] || join(homedir(), ".agentmemory", "snapshots"),
   };
 }
@@ -511,6 +515,33 @@ export function getIdleSessionMs(): number {
   return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
 }
 
+const LESSON_TOMBSTONE_DEFAULT_DAYS = 30;
+
+export function getLessonTombstoneMs(): number {
+  const days = safeParseInt(
+    getMergedEnv()["AGENTMEMORY_LESSON_TOMBSTONE_DAYS"],
+    LESSON_TOMBSTONE_DEFAULT_DAYS,
+  );
+  return Math.max(0, days) * 24 * 60 * 60 * 1000;
+}
+
+const SIGNAL_TTL_DEFAULT_DAYS = 30;
+
+export function getSignalDefaultTtlMs(): number {
+  const days = safeParseInt(
+    getMergedEnv()["AGENTMEMORY_SIGNAL_TTL_DAYS"],
+    SIGNAL_TTL_DEFAULT_DAYS,
+  );
+  return days > 0 ? days * 24 * 60 * 60 * 1000 : 0;
+}
+
+const BACKUP_KEEP_DEFAULT = 7;
+
+export function getBackupKeep(): number {
+  const keep = safeParseInt(getMergedEnv()["AGENTMEMORY_BACKUP_KEEP"], BACKUP_KEEP_DEFAULT);
+  return keep >= 0 ? keep : BACKUP_KEEP_DEFAULT;
+}
+
 export function isConsolidationEnabled(): boolean {
   const env = getMergedEnv();
   const explicit = env["CONSOLIDATION_ENABLED"];
@@ -557,6 +588,11 @@ export function isContextInjectionEnabled(): boolean {
 
 export function getConsolidationDecayDays(): number {
   return safeParseInt(getMergedEnv()["CONSOLIDATION_DECAY_DAYS"], 30);
+}
+
+export function getConsolidatedMemoryForgetDays(): number {
+  const days = safeParseInt(getMergedEnv()["CONSOLIDATED_MEMORY_FORGET_DAYS"], 180);
+  return days > 0 ? days : 0;
 }
 
 // Cooldown between corpus consolidations triggered by session stop. The Stop

@@ -22,6 +22,7 @@ AGENTMEMORY_INJECT_CONTEXT=true
 - Token-spending features ship OFF on purpose: `AGENTMEMORY_AUTO_COMPRESS` (LLM summaries) costs tokens per observation and `AGENTMEMORY_INJECT_CONTEXT` injects recalled context at session start plus up to three strong matches per user prompt.
 - Tool visibility: `AGENTMEMORY_TOOLS=all` (default) or `core` for the lean set.
 - Auth: set `AGENTMEMORY_SECRET` to require `Authorization: Bearer` on the REST API.
+- Backups: the daemon writes a verified `agentmemory-backup-<UTC timestamp>.sqlite` beside the SQLite file 5 minutes after boot and daily, keeping the newest `AGENTMEMORY_BACKUP_KEEP` (default 7, `0` keeps all) and deleting only files with that name; `AGENTMEMORY_BACKUP_ENABLED=false` turns the schedule off. `POST /agentmemory/backup` (optional `dir`) does the same on demand. To restore: stop the daemon, copy the chosen backup over `AGENTMEMORY_SQLITE_PATH` (default `~/.agentmemory/agentmemory.sqlite`), remove that file's `-wal` and `-shm` siblings, start the daemon.
 - Claude Code paths: `connect`, `import-jsonl`, replay and the claude-bridge `MEMORY.md` follow `CLAUDE_CONFIG_DIR` when it is set in the process environment (as for Claude Code, `~/.agentmemory/.env` does not set it), and use `~/.claude` (with `~/.claude.json`) otherwise.
 - Storage: one SQLite file at `<data-dir>/agentmemory.sqlite`. Move the directory with `--data-dir` / `AGENTMEMORY_DATA_DIR`, or the file alone with `AGENTMEMORY_SQLITE_PATH`.
 

@@ -5,8 +5,8 @@ import type { StateKV } from "../src/state/kv.js";
 function fakeKv() {
   return {
     set: vi.fn(async () => undefined),
-    list: vi.fn(async () => [{ id: "aud_x", timestamp: "2026-01-01T00:00:00.000Z", operation: "delete" }]),
-  } as unknown as StateKV & { set: ReturnType<typeof vi.fn>; list: ReturnType<typeof vi.fn> };
+    listNewest: vi.fn(async () => [{ id: "aud_x", timestamp: "2026-01-01T00:00:00.000Z", operation: "delete" }]),
+  } as unknown as StateKV & { set: ReturnType<typeof vi.fn>; listNewest: ReturnType<typeof vi.fn> };
 }
 
 describe("AGENTMEMORY_AUDIT_STORE=off", () => {
@@ -44,7 +44,7 @@ describe("AGENTMEMORY_AUDIT_STORE=off", () => {
     expect(text).toContain("mem_3");
 
     expect(await queryAudit(kv, { operation: "delete" })).toEqual([]);
-    expect(kv.list).not.toHaveBeenCalled();
+    expect(kv.listNewest).not.toHaveBeenCalled();
   });
 
   it("AGENTMEMORY_AUDIT_LOG=deletions keeps only the paths that remove data", async () => {

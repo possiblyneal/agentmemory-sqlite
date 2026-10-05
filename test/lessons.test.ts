@@ -29,6 +29,20 @@ function mockKV() {
       return entries.length;
     },
     setManyCalls,
+    deleteManyIfUnchanged: async (
+      scope: string,
+      entries: Array<{ key: string; updatedAt: string }>,
+    ): Promise<string[]> => {
+      const deleted: string[] = [];
+      for (const e of entries) {
+        const row = store.get(scope)?.get(e.key) as { updatedAt?: string } | undefined;
+        if (row && row.updatedAt === e.updatedAt) {
+          store.get(scope)!.delete(e.key);
+          deleted.push(e.key);
+        }
+      }
+      return deleted;
+    },
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
@@ -377,6 +391,58 @@ describe("Lessons", () => {
       const after = await kv.get<Lesson>("mem:lessons", saved.lesson.id);
       expect(after!.confidence).toBeCloseTo(0.55, 2);
       expect(after!.confidence).toBeGreaterThan(0.4);
+    });
+  });
+
+  describe("tombstone purge", () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    async function tombstone(content: string, ageDays: number): Promise<Lesson> {
+      const saved = (await sdk.trigger("mem::lesson-save", { content })) as { lesson: Lesson };
+      const row = (await kv.get<Lesson>("mem:lessons", saved.lesson.id))!;
+      row.deleted = true;
+      row.updatedAt = new Date(Date.now() - ageDays * DAY).toISOString();
+      await kv.set("mem:lessons", row.id, row);
+      return row;
+    }
+
+    it("removes tombstones older than 30 days and keeps newer ones", async () => {
+      const old = await tombstone("old tombstone", 31);
+      const fresh = await tombstone("fresh tombstone", 5);
+
+      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { purged: number };
+
+      expect(result.purged).toBe(1);
+      expect(await kv.get("mem:lessons", old.id)).toBeNull();
+      expect(await kv.get("mem:lessons", fresh.id)).not.toBeNull();
+    });
+
+    it("keeps every tombstone when AGENTMEMORY_LESSON_TOMBSTONE_DAYS is 0", async () => {
+      vi.stubEnv("AGENTMEMORY_LESSON_TOMBSTONE_DAYS", "0");
+      try {
+        const old = await tombstone("ancient tombstone", 400);
+        const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { purged: number };
+        expect(result.purged).toBe(0);
+        expect(await kv.get("mem:lessons", old.id)).not.toBeNull();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("skips a tombstone that changed after the sweep read it", async () => {
+      const old = await tombstone("raced tombstone", 40);
+      const realList = kv.list;
+      kv.list = async <T>(scope: string): Promise<T[]> => {
+        const rows = await realList<T>(scope);
+        const live = (await kv.get<Lesson>("mem:lessons", old.id))!;
+        await kv.set("mem:lessons", old.id, { ...live, deleted: false, updatedAt: new Date().toISOString() });
+        return rows;
+      };
+
+      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { purged: number };
+
+      expect(result.purged).toBe(0);
+      expect((await kv.get<Lesson>("mem:lessons", old.id))!.deleted).toBe(false);
     });
   });
 

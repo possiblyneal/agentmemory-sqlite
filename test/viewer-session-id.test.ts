@@ -137,8 +137,7 @@ function loadViewerSandbox() {
       pathname: "/",
       search: "",
     },
-    localStorage: { getItem: () => null, setItem: () => {} },
-    sessionStorage: (() => {
+    localStorage: (() => {
       const values = new Map<string, string>();
       return {
         getItem: (key: string) => values.get(key) ?? null,
@@ -183,7 +182,7 @@ describe("viewer session rendering", () => {
   it("attaches the saved viewer bearer to API calls", async () => {
     const { sandbox } = loadViewerSandbox();
     const requests: Array<{ url: string; opts: { headers?: Record<string, string> } }> = [];
-    sandbox.sessionStorage.setItem("agentmemory-viewer-token", "viewer-secret");
+    sandbox.localStorage.setItem("agentmemory-viewer-token", "viewer-secret");
     sandbox.fetch = async (url: string, opts: { headers?: Record<string, string> }) => {
       requests.push({ url, opts });
       return { ok: true, json: async () => ({ ok: true }) };
