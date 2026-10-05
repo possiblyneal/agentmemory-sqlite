@@ -370,6 +370,52 @@ describe("Smart Search Function", () => {
     });
   });
 
+  describe("Semantic Fact inclusion (#590)", () => {
+    const seedFact = (id: string, text: string, sessionId: string, confidence = 0.8) =>
+      kv.set("mem:semantic", id, {
+        id,
+        fact: text,
+        confidence,
+        sourceSessionIds: [sessionId],
+        sourceMemoryIds: [],
+        accessCount: 1,
+        lastAccessedAt: "2026-02-02T00:00:00Z",
+        strength: confidence,
+        createdAt: "2026-02-02T00:00:00Z",
+        updatedAt: "2026-02-02T00:00:00Z",
+      });
+
+    it("returns matching facts from the caller's project only", async () => {
+      await kv.set("mem:sessions", "ses_other", {
+        id: "ses_other", project: "other-project", cwd: "/tmp", startedAt: "2026-02-01T00:00:00Z",
+        status: "completed", observationCount: 0,
+      });
+      await seedFact("sem_mine", "auth tokens rotate hourly", "ses_1");
+      await seedFact("sem_theirs", "auth tokens never expire", "ses_other");
+      await seedFact("sem_unrelated", "database uses wal mode", "ses_1");
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth tokens",
+        project: "my-project",
+      })) as { semanticFacts: Array<{ factId: string; fact: string }> };
+
+      expect(result.semanticFacts.map((f) => f.factId)).toEqual(["sem_mine"]);
+      expect(result.semanticFacts[0].fact).toBe("auth tokens rotate hourly");
+    });
+
+    it("bounds the facts returned by the recall limit", async () => {
+      for (let i = 0; i < 15; i++) await seedFact(`sem_${i}`, `auth fact ${i}`, "ses_1");
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth",
+        project: "my-project",
+        limit: 50,
+      })) as { semanticFacts: unknown[] };
+
+      expect(result.semanticFacts).toHaveLength(10);
+    });
+  });
+
   describe("insight inclusion (PR 615)", () => {
     it("returns Insights for the query and project, trimmed for preview", async () => {
       let receivedPayload: any = null;
