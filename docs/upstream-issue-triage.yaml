@@ -785,9 +785,11 @@ issues:
     title: "feat(recovery): abandoned session detection and backfill for abruptly terminated sessions"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "Detect and backfill sessions that terminated without a SessionEnd hook."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "mem::idle-session-sweep"
+    status: "fixed-here — mem::idle-session-sweep (src/functions/idle-session-sweep.ts) runs hourly (src/index.ts:628-634) and ends Sessions idle past SESSION_IDLE_CLOSE_HOURS (default 6, src/config.ts:504-512) through api::session::end, which summarizes and extracts the graph; stale-session eviction compresses raw rows before deleting (src/functions/evict.ts:130-148). The viewer banner/doctor warning (Part C) is feature work."
     url: https://github.com/rohitg00/agentmemory/issues/737
   - number: 739
     title: "The memories endpoint `GET /agentmemory/memories` returns entries with an `id` field, so the data model already supports individual records."
@@ -1962,9 +1964,10 @@ issues:
     title: "Viewer stores bearer token in sessionStorage — users must re-enter on every new tab"
     severity: low
     difficulty: low
-    kind: feature
+    kind: bug
     note: "Viewer keeps the bearer token in sessionStorage, so it must be re-entered per tab."
     disposition: candidate
+    status: "present-here — getViewerToken/setViewerToken use sessionStorage (src/viewer/index.html:1315-1322, key at :1162), so the token is re-entered in every new tab and after a browser restart."
     url: https://github.com/rohitg00/agentmemory/issues/1116
   - number: 1117
     title: "Viewer stores bearer token in sessionStorage — users must re-enter on every new tab"
@@ -2088,9 +2091,10 @@ issues:
     title: "Scheduled Git snapshots grow without a retention policy"
     severity: med
     difficulty: low
-    kind: feature
+    kind: bug
     note: "Git snapshot repository has no age, count or size retention policy."
     disposition: candidate
+    status: "present-here — with SNAPSHOT_ENABLED=true, mem::snapshot-create commits the full state.json on every changed run (src/functions/snapshot.ts:184-197) and nothing prunes or gcs the repo."
     url: https://github.com/rohitg00/agentmemory/issues/1158
   - number: 1159
     title: "REST shims silently drop agentId on /agentmemory/remember and /agentmemory/observe — per-request multi-agent scoping impossible over REST"
@@ -2165,9 +2169,10 @@ issues:
     title: "The \"backups\" feature never backs up memory — ~/.agentmemory/backups/ holds only connect config snapshots; no memory backup/restore command exists"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "~/.agentmemory/backups holds only connect config snapshots; no memory backup command exists."
     disposition: candidate
+    status: "present-here — mem::backup (POST /agentmemory/backup, src/functions/maintenance.ts:134-144) writes a verified VACUUM INTO copy, but nothing schedules it, it overwrites one agentmemory-snapshot.sqlite beside the live DB (maintenance.ts:35, 69, 135), and no restore path is documented."
     url: https://github.com/rohitg00/agentmemory/issues/1167
   - number: 1168
     title: "Unbounded sourceObservationIds / sourceMemoryIds are what push collections past the worker limit in #1142 / #1124"
@@ -2222,9 +2227,11 @@ issues:
     title: "No way to rebuild the search index without restarting: rebuildIndex only runs when the index is empty"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "rebuildIndex only runs at boot on an empty index; no supported rebuild path."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "BM25 rebuilt from content on every boot"
+    status: "fixed-here — BM25 is never persisted and is rebuilt from content on every boot (src/index.ts:449-458), and vectors for deleted or changed content are pruned at load (src/engine/inproc/vectors.ts:169), so a daemon restart is the full rebuild and loses no valid vectors. No runtime reindex endpoint, by choice."
     url: https://github.com/rohitg00/agentmemory/issues/1179
   - number: 1180
     title: "Index persistence is never scheduled after boot: everything indexed at runtime is lost unless the process exits cleanly"
@@ -2297,25 +2304,28 @@ issues:
     title: "Semantic and Procedural Memory need a bounded retention path"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "Semantic and procedural memory have no bounded retention path."
     disposition: candidate
+    status: "present-here — applyDecay stops at strength 0.1 and deletes nothing (src/functions/consolidation-pipeline.ts:37, 289-302); evict and auto-forget never touch KV.semantic or KV.procedural; mem::retention-evict (src/functions/retention.ts:272) has no caller."
     url: https://github.com/rohitg00/agentmemory/issues/1191
   - number: 1192
     title: "Audit storage needs retention and bounded queries"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "Audit storage needs retention and bounded queries."
     disposition: candidate
+    status: "partly-present-here — storage is capped (evictOldestAudit, AGENTMEMORY_AUDIT_MAX default 50,000, src/functions/audit.ts:132-154, daily at src/index.ts:597-604), but queryAudit lists and sorts the whole scope before slicing (src/functions/audit.ts:166-189)."
     url: https://github.com/rohitg00/agentmemory/issues/1192
   - number: 1193
     title: "Lesson and Insight tombstones need bounded physical reclamation"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "Lesson and insight tombstones need physical reclamation."
     disposition: candidate
+    status: "partly-present-here — the Insight decay sweep physically deletes expired and tombstoned rows (src/functions/reflect.ts:551-553, 586); Lesson decay and mem::lesson-delete only set deleted=true (src/functions/lessons.ts:280, 337) and later sweeps skip tombstones (lessons.ts:319), so they stay in KV.lessons forever."
     url: https://github.com/rohitg00/agentmemory/issues/1193
   - number: 1196
     title: "Replay loses raw prompt/tool/response content under default synthetic compression"
@@ -2429,9 +2439,11 @@ issues:
     title: "Unable to recompress raw observations; compression failures leave observations uncompressed with no recovery path"
     severity: med
     difficulty: med
-    kind: feature
+    kind: bug
     note: "No way to recompress an observation whose LLM compression failed."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "POST /agentmemory/recompress-orphans"
+    status: "fixed-here — POST /agentmemory/recompress-orphans (src/triggers/api.ts:2029-2167) re-runs mem::compress on stored raw rows, then parked ones, bounded by limit with dryRun and requeueQuarantined; /diagnostics reports observations-uncompressed:N (src/functions/diagnostics.ts:435)."
     url: https://github.com/rohitg00/agentmemory/issues/1228
   - number: 1229
     title: "Viewer renders session summary as '[object Object]' (array fields not serialized)"
@@ -2636,9 +2648,10 @@ issues:
     title: "Feature request: signal deletion / TTL for signals"
     severity: low
     difficulty: med
-    kind: feature
+    kind: bug
     note: "Signals have no delete or TTL, so the store grows without bound."
     disposition: candidate
+    status: "present-here — mem::signal-cleanup (src/functions/signals.ts:182-195) removes only signals with expiresAt and nothing schedules it; expiresAt is set only from expiresInMs (signals.ts:45), which memory_signal_send never forwards (src/mcp/server.ts:946-952)."
     url: https://github.com/rohitg00/agentmemory/issues/1297
   - number: 1312
     title: "[deps] Please bump iii-sdk / iii-engine past 0.11.2 — unbounded RSS growth + hung graceful shutdown in long-running deployments"
