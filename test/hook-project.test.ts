@@ -29,12 +29,19 @@ describe("resolveProject — hook project basename resolver", () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
+  const originalHome = process.env.HOME;
+  let home: string;
+
   beforeEach(() => {
     delete process.env.AGENTMEMORY_PROJECT_NAME;
+    home = mkdtempSync(join(tmpdir(), "amem-home-"));
+    process.env.HOME = home;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    process.env.HOME = originalHome;
+    rmSync(home, { recursive: true, force: true });
     if (originalEnv === undefined) {
       delete process.env.AGENTMEMORY_PROJECT_NAME;
     } else {
@@ -106,5 +113,48 @@ describe("resolveProject — hook project basename resolver", () => {
     vi.spyOn(process, "cwd").mockReturnValue(repoDir);
     expect(resolveProject("")).toBe(REPO_NAME);
     expect(resolveProject("   ")).toBe(REPO_NAME);
+  });
+
+  describe("same-named repos (rohitg00/agentmemory#733)", () => {
+    const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+    const makeRepo = (parent: string, remote?: string) => {
+      const dir = join(tmpRoot, parent, "shared-name");
+      mkdirSync(dir, { recursive: true });
+      git(dir, "init", "--quiet");
+      if (remote) git(dir, "remote", "add", "origin", remote);
+      return dir;
+    };
+
+    it("gives a second same-named repo with a different remote its own project", () => {
+      const first = makeRepo("a", "git@example.com:one/shared-name.git");
+      const second = makeRepo("b", "git@example.com:two/shared-name.git");
+      expect(resolveProject(first)).toBe("shared-name");
+      const suffixed = resolveProject(second);
+      expect(suffixed).toMatch(/^shared-name-[0-9a-f]{6}$/);
+      expect(resolveProject(first)).toBe("shared-name");
+      expect(resolveProject(second)).toBe(suffixed);
+    });
+
+    it("tells same-named repos without a remote apart by their common dir", () => {
+      const first = makeRepo("c");
+      const second = makeRepo("d");
+      expect(resolveProject(first)).toBe("shared-name");
+      expect(resolveProject(second)).toMatch(/^shared-name-[0-9a-f]{6}$/);
+    });
+
+    it("keeps a repo with no collision under its bare name", () => {
+      expect(resolveProject(repoDir)).toBe(REPO_NAME);
+    });
+
+    it("keeps worktrees of a suffixed repo in that repo's project", () => {
+      const main = makeRepo("e", "git@example.com:one/shared-name.git");
+      const other = makeRepo("f", "git@example.com:two/shared-name.git");
+      git(other, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "--quiet", "-m", "i");
+      const worktree = join(tmpRoot, "other-wt");
+      git(other, "worktree", "add", "--quiet", worktree);
+      expect(resolveProject(main)).toBe("shared-name");
+      expect(resolveProject(other)).not.toBe("shared-name");
+      expect(resolveProject(worktree)).toBe(resolveProject(other));
+    });
   });
 });
