@@ -285,8 +285,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Stale index dimension mismatch makes the worker refuse to start; REST unreachable."
-    disposition: candidate
-    status: "partly-present-here — boot still refuses on a vector dimension mismatch unless AGENTMEMORY_DROP_STALE_INDEX=true (src/index.ts:447-481), but the drop deletes only the vectors table (src/engine/inproc/vectors.ts:110-112) and the fill pass re-embeds from content (src/index.ts:529-534), so nothing is lost; the daemon is still down by default. The message's re-embed option has no caller (migrateVectorIndex, src/functions/migrate-vector-index.ts:44)."
+    disposition: already-fixed
+    fixed_by: "A vector dimension mismatch at boot drops the vectors table, logs the drop, and starts; the fill pass re-embeds from content (dropMismatchedVectors, src/functions/index-fill.ts; src/index.ts boot; test/inproc-index-fill.test.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/455
     fix_prs: [575]
     mentioned_by_prs: [525]
@@ -296,8 +296,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Same 2048-vs-384 dimension mismatch crashing startup on macOS."
-    disposition: candidate
-    status: "partly-present-here — same guard as rohitg00/agentmemory#455: a deliberate refusal rather than a crash (src/index.ts:447-481), lossless to clear with AGENTMEMORY_DROP_STALE_INDEX, but it still keeps the daemon down until the Operator acts."
+    disposition: already-fixed
+    fixed_by: "A vector dimension mismatch at boot drops the vectors table, logs the drop, and starts; the fill pass re-embeds from content (dropMismatchedVectors, src/functions/index-fill.ts; src/index.ts boot; test/inproc-index-fill.test.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/469
     fix_prs: [575]
     mentioned_by_prs: [525]
