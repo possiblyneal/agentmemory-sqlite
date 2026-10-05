@@ -365,11 +365,13 @@ export function isAgentScopeIsolated(): boolean {
 // this floor is treated as a misconfiguration and falls back to the default.
 const SNAPSHOT_INTERVAL_DEFAULT_SECONDS = 3600;
 const MIN_SNAPSHOT_INTERVAL_SECONDS = 1;
+const SNAPSHOT_KEEP_DEFAULT = 48;
 
 export function loadSnapshotConfig(): {
   enabled: boolean;
   interval: number;
   dir: string;
+  keep: number;
 } {
   const env = getMergedEnv();
   const rawInterval = safeParseInt(
@@ -380,9 +382,11 @@ export function loadSnapshotConfig(): {
     rawInterval >= MIN_SNAPSHOT_INTERVAL_SECONDS
       ? rawInterval
       : SNAPSHOT_INTERVAL_DEFAULT_SECONDS;
+  const rawKeep = safeParseInt(env["SNAPSHOT_KEEP"], SNAPSHOT_KEEP_DEFAULT);
   return {
     enabled: env["SNAPSHOT_ENABLED"] === "true",
     interval,
+    keep: rawKeep >= 0 ? rawKeep : SNAPSHOT_KEEP_DEFAULT,
     dir: env["SNAPSHOT_DIR"] || join(homedir(), ".agentmemory", "snapshots"),
   };
 }

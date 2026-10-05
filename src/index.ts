@@ -361,7 +361,7 @@ async function main() {
 
   const snapshotConfig = loadSnapshotConfig();
   if (snapshotConfig.enabled) {
-    registerSnapshotFunction(sdk, kv, snapshotConfig.dir);
+    registerSnapshotFunction(sdk, kv, snapshotConfig.dir, snapshotConfig.keep);
     // The boot line promised "every <interval>s" but nothing ever fired
     // mem::snapshot-create. Drive it on a periodic timer (unref'd so it
     // never keeps the process alive), mirroring the auto-forget timer.
@@ -378,7 +378,7 @@ async function main() {
     }, snapshotConfig.interval * 1000);
     snapshotTimer.unref();
     bootLog(
-      `Git snapshots: ${snapshotConfig.dir} (every ${snapshotConfig.interval}s)`,
+      `Git snapshots: ${snapshotConfig.dir} (every ${snapshotConfig.interval}s, keep ${snapshotConfig.keep || "all"})`,
     );
   }
 
