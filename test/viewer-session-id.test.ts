@@ -322,6 +322,42 @@ describe("viewer dashboard", () => {
     expect(html).toContain("No answer for: graph.");
   });
 
+  it("names every dashboard request that failed, not only the counted cards", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    sandbox.fetch = dashboardFetch("audit");
+
+    await sandbox.loadDashboard();
+
+    expect(getElement("view-dashboard").innerHTML).toContain("No answer for: audit.");
+  });
+
+  it("lets only the newest of overlapping loads redraw the dashboard", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    const sessionsOf = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ id: `s${i}`, observationCount: 1 }));
+    let releaseOlder: () => void = () => {};
+    const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
+
+    sandbox.fetch = async (url: string) => {
+      if (url.includes("/sessions")) {
+        await olderGate;
+        return { ok: true, json: async () => ({ sessions: sessionsOf(1) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    };
+    const older = sandbox.loadDashboard();
+
+    sandbox.fetch = async (url: string) => {
+      if (url.includes("/sessions")) return { ok: true, json: async () => ({ sessions: sessionsOf(2) }) };
+      return { ok: true, json: async () => ({}) };
+    };
+    await sandbox.loadDashboard();
+    releaseOlder();
+    await older;
+
+    expect(getElement("view-dashboard").innerHTML).toContain('<div class="label">Sessions</div><div class="value">2</div>');
+  });
+
   it("keeps the rendered dashboard in place while a refresh is in flight", async () => {
     const { sandbox, getElement } = loadViewerSandbox();
     const el = getElement("view-dashboard");

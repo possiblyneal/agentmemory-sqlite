@@ -1467,7 +1467,9 @@
       }
     }
 
+    var dashboardLoadSeq = 0;
     async function loadDashboard() {
+      var seq = ++dashboardLoadSeq;
       var el = document.getElementById('view-dashboard');
       // Only an empty panel gets the placeholder: swapping it in on a
       // refresh collapses the panel and throws away the Operator's scroll.
@@ -1486,6 +1488,9 @@
           apiGet('crystals'),
           apiGet('insights?limit=1')
         ]);
+        // Polls, websocket events and the Refresh button overlap; only the
+        // newest load may redraw, or an older answer overwrites newer figures.
+        if (seq !== dashboardLoadSeq) return;
         state.dashboard.health = results[0];
         state.dashboard.sessions = (results[1] && results[1].sessions) || [];
         state.dashboard.memories = (results[2] && results[2].memories) || [];
@@ -1497,8 +1502,9 @@
         // A failed request resolves to null; the count cards show a dash for
         // it so the Operator can tell an unreachable count from an empty one.
         state.dashboard.failed = {
-          health: !results[0], sessions: !results[1], memories: !results[2], graph: !results[3], semantic: !results[5],
-          lessons: !results[8], crystals: !results[9], insights: !results[10]
+          health: !results[0], sessions: !results[1], memories: !results[2], graph: !results[3], audit: !results[4],
+          semantic: !results[5], procedural: !results[6], relations: !results[7], lessons: !results[8],
+          crystals: !results[9], insights: !results[10]
         };
         state.dashboard.procedural = (results[6] && results[6].procedures) || (results[6] && results[6].procedural) || [];
         state.dashboard.lessons = (results[8] && results[8].lessons) || [];
@@ -1516,6 +1522,7 @@
         // Surface the error in the panel + log full detail to console.
         var msg = (err && err.message) ? err.message : String(err);
         console.error('[viewer] loadDashboard failed:', err);
+        if (seq !== dashboardLoadSeq) return;
         el.innerHTML =
           '<div class="loading" style="color:var(--accent);">' +
           'Dashboard failed to load: ' + msg +
@@ -1555,7 +1562,7 @@
       if (failedNames.length > 0) {
         html += '<div role="alert" style="margin-bottom:14px;padding:10px 12px;border:1px solid var(--accent);background:var(--bg-alt);font-size:12px;color:var(--ink);line-height:1.4;">';
         html += '<div style="font-weight:600;margin-bottom:4px;">Some dashboard requests failed</div>';
-        html += '<div style="font-size:11px;color:var(--ink-muted);">No answer for: ' + esc(failedNames.join(', ')) + '. Their cards show &ndash; until a refresh succeeds; the browser console has the HTTP status.</div>';
+        html += '<div style="font-size:11px;color:var(--ink-muted);">No answer for: ' + esc(failedNames.join(', ')) + '. Their figures are missing until a refresh succeeds; the browser console has the error.</div>';
         html += '</div>';
       }
       // First-run hero: empty dashboard = guided next step

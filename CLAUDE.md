@@ -236,8 +236,9 @@ Every row in both files carries a `disposition`: `already-fixed` (verified again
 `fixed_by`/`status` names the evidence), `wont-fix` (out of scope here — most often
 upstream-only housekeeping, or code this fork does not carry: the iii engine, npm publishing,
 Windows CI, the deploy tree, a host other than Claude Code, a third-party LLM or
-embedding provider beyond the OpenAI-compatible, Anthropic and local paths, a
-non-English language support; `wont_fix_reason`
+embedding provider beyond the OpenAI-compatible, Anthropic and local paths,
+non-English language support, or a multi-user feature (one Operator runs the daemon);
+`wont_fix_reason`
 says which), or `candidate` — the working set. A row that was opened against
 this tree also carries `status`, whose leading token says what the read found
 (`fixed-here`, `present-here`, `partly-present-here`, `unresolved`). No `status` means

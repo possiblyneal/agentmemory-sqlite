@@ -2303,7 +2303,7 @@ prs:
       - src/state/kv.ts
     note: "StateKV rejects missing/empty keys before hitting the engine."
     disposition: already-fixed
-    status: "fixed-here — node:sqlite refuses an undefined key ("Provided value cannot be bound"), so a keyless read or write fails at once; the warning spam was iii-only."
+    status: "fixed-here — node:sqlite refuses an undefined key (\"Provided value cannot be bound\"), so a keyless read or write fails at once; the warning spam was iii-only."
     fixed_by: "SqliteState binds scope and key as parameters (src/engine/inproc/state.ts); key is TEXT NOT NULL."
     url: https://github.com/rohitg00/agentmemory/pull/1234
   - number: 1248

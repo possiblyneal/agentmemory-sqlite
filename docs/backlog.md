@@ -74,3 +74,12 @@ plus the reduce (`src/functions/summarize.ts`, the 2-attempt loop around
 
 - **Done when.** A schema-rejected merged summary retries the reduce call alone, and the
   chunked-path test in `test/summarize.test.ts` asserts 3 chunk calls + 2 reduce calls.
+
+## Remove the TEAM_MODE=private setting that filters nothing
+
+`loadTeamConfig` (`src/config.ts:311`) defaults `TEAM_MODE` to `private`, but team-feed and
+team-profile (`src/functions/team.ts`) return the same items in either mode. One Operator
+runs the daemon, so per-user privacy has no reader (`rohitg00/agentmemory#689` is wont-fix).
+
+- **Done when.** `TEAM_MODE` and its `private`/`shared` branch are gone, or documented as a
+  no-op, and no doc promises private team items.
