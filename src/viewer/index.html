@@ -1078,9 +1078,9 @@
   <footer id="viewer-footer" class="viewer-footer">
     <span>agentmemory viewer · <span id="footer-version">loading...</span></span>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/rohitg00/agentmemory" target="_blank" rel="noopener">github</a>
+    <a href="https://github.com/possiblyneal/agentmemory-sqlite" target="_blank" rel="noopener">github</a>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/rohitg00/agentmemory#readme" target="_blank" rel="noopener">docs</a>
+    <a href="https://github.com/possiblyneal/agentmemory-sqlite/tree/main/plugin/skills" target="_blank" rel="noopener">docs</a>
     <span class="footer-sep">·</span>
     <a id="footer-feedback" href="#" target="_blank" rel="noopener">report issue &rarr;</a>
   </footer>
@@ -2747,7 +2747,7 @@
           '<div class="empty-title">No memories yet</div>' +
           '<div class="empty-lead">Memories are the distilled facts agentmemory keeps across sessions &mdash; things like file paths, architectural decisions, and user preferences. Hooks capture them automatically during coding sessions; you can also save one directly.</div>' +
           '<pre class="empty-cmd">memory_remember {\n  title: "auth uses jose middleware",\n  content: "src/middleware/auth.ts handles JWT validation",\n  type: "architecture"\n}</pre>' +
-          '<div><a class="empty-link" href="https://github.com/rohitg00/agentmemory#memories" target="_blank" rel="noopener">Memory types &rarr;</a></div>' +
+          '<div><a class="empty-link" href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-architecture/SKILL.md#storage-and-lifecycle" target="_blank" rel="noopener">Memory types &rarr;</a></div>' +
           '</div>';
       } else {
         html += '<table><tr><th>Title</th><th>Type</th><th>Strength</th><th>Version</th><th>Updated</th><th>Actions</th></tr>';
@@ -3420,7 +3420,7 @@
           '<div class="empty-title">No lessons yet</div>' +
           '<div class="empty-lead">Lessons are short imperative rules (always/never/prefer/avoid) learned from past work &mdash; things you corrected once that the agent should never repeat. Confidence grows when they hold and decays when unused.</div>' +
           '<pre class="empty-cmd"># Save a lesson explicitly\nmemory_lesson_save { rule, reason, confidence }\n\n# Or: Replay tab &rarr; Import JSONL auto-extracts lessons\n# from your past Claude Code sessions</pre>' +
-          '<div><a class="empty-link" href="https://github.com/rohitg00/agentmemory#lessons" target="_blank" rel="noopener">Lesson decay &amp; scoring &rarr;</a></div>' +
+          '<div><a class="empty-link" href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/lesson/SKILL.md" target="_blank" rel="noopener">Lesson decay &amp; scoring &rarr;</a></div>' +
           '</div>';
       } else {
         html += '<table><thead><tr><th>Lesson</th><th title="How battle-tested the rule is. Grows each time it is reinforced, decays weekly when unused.">Confidence</th><th title="Times the agent re-confirmed this rule.">Uses</th><th>Source</th><th>Project</th><th>Updated</th></tr></thead><tbody>';
@@ -3511,7 +3511,7 @@
           '<div class="empty-lead">Actions are follow-ups the agent surfaced during a session: <em>decisions to revisit</em>, <em>files to inspect</em>, <em>tasks blocked on input</em>. They show up here with status pending &rarr; active &rarr; done/blocked so nothing slips through between sessions.</div>' +
           '<div class="empty-lead" style="margin-top:0;">Three ways to create them:</div>' +
           '<pre class="empty-cmd"># 1. MCP tool (from any agent)\nmemory_action_create { title, description, priority }\n\n# 2. Curl\ncurl -X POST http://localhost:3111/agentmemory/actions \\\n  -H \'Content-Type: application/json\' \\\n  -d \'{"title":"ship v1","priority":"high"}\'\n\n# 3. Hooks auto-extract from long session bodies</pre>' +
-          '<div><a class="empty-link" href="https://github.com/rohitg00/agentmemory#actions" target="_blank" rel="noopener">Action lifecycle docs &rarr;</a></div>' +
+          '<div><a class="empty-link" href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-mcp-tools/SKILL.md" target="_blank" rel="noopener">Action lifecycle docs &rarr;</a></div>' +
           '</div>';
       } else {
         html += '<table><thead><tr><th>Title</th><th>Status</th><th>Priority</th><th>Tags</th><th>Frontier</th><th>Updated</th></tr></thead><tbody>';
@@ -3597,7 +3597,7 @@
           '<div class="empty-title">No crystals yet</div>' +
           '<div class="empty-lead">Crystals are frozen snapshots of completed work &mdash; one session’s narrative, key outcomes, files touched, and lessons surfaced, kept after raw observations are pruned so the next session gets fast context.</div>' +
           '<pre class="empty-cmd"># Auto: import a JSONL transcript\n#   Replay tab &rarr; Import JSONL\n\n# Manual: crystallize a specific session\nmemory_crystallize { sessionId }</pre>' +
-          '<div><a class="empty-link" href="https://github.com/rohitg00/agentmemory#crystals" target="_blank" rel="noopener">Crystal pipeline &rarr;</a></div>' +
+          '<div><a class="empty-link" href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-mcp-tools/SKILL.md" target="_blank" rel="noopener">Crystal pipeline &rarr;</a></div>' +
           '</div>';
       } else {
         items.forEach(function(c) {
@@ -4094,7 +4094,7 @@
           keyLabel: 'ANTHROPIC_API_KEY',
           desc: 'Compression, summarization, and graph extraction stay disabled until a key is provided.',
           enable: 'export ANTHROPIC_API_KEY=sk-ant-...\n# then restart: agentmemory',
-          docs: 'https://github.com/rohitg00/agentmemory#quick-start',
+          docs: 'https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-config/SKILL.md',
           dismissKey: '__provider_noop',
         });
       }
@@ -4106,7 +4106,7 @@
           keyLabel: 'OPENAI_API_KEY',
           desc: 'Semantic vector search is off. BM25 keyword search is active and good for exact matches.',
           enable: 'export OPENAI_API_KEY=sk-...\n# or VOYAGE_API_KEY, COHERE_API_KEY, OLLAMA_HOST',
-          docs: 'https://github.com/rohitg00/agentmemory#embedding-providers',
+          docs: 'https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-config/SKILL.md',
           dismissKey: '__embedding_none',
         });
       }
@@ -4166,7 +4166,7 @@
           '### Steps to reproduce\n\n' +
           '1. \n2. \n3. \n'
         );
-        fbEl.href = 'https://github.com/rohitg00/agentmemory/issues/new?title=' +
+        fbEl.href = 'https://github.com/possiblyneal/agentmemory-sqlite/issues/new?title=' +
           encodeURIComponent('[viewer] ') + '&body=' + body;
       }
     }

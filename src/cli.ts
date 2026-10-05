@@ -1221,7 +1221,7 @@ async function runInit() {
   const template = findEnvExample();
   if (!template) {
     p.log.error(
-      "Could not locate .env.example in the package. Re-install with: npm i -g @agentmemory/agentmemory",
+      "Could not locate .env.example in the package. Rebuild from your clone: npm ci && npm run build && npm link",
     );
     process.exit(1);
   }
