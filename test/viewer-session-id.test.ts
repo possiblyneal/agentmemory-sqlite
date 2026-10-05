@@ -60,6 +60,9 @@ function loadViewerSandbox() {
         attributes.delete(name);
       },
       querySelectorAll: () => [],
+      hasChildNodes() {
+        return this.innerHTML !== "";
+      },
     };
   };
   const getElement = (id: string) => {
@@ -281,5 +284,97 @@ describe("viewer session rendering", () => {
     expect(tabButtons.length).toBeGreaterThan(0);
     expect(() => sandbox.switchTab("sessions")).not.toThrow();
     expect(tabButtons.some((button: any) => button.classList.contains("active"))).toBe(true);
+  });
+});
+
+describe("viewer dashboard", () => {
+  function dashboardFetch(failPath?: string) {
+    return async (url: string) => {
+      const path = url.replace(/^.*\/agentmemory\//, "");
+      if (failPath && path.startsWith(failPath)) {
+        return { ok: false, status: 503, json: async () => ({}) };
+      }
+      if (path.startsWith("sessions")) {
+        return { ok: true, json: async () => ({ sessions: [{ id: "s1", observationCount: 100 }] }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    };
+  }
+
+  it("estimates Token Savings the same way as agentmemory status", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    sandbox.fetch = dashboardFetch();
+
+    await sandbox.loadDashboard();
+
+    // 100 observations: full 8000 tokens, injected min(100, 50) * 38 = 1900.
+    expect(getElement("view-dashboard").innerHTML).toContain(">76%<");
+  });
+
+  it("names the requests that failed instead of only dashing their cards", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    sandbox.fetch = dashboardFetch("graph/stats");
+
+    await sandbox.loadDashboard();
+
+    const html = getElement("view-dashboard").innerHTML;
+    expect(html).toContain("Some dashboard requests failed");
+    expect(html).toContain("No answer for: Graph Nodes.");
+  });
+
+  it("names every dashboard request that failed, not only the counted cards", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    sandbox.fetch = dashboardFetch("audit");
+
+    await sandbox.loadDashboard();
+
+    expect(getElement("view-dashboard").innerHTML).toContain("No answer for: Recent Activity.");
+  });
+
+  it("lets only the newest of overlapping loads redraw the dashboard", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    const sessionsOf = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ id: `s${i}`, observationCount: 1 }));
+    let releaseOlder: () => void = () => {};
+    const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
+
+    sandbox.fetch = async (url: string) => {
+      if (url.includes("/sessions")) {
+        await olderGate;
+        return { ok: true, json: async () => ({ sessions: sessionsOf(1) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    };
+    const older = sandbox.loadDashboard();
+
+    sandbox.fetch = async (url: string) => {
+      if (url.includes("/sessions")) return { ok: true, json: async () => ({ sessions: sessionsOf(2) }) };
+      return { ok: true, json: async () => ({}) };
+    };
+    await sandbox.loadDashboard();
+    releaseOlder();
+    await older;
+
+    expect(getElement("view-dashboard").innerHTML).toContain('<div class="label">Sessions</div><div class="value">2</div>');
+  });
+
+  it("keeps the rendered dashboard in place while a refresh is in flight", async () => {
+    const { sandbox, getElement } = loadViewerSandbox();
+    const el = getElement("view-dashboard");
+    sandbox.fetch = dashboardFetch();
+    await sandbox.loadDashboard();
+    const rendered = el.innerHTML;
+
+    const seenDuringRefresh: string[] = [];
+    const inner = dashboardFetch();
+    sandbox.fetch = async (url: string) => {
+      seenDuringRefresh.push(el.innerHTML);
+      return inner(url);
+    };
+    sandbox.refreshDashboard();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(seenDuringRefresh.length).toBeGreaterThan(0);
+    expect(seenDuringRefresh.every((html) => html === rendered)).toBe(true);
   });
 });
