@@ -420,7 +420,8 @@ issues:
     difficulty: low
     kind: docs
     note: "memory_lesson_save exists but is absent from every doc surface."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "plugin/skills/lesson/SKILL.md documents memory_lesson_save with confidence, strengthening on repeat saves and decay; agentmemory-mcp-tools SKILL.md and REFERENCE.md list it."
     url: https://github.com/rohitg00/agentmemory/issues/552
   - number: 557
     title: "error: unsupported OS when installing on Windows 11"
@@ -541,7 +542,8 @@ issues:
     difficulty: low
     kind: chore
     note: "Standardize MCP dispatch test mocks on the repo pattern."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "asks to move test/mcp-tools-call.test.ts onto vi.mock(\"iii-sdk\"); this tree has neither, and its rule is hand-rolled mockKV/mockSdk fakes (test/helpers/mocks.ts) with vi.mock reserved for the logger and keyed mutex"
     url: https://github.com/rohitg00/agentmemory/issues/621
   - number: 637
     title: "Windows: mem::summarize fails with Unicode characters (em dash) — ByteString conversion error"
@@ -666,7 +668,7 @@ issues:
     kind: bug
     note: "crypto.randomUUID unavailable on Node 16; below the supported floor."
     disposition: wont-fix
-    wont_fix_reason: "below the runtime floor — the Engine needs Node >=22.13"
+    wont_fix_reason: "below the runtime floor — the Engine needs Node >=22.13, where crypto.randomUUID is always present"
     url: https://github.com/rohitg00/agentmemory/issues/715
   - number: 716
     title: "Resolve project identity from canonical repo URL, not directory basename"
@@ -702,7 +704,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Reranker is a silent no-op: softmax over a single logit always scores 1.0."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "src/state/reranker.ts scores each query/passage pair with AutoTokenizer + AutoModelForSequenceClassification and takes the sigmoid of the single logit; a live run scored a relevant pair 0.874 and an irrelevant one 0.000."
     url: https://github.com/rohitg00/agentmemory/issues/724
   - number: 725
     title: "local embedding provider hardcodes English-only model — make it configurable (multilingual default)"
@@ -1212,7 +1215,8 @@ issues:
     difficulty: low
     kind: bug
     note: "/recall calls memory_lesson_recall, which has no server endpoint (404)."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "memory_lesson_recall has a server case (src/mcp/server.ts:1206) reaching mem::lesson-recall (src/functions/lessons.ts:151); the standalone shim forwards non-core tools to /agentmemory/mcp/call (src/mcp/standalone.ts:399-417)."
     url: https://github.com/rohitg00/agentmemory/issues/915
   - number: 918
     title: "GET /agentmemory/memories ignores the `project` query param — returns all projects"
@@ -1248,7 +1252,8 @@ issues:
     difficulty: low
     kind: docs
     note: "import-jsonl finds nothing because Claude Code purges transcripts after cleanupPeriodDays."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "plugin/skills/agentmemory-hooks/SKILL.md (Backfilling from transcripts) says Claude Code deletes transcripts past cleanupPeriodDays (default 30), so import-jsonl finds only what is left."
     url: https://github.com/rohitg00/agentmemory/issues/924
   - number: 925
     title: "graph search silently drops all results due to hardcoded `sessionId: \"\"`"
@@ -1305,7 +1310,7 @@ issues:
     kind: feature
     note: "No lesson_delete tool or REST endpoint anywhere."
     disposition: already-fixed
-    fixed_by: "memory_lesson_delete (src/mcp/server.ts:1219) and POST /agentmemory/lessons/delete (src/triggers/api.ts:3664)."
+    fixed_by: "memory_lesson_delete (src/mcp/tools-registry.ts:875, src/mcp/server.ts:1219) and POST /agentmemory/lessons/delete (src/triggers/api.ts:3664) both reach mem::lesson-delete (src/functions/lessons.ts:269)."
     url: https://github.com/rohitg00/agentmemory/issues/945
   - number: 948
     title: "Add option to include low-score results in semantic search"
@@ -1784,7 +1789,8 @@ issues:
     difficulty: med
     kind: docs
     note: "import-jsonl path semantics are undocumented and confusing in server-hosted mode."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "plugin/skills/agentmemory-hooks/SKILL.md (Backfilling from transcripts) says the daemon reads the posted path on its own host, the CLI targets localhost and sends its own default root, and a remote daemon needs the transcripts copied to it."
     url: https://github.com/rohitg00/agentmemory/issues/1077
   - number: 1080
     title: "Smart search cannot expand or consistently scope durable memories"

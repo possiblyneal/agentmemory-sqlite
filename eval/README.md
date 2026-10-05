@@ -42,7 +42,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 The `agentmemory` adapters start their own daemon (`runner/sandbox.ts`) and stop it when they finish. It runs `dist/cli.mjs --instance 3` (REST 3411) with:
 
 - a store and a scratch `HOME` under `tmp/eval-sandbox/instance-3/`, deleted before and after the run, so neither your real `~/.agentmemory` store nor its `.env` is touched;
-- an environment built from scratch: `PATH`, the `HF_*` cache variables, and `EMBEDDING_PROVIDER=local` unless the adapter is `agentmemory-bm25`. No LLM provider, so compression is synthetic and there are no summaries;
+- an environment built from scratch: `PATH`, the `HF_*` cache variables, `EMBEDDING_PROVIDER=local` unless the adapter is `agentmemory-bm25`, and `RERANK_ENABLED` when the shell sets it (`RERANK_ENABLED=true npm run eval:coding-life` scores the cross-encoder reranker). No LLM provider, so compression is synthetic and there are no summaries;
 - its log at `tmp/eval-sandbox/instance-3.log`.
 
 The run refuses to start if any of the instance's three ports (REST 3411, streams 3412, viewer 3413) is in use; pick another block with `--instance N`. On a stop the daemon gets 10 seconds to exit after SIGTERM before it is killed. To score a daemon you started yourself instead, pass `--base-url http://localhost:PORT` (or set `AGENTMEMORY_BASE_URL`) — the runner then ingests into that store, so point it at a throwaway one. `npm run eval:gate` ignores both and always starts a fresh sandbox.
