@@ -511,6 +511,16 @@ export function getIdleSessionMs(): number {
   return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
 }
 
+const SIGNAL_TTL_DEFAULT_DAYS = 30;
+
+export function getSignalDefaultTtlMs(): number {
+  const days = safeParseInt(
+    getMergedEnv()["AGENTMEMORY_SIGNAL_TTL_DAYS"],
+    SIGNAL_TTL_DEFAULT_DAYS,
+  );
+  return days > 0 ? days * 24 * 60 * 60 * 1000 : 0;
+}
+
 export function isConsolidationEnabled(): boolean {
   const env = getMergedEnv();
   const explicit = env["CONSOLIDATION_ENABLED"];

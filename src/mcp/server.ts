@@ -943,12 +943,24 @@ export function registerMcpEndpoints(
                 body: { error: "from and content are required" },
               };
             }
+            if (
+              args.expiresInMs !== undefined &&
+              (typeof args.expiresInMs !== "number" ||
+                !Number.isFinite(args.expiresInMs) ||
+                args.expiresInMs <= 0)
+            ) {
+              return {
+                status_code: 400,
+                body: { error: "expiresInMs must be a positive number" },
+              };
+            }
             const sigResult = await sdk.trigger({ function_id: "mem::signal-send", payload: {
               from: args.from,
               to: args.to,
               content: args.content,
               type: args.type,
               replyTo: args.replyTo,
+              expiresInMs: args.expiresInMs,
             } });
             return {
               status_code: 200,
