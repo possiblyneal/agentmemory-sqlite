@@ -5,8 +5,8 @@
 // severity numbers and attributes maps). If we later want structured OTEL
 // logs, this file is the only thing that changes.
 //
-// Output goes to stderr as `[agentmemory] <level> <msg> <json-fields>`,
-// which systemd captures into the journal.
+// Output is `[agentmemory] <level> <msg> <json-fields>`: info on stdout,
+// warn, error and audit on stderr, so log platforms classify each line.
 
 type Fields = Record<string, unknown> | undefined;
 
@@ -35,10 +35,11 @@ function fmt(level: string, msg: string, fields: Fields): string {
 }
 
 function emit(level: string, msg: string, fields: Fields): void {
+  const stream = level === "info" ? process.stdout : process.stderr;
   try {
-    process.stderr.write(fmt(level, msg, fields) + "\n");
+    stream.write(fmt(level, msg, fields) + "\n");
   } catch {
-    // stderr is unavailable in some weird test/worker contexts — swallow
+    // the stream is unavailable in some weird test/worker contexts — swallow
     // so no log line can ever crash a handler.
   }
 }

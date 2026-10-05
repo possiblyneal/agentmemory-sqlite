@@ -61,7 +61,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_team_share` |  | `itemId`*: string, `itemType`*: string | Share a memory or observation with team members. |
 | `memory_timeline` |  | `anchor`*: string, `project`: string, `before`: number, `after`: number | Chronological observations around an anchor point. |
 | `memory_verify` |  | `id`*: string | Verify a memory or observation by tracing its citation chain back to source observations and session context. Returns provenance information including confidence scores. |
-| `memory_vision_search` |  | `queryText`: string, `queryImageRef`: string, `queryImageBase64`: string, `topK`: number, `sessionId`: string | Cross-modal image search via CLIP embeddings. Pass queryText to find screenshots matching a description, or queryImageBase64/queryImageRef to find similar images. Requires AGENTMEMORY_IMAGE_EMBEDDINGS=true. |
+| `memory_vision_search` |  | `queryText`: string, `queryImageRef`: string, `queryImageBase64`: string, `topK`: number, `limit`: number, `sessionId`: string | Cross-modal image search via CLIP embeddings. Pass queryText to find screenshots matching a description, or queryImageBase64/queryImageRef to find similar images. Requires AGENTMEMORY_IMAGE_EMBEDDINGS=true. |
 
 `*` marks required parameters.
 <!-- AUTOGEN:tools END -->

@@ -2349,8 +2349,8 @@ issues:
     difficulty: low
     kind: bug
     note: "logger sends info and warn to stderr, so log platforms tag every line an error."
-    disposition: candidate
-    status: "present-here — every log level goes to stderr (src/logger.ts:39); harmless under systemd/journald, which stores both streams at one priority."
+    disposition: already-fixed
+    fixed_by: "logger.info writes to stdout, warn/error/audit to stderr (src/logger.ts emit; test/logger-level.test.ts)"
     url: https://github.com/rohitg00/agentmemory/issues/1204
   - number: 1208
     title: "feat: DeepSeek Harness (dsh) integration — connect adapter + cordis plugin"
@@ -2537,8 +2537,8 @@ issues:
     difficulty: low
     kind: bug
     note: "vision-search silently ignores limit while every sibling honors it."
-    disposition: candidate
-    status: "present-here — mem::vision-search reads only topK and ignores limit (src/functions/vision-search.ts:84-87, src/triggers/api.ts:2508)."
+    disposition: already-fixed
+    fixed_by: "mem::vision-search, api::vision-search and memory_vision_search accept limit as an alias for topK (test/vision-search.test.ts)"
     url: https://github.com/rohitg00/agentmemory/issues/1254
     fix_prs: [1255]
   - number: 1264

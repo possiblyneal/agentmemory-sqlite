@@ -3,12 +3,32 @@ import { logger } from "../src/logger.js";
 
 function capture(): string[] {
   const out: string[] = [];
-  vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+  const sink = ((chunk: unknown) => {
     out.push(String(chunk));
     return true;
-  }) as never);
+  }) as never;
+  vi.spyOn(process.stderr, "write").mockImplementation(sink);
+  vi.spyOn(process.stdout, "write").mockImplementation(sink);
   return out;
 }
+
+describe("log streams", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("info goes to stdout, warn, error and audit to stderr", () => {
+    delete process.env.AGENTMEMORY_LOG_LEVEL;
+    const out: string[] = [];
+    const err: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation(((c: unknown) => (out.push(String(c)), true)) as never);
+    vi.spyOn(process.stderr, "write").mockImplementation(((c: unknown) => (err.push(String(c)), true)) as never);
+    logger.info("i");
+    logger.warn("w");
+    logger.error("e");
+    logger.audit("a");
+    expect(out.map((l) => l.trim())).toEqual(["[agentmemory] info i"]);
+    expect(err.map((l) => l.trim())).toEqual(["[agentmemory] warn w", "[agentmemory] error e", "[agentmemory] audit a"]);
+  });
+});
 
 describe("AGENTMEMORY_LOG_LEVEL", () => {
   const saved = process.env.AGENTMEMORY_LOG_LEVEL;
