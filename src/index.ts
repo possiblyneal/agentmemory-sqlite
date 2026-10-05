@@ -11,12 +11,11 @@ import {
   isAutoCompressEnabled,
   isConsolidationEnabled,
   isContextInjectionEnabled,
-  isDropStaleIndexEnabled,
   getSqlitePath,
 } from "./config.js";
 import { createInprocSdk } from "./engine/inproc/sdk.js";
 import { SqliteVectorStore } from "./engine/inproc/vectors.js";
-import { createIndexFill, registerIndexFillFunction } from "./functions/index-fill.js";
+import { createIndexFill, dropMismatchedVectors, registerIndexFillFunction } from "./functions/index-fill.js";
 import { registerMaintenanceFunctions } from "./functions/maintenance.js";
 import {
   createProvider,
@@ -427,56 +426,19 @@ async function main() {
     const hydrated = vectorStore.hydrate(vectorIndex);
     if (hydrated > 0) bootLog(`Hydrated ${hydrated} vectors from SQLite`);
   }
-  // The dimension guard runs over the rows just hydrated.
-  const vectorSource = vectorIndex;
-  if (vectorSource && vectorIndex && vectorSource.size > 0) {
-    // Persisted vectors carry whatever dimension the provider had when
-    // they were written. If the active provider declares a different
-    // dimension — or if the on-disk index contains a mix of dimensions
-    // (legacy indexes written before the live-API guard in this PR) —
-    // restoring would silently corrupt search: cosineSimilarity returns
-    // 0 on cross-dim pairs, so affected observations stop matching
-    // anything and recall degrades without an error. Walk every stored
-    // vector instead of trusting the first; refuse to load if anything
-    // is off.
-    const activeDim = embeddingProvider?.dimensions ?? 0;
-    const { mismatches, seenDimensions } =
-      activeDim > 0
-        ? vectorSource.validateDimensions(activeDim)
-        : { mismatches: [], seenDimensions: new Set<number>() };
-
-    if (mismatches.length > 0) {
-      const sample = mismatches
-        .slice(0, 5)
-        .map((m) => `${m.obsId} (dim=${m.dim})`)
-        .join(", ");
-      const distinct = Array.from(seenDimensions).sort((a, b) => a - b).join(", ");
-      const dropStale = isDropStaleIndexEnabled();
-      if (dropStale) {
-        console.warn(
-          `[agentmemory] Persisted vector index has ${mismatches.length} of ` +
-            `${vectorSource.size} vectors with the wrong dimension. Active ` +
-            `provider (${embeddingProvider?.name}) declares ${activeDim}; ` +
-            `dimensions seen on disk: ${distinct}. ` +
-            `AGENTMEMORY_DROP_STALE_INDEX=true is set — discarding the persisted ` +
-            `vectors. Live observations will rebuild the index over time.`,
-        );
-        // The rows ARE the index, so discarding means deleting them.
-        vectorIndex.clear();
-      } else {
-        throw new Error(
-          `[agentmemory] Refusing to start: persisted vector index has ` +
-            `${mismatches.length} of ${vectorSource.size} vectors with the ` +
-            `wrong dimension. Active provider (${embeddingProvider?.name}) ` +
-            `declares ${activeDim}; dimensions seen on disk: ${distinct}. ` +
-            `First mismatched obsIds: ${sample}. Loading would silently corrupt ` +
-            `search (cross-dimension cosine returns 0). Choose one:\n` +
-            `  - Re-embed the existing index against the new provider, then start.\n` +
-            `  - Set AGENTMEMORY_DROP_STALE_INDEX=true to discard the persisted ` +
-            `vectors and rebuild from live observations.\n` +
-            `  - Switch the embedding provider back to the one that wrote the index.`,
-        );
-      }
+  // A dimension change makes every persisted vector unusable (cross-dimension
+  // cosine returns 0). Vectors re-derive from content, so drop them and let
+  // the fill pass below re-embed; the daemon starts either way.
+  if (vectorIndex && embeddingProvider) {
+    const before = vectorIndex.size;
+    const dropped = dropMismatchedVectors(vectorIndex, embeddingProvider.dimensions);
+    if (dropped > 0) {
+      console.warn(
+        `[agentmemory] Persisted vectors do not match the active provider ` +
+          `(${embeddingProvider.name}, ${embeddingProvider.dimensions} dimensions). ` +
+          `Dropped all ${before} vectors; the fill pass is re-embedding them, ` +
+          `so Recall is BM25-only until it finishes.`,
+      );
     }
   }
 
