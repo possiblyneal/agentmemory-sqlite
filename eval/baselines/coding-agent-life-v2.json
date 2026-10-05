@@ -2,7 +2,7 @@
   "tolerance": 0.02,
   "metrics": {
     "agentmemory-bm25": {
-      "search": { "recall": 0.969, "precision": 0.195 },
+      "search": { "recall": 0.969, "precision": 0.628, "noAnswerClean": 0.25 },
       "session-start": { "recall": 0.813, "precision": 1, "noAnswerClean": 1 },
       "prompt-submit": { "recall": 0.907, "precision": 0.822, "noAnswerClean": 0.833 }
     }

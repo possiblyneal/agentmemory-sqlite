@@ -81,6 +81,8 @@ function makeHit(obsId: string, sessionId = "ses_1"): HybridSearchResult {
       files: [],
     } as any,
     sessionId,
+    bm25Score: 8,
+    vectorScore: 0,
     combinedScore: 0.8,
   } as HybridSearchResult;
 }

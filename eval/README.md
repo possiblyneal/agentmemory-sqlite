@@ -70,7 +70,7 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
 
-Search no-answer clean is not gated: smart-search has no relevance floor yet, so it returns something for every query and scores 0 there. That is known debt, and the search entry gains a `noAnswerClean` floor once a relevance cutoff lands.
+Search is gated on all three metrics. smart-search drops hybrid hits below a relevance floor (BM25 of at least 3.5 and half the best match, or a cosine of at least 0.3 on a hit BM25 also matched), so an off-topic query can return nothing. Search no-answer clean is 0.25, not 1: three of its four no-answer questions still have a lexical match above the floor (best BM25 3.9, 4.9 and 6.4), and gold Sessions score as low as 3.8, so a floor high enough to clear them (4.0 clears only the first) costs search recall.
 
 CI runs it on the ubuntu / Node 22 leg. The gate is BM25-only so CI never downloads the embedding model and needs no network beyond `npm ci`; the on-device embedding stack is still measured by `npm run eval:coding-life`. A PR that changes these numbers on purpose updates the baseline file in the same PR and says why. One question gained or lost on a path moves recall by at least 0.05, so the tolerance only absorbs rounding.
 
@@ -114,7 +114,7 @@ eval/
 
 Reports land in `eval/reports/<bench>/` (gitignored): `scores.ndjson` (one row per question, with the Session ids returned) and `summary.json`.
 
-Published scorecards land in `docs/benchmarks/YYYY-MM-DD-<bench>.md`; the current one is [2026-10-01-coding-agent-life-v2](../docs/benchmarks/2026-10-01-coding-agent-life-v2.md).
+Published scorecards land in `docs/benchmarks/YYYY-MM-DD-<bench>.md`; the current one is [2026-10-05-coding-agent-life-v2](../docs/benchmarks/2026-10-05-coding-agent-life-v2.md).
 
 ## Writing a new adapter
 

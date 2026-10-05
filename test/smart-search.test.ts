@@ -84,14 +84,14 @@ describe("Smart Search Function", () => {
     searchResults = [
       {
         observation: obs1,
-        bm25Score: 0.8,
+        bm25Score: 8,
         vectorScore: 0,
         combinedScore: 0.8,
         sessionId: "ses_1",
       },
       {
         observation: obs2,
-        bm25Score: 0.3,
+        bm25Score: 6,
         vectorScore: 0,
         combinedScore: 0.3,
         sessionId: "ses_1",
@@ -127,6 +127,52 @@ describe("Smart Search Function", () => {
     expect(result.results[0]).toHaveProperty("score");
     expect(result.results[0]).toHaveProperty("timestamp");
     expect(result.results[0]).not.toHaveProperty("narrative");
+  });
+
+  describe("relevance floor", () => {
+    function hit(id: string, bm25Score: number, vectorScore = 0): HybridSearchResult {
+      return {
+        observation: makeObs({ id, sessionId: "ses_1", title: id }),
+        bm25Score,
+        vectorScore,
+        combinedScore: 0.01,
+        sessionId: "ses_1",
+      };
+    }
+    const search = async (query = "auth") =>
+      (await sdk.trigger("mem::smart-search", { query })) as { results: CompactSearchResult[] };
+    const ids = (r: { results: CompactSearchResult[] }) => r.results.map((x) => x.obsId);
+
+    it("keeps a strong hit and drops a weak tail", async () => {
+      searchResults = [hit("strong", 15), hit("middling", 8), hit("tail", 4)];
+      expect(ids(await search())).toEqual(["strong", "middling"]);
+    });
+
+    it("returns nothing for an off-topic query whose best hit is weak", async () => {
+      searchResults = [hit("a", 3.2), hit("b", 2.1), hit("c", 1)];
+      expect((await search()).results).toEqual([]);
+    });
+
+    it("keeps a vector-only hit with a strong match only when BM25 also saw it", async () => {
+      searchResults = [hit("lexical", 10), hit("paraphrase", 3.2, 0.33), hit("vector-only", 0, 0.9), hit("weak-cosine", 3.2, 0.2)];
+      expect(ids(await search())).toEqual(["lexical", "paraphrase"]);
+    });
+
+    it("fills the page from hits past the limit when the floor drops ones inside it", async () => {
+      searchResults = [hit("weak-top", 1), hit("strong-a", 12), hit("strong-b", 10)];
+      const result = (await sdk.trigger("mem::smart-search", { query: "auth", limit: 2 })) as {
+        results: CompactSearchResult[];
+      };
+      expect(ids(result)).toEqual(["strong-a", "strong-b"]);
+    });
+
+    it("does not floor expandIds", async () => {
+      searchResults = [hit("weak", 0.1)];
+      const result = (await sdk.trigger("mem::smart-search", {
+        expandIds: ["obs_1"],
+      })) as { results: unknown[] };
+      expect(result.results.length).toBe(1);
+    });
   });
 
   it("expand mode returns full observations for given IDs", async () => {
@@ -221,7 +267,7 @@ describe("Smart Search Function", () => {
       searchResults.unshift(
         ...[other, savedHere, savedElsewhere, unknownSession, evictedHere, evictedElsewhere, savedInEvicted, blankSummary].map((observation) => ({
           observation,
-          bm25Score: 0.9,
+          bm25Score: 9,
           vectorScore: 0,
           combinedScore: 0.9,
           sessionId: observation.sessionId,

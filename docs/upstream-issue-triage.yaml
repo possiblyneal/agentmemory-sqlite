@@ -760,6 +760,7 @@ issues:
     kind: feature
     note: "Inject semantic, procedural, crystals and insights into mem::context."
     disposition: candidate
+    status: "partly-present-here — mem::context already injects Lessons, Insights and Semantic Facts (src/functions/context.ts:102-230); crystals and procedural skills are not injected."
     url: https://github.com/rohitg00/agentmemory/issues/732
   - number: 733
     title: "Project identity uses git-toplevel basename — collides across same-named repos, no remote-based identity"
@@ -868,6 +869,7 @@ issues:
     kind: feature
     note: "State trigger that stales supersede/contradict targets automatically."
     disposition: candidate
+    status: "partly-present-here — a supersedes relation marks the old Memory isLatest=false (src/functions/relations.ts:153-156) and search drops non-latest Memories (src/functions/search.ts:420, src/state/hybrid-search.ts:582); temporal-graph edges supersede too. A contradicts relation only lowers the score by 0.05 (relations.ts:35) and stales nothing."
     url: https://github.com/rohitg00/agentmemory/issues/768
   - number: 769
     title: "feat(bench): LongMemEval-S harness with statistical rigor + CI gate"
@@ -884,6 +886,7 @@ issues:
     kind: feature
     note: "Index semantic, procedural, crystals, insights and facets in smart-search."
     disposition: candidate
+    status: "partly-present-here — smart-search already recalls Lessons, Insights and Semantic Facts alongside hybrid hits (src/functions/smart-search.ts recallLessons/recallInsights/recallSemantic); crystals and procedural skills are not searched."
     url: https://github.com/rohitg00/agentmemory/issues/770
     fix_prs: [784]
   - number: 787
@@ -945,6 +948,7 @@ issues:
     kind: feature
     note: "No way to search only memory_save entries; observation noise buries L2."
     disposition: candidate
+    status: "partly-present-here — smart-search ranks Memories above Observations only when AGENTMEMORY_MEMORY_LAYER_BOOST > 1 (src/state/hybrid-search.ts:351, default 1.0); there is no Memories-only filter. The eval corpus holds no saved Memories, so a default boost cannot be measured yet."
     url: https://github.com/rohitg00/agentmemory/issues/819
   - number: 820
     title: "memory_governance_delete returns deleted:0 for memory_save entries"

@@ -26,6 +26,28 @@ import { graphReadable } from "../state/graph-indexes.js";
 import { createProjectMatcher } from "./search.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
 
+// Chosen against the search path of eval/data/coding-agent-life-v2 (the
+// `agentmemory` and `agentmemory-bm25` adapters). Gold Sessions score as low
+// as BM25 3.8 (best match 7.1), so the absolute floor sits below that, not at
+// prompt-context's 5; the relative cutoff trims the tail on a large store.
+// On-device cosine for the one gold Session BM25 alone misses is 0.33 and
+// off-topic vector-only hits stay at or under 0.17, but off-topic hits with
+// lexical overlap reach 0.58, so cosine alone never admits a hit: it only
+// rescues one that BM25 already matched.
+const MIN_BM25_SCORE = 3.5;
+const MIN_BM25_RATIO_TO_BEST = 0.5;
+const MIN_COSINE_SCORE = 0.3;
+
+function aboveRelevanceFloor(hits: HybridSearchResult[]): HybridSearchResult[] {
+  const best = Math.max(0, ...hits.map((h) => h.bm25Score));
+  const bm25Floor = Math.max(MIN_BM25_SCORE, best * MIN_BM25_RATIO_TO_BEST);
+  return hits.filter(
+    (h) =>
+      h.bm25Score >= bm25Floor ||
+      (h.bm25Score > 0 && h.vectorScore >= MIN_COSINE_SCORE),
+  );
+}
+
 // #771: smart-search followup-rate diagnostic. Stored per session as
 // the most recent search payload, used to detect whether the next
 // search inside the window had a disjoint result set. sessionId is
@@ -239,14 +261,17 @@ export function registerSmartSearchFunction(
         recallSemantic(kv, data.query, recallLimit, project),
       ]);
 
+      // Scope every hit before the floor and the limit, so the floor's best
+      // match is the best in-scope one and a dropped hit is refilled from the
+      // over-fetch instead of leaving the page short.
       const inProject = project ? createProjectMatcher(kv, project) : null;
-      const filteredHybrid: HybridSearchResult[] = [];
+      const inScope: HybridSearchResult[] = [];
       for (const r of hybridResults) {
-        if (filteredHybrid.length >= limit) break;
         if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
         if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
-        filteredHybrid.push(r);
+        inScope.push(r);
       }
+      const filteredHybrid = aboveRelevanceFloor(inScope).slice(0, limit);
 
       const compact: CompactSearchResult[] = filteredHybrid.map((r) => ({
         obsId: r.observation.id,
