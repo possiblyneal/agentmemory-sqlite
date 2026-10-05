@@ -348,3 +348,21 @@ describe("SearchIndex field weighting and CJK fallback", () => {
     expect(hits.map((h) => h.obsId)).toEqual(["a"]);
   });
 });
+
+describe("SearchIndex long queries", () => {
+  it("drops the commonest terms past the query-term cap", () => {
+    const idx = new SearchIndex();
+    const rare = Array.from({ length: 25 }, (_, i) => `rare${String.fromCharCode(97 + i)}x`);
+    rare.forEach((term, i) =>
+      idx.add(makeObs({ id: `r${i}`, title: term, subtitle: "", facts: [], narrative: "", concepts: [], files: [] })),
+    );
+    for (let i = 0; i < 10; i++) {
+      idx.add(makeObs({ id: `c${i}`, title: "commonword", subtitle: "", facts: [], narrative: "", concepts: [], files: [] }));
+    }
+
+    const ids = idx.search(["commonword", ...rare].join(" "), 100).map((h) => h.obsId);
+
+    expect(ids).toHaveLength(25);
+    expect(ids.some((id) => id.startsWith("c"))).toBe(false);
+  });
+});
