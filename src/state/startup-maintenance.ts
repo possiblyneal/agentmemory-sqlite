@@ -1,13 +1,15 @@
 import type { SqliteState } from "../engine/inproc/state.js";
 import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, KV } from "./schema.js";
-import { capSourceIds } from "../functions/graph-provenance.js";
+import { capSourceIds, MAX_SOURCE_LIST_IDS } from "../functions/graph-provenance.js";
+import { checkoutRootsOf } from "../functions/project-files.js";
+import { mergeDuplicateFileNodes } from "./merge-file-nodes.js";
 import { getMaxSourceObservationIds } from "../config.js";
 import { logger } from "../logger.js";
-import type { StateScope } from "../types.js";
+import type { Session, StateScope } from "../types.js";
 
 // Bump when the pass gains a job that has to run against a store an earlier
 // version already marked as done.
-export const STARTUP_MAINTENANCE_VERSION = 1;
+export const STARTUP_MAINTENANCE_VERSION = 2;
 
 const MARKER_KEY: keyof StateScope = "system:startupMaintenanceVersion";
 
@@ -22,10 +24,14 @@ const CHUNK_ROWS = 100;
 export type StartupMaintenanceResult = {
   /** True when an earlier boot already completed this version of the pass. */
   skipped: boolean;
-  /** Graph rows whose provenance was over the bound and got trimmed. */
+  /** Rows whose id list was over its bound and got trimmed. */
   rowsTrimmed: number;
-  /** Source observation ids dropped across all trimmed rows. */
+  /** Ids dropped across all trimmed rows. */
   idsDropped: number;
+  /** Duplicate file nodes folded into the node named by the project-relative path. */
+  fileNodesMerged: number;
+  /** Edges re-pointed to a surviving file node, or dropped as a self-loop or duplicate. */
+  edgesChanged: number;
   /** Rows deleted from the dead index scopes. */
   deadIndexRowsDeleted: number;
 };
@@ -57,10 +63,12 @@ async function inChunks<T extends { seq: number }>(
   }
 }
 
-async function trimProvenance(
+// `field` names the id list inside each row; without it the row is the list.
+async function trimIdLists(
   state: SqliteState,
   scope: string,
   max: number,
+  field?: string,
 ): Promise<{ rowsTrimmed: number; idsDropped: number }> {
   // `seq` is the rowid and survives in-place updates, so paging by it is
   // stable even though the trim rewrites rows it has already passed.
@@ -81,20 +89,22 @@ async function trimProvenance(
     (rows) => {
       const entries: Array<{ key: string; value: unknown }> = [];
       for (const row of rows) {
-        let parsed: { sourceObservationIds?: unknown };
+        let parsed: unknown;
         try {
-          parsed = JSON.parse(row.value) as { sourceObservationIds?: unknown };
+          parsed = JSON.parse(row.value);
         } catch {
           continue;
         }
-        const ids = parsed.sourceObservationIds;
+        const ids = field ? (parsed as Record<string, unknown> | null)?.[field] : parsed;
         if (!Array.isArray(ids) || ids.length <= max) continue;
         // The write path's rule, not a second copy of it: dedupe from the
         // tail, keep the newest `max`.
         const capped = capSourceIds(ids as string[], max);
-        parsed.sourceObservationIds = capped;
         idsDropped += ids.length - capped.length;
-        entries.push({ key: row.key, value: parsed });
+        entries.push({
+          key: row.key,
+          value: field ? { ...(parsed as object), [field]: capped } : capped,
+        });
       }
 
       if (entries.length > 0) {
@@ -132,10 +142,23 @@ async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
   return deleted;
 }
 
+async function sessionCheckoutRoots(state: SqliteState): Promise<string[]> {
+  const roots = new Set<string>();
+  const cwds = new Set(
+    (state.list(KV.sessions) as Session[]).flatMap((s) => (s?.cwd ? [s.cwd] : [])),
+  );
+  for (const cwd of cwds) {
+    if ([...roots].some((root) => cwd === root || cwd.startsWith(root + "/"))) continue;
+    for (const root of await checkoutRootsOf(cwd)) roots.add(root);
+  }
+  return [...roots];
+}
+
 /**
- * The one-time repair pass: trims graph provenance written before the
- * write-time bound existed, reclaims the dead index scopes, then records the
- * version so later boots skip the scan entirely.
+ * The one-time repair pass: trims graph provenance, obs-nodes rows, Insight
+ * and Semantic Fact source lists written before their write-time bounds
+ * existed, folds duplicate file nodes, reclaims the dead index scopes, then
+ * records the version so later boots skip the scan entirely.
  *
  * Chunked and yielding, so the daemon keeps serving while it runs. It takes
  * the open store, which is the seam it is tested at, and touches nothing
@@ -145,27 +168,49 @@ export async function runStartupMaintenance(
   state: SqliteState,
 ): Promise<StartupMaintenanceResult> {
   if (alreadyRan(state)) {
-    return { skipped: true, rowsTrimmed: 0, idsDropped: 0, deadIndexRowsDeleted: 0 };
+    return {
+      skipped: true,
+      rowsTrimmed: 0,
+      idsDropped: 0,
+      fileNodesMerged: 0,
+      edgesChanged: 0,
+      deadIndexRowsDeleted: 0,
+    };
   }
 
   const max = getMaxSourceObservationIds();
-  const nodes = await trimProvenance(state, KV.graphNodes, max);
-  const edges = await trimProvenance(state, KV.graphEdges, max);
+  const trimmed = [
+    await trimIdLists(state, KV.graphNodes, max, "sourceObservationIds"),
+    await trimIdLists(state, KV.graphEdges, max, "sourceObservationIds"),
+    await trimIdLists(state, KV.graphObsNodes, max),
+    await trimIdLists(state, KV.insights, MAX_SOURCE_LIST_IDS, "sourceMemoryIds"),
+    await trimIdLists(state, KV.semantic, MAX_SOURCE_LIST_IDS, "sourceSessionIds"),
+  ];
+  const merged = await mergeDuplicateFileNodes(state, await sessionCheckoutRoots(state));
   const deadIndexRowsDeleted = await deleteDeadIndexRows(state);
 
   state.set(KV.state, MARKER_KEY, STARTUP_MAINTENANCE_VERSION);
 
   const result: StartupMaintenanceResult = {
     skipped: false,
-    rowsTrimmed: nodes.rowsTrimmed + edges.rowsTrimmed,
-    idsDropped: nodes.idsDropped + edges.idsDropped,
+    rowsTrimmed: trimmed.reduce((n, t) => n + t.rowsTrimmed, 0),
+    idsDropped: trimmed.reduce((n, t) => n + t.idsDropped, 0),
+    fileNodesMerged: merged.nodesMerged,
+    edgesChanged: merged.edgesChanged,
     deadIndexRowsDeleted,
   };
 
-  if (result.rowsTrimmed > 0 || result.deadIndexRowsDeleted > 0) {
+  if (
+    result.rowsTrimmed > 0 ||
+    result.fileNodesMerged > 0 ||
+    result.edgesChanged > 0 ||
+    result.deadIndexRowsDeleted > 0
+  ) {
     logger.info("Startup maintenance complete", {
       rowsTrimmed: result.rowsTrimmed,
       idsDropped: result.idsDropped,
+      fileNodesMerged: result.fileNodesMerged,
+      edgesChanged: result.edgesChanged,
       deadIndexRowsDeleted: result.deadIndexRowsDeleted,
       provenanceBound: max,
     });

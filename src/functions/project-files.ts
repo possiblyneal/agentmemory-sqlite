@@ -7,7 +7,7 @@ import type { CompressedObservation, Session } from "../types.js";
 
 const run = promisify(execFile);
 
-async function checkoutRootsOf(cwd: string): Promise<string[]> {
+export async function checkoutRootsOf(cwd: string): Promise<string[]> {
   try {
     const { stdout } = await run("git", ["worktree", "list", "--porcelain"], {
       cwd,
@@ -35,7 +35,7 @@ async function checkoutRoots(
   return [...new Set(roots.flat())];
 }
 
-function projectRelative(file: string, roots: string[]): string {
+export function projectRelative(file: string, roots: string[]): string {
   if (!isAbsolute(file)) return file;
   const path = resolve(file);
   let best: string | undefined;
