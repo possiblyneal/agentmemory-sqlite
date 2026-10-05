@@ -64,6 +64,7 @@ function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode)
     if (key.startsWith("HF_") && value !== undefined) env[key] = value;
   }
   if (embeddings === "local") env.EMBEDDING_PROVIDER = "local";
+  if (process.env.RERANK_ENABLED) env.RERANK_ENABLED = process.env.RERANK_ENABLED;
   return env;
 }
 

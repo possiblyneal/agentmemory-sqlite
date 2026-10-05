@@ -67,17 +67,20 @@ describe("reranker with loaded pipeline", () => {
     vi.resetModules();
   });
 
-  it("invokes the @huggingface/transformers pipeline and reorders by score", async () => {
-    const mockPipeline = vi.fn(async (text: string) => [
-      { score: text.includes("First") ? 0.9 : 0.1 },
-    ]);
+  it("scores each query/passage pair and reorders by the cross-encoder logit", async () => {
+    const tokenizer = vi.fn(
+      (queries: string[], opts: { text_pair: string[] }) => ({ queries, passages: opts.text_pair }),
+    );
+    const model = vi.fn(async (inputs: { passages: string[] }) => ({
+      logits: { data: Float32Array.from(inputs.passages.map((p) => (p.includes("First") ? 2 : -9))) },
+    }));
     const env: Record<string, unknown> = {};
     vi.doMock("@huggingface/transformers", () => ({
       env,
-      pipeline: () => Promise.resolve(mockPipeline),
+      AutoTokenizer: { from_pretrained: () => Promise.resolve(tokenizer) },
+      AutoModelForSequenceClassification: { from_pretrained: () => Promise.resolve(model) },
     }));
     vi.resetModules();
-
     const { rerank } = await import("../src/state/reranker.js");
 
     const results = [
@@ -87,8 +90,10 @@ describe("reranker with loaded pipeline", () => {
 
     const reranked = await rerank("query", results);
 
-    expect(mockPipeline).toHaveBeenCalled();
-    expect(reranked[0].observation.id).toBe("o1");
+    expect(tokenizer.mock.calls[0][0]).toEqual(["query", "query"]);
+    expect(reranked.map((r) => r.observation.id)).toEqual(["o1", "o2"]);
+    expect(reranked[0].combinedScore).toBeGreaterThan(0.8);
+    expect(reranked[1].combinedScore).toBeLessThan(0.01);
     expect(env["cacheDir"]).toMatch(/models$/);
   });
 });
