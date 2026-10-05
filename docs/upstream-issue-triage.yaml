@@ -2743,8 +2743,8 @@ issues:
     difficulty: med
     kind: bug
     note: "The oversized export refusal ships under HTTP 200 after materialising 18.5GB of RSS."
-    disposition: candidate
-    status: "partly-present-here — REST already refuses with 413 (src/triggers/api.ts:1590), but mem::export reads every durable store and stringifies the whole payload before refusing (src/functions/export-import.ts:121-201, src/state/payload-bound.ts:35), and /mcp/call's memory_export still returns the refusal under 200 (src/mcp/server.ts:455-458)."
+    disposition: already-fixed
+    fixed_by: "mem::export sums row sizes per scope (state::bytes) and refuses an oversized export before reading any store (src/functions/export-import.ts); REST answers 413 (src/triggers/api.ts) and MCP memory_export returns isError (src/mcp/server.ts); test/export-import.test.ts and test/mcp-search-project-scope.test.ts cover it."
     url: https://github.com/rohitg00/agentmemory/issues/1334
   - number: 1335
     title: "Shutdown index save is lost to a container teardown race, and boot only reconciles a completely empty index"

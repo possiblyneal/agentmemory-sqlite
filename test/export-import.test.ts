@@ -33,6 +33,10 @@ function mockKV() {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
     },
+    bytes: async (scope: string): Promise<number> => {
+      const entries = store.get(scope);
+      return entries ? JSON.stringify(Array.from(entries.values())).length : 0;
+    },
   };
 }
 
@@ -132,6 +136,23 @@ describe("Export/Import Functions", () => {
     expect(result.observations["ses_1"].length).toBe(1);
     expect(result.memories.length).toBe(1);
     expect(result.summaries.length).toBe(1);
+  });
+
+  it("refuses an oversized export from row sizes without reading the stores", async () => {
+    const bytesOf = kv.bytes;
+    kv.bytes = async (scope: string) =>
+      scope === "mem:memories" ? 300 * 1024 * 1024 : bytesOf(scope);
+    const listed: string[] = [];
+    const listOf = kv.list;
+    kv.list = (async (scope: string) => {
+      listed.push(scope);
+      return listOf(scope);
+    }) as typeof kv.list;
+
+    const result = await sdk.trigger("mem::export", {});
+
+    expect(result).toMatchObject({ success: false, oversized: true });
+    expect(listed).toEqual(["mem:sessions"]);
   });
 
   it("import with merge strategy adds data", async () => {

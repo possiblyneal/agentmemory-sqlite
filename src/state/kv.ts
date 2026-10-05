@@ -115,6 +115,13 @@ export class StateKV {
     })
   }
 
+  async bytes(scope: string): Promise<number> {
+    return this.sdk.trigger<{ scope: string }, number>({
+      function_id: 'state::bytes',
+      payload: { scope },
+    })
+  }
+
   async listScopes(prefix: string): Promise<string[]> {
     return this.sdk.trigger<{ prefix: string }, string[]>({
       function_id: 'state::list-scopes',

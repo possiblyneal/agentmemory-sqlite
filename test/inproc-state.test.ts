@@ -39,6 +39,14 @@ describe("inproc state store", () => {
     ]);
   });
 
+  it("reports the stored byte size of a scope", async () => {
+    const fns = stateFunctions(store);
+    expect(await fns["state::bytes"]({ scope: "s" })).toBe(0);
+    await fns["state::set"]({ scope: "s", key: "a", value: { t: "é" } });
+    await fns["state::set"]({ scope: "other", key: "a", value: "x".repeat(50) });
+    expect(await fns["state::bytes"]({ scope: "s" })).toBe(Buffer.byteLength('{"t":"é"}'));
+  });
+
   it("round-trips all five operations", async () => {
     const fns = stateFunctions(store);
 

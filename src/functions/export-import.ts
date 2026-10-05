@@ -29,7 +29,7 @@ import {
 } from "../state/graph-indexes.js";
 import { graphWritesDisabled } from "./graph.js";
 import { capRecordProvenance } from "./graph-provenance.js";
-import { checkPayloadSize } from "../state/payload-bound.js";
+import { MAX_PAYLOAD_BYTES, type OversizedPayload } from "../state/payload-bound.js";
 import { StateKV } from "../state/kv.js";
 import { VERSION } from "../version.js";
 import { recordAudit } from "./audit.js";
@@ -101,16 +101,30 @@ export type DurableRows = {
   [K in DurableStoreField]?: NonNullable<ExportData[K]>;
 };
 
+function readableStores(): DurableStore[] {
+  return DURABLE_STORES.filter((s) => !(s.graph && graphLegDisabled()));
+}
+
 // B-mode (graph leg off): the graph scopes are not enumerated, so their
 // fields are absent rather than empty.
 export async function readDurableStores(kv: StateKV): Promise<DurableRows> {
-  const readable = DURABLE_STORES.filter((s) => !(s.graph && graphLegDisabled()));
+  const readable = readableStores();
   const lists = await Promise.all(readable.map((s) => kv.list(s.scope)));
   return Object.fromEntries(readable.map((s, i) => [s.field, lists[i]]));
 }
 
 function nonEmpty<T>(rows: T[] | undefined): T[] | undefined {
   return rows && rows.length > 0 ? rows : undefined;
+}
+
+function oversizedExport(bytes: number): OversizedPayload {
+  return {
+    success: false,
+    error: `Export is about ${(bytes / (1024 * 1024)).toFixed(1)} MiB, over the ${MAX_PAYLOAD_BYTES / (1024 * 1024)} MiB response limit; narrow the range with ?maxSessions / ?offset, or export fewer collections; the non-session collections (memories, graph, semantic, actions, lessons, ...) are not yet paginated`,
+    oversized: true,
+    bytes,
+    limitBytes: MAX_PAYLOAD_BYTES,
+  };
 }
 
 export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
@@ -121,11 +135,25 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
       const rawOffset = Number(data?.offset);
       const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
 
-      const stores = await readDurableStores(kv);
-      const allSessions = stores.sessions ?? [];
+      const allSessions = await kv.list<Session>(KV.sessions);
       const paginatedSessions = maxSessions !== undefined
         ? allSessions.slice(offset, offset + maxSessions)
         : allSessions;
+
+      const scopes = [
+        ...readableStores().map((s) => s.scope),
+        ...paginatedSessions.map((s) => KV.observations(s.id)),
+      ];
+      const estimatedBytes = (await Promise.all(scopes.map((scope) => kv.bytes(scope)))).reduce(
+        (sum, n) => sum + n,
+        0,
+      );
+      if (estimatedBytes > MAX_PAYLOAD_BYTES) {
+        logger.warn("Export refused before it was built", { estimatedBytes });
+        return oversizedExport(estimatedBytes);
+      }
+
+      const stores = await readDurableStores(kv);
       const memories = stores.memories ?? [];
       const summaries = stores.summaries ?? [];
 
@@ -195,17 +223,6 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         memories: memories.length,
         summaries: summaries.length,
       });
-
-      // Only session collections page on ?maxSessions/?offset, so a large
-      // store can outgrow the response bound even at ?maxSessions=1.
-      const oversized = checkPayloadSize(
-        exportData,
-        "narrow the range with ?maxSessions / ?offset, or export fewer collections; the non-session collections (memories, graph, semantic, actions, lessons, ...) are not yet paginated",
-      );
-      if (oversized) {
-        logger.warn("Export exceeds the response bound", { bytes: oversized.bytes });
-        return oversized;
-      }
 
       return exportData;
     },
