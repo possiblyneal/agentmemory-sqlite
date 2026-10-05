@@ -580,8 +580,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Semantic consolidate and reflect time out from sequential KV operations."
-    disposition: candidate
-    status: "present-here — the MCP shim forwards memory_reflect/memory_consolidate with a fixed 15 s CALL_TIMEOUT_MS (src/mcp/rest-proxy.ts:3, 163, via src/mcp/standalone.ts:409) while reflect makes up to 20 sequential LLM calls (src/functions/reflect.ts:302, 373); the sequential-KV cause does not apply (consolidation-pipeline.ts:290 uses setMany)."
+    disposition: already-fixed
+    fixed_by: "src/mcp/standalone.ts routes memory_reflect and memory_consolidate through llmCallTimeoutMs() (src/mcp/rest-proxy.ts), at least 15 s and at least AGENTMEMORY_LLM_TIMEOUT_MS (default 60 s), while every other tool keeps the 15 s call timeout; test/mcp-standalone-proxy.test.ts asserts it."
     url: https://github.com/rohitg00/agentmemory/issues/655
     mentioned_by_prs: [867]
   - number: 658
@@ -1126,8 +1126,8 @@ issues:
     difficulty: med
     kind: bug
     note: "expandIds is a no-op end to end: shim drops it and the engine cannot expand mem_ ids."
-    disposition: candidate
-    status: "partly-present-here — the engine resolves mem_ ids (src/functions/smart-search.ts:439-440) and server.ts forwards expandIds (src/mcp/server.ts:364-370), but `agentmemory mcp` runs src/mcp/standalone.ts, whose validation requires query and drops expandIds (standalone.ts:175-197, 255-264)."
+    disposition: already-fixed
+    fixed_by: "src/mcp/standalone.ts validates and forwards expandIds with no query to /agentmemory/smart-search, and the registry and src/mcp/server.ts no longer require query when expandIds is given; test/mcp-standalone-proxy.test.ts asserts the forwarded body."
     url: https://github.com/rohitg00/agentmemory/issues/889
     fix_prs: [1230]
   - number: 890
@@ -1827,8 +1827,8 @@ issues:
     difficulty: med
     kind: bug
     note: "expandIds only searches observations and project is inconsistently applied to durable memories."
-    disposition: candidate
-    status: "partly-present-here — expandIds resolves mem_ ids through KV.memories (src/functions/smart-search.ts:440-441) and compact results are project-filtered (:215-222), but the expandIds branch applies no project filter (:172-174)."
+    disposition: already-fixed
+    fixed_by: "the expandIds branch of mem::smart-search (src/functions/smart-search.ts) now applies createProjectMatcher like compact results, so another project's Memory returns nothing; test/smart-search.test.ts asserts it."
     url: https://github.com/rohitg00/agentmemory/issues/1080
     fix_prs: [1091]
   - number: 1081

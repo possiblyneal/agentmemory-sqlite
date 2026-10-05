@@ -198,7 +198,6 @@ export const CORE_TOOLS: McpToolDef[] = [
         limit: { type: "number", description: "Max results (default 10)" },
         project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
       },
-      required: ["query"],
     },
   },
   {

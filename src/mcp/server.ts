@@ -355,13 +355,16 @@ export function registerMcpEndpoints(
           }
 
           case "memory_smart_search": {
-            if (typeof args.query !== "string" || !args.query.trim()) {
+            const expandIds = parseCsvList(args.expandIds).slice(0, 20);
+            if (
+              (typeof args.query !== "string" || !args.query.trim()) &&
+              expandIds.length === 0
+            ) {
               return {
                 status_code: 400,
-                body: { error: "query is required for memory_smart_search" },
+                body: { error: "query or expandIds is required for memory_smart_search" },
               };
             }
-            const expandIds = parseCsvList(args.expandIds).slice(0, 20);
             const limit = Math.max(1, Math.min(100, asNumber(args.limit, 10) ?? 10));
             const result = await sdk.trigger({
               function_id: "mem::smart-search",

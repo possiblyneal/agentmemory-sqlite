@@ -79,6 +79,50 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(body.results[0].id).toBe("m1");
   });
 
+  it("forwards expandIds to smart-search with no query, scoped to the cwd project", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      if (url.endsWith("/agentmemory/smart-search")) {
+        bodies.push(JSON.parse((init?.body as string) || "{}"));
+        return new Response(JSON.stringify({ mode: "expanded", results: [] }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    });
+    await handleToolCall("memory_smart_search", { expandIds: "mem_a, mem_b" });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]["expandIds"]).toEqual(["mem_a", "mem_b"]);
+    expect(bodies[0]["project"]).toBe("cwd-project");
+    expect(bodies[0]["query"]).toBeUndefined();
+  });
+
+  it("gives reflect and consolidate a call timeout past 15 s and keeps 15 s elsewhere", async () => {
+    const timeouts: number[] = [];
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return realTimeout(ms);
+    });
+    try {
+      installFetch((url) => {
+        if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+        return new Response(JSON.stringify({ content: [] }), { status: 200 });
+      });
+      timeouts.length = 0;
+      await handleToolCall("memory_reflect", {});
+      const reflect = timeouts.at(-1)!;
+      await handleToolCall("memory_consolidate", {});
+      const consolidate = timeouts.at(-1)!;
+      await handleToolCall("memory_sessions", {});
+      const sessions = timeouts.at(-1)!;
+      expect(reflect).toBeGreaterThan(15_000);
+      expect(consolidate).toBeGreaterThan(15_000);
+      expect(sessions).toBe(15_000);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("proxies memory_recall to POST /agentmemory/search and forwards format/token_budget (#507)", async () => {
     const calls: Array<{ url: string; body?: unknown }> = [];
     installFetch((url, init) => {

@@ -246,6 +246,17 @@ describe("Smart Search Function", () => {
       ]);
     });
 
+    it("expandIds returns only the caller's project", async () => {
+      await kv.set("mem:obs:ses_other", "obs_other", makeObs({ id: "obs_other", sessionId: "ses_other", title: "Auth in other repo" }));
+      const result = (await sdk.trigger("mem::smart-search", {
+        expandIds: ["mem_here", "mem_elsewhere", "obs_other"],
+        project: "my-project",
+      })) as { mode: string; results: Array<{ obsId: string }> };
+
+      expect(result.mode).toBe("expanded");
+      expect(result.results.map((r) => r.obsId)).toEqual(["mem_here"]);
+    });
+
     it("returns every project when none is given", async () => {
       const result = (await sdk.trigger("mem::smart-search", {
         query: "auth",

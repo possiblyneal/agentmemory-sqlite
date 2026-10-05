@@ -170,9 +170,19 @@ export function registerSmartSearchFunction(
           if (r) expanded.push(r);
         }
 
-        const scoped = filterAgentId
-          ? expanded.filter((e) => e.observation.agentId === filterAgentId)
-          : expanded;
+        const expandProject =
+          typeof data.project === "string" && data.project.trim().length > 0
+            ? data.project.trim()
+            : undefined;
+        const inExpandProject = expandProject
+          ? createProjectMatcher(kv, expandProject)
+          : null;
+        const scoped: typeof expanded = [];
+        for (const e of expanded) {
+          if (filterAgentId && e.observation.agentId !== filterAgentId) continue;
+          if (inExpandProject && !(await inExpandProject(e.sessionId, e.obsId))) continue;
+          scoped.push(e);
+        }
 
         void recordAccessBatch(
           kv,
