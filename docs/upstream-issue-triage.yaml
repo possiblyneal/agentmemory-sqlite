@@ -2172,8 +2172,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Unbounded provenance arrays are ~97% of collection bytes and are what push collections past the worker limit."
-    disposition: candidate
-    status: "partly-present-here — graph node/edge provenance is capped (capSourceIds, src/functions/graph-provenance.ts:11) and since c8819da insight sourceMemoryIds are bounded only by the reflect prompt budget (src/functions/reflect.ts:28, 366, 410), with no explicit cap; insights written before then still hold up to 2,553 ids."
+    disposition: already-fixed
+    fixed_by: "Insight sourceMemoryIds are capped at MAX_SOURCE_LIST_IDS (src/functions/graph-provenance.ts) when reflect writes them (src/functions/reflect.ts), alongside the capped graph provenance (capSourceIds); test/reflect.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1168
     fix_prs: [1295, 1349]
     mentioned_by_prs: [1233, 1353]
@@ -2800,8 +2800,8 @@ issues:
     difficulty: high
     kind: bug
     note: "Unbounded sourceSessionIds/sourceMemoryIds plus unpaginated list endpoints hit the 16 MiB frame limit."
-    disposition: candidate
-    status: "partly-present-here — the 16 MiB frame limit is iii-only, but consolidation-pipeline appends sourceSessionIds without a cap (overlaps rohitg00/agentmemory#1168)"
+    disposition: already-fixed
+    fixed_by: "consolidation-pipeline caps sourceSessionIds with capSourceIds and MAX_SOURCE_LIST_IDS, keeping the newest (src/functions/consolidation-pipeline.ts); test/consolidation-pipeline.test.ts. The 16 MiB frame limit is iii-only."
     url: https://github.com/rohitg00/agentmemory/issues/1360
   - number: 1361
     title: "Windows hardening: cross-platform build script, test normalization, and audit split"

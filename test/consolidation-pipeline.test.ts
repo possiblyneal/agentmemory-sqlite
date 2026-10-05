@@ -440,4 +440,33 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
       expect.arrayContaining(["alpha_0", "beta_0"]),
     );
   });
+
+  it("appends Session ids to an existing fact up to the cap, dropping the oldest", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = {
+      name: "test",
+      compress: vi.fn(),
+      summarize: vi.fn().mockResolvedValue(`<fact confidence="0.8">Use node:sqlite</fact>`),
+    };
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    const old = Array.from({ length: 150 }, (_, i) => `old_${i}`);
+    await kv.set("mem:semantic", "sem_1", {
+      id: "sem_1", fact: "Use node:sqlite", confidence: 0.5,
+      sourceSessionIds: old, sourceMemoryIds: [], accessCount: 1,
+      lastAccessedAt: "2026-01-01T00:00:00Z", strength: 0.5,
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+    } satisfies SemanticMemory);
+    for (let i = 0; i < 5; i++) {
+      await kv.set("mem:summaries", `ses_${i}`, makeSummary(i));
+    }
+
+    await sdk.trigger("mem::consolidate-pipeline", { tier: "semantic" });
+
+    const [fact] = await kv.list<SemanticMemory>("mem:semantic");
+    expect(fact.sourceSessionIds).toHaveLength(100);
+    expect(fact.sourceSessionIds).toContain("ses_0");
+    expect(fact.sourceSessionIds).not.toContain("old_0");
+    expect(fact.sourceSessionIds).toContain("old_149");
+  });
 });

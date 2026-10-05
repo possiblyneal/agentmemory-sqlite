@@ -21,6 +21,7 @@ import {
 import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { logger } from "../logger.js";
+import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 
 // A cluster takes every fact sharing a word with its concepts, which on the
 // Operator's broker reached 100k+ tokens and starved sibling slots during
@@ -407,7 +408,7 @@ export function registerReflectFunctions(
                 confidence,
                 reinforcements: 0,
                 sourceConceptCluster: conceptNames,
-                sourceMemoryIds: cluster.factIds,
+                sourceMemoryIds: cluster.factIds.slice(0, MAX_SOURCE_LIST_IDS),
                 sourceLessonIds: cluster.lessonIds,
                 sourceCrystalIds: cluster.crystalIds,
                 project: data?.project,

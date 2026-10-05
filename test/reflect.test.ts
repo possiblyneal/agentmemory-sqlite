@@ -326,6 +326,24 @@ describe("Reflect", () => {
       expect(insight!.sourceMemoryIds).not.toContain("sem_0");
     });
 
+    it("writes at most 100 source Memory ids per Insight however many facts fit the prompt", async () => {
+      await seedNode(kv, makeConceptNode("security"));
+      await seedNode(kv, makeConceptNode("validation"));
+      await seedEdge(kv, makeEdge("security", "validation"));
+      for (let i = 0; i < 300; i++) {
+        await kv.set("mem:semantic", `sem_${i}`, {
+          ...makeSemantic(`security fact ${i}`, `sem_${i}`),
+          confidence: i / 300,
+        });
+      }
+
+      await sdk.trigger("mem::reflect", {});
+
+      const [insight] = await kv.list<Insight>("mem:insights");
+      expect(insight!.sourceMemoryIds).toHaveLength(100);
+      expect(insight!.sourceMemoryIds).toContain("sem_299");
+    });
+
     it("skips a cluster left with fewer than 3 items after fitting its budget", async () => {
       await seedNode(kv, makeConceptNode("security"));
       await seedNode(kv, makeConceptNode("validation"));
