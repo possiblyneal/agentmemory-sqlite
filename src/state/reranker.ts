@@ -1,5 +1,6 @@
 import type { HybridSearchResult } from "../types.js";
 import { configureTransformers } from "../providers/transformers-env.js";
+import { logger } from "../logger.js";
 
 const RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2";
 
@@ -8,6 +9,10 @@ type CrossEncoder = { tokenizer: any; model: any };
 let encoder: CrossEncoder | null = null;
 let encoderLoading: Promise<CrossEncoder | null> | null = null;
 let encoderUnavailable = false;
+let scoringFailureLogged = false;
+
+// [CLS] query [SEP] passage [SEP]
+const PAIR_SPECIAL_TOKENS = 3;
 
 async function loadEncoder(): Promise<CrossEncoder | null> {
   if (encoderUnavailable) return null;
@@ -47,13 +52,22 @@ async function scorePairs(
   query: string,
   passages: string[],
 ): Promise<number[]> {
+  const queryTokens = tokenizer.encode(query, { add_special_tokens: false }).length;
+  const budget = Math.max(0, tokenizer.model_max_length - queryTokens - PAIR_SPECIAL_TOKENS);
   const inputs = tokenizer(new Array(passages.length).fill(query), {
-    text_pair: passages,
+    text_pair: passages.map((p) => fitPassage(tokenizer, budget, p)),
     padding: true,
     truncation: true,
   });
   const { logits } = await model(inputs);
   return Array.from(logits.data as Float32Array, (l) => 1 / (1 + Math.exp(-l)));
+}
+
+// The tokenizer's own truncation cuts the joined pair from the end, dropping
+// the closing [SEP] the cross-encoder was trained on; trim only the passage.
+function fitPassage(tokenizer: any, budget: number, passage: string): string {
+  const ids: number[] = tokenizer.encode(passage, { add_special_tokens: false });
+  return ids.length <= budget ? passage : tokenizer.decode(ids.slice(0, budget));
 }
 
 export async function rerank(
@@ -75,7 +89,13 @@ export async function rerank(
   try {
     const relevance = await scorePairs(crossEncoder, query, passages);
     scores = candidates.map((result, i) => ({ result, rerankScore: relevance[i] }));
-  } catch {
+  } catch (err) {
+    if (!scoringFailureLogged) {
+      scoringFailureLogged = true;
+      logger.warn("reranker scoring failed; returning results unreranked", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     return results;
   }
 

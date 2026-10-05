@@ -67,13 +67,24 @@ describe("reranker with loaded pipeline", () => {
     vi.resetModules();
   });
 
-  it("scores each query/passage pair and reorders by the cross-encoder logit", async () => {
-    const tokenizer = vi.fn(
-      (queries: string[], opts: { text_pair: string[] }) => ({ queries, passages: opts.text_pair }),
+  function wordTokenizer(maxLength: number) {
+    return Object.assign(
+      vi.fn((queries: string[], opts: { text_pair: string[] }) => ({
+        queries,
+        passages: opts.text_pair,
+      })),
+      {
+        model_max_length: maxLength,
+        encode: (text: string) => text.split(" ").filter(Boolean),
+        decode: (ids: string[]) => ids.join(" "),
+      },
     );
-    const model = vi.fn(async (inputs: { passages: string[] }) => ({
-      logits: { data: Float32Array.from(inputs.passages.map((p) => (p.includes("First") ? 2 : -9))) },
-    }));
+  }
+
+  async function loadReranker(
+    tokenizer: ReturnType<typeof wordTokenizer>,
+    model: (inputs: { passages: string[] }) => Promise<unknown>,
+  ) {
     const env: Record<string, unknown> = {};
     vi.doMock("@huggingface/transformers", () => ({
       env,
@@ -82,6 +93,15 @@ describe("reranker with loaded pipeline", () => {
     }));
     vi.resetModules();
     const { rerank } = await import("../src/state/reranker.js");
+    return { rerank, env };
+  }
+
+  it("scores each query/passage pair and reorders by the cross-encoder logit", async () => {
+    const tokenizer = wordTokenizer(512);
+    const model = vi.fn(async (inputs: { passages: string[] }) => ({
+      logits: { data: Float32Array.from(inputs.passages.map((p) => (p.includes("First") ? 2 : -9))) },
+    }));
+    const { rerank, env } = await loadReranker(tokenizer, model);
 
     const results = [
       { observation: { id: "o2", title: "Second", narrative: "" }, combinedScore: 0.9 },
@@ -95,5 +115,40 @@ describe("reranker with loaded pipeline", () => {
     expect(reranked[0].combinedScore).toBeGreaterThan(0.8);
     expect(reranked[1].combinedScore).toBeLessThan(0.01);
     expect(env["cacheDir"]).toMatch(/models$/);
+  });
+
+  it("trims only the passage so the query and closing separator fit the model", async () => {
+    const tokenizer = wordTokenizer(8);
+    const model = vi.fn(async (inputs: { passages: string[] }) => ({
+      logits: { data: Float32Array.from(inputs.passages.map(() => 0)) },
+    }));
+    const { rerank } = await loadReranker(tokenizer, model);
+
+    await rerank("two words", [
+      { observation: { id: "o1", title: "a", narrative: "b c d e f g" }, combinedScore: 1 },
+      { observation: { id: "o2", title: "short", narrative: "" }, combinedScore: 0.5 },
+    ] as any);
+
+    expect(tokenizer.mock.calls[0][1].text_pair).toEqual(["a b c", "short "]);
+  });
+
+  it("returns results unreranked and warns once when scoring fails", async () => {
+    const tokenizer = wordTokenizer(512);
+    const model = vi.fn(async () => {
+      throw new Error("inference failed");
+    });
+    const { rerank } = await loadReranker(tokenizer, model);
+    const { logger } = await import("../src/logger.js");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const results = [
+      { observation: { id: "o1", title: "A", narrative: "" }, combinedScore: 0.9 },
+      { observation: { id: "o2", title: "B", narrative: "" }, combinedScore: 0.5 },
+    ] as any;
+
+    expect(await rerank("query", results)).toBe(results);
+    await rerank("query", results);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });
