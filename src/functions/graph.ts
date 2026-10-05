@@ -825,7 +825,7 @@ export function graphWritesOffReason(): string | null {
   return reasons.length > 0 ? reasons.join(", ") : null;
 }
 
-const GRAPH_WRITE_LOCK = "mem:graph:write";
+export const GRAPH_WRITE_LOCK = "mem:graph:write";
 
 export function persistGraphDelta(
   kv: StateKV,

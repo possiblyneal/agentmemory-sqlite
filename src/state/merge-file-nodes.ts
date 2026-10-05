@@ -4,7 +4,8 @@ import { KV } from "./schema.js";
 import { nameShardKey, type NameCatalogEntry } from "./graph-indexes.js";
 import { noteGraphWrite } from "./kv.js";
 import { capSourceIds } from "../functions/graph-provenance.js";
-import { edgeIndexKey, nameIndexKey } from "../functions/graph.js";
+import { GRAPH_WRITE_LOCK, edgeIndexKey, nameIndexKey } from "../functions/graph.js";
+import { withKeyedLock } from "./keyed-mutex.js";
 import { projectRelative } from "../functions/project-files.js";
 
 const GROUPS_PER_TURN = 20;
@@ -262,9 +263,17 @@ function mergeGroup(
  * incident edges are re-pointed (an edge that becomes a self-loop is dropped, and
  * one that collides with an existing edge folds into it), and the side indexes
  * and snapshot follow. Each group commits in its own transaction, and a rerun
- * finds nothing left to merge.
+ * finds nothing left to merge. Holds the graph write lock throughout so a
+ * concurrent extraction cannot overwrite the patched snapshot.
  */
-export async function mergeDuplicateFileNodes(
+export function mergeDuplicateFileNodes(
+  state: SqliteState,
+  roots: string[],
+): Promise<FileNodeMergeResult> {
+  return withKeyedLock(GRAPH_WRITE_LOCK, () => mergeDuplicateFileNodesUnlocked(state, roots));
+}
+
+async function mergeDuplicateFileNodesUnlocked(
   state: SqliteState,
   roots: string[],
 ): Promise<FileNodeMergeResult> {
