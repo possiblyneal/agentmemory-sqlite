@@ -765,8 +765,9 @@ issues:
     difficulty: med
     kind: bug
     note: "git-toplevel basename project identity collides across same-named repos."
-    disposition: candidate
-    status: "partly-present-here — worktrees share one project through --git-common-dir (src/hooks/_project.ts:19-20), but identity is still a directory basename with no remote, so same-named repos collide."
+    disposition: already-fixed
+    fixed_by: "src/hooks/_project.ts disambiguate"
+    status: "fixed-here — resolveProject keeps the bare basename for the first checkout to claim it (~/.agentmemory/project-names.json) and suffixes a later same-named repo with a hash of its origin URL, or its common-dir path when it has no remote; worktrees share their repo's identity. test/hook-project.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/733
     fix_prs: [738]
   - number: 736

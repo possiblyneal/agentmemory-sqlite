@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
 	const vars = {};
@@ -47,8 +48,12 @@ function loadEnvFile() {
 	};
 	return vars;
 }
+const NOT_HYDRATED = new Set(["CLAUDE_CONFIG_DIR"]);
 function hydrateEnvFromFile(isUnset) {
-	for (const [key, value] of Object.entries(loadEnvFile())) if (isUnset(process.env[key])) process.env[key] = value;
+	for (const [key, value] of Object.entries(loadEnvFile())) {
+		if (NOT_HYDRATED.has(key)) continue;
+		if (isUnset(process.env[key])) process.env[key] = value;
+	}
 }
 function hydrateHookEnv() {
 	try {
@@ -84,6 +89,48 @@ function shouldSkipSession() {
 }
 //#endregion
 //#region src/hooks/_project.ts
+function projectNamesPath() {
+	return join(homedir(), ".agentmemory", "project-names.json");
+}
+function remoteUrl(dir) {
+	try {
+		return execSync("git config --get remote.origin.url", {
+			cwd: dir,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			],
+			timeout: 500
+		}).toString().trim().replace(/\.git$/, "");
+	} catch {
+		return "";
+	}
+}
+function disambiguate(name, commonDir, dir) {
+	const identity = remoteUrl(dir) || commonDir;
+	try {
+		const path = projectNamesPath();
+		let claims = {};
+		try {
+			claims = JSON.parse(readFileSync(path, "utf-8"));
+		} catch {}
+		if (!(name in claims)) {
+			mkdirSync(dirname(path), { recursive: true });
+			const staged = `${path}.${process.pid}`;
+			writeFileSync(staged, JSON.stringify({
+				...claims,
+				[name]: identity
+			}));
+			renameSync(staged, path);
+			return name;
+		}
+		if (claims[name] === identity) return name;
+		return `${name}-${createHash("sha1").update(identity).digest("hex").slice(0, 6)}`;
+	} catch {
+		return name;
+	}
+}
 function resolveProject(cwd) {
 	const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
 	if (explicit && explicit.trim()) return explicit.trim();
@@ -98,8 +145,8 @@ function resolveProject(cwd) {
 			],
 			timeout: 500
 		}).toString().trim().split("\n");
-		if (commonDir && basename(commonDir) === ".git") return basename(dirname(resolve(dir, commonDir)));
-		if (top) return basename(top);
+		if (commonDir && basename(commonDir) === ".git") return disambiguate(basename(dirname(resolve(dir, commonDir))), resolve(dir, commonDir), dir);
+		if (top) return disambiguate(basename(top), resolve(dir, commonDir || top), dir);
 	} catch {}
 	return basename(dir);
 }
