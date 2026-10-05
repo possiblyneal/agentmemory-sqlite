@@ -704,8 +704,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Reranker is a silent no-op: softmax over a single logit always scores 1.0."
-    disposition: candidate
-    status: "present-here — src/state/reranker.ts:19-23 still builds a text-classification pipeline over Xenova/ms-marco-MiniLM-L-6-v2."
+    disposition: already-fixed
+    fixed_by: "src/state/reranker.ts scores each query/passage pair with AutoTokenizer + AutoModelForSequenceClassification and takes the sigmoid of the single logit; a live run scored a relevant pair 0.874 and an irrelevant one 0.000."
     url: https://github.com/rohitg00/agentmemory/issues/724
   - number: 725
     title: "local embedding provider hardcodes English-only model — make it configurable (multilingual default)"
