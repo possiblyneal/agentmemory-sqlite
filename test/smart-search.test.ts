@@ -158,6 +158,14 @@ describe("Smart Search Function", () => {
       expect(ids(await search())).toEqual(["lexical", "paraphrase"]);
     });
 
+    it("fills the page from hits past the limit when the floor drops ones inside it", async () => {
+      searchResults = [hit("weak-top", 1), hit("strong-a", 12), hit("strong-b", 10)];
+      const result = (await sdk.trigger("mem::smart-search", { query: "auth", limit: 2 })) as {
+        results: CompactSearchResult[];
+      };
+      expect(ids(result)).toEqual(["strong-a", "strong-b"]);
+    });
+
     it("does not floor expandIds", async () => {
       searchResults = [hit("weak", 0.1)];
       const result = (await sdk.trigger("mem::smart-search", {

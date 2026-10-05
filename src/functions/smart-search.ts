@@ -261,16 +261,19 @@ export function registerSmartSearchFunction(
         recallSemantic(kv, data.query, recallLimit, project),
       ]);
 
+      // Scope every hit before the floor and the limit, so the floor's best
+      // match is the best in-scope one and a dropped hit is refilled from the
+      // over-fetch instead of leaving the page short.
       const inProject = project ? createProjectMatcher(kv, project) : null;
-      const filteredHybrid: HybridSearchResult[] = [];
+      const inScope: HybridSearchResult[] = [];
       for (const r of hybridResults) {
-        if (filteredHybrid.length >= limit) break;
         if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
         if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
-        filteredHybrid.push(r);
+        inScope.push(r);
       }
+      const filteredHybrid = aboveRelevanceFloor(inScope).slice(0, limit);
 
-      const compact: CompactSearchResult[] = aboveRelevanceFloor(filteredHybrid).map((r) => ({
+      const compact: CompactSearchResult[] = filteredHybrid.map((r) => ({
         obsId: r.observation.id,
         sessionId: r.sessionId,
         title: r.observation.title,
