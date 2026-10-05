@@ -323,11 +323,11 @@ async function traverseViaIndexes(
   return result;
 }
 
-function nameIndexKey(type: string, name: string): string {
+export function nameIndexKey(type: string, name: string): string {
   return `${type}|${name}`;
 }
 
-function edgeIndexKey(
+export function edgeIndexKey(
   sourceNodeId: string,
   targetNodeId: string,
   type: string,

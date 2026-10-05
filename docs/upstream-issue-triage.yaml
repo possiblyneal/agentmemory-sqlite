@@ -2176,7 +2176,7 @@ issues:
     kind: bug
     note: "Unbounded provenance arrays are ~97% of collection bytes and are what push collections past the worker limit."
     disposition: already-fixed
-    fixed_by: "Insight sourceMemoryIds are capped at MAX_SOURCE_LIST_IDS (src/functions/graph-provenance.ts) when reflect writes them (src/functions/reflect.ts), alongside the capped graph provenance (capSourceIds); test/reflect.test.ts."
+    fixed_by: "Insight sourceMemoryIds are capped at MAX_SOURCE_LIST_IDS (src/functions/graph-provenance.ts) when reflect writes them (src/functions/reflect.ts), alongside the capped graph provenance (capSourceIds); test/reflect.test.ts. Existing Insights over the cap are trimmed once at boot by the startup maintenance pass (src/state/startup-maintenance.ts); test/startup-maintenance.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1168
     fix_prs: [1295, 1349]
     mentioned_by_prs: [1233, 1353]
@@ -2392,7 +2392,7 @@ issues:
     kind: bug
     note: "Graph file-node identity is the absolute path, duplicating nodes across worktrees."
     disposition: already-fixed
-    fixed_by: "File names are rewritten to project-relative paths against every worktree of the Session cwd before extraction (src/functions/project-files.ts, called from src/functions/graph.ts extractGraph); paths outside every checkout stay absolute."
+    fixed_by: "File names are rewritten to project-relative paths against every worktree of the Session cwd before extraction (src/functions/project-files.ts, called from src/functions/graph.ts extractGraph); paths outside every checkout stay absolute. Existing duplicate file nodes are merged once at boot, edges re-pointed, by the startup maintenance pass (src/state/merge-file-nodes.ts); test/startup-maintenance.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1221
   - number: 1223
     title: "Health reports critical from heapUsed/heapTotal, so /agentmemory/health returns 503 on a healthy process"
@@ -2804,7 +2804,7 @@ issues:
     kind: bug
     note: "Unbounded sourceSessionIds/sourceMemoryIds plus unpaginated list endpoints hit the 16 MiB frame limit."
     disposition: already-fixed
-    fixed_by: "consolidation-pipeline caps sourceSessionIds with capSourceIds and MAX_SOURCE_LIST_IDS, keeping the newest (src/functions/consolidation-pipeline.ts); test/consolidation-pipeline.test.ts. The 16 MiB frame limit is iii-only."
+    fixed_by: "consolidation-pipeline caps sourceSessionIds with capSourceIds and MAX_SOURCE_LIST_IDS, keeping the newest (src/functions/consolidation-pipeline.ts); test/consolidation-pipeline.test.ts. The 16 MiB frame limit is iii-only. Existing Semantic Facts over the cap are trimmed once at boot by the startup maintenance pass (src/state/startup-maintenance.ts); test/startup-maintenance.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1360
   - number: 1361
     title: "Windows hardening: cross-platform build script, test normalization, and audit split"
@@ -2870,7 +2870,7 @@ issues:
     kind: bug
     note: "Unbounded provenance inflates a 4062-node graph to 192MB; every traversal drops the worker."
     disposition: already-fixed
-    fixed_by: "The obs-nodes row is capped with capSourceIds (src/state/graph-indexes.ts), deleted when its Observation is evicted (unlinkObservationNodes in src/functions/evict.ts and observe.ts), and expandFromChunks fetches at most MAX_EXPANSION_NODES nodes (src/functions/graph-retrieval.ts)."
+    fixed_by: "The obs-nodes row is capped with capSourceIds (src/state/graph-indexes.ts), deleted when its Observation is evicted (unlinkObservationNodes in src/functions/evict.ts and observe.ts), and expandFromChunks fetches at most MAX_EXPANSION_NODES nodes (src/functions/graph-retrieval.ts). Existing oversized rows are trimmed once at boot by the startup maintenance pass (src/state/startup-maintenance.ts); test/startup-maintenance.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1374
   - number: 1377
     title: "[mcp] Some MCP host bridges receive empty inputSchema from tools/list — parameterized tool calls fail"

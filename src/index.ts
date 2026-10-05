@@ -476,9 +476,9 @@ async function main() {
     bootLog("Ready: /agentmemory/readyz -> 200, routes open");
   }
 
-  // One-time repair of stores written before this fork: graph provenance that
-  // predates the write-time bound, and the index shards the removed engine
-  // left behind. Not awaited — readyz already answers 200 — and the pass
+  // One-time repair of stores written before this fork: id lists that predate
+  // their write-time bounds, duplicate file nodes, and the index shards the
+  // removed engine left behind. Not awaited — readyz already answers 200 — and the pass
   // itself yields between chunks, so requests arriving during it are served
   // rather than queued. It records its own version, so every later boot is a
   // single marker read.
