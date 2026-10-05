@@ -9,6 +9,7 @@ import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
+import { unlinkObservationNodes } from "../state/graph-indexes.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
 import { safeAudit } from "./audit.js";
 import { decrementImageRef, deleteUnreferencedImage, incrementImageRef } from "./image-refs.js";
@@ -103,6 +104,7 @@ async function evictOverCap(
   for (const obs of victims) {
     try {
       await deleteIndexed(kv, scope, obs.id);
+      await unlinkObservationNodes(kv, obs.id);
       evicted++;
     } catch (err) {
       logger.warn("Session cap eviction failed", {

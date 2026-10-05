@@ -2,6 +2,7 @@ import type { GraphNode, GraphEdge } from "../types.js";
 import { KV } from "./schema.js";
 import { graphWriteGeneration, type StateKV } from "./kv.js";
 import { withKeyedLock } from "./keyed-mutex.js";
+import { capSourceIds } from "../functions/graph-provenance.js";
 
 export const NAME_SHARD_COUNT = 64;
 export const GRAPH_INDEX_NODE_CEILING = 25000;
@@ -93,11 +94,23 @@ export async function linkObservationsToNode(
     await withKeyedLock(`gidx:obs:${obsId}`, async () => {
       const nodeIds = (await kv.get<string[]>(KV.graphObsNodes, obsId)) ?? [];
       if (!nodeIds.includes(nodeId)) {
-        nodeIds.push(nodeId);
-        await kv.set(KV.graphObsNodes, obsId, nodeIds);
+        await kv.set(
+          KV.graphObsNodes,
+          obsId,
+          capSourceIds([...nodeIds, nodeId]),
+        );
       }
     });
   }
+}
+
+export async function unlinkObservationNodes(
+  kv: StateKV,
+  obsId: string,
+): Promise<void> {
+  await withKeyedLock(`gidx:obs:${obsId}`, () =>
+    kv.delete(KV.graphObsNodes, obsId),
+  ).catch(() => {});
 }
 
 export async function indexGraphEdge(
@@ -377,7 +390,9 @@ export async function backfillGraphIndexes(
     await Promise.all(
       obsEntries
         .slice(i, i + BATCH_SIZE)
-        .map(([obsId, nodeIds]) => kv.set(KV.graphObsNodes, obsId, nodeIds)),
+        .map(([obsId, nodeIds]) =>
+          kv.set(KV.graphObsNodes, obsId, capSourceIds(nodeIds)),
+        ),
     );
   }
 
