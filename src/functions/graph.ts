@@ -32,6 +32,7 @@ import {
 import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { capSourceIds } from "./graph-provenance.js";
+import { withProjectRelativeFiles } from "./project-files.js";
 import { recordAudit } from "./audit.js";
 import { getSearchIndex } from "./search.js";
 import { logger } from "../logger.js";
@@ -981,10 +982,11 @@ interface GraphExtraction {
 async function extractGraph(
   kv: StateKV,
   provider: MemoryProvider,
-  observations: CompressedObservation[],
+  rawObservations: CompressedObservation[],
   batchSize: number,
   stopAtFirstFailure: boolean,
 ): Promise<GraphExtraction> {
+  const observations = await withProjectRelativeFiles(kv, rawObservations);
   const obsIds = observations.map((o) => o.id);
 
   let nodes: GraphNode[] = [];

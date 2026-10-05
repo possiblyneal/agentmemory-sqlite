@@ -2390,8 +2390,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Graph file-node identity is the absolute path, duplicating nodes across worktrees."
-    disposition: candidate
-    status: "present-here — file nodes are keyed by the raw lowercased obs.files string (src/functions/graph.ts:704, 757) with no repo-relative normalisation, so one file appears as a separate node per worktree or scratch checkout."
+    disposition: already-fixed
+    fixed_by: "File names are rewritten to project-relative paths against every worktree of the Session cwd before extraction (src/functions/project-files.ts, called from src/functions/graph.ts extractGraph); paths outside every checkout stay absolute."
     url: https://github.com/rohitg00/agentmemory/issues/1221
   - number: 1223
     title: "Health reports critical from heapUsed/heapTotal, so /agentmemory/health returns 503 on a healthy process"
