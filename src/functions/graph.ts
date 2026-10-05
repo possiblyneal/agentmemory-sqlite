@@ -11,6 +11,7 @@ import type {
   Session,
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 import type { StateKV } from "../state/kv.js";
 import {
   GraphIndexReader,
@@ -183,9 +184,10 @@ function paginateFromSnapshot(
   const filteredNodes = filterType
     ? snap.topNodes.filter((n) => n.type === filterType)
     : snap.topNodes;
-  const total = filterType
-    ? snap.stats.nodesByType[filterType] ?? 0
-    : snap.stats.totalNodes;
+  const total = Math.max(
+    filterType ? snap.stats.nodesByType[filterType] ?? 0 : snap.stats.totalNodes,
+    filteredNodes.length,
+  );
   const pageNodes = filteredNodes.slice(offset, offset + limit);
   const pageIds = new Set(pageNodes.map((n) => n.id));
   const pageEdges = snap.topEdges.filter(
@@ -823,7 +825,20 @@ export function graphWritesOffReason(): string | null {
   return reasons.length > 0 ? reasons.join(", ") : null;
 }
 
-export async function persistGraphDelta(
+const GRAPH_WRITE_LOCK = "mem:graph:write";
+
+export function persistGraphDelta(
+  kv: StateKV,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  obsIds: string[],
+): Promise<{ newNodeCount: number; newEdgeCount: number }> {
+  return withKeyedLock(GRAPH_WRITE_LOCK, () =>
+    persistGraphDeltaUnlocked(kv, nodes, edges, obsIds),
+  );
+}
+
+async function persistGraphDeltaUnlocked(
   kv: StateKV,
   nodes: GraphNode[],
   edges: GraphEdge[],
@@ -1468,32 +1483,34 @@ export function registerGraphFunction(
   // read by any post-#816 code path. Cleanup is deferred to a future
   // chunked-vacuum job; #816's broken vacuum-via-list strategy is
   // what we are leaving behind here.
-  sdk.registerFunction("mem::graph-reset", async () => {
-    const started = Date.now();
-    // Stamp resetAt=now on the empty snapshot. Future
-    // mem::graph-extract calls compare each name-index lookup's
-    // existing node `createdAt` against this timestamp; anything
-    // older counts as an orphan and is dropped from the merge path,
-    // forcing extract to write a fresh row instead of reconnecting
-    // to a pre-reset entry.
-    const resetSnapshot: GraphSnapshot = {
-      ...emptySnapshot(),
-      resetAt: new Date().toISOString(),
-    };
-    await kv.set(KV.graphSnapshot, SNAPSHOT_KEY, resetSnapshot);
-    // Pre-reset adjacency and obs-node rows are deleted in pages so a
-    // reset frees their disk without listing the scopes whole. Marking
-    // the indexes ready flips retrieval onto the index path, which
-    // (unlike the enumeration fallback) applies the resetAt filter and
-    // therefore stops surfacing pre-reset rows.
-    const cleared = await clearGraphSideIndexes(kv);
-    await markGraphIndexesReady(kv);
-    const counts: Record<string, number> = {
-      [KV.graphSnapshot]: 1,
-      ...cleared,
-    };
-    const tookMs = Date.now() - started;
-    logger.info("Graph state reset", { counts, tookMs });
-    return { success: true, cleared: counts, tookMs };
-  });
+  sdk.registerFunction("mem::graph-reset", () =>
+    withKeyedLock(GRAPH_WRITE_LOCK, async () => {
+      const started = Date.now();
+      // Stamp resetAt=now on the empty snapshot. Future
+      // mem::graph-extract calls compare each name-index lookup's
+      // existing node `createdAt` against this timestamp; anything
+      // older counts as an orphan and is dropped from the merge path,
+      // forcing extract to write a fresh row instead of reconnecting
+      // to a pre-reset entry.
+      const resetSnapshot: GraphSnapshot = {
+        ...emptySnapshot(),
+        resetAt: new Date().toISOString(),
+      };
+      await kv.set(KV.graphSnapshot, SNAPSHOT_KEY, resetSnapshot);
+      // Pre-reset adjacency and obs-node rows are deleted in pages so a
+      // reset frees their disk without listing the scopes whole. Marking
+      // the indexes ready flips retrieval onto the index path, which
+      // (unlike the enumeration fallback) applies the resetAt filter and
+      // therefore stops surfacing pre-reset rows.
+      const cleared = await clearGraphSideIndexes(kv);
+      await markGraphIndexesReady(kv);
+      const counts: Record<string, number> = {
+        [KV.graphSnapshot]: 1,
+        ...cleared,
+      };
+      const tookMs = Date.now() - started;
+      logger.info("Graph state reset", { counts, tookMs });
+      return { success: true, cleared: counts, tookMs };
+    }),
+  );
 }

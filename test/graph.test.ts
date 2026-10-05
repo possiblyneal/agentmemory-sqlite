@@ -564,6 +564,36 @@ describe("Graph Functions", () => {
     expect(huge.truncated).toBe(false);
   });
 
+  it("paginate reports a total at least the returned count and truncates when nodes are hidden", async () => {
+    const nodes = ["a", "b", "c"].map((id) => ({
+      id,
+      type: "concept",
+      name: id,
+      properties: {},
+      sourceObservationIds: [],
+      createdAt: "2026-01-01T00:00:00Z",
+    }));
+    await kv.set("mem:graph:snapshot", "current", {
+      version: 1,
+      topNodes: nodes,
+      topEdges: [],
+      topDegrees: {},
+      stats: { totalNodes: 1, totalEdges: 0, nodesByType: { concept: 1 }, edgesByType: {} },
+      updatedAt: "2026-01-01T00:00:00Z",
+      dirty: false,
+    });
+
+    for (const nodeType of [undefined, "concept"]) {
+      const page = (await sdk.trigger("mem::graph-query", {
+        limit: 2,
+        nodeType,
+      })) as GraphQueryResult;
+      expect(page.nodes.length).toBe(2);
+      expect(page.totalNodes).toBeGreaterThanOrEqual(3);
+      expect(page.truncated).toBe(true);
+    }
+  });
+
   it("paginate excludes edges whose endpoints fall outside the page", async () => {
     for (let i = 0; i < 60; i++) {
       await kv.set("mem:graph:nodes", `x_${i.toString().padStart(3, "0")}`, {
@@ -789,6 +819,40 @@ describe("Graph Functions", () => {
         stats: { totalNodes: number };
       }>("mem:graph:snapshot", "current");
       expect(snap?.stats.totalNodes).toBe(0);
+    });
+
+    it("graph-reset holds when it interleaves with an in-flight extraction write", async () => {
+      const base = mockKV();
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let readStarted!: () => void;
+      const started = new Promise<void>((r) => (readStarted = r));
+      const gatedKV = {
+        ...base,
+        get: async <T>(scope: string, key: string): Promise<T | null> => {
+          const value = await base.get<T>(scope, key);
+          if (scope === "mem:graph:snapshot") {
+            readStarted();
+            await gate;
+          }
+          return value;
+        },
+      };
+      const gatedSdk = mockSdk();
+      registerGraphFunction(gatedSdk as never, gatedKV as never, mockProvider as never);
+
+      const extraction = gatedSdk.trigger("mem::graph-extract", { observations: [testObs] });
+      await started;
+      const reset = gatedSdk.trigger("mem::graph-reset", {});
+      release();
+      await Promise.all([extraction, reset]);
+
+      const snap = await base.get<{ stats: { totalNodes: number }; resetAt?: string }>(
+        "mem:graph:snapshot",
+        "current",
+      );
+      expect(snap?.stats.totalNodes).toBe(0);
+      expect(snap?.resetAt).toBeDefined();
     });
 
     it("graph-reset writes empty snapshot; legacy rows stay as orphans (#825)", async () => {

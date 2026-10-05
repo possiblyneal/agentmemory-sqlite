@@ -2280,8 +2280,8 @@ issues:
     difficulty: med
     kind: bug
     note: "graph-reset leaves pre-reset rows queryable and races a concurrent graph-extract."
-    disposition: candidate
-    status: "partly-present-here — pre-reset rows are filtered on read by isLiveGraphRecord (src/state/graph-indexes.ts:182-188), but persistGraphDelta loads the snapshot (src/functions/graph.ts:821) and writes it back (:953) with no lock against mem::graph-reset (:1529), so a concurrent extract can overwrite the reset."
+    disposition: already-fixed
+    fixed_by: "mem::graph-reset and persistGraphDelta run under the same keyed lock (GRAPH_WRITE_LOCK in src/functions/graph.ts), so a concurrent extract cannot write the cleared snapshot back; test/graph.test.ts interleaves them and asserts the reset holds."
     url: https://github.com/rohitg00/agentmemory/issues/1189
   - number: 1190
     title: "Bug: snapshot restore is additive and omits durable stores"
@@ -2915,8 +2915,8 @@ issues:
     difficulty: low
     kind: bug
     note: "paginateFromSnapshot can report a total below the node count it returns; the truncated banner never fires."
-    disposition: candidate
-    status: "present-here — paginateFromSnapshot reports snap.stats.totalNodes with no floor at the returned node count, so truncated can be false while nodes are hidden (src/functions/graph.ts:162-176)."
+    disposition: already-fixed
+    fixed_by: "paginateFromSnapshot floors its total at the filtered node count, so truncated is true whenever nodes are hidden (src/functions/graph.ts); test/graph.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1382
     fix_prs: [1385]
   - number: 1383
