@@ -559,6 +559,11 @@ export function getConsolidationDecayDays(): number {
   return safeParseInt(getMergedEnv()["CONSOLIDATION_DECAY_DAYS"], 30);
 }
 
+export function getConsolidatedMemoryForgetDays(): number {
+  const days = safeParseInt(getMergedEnv()["CONSOLIDATED_MEMORY_FORGET_DAYS"], 180);
+  return days > 0 ? days : 0;
+}
+
 // Cooldown between corpus consolidations triggered by session stop. The Stop
 // hook fires per agent turn and posts /session/end, so without this every turn
 // would kick a full LLM semantic-merge + reflect + crystallize. Debounced to at

@@ -15,7 +15,11 @@ import {
   buildProceduralExtractionPrompt,
 } from "../prompts/consolidation.js";
 import { recordAudit } from "./audit.js";
-import { getConsolidationDecayDays, isConsolidationEnabled } from "../config.js";
+import {
+  getConsolidatedMemoryForgetDays,
+  getConsolidationDecayDays,
+  isConsolidationEnabled,
+} from "../config.js";
 import { logger } from "../logger.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 
@@ -34,7 +38,7 @@ function applyDecay<
       (now - new Date(lastAccess).getTime()) / (1000 * 60 * 60 * 24);
     if (daysSince > decayDays) {
       const decayPeriods = Math.floor(daysSince / decayDays);
-      const next = Math.max(0.1, item.strength * Math.pow(0.9, decayPeriods));
+      const next = Math.max(DECAY_FLOOR, item.strength * Math.pow(0.9, decayPeriods));
       if (next !== item.strength) {
         item.strength = next;
         changed.push(item);
@@ -42,6 +46,29 @@ function applyDecay<
     }
   }
   return changed;
+}
+
+const DECAY_FLOOR = 0.1;
+
+function forgettable<
+  T extends {
+    id: string;
+    strength: number;
+    accessCount?: number;
+    lastAccessedAt?: string;
+    updatedAt: string;
+  },
+>(items: T[], forgetDays: number): Array<{ key: string; updatedAt: string }> {
+  if (forgetDays <= 0) return [];
+  const cutoff = Date.now() - forgetDays * 24 * 60 * 60 * 1000;
+  return items
+    .filter(
+      (item) =>
+        item.strength <= DECAY_FLOOR &&
+        (item.accessCount ?? 0) === 0 &&
+        new Date(item.lastAccessedAt || item.updatedAt).getTime() < cutoff,
+    )
+    .map((item) => ({ key: item.id, updatedAt: item.updatedAt }));
 }
 
 export function registerConsolidationPipelineFunction(
@@ -295,11 +322,33 @@ export function registerConsolidationPipelineFunction(
       const proceduralChanged = applyDecay(procedural, decayDays);
       await kv.setMany(KV.procedural, proceduralChanged.map((p) => ({ key: p.id, value: p })));
 
+      const forgetDays = getConsolidatedMemoryForgetDays();
+      const [forgottenSemantic, forgottenProcedural] = await Promise.all([
+        kv.deleteManyIfUnchanged(KV.semantic, forgettable(semantic, forgetDays)),
+        kv.deleteManyIfUnchanged(KV.procedural, forgettable(procedural, forgetDays)),
+      ]);
+      if (forgottenSemantic.length + forgottenProcedural.length > 0) {
+        await recordAudit(
+          kv,
+          "forget",
+          "mem::consolidate-pipeline",
+          [...forgottenSemantic, ...forgottenProcedural],
+          {
+            event: "consolidated.forget",
+            forgetDays,
+            semanticIds: forgottenSemantic,
+            proceduralIds: forgottenProcedural,
+          },
+        );
+      }
+
       results.decay = {
         semantic: semantic.length,
         procedural: procedural.length,
         semanticWritten: semanticChanged.length,
         proceduralWritten: proceduralChanged.length,
+        semanticForgotten: forgottenSemantic.length,
+        proceduralForgotten: forgottenProcedural.length,
       };
     }
 
