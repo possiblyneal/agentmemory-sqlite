@@ -12,6 +12,7 @@ import { getVisibleTools, PROJECT_FILTER_DESCRIPTION } from "./tools-registry.js
 import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import { isOversizedPayload } from "../state/payload-bound.js";
 import { logger } from "../logger.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
 import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
@@ -454,6 +455,12 @@ export function registerMcpEndpoints(
 
           case "memory_export": {
             const result = await sdk.trigger({ function_id: "mem::export", payload: {} });
+            if (isOversizedPayload(result)) {
+              return {
+                status_code: 200,
+                body: { content: [{ type: "text", text: result.error }], isError: true },
+              };
+            }
             return {
               status_code: 200,
               body: {

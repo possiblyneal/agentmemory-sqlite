@@ -276,6 +276,13 @@ export class SqliteState {
     return rows.map((r) => JSON.parse(r.value));
   }
 
+  bytes(scope: string): number {
+    const row = this.db
+      .prepare("SELECT COALESCE(SUM(LENGTH(CAST(value AS BLOB))), 0) AS n FROM kv WHERE scope = ?")
+      .get(scope) as { n: number };
+    return row.n;
+  }
+
   // A half-open range over the (scope, seq) index, so the prefix needs no
   // LIKE escaping.
   listScopes(prefix: string): string[] {
@@ -448,6 +455,7 @@ export function stateFunctions(
     "state::update": async (p) => cooperate(store.update(p.scope, p.key, p.ops ?? [])),
     "state::delete": async (p) => cooperate(store.delete(p.scope, p.key)),
     "state::list": async (p) => cooperate(store.list(p.scope)),
+    "state::bytes": async (p) => cooperate(store.bytes(p.scope)),
     "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
     "state::delete-many-if-unchanged": async (p) =>
