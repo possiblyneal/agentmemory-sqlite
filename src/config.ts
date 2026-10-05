@@ -535,6 +535,13 @@ export function getSignalDefaultTtlMs(): number {
   return days > 0 ? days * 24 * 60 * 60 * 1000 : 0;
 }
 
+const BACKUP_KEEP_DEFAULT = 7;
+
+export function getBackupKeep(): number {
+  const keep = safeParseInt(getMergedEnv()["AGENTMEMORY_BACKUP_KEEP"], BACKUP_KEEP_DEFAULT);
+  return keep >= 0 ? keep : BACKUP_KEEP_DEFAULT;
+}
+
 export function isConsolidationEnabled(): boolean {
   const env = getMergedEnv();
   const explicit = env["CONSOLIDATION_ENABLED"];

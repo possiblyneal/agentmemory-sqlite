@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,7 +8,7 @@ import { createInprocSdk, type InprocSdk } from "../src/engine/inproc/sdk.js";
 import { SqliteVectorStore } from "../src/engine/inproc/vectors.js";
 import { VectorIndex } from "../src/state/vector-index.js";
 import { KV } from "../src/state/schema.js";
-import { registerMaintenanceFunctions, snapshotDatabase } from "../src/functions/maintenance.js";
+import { pruneBackups, registerMaintenanceFunctions, snapshotDatabase } from "../src/functions/maintenance.js";
 import { getSearchIndex, setEmbeddingProvider, setVectorIndex } from "../src/functions/search.js";
 import type { CompressedObservation, EmbeddingProvider } from "../src/types.js";
 
@@ -97,8 +97,9 @@ describe("inproc maintenance functions", () => {
     const res = await call("/agentmemory/backup", { dir });
     expect(res.status).toBe(200);
     const r = (await res.json()) as { path: string; kvRows: number; vectorRows: number; integrity: string; bytes: number };
-    expect(r).toMatchObject({ path: join(dir, "agentmemory-snapshot.sqlite"), kvRows: 3, vectorRows: 3, integrity: "ok" });
+    expect(r).toMatchObject({ kvRows: 3, vectorRows: 3, integrity: "ok" });
     expect(r.bytes).toBeGreaterThan(0);
+    expect(r.path).toMatch(/agentmemory-backup-\d{8}T\d{6}Z\.sqlite$/);
     const snap = new DatabaseSync(r.path, { readOnly: true });
     try {
       expect((snap.prepare("SELECT count(*) AS n FROM kv WHERE scope = ?").get(KV.observations("s1")) as { n: number }).n).toBe(3);
@@ -106,12 +107,46 @@ describe("inproc maintenance functions", () => {
     } finally {
       snap.close();
     }
-    // Only the snapshot (and the live store) are left behind: no unique-name temp, no sidecars of it.
-    expect(readdirSync(dir).filter((f) => f.startsWith("agentmemory-snapshot.") && f !== "agentmemory-snapshot.sqlite" && !f.endsWith("-wal") && !f.endsWith("-shm"))).toEqual([]);
-    // A second run replaces the first in place.
+    // Only the backup (and the live store) are left behind: no unique-name temp, no sidecars of it.
+    expect(readdirSync(dir).filter((f) => f.startsWith("agentmemory-snapshot."))).toEqual([]);
     sdk.store.set(KV.observations("s1"), "obs_4", observation("obs_4", "s1", "later"));
     const again = (await (await call("/agentmemory/backup", { dir })).json()) as { kvRows: number };
     expect(again.kvRows).toBe(4);
+  });
+
+  it("pruneBackups keeps the newest N backups and touches nothing else", () => {
+    const names = ["20260101T000000Z", "20260102T000000Z", "20260103T000000Z"].map((t) => `agentmemory-backup-${t}.sqlite`);
+    const other = ["agentmemory-snapshot.sqlite", "agentmemory-backup-notes.sqlite", "agentmemory-backup-20260101T000000Z.sqlite.bak", "state.sqlite"];
+    for (const f of [...names, ...other]) writeFileSync(join(dir, f), "x");
+    expect(pruneBackups(dir, 0)).toEqual([]);
+    expect(pruneBackups(dir, 2)).toEqual([names[0]]);
+    expect(existsSync(join(dir, names[0]))).toBe(false);
+    for (const f of [...names.slice(1), ...other]) expect(existsSync(join(dir, f))).toBe(true);
+  });
+
+  it("mem::backup prunes older backups beyond AGENTMEMORY_BACKUP_KEEP", async () => {
+    const old = ["20260101T000000Z", "20260102T000000Z"].map((t) => join(dir, `agentmemory-backup-${t}.sqlite`));
+    for (const f of old) writeFileSync(f, "x");
+    process.env.AGENTMEMORY_BACKUP_KEEP = "2";
+    try {
+      const r = (await (await call("/agentmemory/backup", { dir })).json()) as { path: string; pruned: string[] };
+      expect(r.pruned).toEqual(["agentmemory-backup-20260101T000000Z.sqlite"]);
+      expect(existsSync(old[0]!)).toBe(false);
+      expect(existsSync(old[1]!)).toBe(true);
+      expect(existsSync(r.path)).toBe(true);
+    } finally {
+      delete process.env.AGENTMEMORY_BACKUP_KEEP;
+    }
+  });
+
+  it("mem::backup-sweep writes a backup beside the live DB", async () => {
+    process.env.AGENTMEMORY_SQLITE_PATH = join(dir, "state.sqlite");
+    try {
+      await sdk.trigger({ function_id: "mem::backup-sweep", payload: {} });
+    } finally {
+      delete process.env.AGENTMEMORY_SQLITE_PATH;
+    }
+    expect(readdirSync(dir).filter((f) => /^agentmemory-backup-.*\.sqlite$/.test(f))).toHaveLength(1);
   });
 
   it("mem::backup fails loudly and leaves nothing behind when the snapshot cannot be written", async () => {

@@ -13,6 +13,7 @@ import {
   isConsolidationEnabled,
   isContextInjectionEnabled,
   getSqlitePath,
+  getBackupKeep,
 } from "./config.js";
 import { createInprocSdk } from "./engine/inproc/sdk.js";
 import { SqliteVectorStore } from "./engine/inproc/vectors.js";
@@ -593,6 +594,17 @@ async function main() {
     setTimeout(runEviction, FIRST_SWEEP_DELAY_MS).unref();
     setInterval(runEviction, 86400000).unref();
     bootLog(`Eviction sweep: enabled (5 min after boot, then every 24h)`);
+  }
+
+  if (process.env.AGENTMEMORY_BACKUP_ENABLED !== "false") {
+    const runBackup = async () => {
+      try {
+        await sdk.trigger({ function_id: "mem::backup-sweep", payload: {} });
+      } catch {}
+    };
+    setTimeout(runBackup, FIRST_SWEEP_DELAY_MS).unref();
+    setInterval(runBackup, 86400000).unref();
+    bootLog(`Backup: enabled (5 min after boot, then every 24h, newest ${getBackupKeep() || "all"} kept)`);
   }
 
   const runAuditEviction = async () => {
