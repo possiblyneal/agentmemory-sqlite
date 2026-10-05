@@ -293,3 +293,64 @@ describe("mem::context — insights auto-injection (upstream PR #615)", () => {
     expect(result.context).not.toContain("content-gone");
   });
 });
+
+describe("mem::context — Semantic Fact injection (#590)", () => {
+  const session = (id: string, project: string) => ({
+    id,
+    project,
+    cwd: project,
+    startedAt: "2026-02-01T00:00:00Z",
+    status: "completed",
+    observationCount: 0,
+  });
+  const fact = (id: string, text: string, sessionId: string, confidence: number) => ({
+    id,
+    fact: text,
+    confidence,
+    sourceSessionIds: [sessionId],
+    sourceMemoryIds: [],
+    accessCount: 1,
+    lastAccessedAt: "2026-02-02T00:00:00Z",
+    strength: confidence,
+    createdAt: "2026-02-02T00:00:00Z",
+    updatedAt: "2026-02-02T00:00:00Z",
+  });
+
+  it("injects at most five facts from the project's own sessions", async () => {
+    const kv = mockKV();
+    await kv.set(KV.sessions, "ses_mine", session("ses_mine", "/tmp/proj"));
+    await kv.set(KV.sessions, "ses_other", session("ses_other", "/tmp/other"));
+    for (let i = 0; i < 8; i++) {
+      await kv.set(KV.semantic, `sem_mine_${i}`, fact(`sem_mine_${i}`, `mine-fact-${i}`, "ses_mine", 0.5 + i / 100));
+    }
+    await kv.set(KV.semantic, "sem_other", fact("sem_other", "other-project-fact", "ses_other", 0.99));
+
+    const result = await wireContext(kv)({ sessionId: "ses_new", project: "/tmp/proj" });
+
+    expect(result.context).toContain("Semantic Facts");
+    expect(result.context).not.toContain("other-project-fact");
+    expect(result.context.match(/mine-fact-/g)).toHaveLength(5);
+    expect(result.context).toContain("mine-fact-7");
+    expect(result.context).not.toContain("mine-fact-2");
+  });
+
+  it("omits the block when no fact belongs to the project", async () => {
+    const kv = mockKV();
+    await kv.set(KV.sessions, "ses_other", session("ses_other", "/tmp/other"));
+    await kv.set(KV.semantic, "sem_other", fact("sem_other", "other-project-fact", "ses_other", 0.9));
+
+    const result = await wireContext(kv)({ sessionId: "ses_new", project: "/tmp/proj" });
+
+    expect(result.context).not.toContain("Semantic Facts");
+  });
+
+  it("drops the block when it does not fit the token budget", async () => {
+    const kv = mockKV();
+    await kv.set(KV.sessions, "ses_mine", session("ses_mine", "/tmp/proj"));
+    await kv.set(KV.semantic, "sem_big", fact("sem_big", "word ".repeat(2000), "ses_mine", 0.9));
+
+    const result = await wireContext(kv, 200)({ sessionId: "ses_new", project: "/tmp/proj" });
+
+    expect(result.context).not.toContain("word word");
+  });
+});

@@ -221,7 +221,7 @@ export interface ContextBlock {
 }
 
 export interface InjectedRef {
-  kind: "observation" | "memory" | "lesson" | "insight" | "summary";
+  kind: "observation" | "memory" | "lesson" | "insight" | "semantic" | "summary";
   id: string;
   files?: string[];
 }
@@ -364,6 +364,14 @@ export interface CompactInsightResult {
   createdAt: string;
   project?: string;
   tags: string[];
+}
+
+export interface CompactSemanticResult {
+  factId: string;
+  fact: string;
+  confidence: number;
+  score: number;
+  createdAt: string;
 }
 
 export interface TimelineEntry {

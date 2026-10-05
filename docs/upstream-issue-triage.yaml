@@ -473,8 +473,9 @@ issues:
     difficulty: med
     kind: feature
     note: "mem::context and smart-search never read KV.insights or KV.semantic."
-    disposition: candidate
-    status: "partly-present-here — mem::context and smart-search now read KV.insights (src/functions/context.ts:107, src/functions/smart-search.ts:219), but neither reads KV.semantic, so semantic facts are never recalled."
+    disposition: already-fixed
+    fixed_by: "recallSemanticFacts (src/functions/semantic-recall.ts)"
+    status: "fixed-here — mem::smart-search returns up to 10 query-matched Semantic Facts as `semanticFacts` and mem::context injects up to 5 as a `## Semantic Facts` block, both scored by confidence and scoped to facts citing a Session of the caller's project (a fact carries no project of its own). test/smart-search.test.ts and test/context-lessons.test.ts cover it."
     url: https://github.com/rohitg00/agentmemory/issues/590
   - number: 595
     title: "Expose privacy-safe memory governance/delete receipts"
