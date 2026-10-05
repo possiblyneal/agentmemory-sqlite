@@ -620,7 +620,9 @@ prs:
     paths:
       - src/viewer/index.html
     note: "Two viewer CSS bugs: tab bar collapses to ~8px and the graph canvas overflows."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — the tab bar already had flex-shrink: 0; the graph's calc(100vh - 178px) overshot the view by 106px on a 1023px window."
+    fixed_by: "#view-graph has no padding and .graph-container fills it at height: 100% (src/viewer/index.html)."
     url: https://github.com/rohitg00/agentmemory/pull/218
   - number: 223
     title: "feat(smart-search): add format parameter (full/narrative/compact) | 添加 format 参数"
@@ -728,7 +730,7 @@ prs:
     url: https://github.com/rohitg00/agentmemory/pull/465
   - number: 467
     title: "fix(embeddings): allow custom OpenAI embedding path"
-    kind: fix
+    kind: feature
     relevance: med
     in_fork: 4/5
     churn: 57
@@ -830,7 +832,8 @@ prs:
       - src/index.ts
       - src/providers/embedding/voyage.ts
     note: "Three unrelated fixes; the heap-ceiling one duplicates #1317 and the iii reconnect one does not apply here."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/610
   - number: 665
     title: "fix: pass agentId per-call for integration-scoped memory"
@@ -862,11 +865,13 @@ prs:
       - src/mcp/tools-registry.ts
       - test/team.test.ts
     note: "TEAM_MODE=private was read but never enforced, and team-share accepted any sharedBy value."
-    disposition: candidate
+    disposition: wont-fix
+    status: "partly-present-here — team-share always stamps config.userId (src/functions/team.ts:55), so impersonation is closed; TEAM_MODE=private still filters nothing in team-feed/team-profile."
+    wont_fix_reason: "single Operator — one person uses the daemon, so per-user team privacy has no reader"
     url: https://github.com/rohitg00/agentmemory/pull/689
   - number: 742
     title: "fix: LLM provider works with subscription proxies + honor SUMMARIZE_CHUNK_SIZE from .env"
-    kind: fix
+    kind: feature
     relevance: med
     in_fork: 2/2
     churn: 19
@@ -918,7 +923,7 @@ prs:
     url: https://github.com/rohitg00/agentmemory/pull/846
   - number: 862
     title: "Allow XENOVA_CACHE_HOME to redirect local embedding model path"
-    kind: fix
+    kind: feature
     relevance: med
     in_fork: 1/1
     churn: 18
@@ -1309,7 +1314,8 @@ prs:
       - src/types.ts
       - src/viewer/index.html
     note: "Azure OpenAI LLM provider."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/219
   - number: 220
     title: "fix(providers): support Azure AI Foundry (Anthropic) endpoint and corporate proxy"
@@ -1330,7 +1336,8 @@ prs:
       - plugin/scripts/session-start.mjs
       # +11 more
     note: "Azure OpenAI / AI Foundry plus HTTP CONNECT corporate-proxy support; overlaps #594."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/220
   - number: 226
     title: "feat(health): configurable health check thresholds via env vars | 健康阈值可配置"
@@ -1520,7 +1527,8 @@ prs:
       - src/providers/openai.ts
       - test/openai-shared.test.ts
     note: "Azure OpenAI config path; third competing Azure PR with #219/#594."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/558
   - number: 566
     title: "docs: sync MCP tool counts across metadata"
@@ -1574,7 +1582,8 @@ prs:
       - plugin/scripts/session-start.mjs
       # +10 more
     note: "Azure OpenAI / AI Foundry with proxy support; overlaps #220/#558."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/594
   - number: 604
     title: "feat(pi): add full lifecycle hooks to pi integration"
@@ -1598,11 +1607,12 @@ prs:
       - src/providers/index.ts
       - src/types.ts
     note: "DeepSeek embedding provider."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/606
   - number: 607
     title: "feat(cli): allow AGENTMEMORY_IMPORT_TIMEOUT_MS override for import-jsonl"
-    kind: fix
+    kind: feature
     relevance: low
     in_fork: 1/1
     churn: 20
@@ -1706,7 +1716,7 @@ prs:
     url: https://github.com/rohitg00/agentmemory/pull/693
   - number: 694
     title: "fix(viewer): preserve dashboard scroll and show API errors"
-    kind: feature
+    kind: fix
     relevance: low
     in_fork: 2/2
     churn: 190
@@ -1714,7 +1724,9 @@ prs:
       - src/viewer/index.html
       - test/viewer-session-id.test.ts
     note: "Preserve dashboard scroll across refreshes plus API error toasts."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — every refresh swapped the panel for a Loading placeholder, which reset the scroll; failed requests only dashed their cards."
+    fixed_by: "loadDashboard writes its Loading placeholder only into an empty panel, so a poll, websocket or 30s refresh keeps the rendered dashboard and its scroll (src/viewer/index.html). A banner names the dashboard requests that got no answer."
     url: https://github.com/rohitg00/agentmemory/pull/694
   - number: 699
     title: "feat(cli): materialize ~/.agentmemory/config/iii-config.yaml with absolute paths"
@@ -1738,7 +1750,8 @@ prs:
       - .env.example
       - src/providers/resilient.ts
     note: "AGENTMEMORY_OUTPUT_LANG for generated memory text; overlaps #914."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "non-English language support — this fork is English only"
     url: https://github.com/rohitg00/agentmemory/pull/711
   - number: 721
     title: "fix(viewer): correct Token Savings calculation to match CLI"
@@ -1749,7 +1762,9 @@ prs:
     paths:
       - src/viewer/index.html
     note: "Viewer token-savings formula disagrees with the CLI and reads 0%."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — the viewer multiplied sessions by a 2000-token budget, so savings clamped to 0%."
+    fixed_by: "Viewer Token Savings uses the CLI's estimate, min(observations, 50) * 38 injected tokens (src/viewer/index.html renderDashboard)."
     url: https://github.com/rohitg00/agentmemory/pull/721
   - number: 741
     title: "feat: AWS Bedrock provider (LLM + embeddings) with SSO + auth-refresh"
@@ -1768,7 +1783,8 @@ prs:
       - src/types.ts
       - test/compress-file.test.ts
     note: "AWS Bedrock LLM + embeddings with SigV4 and SSO auth refresh."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/741
   - number: 756
     title: "feat(embedding): support configurable vector dimensions for OpenRouter provider"
@@ -1780,7 +1796,8 @@ prs:
       - src/providers/embedding/openrouter.ts
       - test/embedding-provider.test.ts
     note: "OPENROUTER_EMBEDDING_DIMENSIONS."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/756
   - number: 799
     title: "fix: handle undefined manifest value in loadShardedData"
@@ -1871,7 +1888,8 @@ prs:
       - src/prompts/reflect.ts
       - src/prompts/summary.ts
     note: "AGENTMEMORY_OUTPUT_LANGUAGE across compression/summary/graph/reflect prompts; overlaps #711."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "non-English language support — this fork is English only"
     url: https://github.com/rohitg00/agentmemory/pull/914
   - number: 920
     title: "feat(connect): add Qoder CLI CN adapter"
@@ -1911,7 +1929,8 @@ prs:
       - test/fallback-model-resolution.test.ts
       - test/fetch-timeout.test.ts
     note: "OPENROUTER_BASE_URL and GEMINI_BASE_URL, and splits Gemini into its own provider."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/963
   - number: 967
     title: "ci(deps)(deps): bump actions/checkout from 6 to 7"
@@ -2100,7 +2119,8 @@ prs:
       - src/types.ts
       # +2 more
     note: "Cloudflare Workers AI as LLM and embedding provider."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/1111
   - number: 1112
     title: "feat(cursor): workspace adapter on top of the marketplace plugin"
@@ -2282,7 +2302,9 @@ prs:
     paths:
       - src/state/kv.ts
     note: "StateKV rejects missing/empty keys before hitting the engine."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — node:sqlite refuses an undefined key ("Provided value cannot be bound"), so a keyless read or write fails at once; the warning spam was iii-only."
+    fixed_by: "SqliteState binds scope and key as parameters (src/engine/inproc/state.ts); key is TEXT NOT NULL."
     url: https://github.com/rohitg00/agentmemory/pull/1234
   - number: 1248
     title: "feat: expose hook REST endpoints as MCP tools"
@@ -2294,7 +2316,8 @@ prs:
       - src/mcp/server.ts
       - src/mcp/tools-registry.ts
     note: "Exposes 6 hook REST endpoints as MCP tools for hostless MCP clients."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1248
   - number: 1257
     title: "Project: Windows USB portable kit (in-tree + runtime pack)"
@@ -2397,7 +2420,8 @@ prs:
       - src/types.ts
       # +7 more
     note: "Requesty router as LLM and embedding provider."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/1355
   - number: 1356
     title: "mcp-http: per-request agent attribution for the shared bridge"
@@ -2418,7 +2442,8 @@ prs:
       - integrations/pi/README.md
       # +47 more
     note: "Per-request agent attribution on the shared Streamable HTTP MCP bridge; 18.7k churn across 100 files."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/pull/1356
   - number: 1357
     title: "fix(cli): stop interpolating $HOME-derived paths into the iii installer shell command"
@@ -2451,7 +2476,8 @@ prs:
       - src/providers/index.ts
       # +6 more
     note: "OrcaRouter as a first-class provider with OAuth 2.0 + PKCE login."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/1375
   - number: 1376
     title: "feat(providers): dedicated opencode provider for OpenCode Go relay"
@@ -2465,7 +2491,8 @@ prs:
       - src/providers/openai.ts
       - src/types.ts
     note: "Dedicated provider for the OpenCode Go relay, which requires an x-opencode-session header."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/pull/1376
   - number: 1380
     title: "deps(website)(deps-dev): bump @types/node from 25.9.8 to 26.6.1 in /website"

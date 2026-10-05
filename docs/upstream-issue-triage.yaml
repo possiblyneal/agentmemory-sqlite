@@ -264,7 +264,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Support the Volcengine embedding base URL shape."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/issues/439
   - number: 440
     title: "MCP `memory_recall` is aliased to smart-search and drops `format` param - full content unreachable via MCP"
@@ -337,7 +338,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Viewer Rebuild Graph calls a nonexistent POST /agentmemory/graph/build."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "POST /agentmemory/graph/build is registered (src/triggers/api.ts:1926)."
     url: https://github.com/rohitg00/agentmemory/issues/505
     fix_prs: [533, 538]
   - number: 510
@@ -363,7 +365,8 @@ issues:
     difficulty: med
     kind: feature
     note: "CJK tokenization for viewer Memories search."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "non-English language support — this fork is English only"
     url: https://github.com/rohitg00/agentmemory/issues/512
     fix_prs: [536]
   - number: 515
@@ -408,7 +411,8 @@ issues:
     difficulty: high
     kind: feature
     note: "OpenAI/Codex subscription-auth fallback without OPENAI_API_KEY."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/issues/527
   - number: 552
     title: "docs: memory_lesson_save MCP tool exists but is completely undocumented (confidence, decay, reinforcement lifecycle)"
@@ -457,7 +461,7 @@ issues:
     title: "`mem::context` and `smart-search` skip `KV.insights` and `KV.semantic`"
     severity: med
     difficulty: med
-    kind: bug
+    kind: feature
     note: "mem::context and smart-search never read KV.insights or KV.semantic."
     disposition: candidate
     url: https://github.com/rohitg00/agentmemory/issues/590
@@ -494,7 +498,8 @@ issues:
     difficulty: med
     kind: bug
     note: "cline --tui triggers no hooks, so no sessions are recorded."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/603
   - number: 605
     title: "memory_verify + Citation provenance: does a hybrid raw-anchor schema fit the audit lane?"
@@ -616,7 +621,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Use Zed's richer auto-load surface instead of MCP-only wiring."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/706
   - number: 708
     title: "Tracking: native-surface audit for the 5 agents added in PR #677 (skills/prompts/rules, not just MCP)"
@@ -624,7 +630,8 @@ issues:
     difficulty: med
     kind: chore
     note: "Tracking issue for native-surface audits of the five agents from PR 677."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/708
   - number: 712
     title: "iii-console install - Illegal option -o pipefail"
@@ -658,7 +665,8 @@ issues:
     difficulty: low
     kind: bug
     note: "crypto.randomUUID unavailable on Node 16; below the supported floor."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "below the runtime floor — the Engine needs Node >=22.13"
     url: https://github.com/rohitg00/agentmemory/issues/715
   - number: 716
     title: "Resolve project identity from canonical repo URL, not directory basename"
@@ -700,9 +708,10 @@ issues:
     title: "local embedding provider hardcodes English-only model — make it configurable (multilingual default)"
     severity: med
     difficulty: low
-    kind: bug
+    kind: feature
     note: "Local embedding provider hardcodes an English-only model, crippling non-English recall."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "1902f33 — AGENTMEMORY_LOCAL_EMBEDDING_MODEL overrides the local model (src/providers/embedding/local.ts:21)."
     url: https://github.com/rohitg00/agentmemory/issues/725
     mentioned_by_prs: [943]
   - number: 728
@@ -879,7 +888,8 @@ issues:
     difficulty: med
     kind: feature
     note: "OpenRouter reasoning models need provider-specific request and response handling."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/issues/808
     fix_prs: [810]
   - number: 809
@@ -1065,9 +1075,10 @@ issues:
     title: "LocalEmbeddingProvider should respect EMBEDDING_MODEL env var for non-English embeddings"
     severity: med
     difficulty: low
-    kind: bug
+    kind: feature
     note: "LocalEmbeddingProvider ignores EMBEDDING_MODEL, blocking multilingual embeddings."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "1902f33 — AGENTMEMORY_LOCAL_EMBEDDING_MODEL overrides the local model (src/providers/embedding/local.ts:21)."
     url: https://github.com/rohitg00/agentmemory/issues/881
     fix_prs: [943]
   - number: 884
@@ -1120,9 +1131,10 @@ issues:
     title: "Compressed output shouldn't be locked to English: add language option to eliminate the semantic gap between query and memory"
     severity: med
     difficulty: low
-    kind: bug
+    kind: feature
     note: "Compression prompt is hardcoded English, creating a query/memory semantic gap."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "non-English language support — this fork is English only"
     url: https://github.com/rohitg00/agentmemory/issues/902
   - number: 905
     title: "Example request: AIML API with OpenAI-compatible agent memory workflows"
@@ -1227,7 +1239,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Per-event full reload blanks the dashboard, causing flicker under active sessions."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "loadDashboard writes its Loading placeholder only into an empty panel, so a poll, websocket or 30s refresh keeps the rendered dashboard and its scroll (src/viewer/index.html)."
     url: https://github.com/rohitg00/agentmemory/issues/921
   - number: 924
     title: "[BUG] `import-jsonl` utility fails silently on historical data due to Claude Code cleanupPeriodDays conflict"
@@ -1282,7 +1295,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Token Savings always 0% because estInjected counts all sessions."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "Viewer Token Savings uses the CLI's estimate, min(observations, 50) * 38 injected tokens (src/viewer/index.html renderDashboard)."
     url: https://github.com/rohitg00/agentmemory/issues/944
   - number: 945
     title: "Missing lesson_delete tool — no way to delete/cleanup lessons via MCP or REST API"
@@ -1290,7 +1304,8 @@ issues:
     difficulty: med
     kind: feature
     note: "No lesson_delete tool or REST endpoint anywhere."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "memory_lesson_delete (src/mcp/server.ts:1219) and POST /agentmemory/lessons/delete (src/triggers/api.ts:3664)."
     url: https://github.com/rohitg00/agentmemory/issues/945
   - number: 948
     title: "Add option to include low-score results in semantic search"
@@ -1648,7 +1663,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Support gemini-embedding-2 and make the Gemini embedding model configurable."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/issues/1048
   - number: 1054
     title: "Agentmemory dashboard doesn't reflect renamed Codex sessions (Windows)"
@@ -1785,7 +1801,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Configurable external Cohere-compatible rerank endpoint."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
     url: https://github.com/rohitg00/agentmemory/issues/1081
     fix_prs: [1090]
   - number: 1086
@@ -1794,7 +1811,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Support for the oh-my-pi agent."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1086
     fix_prs: [1099]
   - number: 1092
@@ -1902,7 +1920,7 @@ issues:
     title: "Viewer stores bearer token in sessionStorage — users must re-enter on every new tab"
     severity: low
     difficulty: low
-    kind: bug
+    kind: feature
     note: "Viewer keeps the bearer token in sessionStorage, so it must be re-entered per tab."
     disposition: candidate
     url: https://github.com/rohitg00/agentmemory/issues/1116
@@ -1912,7 +1930,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Duplicate of 1116."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "duplicate of 1116"
     url: https://github.com/rohitg00/agentmemory/issues/1117
   - number: 1119
     title: "createEmbeddingProvider's \"openai\" case hardcodes OPENAI_API_KEY, defeating OPENAI_EMBEDDING_API_KEY fallback"
@@ -2104,7 +2123,7 @@ issues:
     title: "The \"backups\" feature never backs up memory — ~/.agentmemory/backups/ holds only connect config snapshots; no memory backup/restore command exists"
     severity: med
     difficulty: med
-    kind: bug
+    kind: feature
     note: "~/.agentmemory/backups holds only connect config snapshots; no memory backup command exists."
     disposition: candidate
     url: https://github.com/rohitg00/agentmemory/issues/1167
@@ -2189,7 +2208,8 @@ issues:
     difficulty: high
     kind: feature
     note: "Grab bag: Windows connect support, Antigravity variants, doctor checks."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
     url: https://github.com/rohitg00/agentmemory/issues/1183
   - number: 1184
     title: "opencode plugin: auto-title generation consumes the once-per-session memory injection — main conversation never gets context"
@@ -2295,7 +2315,8 @@ issues:
     difficulty: med
     kind: feature
     note: "DeepSeek Harness connect adapter plus a cordis capture plugin."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1208
     fix_prs: [1209]
   - number: 1218
@@ -2448,7 +2469,8 @@ issues:
     difficulty: med
     kind: bug
     note: "vision-search queryText always fails: the CLIP text branch demands pixel_values."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "1902f33 — vision-search encodes queryText with the CLIP text tower."
     url: https://github.com/rohitg00/agentmemory/issues/1249
     fix_prs: [1250]
     mentioned_by_prs: [1253]
@@ -2635,7 +2657,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Custom HTTP headers on LLM provider requests, needed for x-opencode-session."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
     url: https://github.com/rohitg00/agentmemory/issues/1328
   - number: 1330
     title: "Docker deployment: real-time viewer on :3113 is unreachable (engine-only image never launches the npm viewer process)"
