@@ -136,7 +136,7 @@ describe("inproc maintenance functions", () => {
     expect(legs.bm25Docs).toBe(3);
     expect(legs.vectorRows).toBe(3);
     expect(legs.bm25).toEqual(getSearchIndex().search("zebras", 10));
-    expect(legs.vector).toEqual(vi.search(v(1, 0), 10));
+    expect(legs.vector).toEqual(await vi.search(v(1, 0), 10));
     expect(legs.vector.map((r: any) => r.obsId)).toEqual(["obs_1", "obs_2", "obs_3"]);
     expect(legs.embedding).toBeNull();
     // Without a supplied embedding the provider embeds and the vector is returned for reuse.

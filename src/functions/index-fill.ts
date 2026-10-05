@@ -54,6 +54,13 @@ const MAX_CONSECUTIVE_BATCH_FAILURES = 3;
 // kinds are checked: a memory and an observation may share a parent id, and a
 // memory may carry a real session id, so neither lookup can exclude the
 // other. `sessionId` is the vector row's current session id.
+export function dropMismatchedVectors(index: VectorIndex, activeDim: number): number {
+  if (activeDim <= 0 || index.validateDimensions(activeDim).mismatches.length === 0) return 0;
+  const dropped = index.size;
+  index.clear();
+  return dropped;
+}
+
 export function claimedNow(state: SqliteState, sessionId: string, vectorId: string): boolean {
   const parent = parentIdOf(vectorId);
   try {

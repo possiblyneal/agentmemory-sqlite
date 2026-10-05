@@ -27,6 +27,8 @@ Saved memory abc12345 with 3 concepts: jwt-refresh-rotation, token-revocation, a
 
 A memory is only as useful as the terms that retrieve it. Tag with specific
 concepts so a future `recall` finds it, and preserve the user's own phrasing.
+Never save credentials (passwords, API keys, tokens, private keys): leave them
+out and record where they live instead.
 
 ## Workflow
 
@@ -49,7 +51,7 @@ RIGHT: `concepts: "jwt-refresh-rotation, token-revocation"` (specific, retrievab
 
 ## Checklist
 
-- Content preserves the user's phrasing, not a paraphrase.
+- Content preserves the user's phrasing, not a paraphrase, and contains no credentials.
 - Concepts are specific, lowercased, 2-5 items.
 - File paths are real references, not guesses.
 - Confirmation echoes the exact concepts tagged.

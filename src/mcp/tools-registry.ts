@@ -198,7 +198,6 @@ export const CORE_TOOLS: McpToolDef[] = [
         limit: { type: "number", description: "Max results (default 10)" },
         project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
       },
-      required: ["query"],
     },
   },
   {
@@ -212,6 +211,7 @@ export const CORE_TOOLS: McpToolDef[] = [
         queryImageRef: { type: "string", description: "Absolute path to a stored image to match against" },
         queryImageBase64: { type: "string", description: "Raw base64 image bytes or data URL" },
         topK: { type: "number", description: "Max results (default 10, max 50)" },
+        limit: { type: "number", description: "Alias for topK" },
         sessionId: { type: "string", description: "Filter to a single session" },
       },
     },
@@ -444,6 +444,11 @@ export const V050_TOOLS: McpToolDef[] = [
           description: "Priority 1-10 (10 highest)",
         },
         project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        createdBy: {
+          type: "string",
+          description: "Agent ID recorded as the action's creator (alias: agentId)",
+        },
+        agentId: { type: "string", description: "Alias for createdBy" },
         tags: {
           type: "string",
           description: "Comma-separated tags",

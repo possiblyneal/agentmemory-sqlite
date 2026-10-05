@@ -17,6 +17,7 @@ import {
 import { recordAudit } from "./audit.js";
 import { getConsolidationDecayDays, isConsolidationEnabled } from "../config.js";
 import { logger } from "../logger.js";
+import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 
 // Returns the rows whose strength changed, so the caller writes only those. A
 // row inside its decay window or already at the 0.1 floor is left alone: the
@@ -122,9 +123,10 @@ export function registerConsolidationPipelineFunction(
           existing.lastAccessedAt = now;
           existing.updatedAt = now;
           existing.confidence = Math.max(existing.confidence, confidence);
-          existing.sourceSessionIds = [
-            ...new Set([...existing.sourceSessionIds, ...recentSummaries.map((s) => s.sessionId)]),
-          ];
+          existing.sourceSessionIds = capSourceIds(
+            [...existing.sourceSessionIds, ...recentSummaries.map((s) => s.sessionId)],
+            MAX_SOURCE_LIST_IDS,
+          );
           await kv.set(KV.semantic, existing.id, existing);
         } else {
           const sem: SemanticMemory = {

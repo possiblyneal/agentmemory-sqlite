@@ -62,3 +62,25 @@ describe("MCP search tools forward project (#787)", () => {
     expect(payloads.get("mem::smart-search")?.project).toBeUndefined();
   });
 });
+
+describe("memory_export refusal", () => {
+  it("is reported as an MCP error, not a successful export", async () => {
+    const fns = new Map<string, Function>();
+    const sdk = {
+      registerFunction: (id: string, h: Function) => {
+        fns.set(id, h);
+      },
+      registerTrigger: () => {},
+      trigger: async () => ({ success: false, error: "Export is too big", oversized: true, bytes: 1, limitBytes: 0 }),
+    };
+    const kv = { get: async () => null, set: async () => {}, delete: async () => {}, list: async () => [] };
+    registerMcpEndpoints(sdk as never, kv as never, SECRET);
+
+    const res = await fns.get("mcp::tools::call")!({
+      headers: { authorization: `Bearer ${SECRET}` },
+      body: { name: "memory_export", arguments: {} },
+    });
+
+    expect(res.body).toEqual({ content: [{ type: "text", text: "Export is too big" }], isError: true });
+  });
+});

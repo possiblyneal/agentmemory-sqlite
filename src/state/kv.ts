@@ -115,6 +115,27 @@ export class StateKV {
     })
   }
 
+  async listPage<T = unknown>(
+    scope: string,
+    after: string | undefined,
+    limit: number,
+  ): Promise<Array<{ key: string; value: T }>> {
+    return this.sdk.trigger<
+      { scope: string; after: string | undefined; limit: number },
+      Array<{ key: string; value: T }>
+    >({
+      function_id: 'state::list-page',
+      payload: { scope, after, limit },
+    })
+  }
+
+  async bytes(scope: string): Promise<number> {
+    return this.sdk.trigger<{ scope: string }, number>({
+      function_id: 'state::bytes',
+      payload: { scope },
+    })
+  }
+
   async listScopes(prefix: string): Promise<string[]> {
     return this.sdk.trigger<{ prefix: string }, string[]>({
       function_id: 'state::list-scopes',

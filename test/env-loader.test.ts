@@ -38,7 +38,6 @@ describe("loadEnvFile", () => {
     process.env["HOME"] = sandboxHome;
     process.env["USERPROFILE"] = sandboxHome;
     delete process.env["AGENTMEMORY_AUTO_COMPRESS"];
-    delete process.env["AGENTMEMORY_DROP_STALE_INDEX"];
     delete process.env["CONSOLIDATION_ENABLED"];
     delete process.env["GRAPH_EXTRACTION_ENABLED"];
     delete process.env["TOKEN"];
@@ -95,12 +94,6 @@ describe("loadEnvFile", () => {
     writeEnv("TOKEN='abc' # trailing comment");
     const cfg = await freshConfig();
     expect(cfg.getEnvVar("TOKEN")).toBe("abc");
-  });
-
-  it("reads AGENTMEMORY_DROP_STALE_INDEX from the env file", async () => {
-    writeEnv("AGENTMEMORY_DROP_STALE_INDEX=true");
-    const cfg = await freshConfig();
-    expect(cfg.isDropStaleIndexEnabled()).toBe(true);
   });
 });
 

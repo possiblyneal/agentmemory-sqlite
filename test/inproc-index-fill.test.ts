@@ -8,7 +8,7 @@ import { SqliteVectorStore } from "../src/engine/inproc/vectors.js";
 import { VectorIndex } from "../src/state/vector-index.js";
 import { KV } from "../src/state/schema.js";
 import { embedInputHash, memoryEmbedJobs } from "../src/state/index-corpus.js";
-import { claimedNow, createIndexFill } from "../src/functions/index-fill.js";
+import { claimedNow, createIndexFill, dropMismatchedVectors } from "../src/functions/index-fill.js";
 import {
   setEmbeddingProvider,
   setInprocStores,
@@ -202,11 +202,34 @@ describe("mem::index-fill-missing", () => {
       expect(r).toMatchObject({ expected: jobs.length, present: jobs.length, missing: 0, embedded: 0, pruned: 1 });
       expect(rows().map((row) => row.id).sort()).toEqual(jobs.map((j) => j.id).sort());
       expect(vi.size).toBe(jobs.length);
-      expect(vi.search(v(1, 0), 5).map((h) => h.obsId)).toEqual(["mem_c"]);
+      expect((await vi.search(v(1, 0), 5)).map((h) => h.obsId)).toEqual(["mem_c"]);
       expect(provider.calls).toHaveLength(0);
     } finally {
       delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
     }
+  });
+
+  it("a dimension change drops the stale vectors, then the fill pass re-embeds them at the new dimension", async () => {
+    const m1 = memory("mem_1", "first");
+    const m2 = memory("mem_2", "second");
+    for (const m of [m1, m2]) state.set(KV.memories, m.id, m);
+    vi.add("mem_1", "memory", v(1, 2, 3), embedInputHash(m1.title + " " + m1.content));
+    vi.add("mem_2", "memory", v(1, 2, 3), embedInputHash(m2.title + " " + m2.content));
+
+    expect(dropMismatchedVectors(vi, provider.dimensions)).toBe(2);
+    expect(vi.size).toBe(0);
+    expect(rows()).toEqual([]);
+
+    const r = await createIndexFill(state, vectors, vi).run();
+    expect(r).toMatchObject({ embedded: 2, failed: 0 });
+    expect(rows().map((row) => row.id).sort()).toEqual(["mem_1", "mem_2"]);
+    expect(vi.validateDimensions(provider.dimensions).mismatches).toEqual([]);
+  });
+
+  it("dropMismatchedVectors leaves a matching index alone", () => {
+    vi.add("mem_1", "memory", v(1, 2), "h");
+    expect(dropMismatchedVectors(vi, 2)).toBe(0);
+    expect(vi.size).toBe(1);
   });
 
   it("claimedNow checks both content kinds behind a shared id", () => {

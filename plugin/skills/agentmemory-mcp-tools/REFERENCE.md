@@ -7,7 +7,7 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 
 | Tool | Core | Parameters | Purpose |
 | --- | --- | --- | --- |
-| `memory_action_create` |  | `title`*: string, `description`: string, `priority`: number, `project`: string, `tags`: string, `parentId`: string, `requires`: string | Create an actionable work item with typed dependencies. Actions track what agents need to do and how work items relate to each other. |
+| `memory_action_create` |  | `title`*: string, `description`: string, `priority`: number, `project`: string, `createdBy`: string, `agentId`: string, `tags`: string, `parentId`: string, `requires`: string | Create an actionable work item with typed dependencies. Actions track what agents need to do and how work items relate to each other. |
 | `memory_action_update` |  | `actionId`*: string, `status`: string, `result`: string, `priority`: number | Update an action's status, priority, or details. Set status to 'done' to complete it and unblock dependent actions. |
 | `memory_audit` |  | `operation`: string, `limit`: number | View the audit trail of memory operations. |
 | `memory_checkpoint` |  | `operation`*: string, `name`: string, `checkpointId`: string, `status`: string, `type`: string, `linkedActionIds`: string | Create or resolve an external checkpoint (CI result, approval, deploy status) that gates action progress. |
@@ -55,13 +55,13 @@ agentmemory exposes 55 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_slot_get` |  | `label`*: string, `project`: string | Read a single slot by label. Leave project out to use the current project's slots; a label the project lacks falls back to the global slot. |
 | `memory_slot_list` |  | `project`: string | List the global slots and, given project, that project's slots. Slots are editable, size-limited memory units the agent can read and modify across sessions. `legacy` lists pre-upgrade project slots that no project owns and that are never injected; copy what is worth keeping into a project slot. Leave project out to use the current project's slots; a label the project lacks falls back to the global slot. |
 | `memory_slot_replace` |  | `label`*: string, `content`*: string, `expectedVersion`: number, `project`: string | Replace slot content in place. Fails if content exceeds sizeLimit. Pass expectedVersion (the slot's version from memory_slot_get) to fail with a version conflict if another write landed since; the previous content is kept as one undo copy. Leave project out to use the current project's slots; a label the project lacks falls back to the global slot. |
-| `memory_smart_search` | yes | `query`*: string, `expandIds`: string, `limit`: number, `project`: string | Hybrid semantic+keyword search with progressive disclosure. |
+| `memory_smart_search` | yes | `query`: string, `expandIds`: string, `limit`: number, `project`: string | Hybrid semantic+keyword search with progressive disclosure. |
 | `memory_snapshot_create` |  | `message`: string | Create a git-versioned snapshot of current memory state. |
 | `memory_team_feed` |  | `limit`: number | Get recent shared items from all team members. |
 | `memory_team_share` |  | `itemId`*: string, `itemType`*: string | Share a memory or observation with team members. |
 | `memory_timeline` |  | `anchor`*: string, `project`: string, `before`: number, `after`: number | Chronological observations around an anchor point. |
 | `memory_verify` |  | `id`*: string | Verify a memory or observation by tracing its citation chain back to source observations and session context. Returns provenance information including confidence scores. |
-| `memory_vision_search` |  | `queryText`: string, `queryImageRef`: string, `queryImageBase64`: string, `topK`: number, `sessionId`: string | Cross-modal image search via CLIP embeddings. Pass queryText to find screenshots matching a description, or queryImageBase64/queryImageRef to find similar images. Requires AGENTMEMORY_IMAGE_EMBEDDINGS=true. |
+| `memory_vision_search` |  | `queryText`: string, `queryImageRef`: string, `queryImageBase64`: string, `topK`: number, `limit`: number, `sessionId`: string | Cross-modal image search via CLIP embeddings. Pass queryText to find screenshots matching a description, or queryImageBase64/queryImageRef to find similar images. Requires AGENTMEMORY_IMAGE_EMBEDDINGS=true. |
 
 `*` marks required parameters.
 <!-- AUTOGEN:tools END -->

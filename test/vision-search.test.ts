@@ -112,6 +112,17 @@ describe("vision-search", () => {
     expect(res.results[0].score).toBeGreaterThan(res.results[1].score);
   });
 
+  it("limit caps results like topK", async () => {
+    for (const r of [LOGIN_REF, DASH_REF, OTHER_REF]) {
+      await seedRef(r);
+      await visionEmbed({ imageRef: r });
+    }
+    const res = (await visionSearch({ queryText: "the login form", limit: 2 })) as {
+      results: unknown[];
+    };
+    expect(res.results).toHaveLength(2);
+  });
+
   it("image-to-image query finds the same image first", async () => {
     await seedRef(LOGIN_REF);
     await seedRef(DASH_REF);

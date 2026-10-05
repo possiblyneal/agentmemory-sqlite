@@ -2,6 +2,7 @@ import type { ISdk } from "../engine/types.js";
 import type {
   CompactInsightResult,
   CompactLessonResult,
+  CompactSemanticResult,
   CompactSearchResult,
   CompressedObservation,
   HybridSearchResult,
@@ -23,6 +24,7 @@ import { logger } from "../logger.js";
 import { getCounters } from "../telemetry/setup.js";
 import { graphReadable } from "../state/graph-indexes.js";
 import { createProjectMatcher } from "./search.js";
+import { recallSemanticFacts } from "./semantic-recall.js";
 
 // #771: smart-search followup-rate diagnostic. Stored per session as
 // the most recent search payload, used to detect whether the next
@@ -170,9 +172,19 @@ export function registerSmartSearchFunction(
           if (r) expanded.push(r);
         }
 
-        const scoped = filterAgentId
-          ? expanded.filter((e) => e.observation.agentId === filterAgentId)
-          : expanded;
+        const expandProject =
+          typeof data.project === "string" && data.project.trim().length > 0
+            ? data.project.trim()
+            : undefined;
+        const inExpandProject = expandProject
+          ? createProjectMatcher(kv, expandProject)
+          : null;
+        const scoped: typeof expanded = [];
+        for (const e of expanded) {
+          if (filterAgentId && e.observation.agentId !== filterAgentId) continue;
+          if (inExpandProject && !(await inExpandProject(e.sessionId, e.obsId))) continue;
+          scoped.push(e);
+        }
 
         void recordAccessBatch(
           kv,
@@ -216,7 +228,7 @@ export function registerSmartSearchFunction(
         ? Math.max(limit * 10, 100)
         : limit;
 
-      const [hybridResults, lessons, insights] = await Promise.all([
+      const [hybridResults, lessons, insights, semanticFacts] = await Promise.all([
         searchFn(data.query, overFetchLimit),
         includeLessons
           ? recallLessons(sdk, data.query, recallLimit, project)
@@ -224,6 +236,7 @@ export function registerSmartSearchFunction(
         includeInsights
           ? recallInsights(sdk, data.query, recallLimit, project)
           : Promise.resolve([]),
+        recallSemantic(kv, data.query, recallLimit, project),
       ]);
 
       const inProject = project ? createProjectMatcher(kv, project) : null;
@@ -302,6 +315,7 @@ export function registerSmartSearchFunction(
         results: compact.length,
         lessons: lessons.length,
         insights: insights.length,
+        semanticFacts: semanticFacts.length,
       });
       // graph-read-fix local delta: surface whether the graph leg
       // contributed. Omitted when the leg is off (B-mode) or the
@@ -314,8 +328,9 @@ export function registerSmartSearchFunction(
         results: CompactSearchResult[];
         lessons?: CompactLessonResult[];
         insights?: CompactInsightResult[];
+        semanticFacts: CompactSemanticResult[];
         graphOmitted?: boolean;
-      } = { mode: "compact", results: compact, graphOmitted };
+      } = { mode: "compact", results: compact, semanticFacts, graphOmitted };
       if (includeLessons) response.lessons = lessons;
       if (includeInsights) response.insights = insights;
       return response;
@@ -376,6 +391,29 @@ async function recallInsights(
     }));
   } catch (err) {
     logger.warn("Smart search: mem::insight-search failed; returning empty insight list", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+}
+
+async function recallSemantic(
+  kv: StateKV,
+  query: string,
+  limit: number,
+  project?: string,
+): Promise<CompactSemanticResult[]> {
+  try {
+    const recalled = await recallSemanticFacts(kv, limit, { query, project });
+    return recalled.map(({ fact, score }) => ({
+      factId: fact.id,
+      fact: preview(fact.fact),
+      confidence: fact.confidence,
+      score: Math.round(score * 1000) / 1000,
+      createdAt: fact.createdAt,
+    }));
+  } catch (err) {
+    logger.warn("Smart search: Semantic Fact recall failed; returning empty list", {
       error: err instanceof Error ? err.message : String(err),
     });
     return [];

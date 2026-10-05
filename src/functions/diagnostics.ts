@@ -5,6 +5,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
 import { readMissedInjections } from "../hooks/_missed-injection.js";
+import { inferMemoryProjects } from "./migrate.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { injectedItemUse, resolveInsightFiles, withFiles } from "./injections.js";
 import type { AccessLog } from "./access-tracker.js";
@@ -522,21 +523,22 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             message: `All ${latestMemories.length} latest memories have a project scope`,
             fixable: false,
           });
-        } else if (unscopedCount <= 10) {
-          checks.push({
-            name: "memory-project-coverage",
-            category: "memories",
-            status: "warn",
-            message: `${unscopedCount} of ${latestMemories.length} latest memories have no project scope — run POST /agentmemory/migrate {"step":"infer-memory-projects"} to backfill`,
-            fixable: true,
-          });
         } else {
+          const { updated: resolvable, ambiguous } = await inferMemoryProjects(kv, true);
+          const backfill =
+            resolvable > 0
+              ? ` — run POST /agentmemory/migrate {"step":"infer-memory-projects"} to backfill ${resolvable}`
+              : "";
+          const operator =
+            ambiguous > 0
+              ? `; ${ambiguous} cannot be resolved from their sessions and need the Operator to assign a project`
+              : "";
           checks.push({
             name: "memory-project-coverage",
             category: "memories",
-            status: "fail",
-            message: `${unscopedCount} of ${latestMemories.length} latest memories have no project scope — run POST /agentmemory/migrate {"step":"infer-memory-projects"} to backfill`,
-            fixable: true,
+            status: unscopedCount <= 10 ? "warn" : "fail",
+            message: `${unscopedCount} of ${latestMemories.length} latest memories have no project scope${backfill}${operator}`,
+            fixable: resolvable > 0,
           });
         }
 

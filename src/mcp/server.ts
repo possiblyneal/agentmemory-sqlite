@@ -12,7 +12,9 @@ import { getVisibleTools, PROJECT_FILTER_DESCRIPTION } from "./tools-registry.js
 import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import { isOversizedPayload } from "../state/payload-bound.js";
 import { logger } from "../logger.js";
+import { isSlotsEnabled } from "../functions/slots.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
 import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
 
@@ -106,6 +108,17 @@ export function registerMcpEndpoints(
       void metricsStore
         ?.record(`mcp_tool:${name}`, 0, true)
         .catch(() => undefined);
+
+      if (name.startsWith("memory_slot_") && !isSlotsEnabled()) {
+        return {
+          status_code: 503,
+          body: {
+            error: "Memory slots not enabled",
+            flag: "AGENTMEMORY_SLOTS",
+            enableHow: "Set AGENTMEMORY_SLOTS=true (in ~/.agentmemory/.env or the shell) and restart.",
+          },
+        };
+      }
 
       try {
         switch (name) {
@@ -355,13 +368,16 @@ export function registerMcpEndpoints(
           }
 
           case "memory_smart_search": {
-            if (typeof args.query !== "string" || !args.query.trim()) {
+            const expandIds = parseCsvList(args.expandIds).slice(0, 20);
+            if (
+              (typeof args.query !== "string" || !args.query.trim()) &&
+              expandIds.length === 0
+            ) {
               return {
                 status_code: 400,
-                body: { error: "query is required for memory_smart_search" },
+                body: { error: "query or expandIds is required for memory_smart_search" },
               };
             }
-            const expandIds = parseCsvList(args.expandIds).slice(0, 20);
             const limit = Math.max(1, Math.min(100, asNumber(args.limit, 10) ?? 10));
             const result = await sdk.trigger({
               function_id: "mem::smart-search",
@@ -392,7 +408,7 @@ export function registerMcpEndpoints(
                 body: { error: "queryText, queryImageRef, or queryImageBase64 required" },
               };
             }
-            const topK = Math.max(1, Math.min(50, asNumber(args.topK, 10) ?? 10));
+            const topK = Math.max(1, Math.min(50, asNumber(args.topK ?? args.limit, 10) ?? 10));
             const sessionId = typeof args.sessionId === "string" ? args.sessionId : undefined;
             const result = await sdk.trigger({
               function_id: "mem::vision-search",
@@ -454,6 +470,12 @@ export function registerMcpEndpoints(
 
           case "memory_export": {
             const result = await sdk.trigger({ function_id: "mem::export", payload: {} });
+            if (isOversizedPayload(result)) {
+              return {
+                status_code: 200,
+                body: { content: [{ type: "text", text: result.error }], isError: true },
+              };
+            }
             return {
               status_code: 200,
               body: {
@@ -772,6 +794,7 @@ export function registerMcpEndpoints(
               title: args.title,
               description: args.description,
               priority: args.priority,
+              createdBy: args.createdBy ?? args.agentId,
               project: args.project,
               tags,
               parentId: args.parentId,

@@ -6,11 +6,13 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
+import { scrubFields } from "../functions/privacy.js";
 import { resolveProject } from "../hooks/_project.js";
 import { withDefaultProject } from "./default-project.js";
 import { hydrateEnvFromFile } from "../hooks/_env.js";
 import {
   isBlankOrPlaceholder,
+  llmCallTimeoutMs,
   resolveHandle,
   invalidateHandle,
   daemonUnreachableMessage,
@@ -132,6 +134,7 @@ interface Validated {
   format?: string;
   tokenBudget?: number;
   memoryIds?: string[];
+  expandIds?: string[];
   reason?: string;
 }
 
@@ -174,10 +177,14 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
     case "memory_recall":
     case "memory_smart_search": {
       const query = args["query"];
-      if (typeof query !== "string" || !query.trim()) {
+      if (toolName === "memory_smart_search") {
+        v.expandIds = normalizeList(args["expandIds"]);
+      }
+      if (typeof query === "string" && query.trim()) {
+        v.query = query.trim();
+      } else if (!v.expandIds?.length) {
         throw new Error("query is required");
       }
-      v.query = query.trim();
       v.limit = parseLimit(args["limit"]);
       const fmt = args["format"];
       if (typeof fmt === "string" && fmt.trim()) {
@@ -253,7 +260,9 @@ async function handleProxy(
       return textResponse(result, true);
     }
     case "memory_smart_search": {
-      const body: Record<string, unknown> = { query: v.query, limit: v.limit };
+      const body: Record<string, unknown> = { limit: v.limit };
+      if (v.query != null) body["query"] = v.query;
+      if (v.expandIds?.length) body["expandIds"] = v.expandIds;
       if (v.format != null) body["format"] = v.format;
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
       if (v.project != null) body["project"] = v.project;
@@ -299,6 +308,7 @@ async function handleLocal(
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   switch (v.tool) {
     case "memory_save": {
+      v = scrubFields(v, "content");
       const id = generateId("mem");
       const isoNow = new Date().toISOString();
       await kvInstance.set("mem:memories", id, {
@@ -329,6 +339,7 @@ async function handleLocal(
         await kvInstance.list<Record<string, unknown>>("mem:memories");
       const results = all
         .filter((m) => {
+          if (v.expandIds?.length) return v.expandIds.includes(m["id"] as string);
           const text = [
             typeof m["title"] === "string" ? m["title"] : "",
             typeof m["content"] === "string" ? m["content"] : "",
@@ -397,6 +408,8 @@ async function handleLocal(
   }
 }
 
+const LLM_BOUND_TOOLS = new Set(["memory_reflect", "memory_consolidate"]);
+
 async function handleProxyGeneric(
   toolName: string,
   args: Record<string, unknown>,
@@ -406,10 +419,14 @@ async function handleProxyGeneric(
   // reach all 54 tools (lessons, sentinels, slots, signals, graph, …)
   // instead of being capped at the 7 IMPLEMENTED_TOOLS set baked into
   // this shim. The server validates arguments per tool.
-  const result = (await handle.call("/agentmemory/mcp/call", {
-    method: "POST",
-    body: JSON.stringify({ name: toolName, arguments: args }),
-  })) as { content?: Array<{ type: string; text: string }> } | null;
+  const result = (await handle.call(
+    "/agentmemory/mcp/call",
+    {
+      method: "POST",
+      body: JSON.stringify({ name: toolName, arguments: args }),
+    },
+    LLM_BOUND_TOOLS.has(toolName) ? llmCallTimeoutMs() : undefined,
+  )) as { content?: Array<{ type: string; text: string }> } | null;
   if (result && Array.isArray(result.content)) {
     return { content: result.content };
   }

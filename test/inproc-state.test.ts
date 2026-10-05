@@ -39,6 +39,27 @@ describe("inproc state store", () => {
     ]);
   });
 
+  it("pages a scope in key order after a cursor", async () => {
+    const fns = stateFunctions(store);
+    for (const key of ["c", "a", "b", "d"]) {
+      await fns["state::set"]({ scope: "s", key, value: key });
+    }
+    await fns["state::set"]({ scope: "other", key: "z", value: "z" });
+
+    const first = (await fns["state::list-page"]({ scope: "s", limit: 2 })) as Array<{ key: string }>;
+    expect(first.map((r) => r.key)).toEqual(["a", "b"]);
+    const next = (await fns["state::list-page"]({ scope: "s", after: "b", limit: 2 })) as Array<{ key: string; value: string }>;
+    expect(next).toEqual([{ key: "c", value: "c" }, { key: "d", value: "d" }]);
+  });
+
+  it("reports the stored byte size of a scope", async () => {
+    const fns = stateFunctions(store);
+    expect(await fns["state::bytes"]({ scope: "s" })).toBe(0);
+    await fns["state::set"]({ scope: "s", key: "a", value: { t: "é" } });
+    await fns["state::set"]({ scope: "other", key: "a", value: "x".repeat(50) });
+    expect(await fns["state::bytes"]({ scope: "s" })).toBe(Buffer.byteLength('{"t":"é"}'));
+  });
+
   it("round-trips all five operations", async () => {
     const fns = stateFunctions(store);
 

@@ -1233,6 +1233,15 @@
       return s;
     }
 
+    function tagList(tags) {
+      if (Array.isArray(tags)) return tags;
+      return typeof tags === 'string' ? tags.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+    }
+    function summaryText(summary) {
+      if (!summary) return '';
+      if (typeof summary === 'string') return summary;
+      return summary.narrative || summary.title || '';
+    }
     function truncate(s, n) {
       if (!s) return '';
       return s.length > n ? s.slice(0, n) + '...' : s;
@@ -1494,6 +1503,7 @@
         state.dashboard.health = results[0];
         state.dashboard.sessions = (results[1] && results[1].sessions) || [];
         state.dashboard.memories = (results[2] && results[2].memories) || [];
+        state.dashboard.memoriesTotal = results[2] && results[2].total;
         state.dashboard.graphStats = results[3];
         state.dashboard.recentAudit = (results[4] && results[4].entries) || [];
         state.dashboard.semantic = (results[5] && results[5].facts) || (results[5] && results[5].semantic) || [];
@@ -1532,6 +1542,19 @@
           '(top-right of the viewer) and the violation text.' +
           '</span></div>';
       }
+    }
+
+    var DASHBOARD_REFRESH_INTERVAL_MS = 5000;
+    var dashboardRefreshTimer = null;
+    var dashboardLastRefreshAt = 0;
+    function scheduleDashboardRefresh() {
+      if (dashboardRefreshTimer) return;
+      var wait = Math.max(0, DASHBOARD_REFRESH_INTERVAL_MS - (Date.now() - dashboardLastRefreshAt));
+      dashboardRefreshTimer = setTimeout(function() {
+        dashboardRefreshTimer = null;
+        dashboardLastRefreshAt = Date.now();
+        if (state.activeTab === 'dashboard') loadDashboard();
+      }, wait);
     }
 
     function renderDashboard() {
@@ -1582,7 +1605,7 @@
       }
       html += '<div class="stats-grid">';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="sessions" role="link" tabindex="0"><div class="label">Sessions</div><div class="value">' + valueOrDash(d.sessions.length, failed.sessions) + '</div><div class="sub">' + valueOrDash(activeSessions, failed.sessions) + ' active</div></div>';
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="memories" role="link" tabindex="0"><div class="label">Memories</div><div class="value">' + valueOrDash(d.memories.length, failed.memories) + '</div><div class="sub">latest versions</div></div>';
+      html += '<div class="stat-card" data-action="goto-tab" data-tab="memories" role="link" tabindex="0"><div class="label">Memories</div><div class="value">' + valueOrDash(d.memoriesTotal !== undefined ? d.memoriesTotal : d.memories.length, failed.memories) + '</div><div class="sub">latest versions</div></div>';
       var lessonCount = (d.lessons || []).length;
       var crystalCount = (d.crystals || []).length;
       html += '<div class="stat-card" data-action="goto-tab" data-tab="lessons" role="link" tabindex="0"><div class="label">Lessons</div><div class="value">' + valueOrDash(lessonCount, failed.lessons) + '</div><div class="sub">confidence-scored</div></div>';
@@ -1976,7 +1999,7 @@
         html += '<div style="margin:8px 0;padding:10px 12px;border:1px solid var(--accent);background:var(--bg-alt);font-size:12px;color:var(--ink);line-height:1.4;">';
         html += '<div style="font-weight:600;margin-bottom:4px;">Graph query failed</div>';
         html += '<div style="font-size:11px;color:var(--ink-muted);">' + esc(state.graph.queryError) + '</div>';
-        html += '<button class="btn" data-action="rebuild-graph" style="margin-top:8px;font-size:11px;">Retry</button>';
+        html += '<button class="btn" data-action="rebuild-graph" style="margin-top:8px;font-size:11px;"' + ((state.graph.rebuild || {}).running ? ' disabled' : '') + '>Retry</button>';
         html += '</div>';
       } else if (state.graph.truncated) {
         // #753: surface the cap so operators know they're not seeing
@@ -2018,7 +2041,11 @@
       });
       html += '</div>';
 
-      html += '<button class="btn" style="margin-top:14px;width:100%;font-size:11px;padding:8px;letter-spacing:0.06em;transition:all 0.15s ease;" data-action="rebuild-graph">↻ Rebuild Graph</button>';
+      var rebuild = state.graph.rebuild || {};
+      html += '<button class="btn" style="margin-top:14px;width:100%;font-size:11px;padding:8px;letter-spacing:0.06em;transition:all 0.15s ease;" data-action="rebuild-graph"' + (rebuild.running ? ' disabled' : '') + '>' + (rebuild.running ? 'Rebuilding...' : '↻ Rebuild Graph') + '</button>';
+      if (rebuild.message) {
+        html += '<div id="graph-rebuild-status" style="margin-top:6px;font-size:11px;color:var(--ink-muted);line-height:1.4;">' + esc(rebuild.message) + '</div>';
+      }
       html += '<div id="selected-node-panel"></div>';
       var __focus = captureSearchFocus(['graph-search']);
       sb.innerHTML = html;
@@ -2372,9 +2399,33 @@
     }
 
     async function rebuildGraph() {
-      var sb = document.getElementById('graph-sidebar');
-      if (sb) sb.innerHTML = '<h3>Graph</h3><p style="font-size:12px;color:var(--ink-faint);font-style:italic;">Rebuilding graph from observations...</p>';
-      await apiPost('graph/build', {});
+      if (state.graph.rebuild && state.graph.rebuild.running) return;
+      var preview = await apiPost('graph/build', { dryRun: true });
+      if (!preview || typeof preview.observations !== 'number') {
+        state.graph.rebuild = { running: false, message: 'Could not count observations; rebuild not started.' };
+        renderGraphSidebar();
+        return;
+      }
+      if (!window.confirm('Rebuild the graph? This replays ' + preview.observations + ' observations through the LLM and may take a long time and cost tokens.')) return;
+      state.graph.rebuild = { running: true, message: 'Replaying ' + preview.observations + ' observations...' };
+      renderGraphSidebar();
+      var result = await api('graph/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        readErrorBody: true
+      });
+      var message;
+      if (result && result.progress) {
+        message = 'Refused: a build is already running (' + result.progress.sessionsDone + ' of ' + result.progress.sessions + ' sessions done).';
+      } else if (result && result.cancelled) {
+        message = 'Build cancelled after ' + result.batches + ' batches.';
+      } else if (result && result.success) {
+        message = 'Done: ' + result.nodes + ' nodes, ' + result.edges + ' edges from ' + result.batches + ' batches.';
+      } else {
+        message = 'Build failed' + (result && result.error ? ': ' + result.error : '.');
+      }
+      state.graph.rebuild = { running: false, message: message };
       state.graph.loaded = false;
       loadGraph();
     }
@@ -3231,7 +3282,7 @@
           html += '<div class="session-item' + (selected ? ' selected' : '') + '"' + (id ? ' data-action="select-session" data-session-id="' + esc(id) + '" role="button" tabindex="0" aria-expanded="' + (selected ? 'true' : 'false') + '"' : '') + '>';
           html += '<div class="session-top"><span class="session-project">' + esc(sessionDisplayName(s)) + '</span>';
           html += '<span class="badge ' + statusBadge + '">' + esc(s.status) + '</span></div>';
-          var preview = s.firstPrompt || s.summary || '';
+          var preview = s.firstPrompt || summaryText(s.summary);
           if (preview) {
             html += '<div class="session-preview" style="font-size:13px;color:var(--ink);margin:4px 0;line-height:1.4;">' + esc(truncate(preview, 140)) + '</div>';
           }
@@ -3295,7 +3346,7 @@
       var durationMs = s.endedAt ? new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime() : 0;
       var durationLabel = durationMs > 0 ? (durationMs < 60000 ? (durationMs / 1000).toFixed(1) + 's' : (durationMs / 60000).toFixed(1) + 'm') : '-';
 
-      var preview = s.firstPrompt || s.summary || firstPromptFromObs || '';
+      var preview = s.firstPrompt || summaryText(s.summary) || firstPromptFromObs || '';
 
       var html = '<div class="detail-panel">';
       html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">';
@@ -3485,7 +3536,7 @@
 
       if (search) {
         items = items.filter(function(a) {
-          return (a.title + ' ' + (a.description || '') + ' ' + (a.tags || []).join(' ')).toLowerCase().indexOf(search) >= 0;
+          return (a.title + ' ' + (a.description || '') + ' ' + tagList(a.tags).join(' ')).toLowerCase().indexOf(search) >= 0;
         });
       }
       if (statusFilter) {
@@ -3525,7 +3576,7 @@
           html += '</td>';
           html += '<td><span class="badge ' + statusClass + '">' + esc(a.status) + '</span></td>';
           html += '<td style="text-align:center;font-weight:600;">' + (a.priority || '-') + '</td>';
-          html += '<td style="font-size:11px;color:var(--ink-muted);">' + (a.tags || []).map(esc).join(', ') + '</td>';
+          html += '<td style="font-size:11px;color:var(--ink-muted);">' + tagList(a.tags).map(esc).join(', ') + '</td>';
           html += '<td style="text-align:center;">' + (isFrontier ? '&#9889;' : '') + '</td>';
           html += '<td style="font-size:12px;color:var(--ink-muted);">' + shortTime(a.updatedAt) + '</td>';
           html += '</tr>';
@@ -4024,10 +4075,7 @@
           renderObservations();
         }
       }
-      if (state.activeTab === 'dashboard') {
-        state.dashboard.loaded = false;
-        loadDashboard();
-      }
+      if (state.activeTab === 'dashboard') scheduleDashboardRefresh();
       if (state.activeTab === 'activity' && msg.observation) {
         state.activity.observations.unshift(msg.observation);
         renderActivity();

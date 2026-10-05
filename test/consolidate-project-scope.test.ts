@@ -290,3 +290,27 @@ describe("mem::consolidate — cross-project existingMatch guard", () => {
     expect(memories[0].project).toBeUndefined();
   });
 });
+
+describe("mem::consolidate — same-title candidates in one run", () => {
+  it("produces one Memory when two concepts synthesize the same title", async () => {
+    const sdk = makeMockSdk();
+    const kv = makeMockKV();
+    const provider = makeProvider("synthesized memory title");
+
+    const session = makeSession("sess_api", "api");
+    await kv.set(KV.sessions, session.id, session);
+    for (const concept of ["auth", "billing"]) {
+      for (let i = 0; i < 3; i++) {
+        const id = `obs_${concept}_${i}`;
+        await kv.set(KV.observations(session.id), id, makeObs(id, session.id, concept));
+      }
+    }
+
+    registerConsolidateFunction(sdk as never, kv as never, provider as never);
+    await sdk.trigger("mem::consolidate", { project: "api", minObservations: 1 });
+
+    const memories = await kv.list<Memory>(KV.memories);
+    expect(memories).toHaveLength(1);
+    expect(memories[0].isLatest).toBe(true);
+  });
+});

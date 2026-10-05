@@ -105,6 +105,27 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     );
   });
 
+  it("deletes the evicted observation's obs-nodes row", async () => {
+    const kv = mockKV();
+    await kv.set(KV.graphObsNodes, "drop", ["n1"]);
+    await kv.set(KV.graphObsNodes, "keep", ["n2"]);
+    const sdk = mockSdk();
+    await kv.set(KV.observations(SESSION), "keep", stored("keep", 8, "2026-01-01T00:00:00Z"));
+    await kv.set(KV.observations(SESSION), "drop", stored("drop", 2, "2026-01-02T00:00:00Z"));
+    registerObserveFunction(sdk as never, kv as never, undefined, 2);
+    await sdk.trigger({
+      function_id: "mem::observe",
+      payload: {
+        sessionId: SESSION,
+        hookType: "post_tool_use",
+        timestamp: "2026-05-01T00:00:00Z",
+        data: { tool_name: "Read", tool_input: { file_path: "new.ts" } },
+      },
+    });
+    expect(await kv.get(KV.graphObsNodes, "drop")).toBeNull();
+    expect(await kv.get(KV.graphObsNodes, "keep")).toEqual(["n2"]);
+  });
+
   it("evicts the older row on an importance tie and drops it from search", async () => {
     getSearchIndex().add(stored("older", 5, "2026-01-01T00:00:00Z") as never);
     const { ids } = await setup(

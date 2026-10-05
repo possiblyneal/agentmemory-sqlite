@@ -2,6 +2,7 @@ import type { GraphNode, GraphEdge } from "../types.js";
 import { KV } from "./schema.js";
 import { graphWriteGeneration, type StateKV } from "./kv.js";
 import { withKeyedLock } from "./keyed-mutex.js";
+import { capSourceIds } from "../functions/graph-provenance.js";
 
 export const NAME_SHARD_COUNT = 64;
 export const GRAPH_INDEX_NODE_CEILING = 25000;
@@ -67,6 +68,106 @@ export async function clearNameShards(kv: StateKV): Promise<void> {
   }
 }
 
+const PAGE_SIZE = 200;
+
+export async function* listPages<T>(
+  kv: StateKV,
+  scope: string,
+): AsyncGenerator<T[]> {
+  let after: string | undefined;
+  for (;;) {
+    const rows = await kv.listPage<T>(scope, after, PAGE_SIZE);
+    if (rows.length === 0) return;
+    yield rows.map((r) => r.value);
+    after = rows[rows.length - 1].key;
+  }
+}
+
+async function clearScope(kv: StateKV, scope: string): Promise<number> {
+  let cleared = 0;
+  for (;;) {
+    const rows = await kv.listPage(scope, undefined, PAGE_SIZE);
+    if (rows.length === 0) return cleared;
+    await Promise.all(rows.map((r) => kv.delete(scope, r.key)));
+    cleared += rows.length;
+  }
+}
+
+export async function clearGraphSideIndexes(
+  kv: StateKV,
+): Promise<Record<string, number>> {
+  await clearNameShards(kv);
+  return {
+    [KV.graphAdjacency]: await clearScope(kv, KV.graphAdjacency),
+    [KV.graphObsNodes]: await clearScope(kv, KV.graphObsNodes),
+  };
+}
+
+function groupInto<V>(
+  groups: Map<string, V[]>,
+  key: string,
+  value: V,
+): void {
+  const list = groups.get(key);
+  if (list) list.push(value);
+  else groups.set(key, [value]);
+}
+
+export async function mergeGraphIndexPage(
+  kv: StateKV,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): Promise<void> {
+  const shards = new Map<string, NameCatalogEntry[]>();
+  const obsNodes = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node?.id || typeof node.name !== "string") continue;
+    groupInto(shards, nameShardKey(node.id), { id: node.id, name: node.name });
+    for (const obsId of node.sourceObservationIds ?? []) {
+      groupInto(obsNodes, obsId, node.id);
+    }
+  }
+  const adjacency = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!edge?.id || !edge.sourceNodeId || !edge.targetNodeId) continue;
+    groupInto(adjacency, edge.sourceNodeId, edge.id);
+    if (edge.targetNodeId !== edge.sourceNodeId) {
+      groupInto(adjacency, edge.targetNodeId, edge.id);
+    }
+  }
+
+  for (const [shard, added] of shards) {
+    await withKeyedLock(`gidx:shard:${shard}`, async () => {
+      const entries =
+        (await kv.get<NameCatalogEntry[]>(KV.graphNameShards, shard)) ?? [];
+      const known = new Set(entries.map((e) => e.id));
+      await kv.set(KV.graphNameShards, shard, [
+        ...entries,
+        ...added.filter((e) => !known.has(e.id)),
+      ]);
+    });
+  }
+  for (const [nodeId, edgeIds] of adjacency) {
+    await withKeyedLock(`gidx:adj:${nodeId}`, async () => {
+      const existing =
+        (await kv.get<string[]>(KV.graphAdjacency, nodeId)) ?? [];
+      await kv.set(KV.graphAdjacency, nodeId, [
+        ...new Set([...existing, ...edgeIds]),
+      ]);
+    });
+  }
+  for (const [obsId, nodeIds] of obsNodes) {
+    await withKeyedLock(`gidx:obs:${obsId}`, async () => {
+      const existing = (await kv.get<string[]>(KV.graphObsNodes, obsId)) ?? [];
+      await kv.set(
+        KV.graphObsNodes,
+        obsId,
+        capSourceIds([...new Set([...existing, ...nodeIds])]),
+      );
+    });
+  }
+}
+
 export async function indexGraphNode(
   kv: StateKV,
   node: GraphNode,
@@ -93,11 +194,23 @@ export async function linkObservationsToNode(
     await withKeyedLock(`gidx:obs:${obsId}`, async () => {
       const nodeIds = (await kv.get<string[]>(KV.graphObsNodes, obsId)) ?? [];
       if (!nodeIds.includes(nodeId)) {
-        nodeIds.push(nodeId);
-        await kv.set(KV.graphObsNodes, obsId, nodeIds);
+        await kv.set(
+          KV.graphObsNodes,
+          obsId,
+          capSourceIds([...nodeIds, nodeId]),
+        );
       }
     });
   }
+}
+
+export async function unlinkObservationNodes(
+  kv: StateKV,
+  obsId: string,
+): Promise<void> {
+  await withKeyedLock(`gidx:obs:${obsId}`, () =>
+    kv.delete(KV.graphObsNodes, obsId),
+  ).catch(() => {});
 }
 
 export async function indexGraphEdge(
@@ -377,7 +490,9 @@ export async function backfillGraphIndexes(
     await Promise.all(
       obsEntries
         .slice(i, i + BATCH_SIZE)
-        .map(([obsId, nodeIds]) => kv.set(KV.graphObsNodes, obsId, nodeIds)),
+        .map(([obsId, nodeIds]) =>
+          kv.set(KV.graphObsNodes, obsId, capSourceIds(nodeIds)),
+        ),
     );
   }
 

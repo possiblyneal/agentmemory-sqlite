@@ -5,6 +5,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { checkPayloadSize, isOversizedPayload } from "../state/payload-bound.js";
+import { pageMeshDelta } from "../functions/mesh.js";
 import { getLatestHealth } from "../health/monitor.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import type { ResilientProvider } from "../providers/resilient.js";
@@ -52,6 +53,13 @@ function pickFields(body: unknown, fields: readonly string[]): Record<string, un
   const picked: Record<string, unknown> = {};
   for (const f of fields) if (source[f] !== undefined) picked[f] = source[f];
   return picked;
+}
+
+function withTagArray(payload: Record<string, unknown>): Record<string, unknown> {
+  if (typeof payload.tags === "string") {
+    payload.tags = payload.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+  return payload;
 }
 
 function checkAuth(
@@ -1865,26 +1873,53 @@ export function registerApiTriggers(
   // Viewer calls this when the graph is empty (#666). Iterates every
   // session, collects observations that have a `title` (compressed only),
   // and feeds them through `mem::graph-extract` in batches.
+  let graphBuild: {
+    controller: AbortController;
+    progress: { running: true; sessions: number; sessionsDone: number; batches: number };
+  } | null = null;
+
   sdk.registerFunction("api::graph-build",
-    async (req: ApiRequest<{ batchSize?: number }>): Promise<Response> => {
+    async (req: ApiRequest<{ batchSize?: number; dryRun?: boolean }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const batchSize = Math.max(
         1,
         Math.min(100, Number((req.body as { batchSize?: number })?.batchSize) || 25),
       );
+      const compressedOf = async (sid: string) =>
+        (await kv.list<CompressedObservation>(KV.observations(sid))).filter(
+          (o) => o && typeof o.title === "string" && o.title.length > 0,
+        );
+      if (graphBuild) {
+        return {
+          status_code: 409,
+          body: { error: "A graph build is already running", progress: graphBuild.progress },
+        };
+      }
+      const controller = new AbortController();
+      const onDisconnect = () => controller.abort();
+      req.signal?.addEventListener("abort", onDisconnect);
       try {
         const sessions = await kv.list<Session>(KV.sessions);
+        const sessionIds = sessions
+          .map((s) => s?.id)
+          .filter((sid): sid is string => typeof sid === "string" && sid.length > 0);
+        if (req.body?.dryRun === true) {
+          let observations = 0;
+          for (const sid of sessionIds) observations += (await compressedOf(sid)).length;
+          return {
+            status_code: 200,
+            body: { dryRun: true, sessions: sessions.length, observations },
+          };
+        }
+        const progress = { running: true as const, sessions: sessionIds.length, sessionsDone: 0, batches: 0 };
+        graphBuild = { controller, progress };
         let totalNodes = 0;
         let totalEdges = 0;
-        let batchesRun = 0;
-        for (const session of sessions) {
-          const sid = session?.id;
-          if (typeof sid !== "string" || sid.length === 0) continue;
-          const observations = await kv.list<CompressedObservation>(KV.observations(sid));
-          const compressed = observations.filter((o) => o && typeof o.title === "string" && o.title.length > 0);
-          if (compressed.length === 0) continue;
+        for (const sid of sessionIds) {
+          const compressed = await compressedOf(sid);
           for (let i = 0; i < compressed.length; i += batchSize) {
+            if (controller.signal.aborted) break;
             const batch = compressed.slice(i, i + batchSize);
             try {
               const result = (await sdk.trigger({
@@ -1895,7 +1930,7 @@ export function registerApiTriggers(
                 totalNodes += Number(result.nodesAdded) || 0;
                 totalEdges += Number(result.edgesAdded) || 0;
               }
-              batchesRun++;
+              progress.batches++;
             } catch (err) {
               logger.warn("graph-build batch failed", {
                 sessionId: sid,
@@ -1904,19 +1939,25 @@ export function registerApiTriggers(
               });
             }
           }
+          if (controller.signal.aborted) break;
+          progress.sessionsDone++;
         }
         return {
           status_code: 200,
           body: {
-            success: true,
+            success: !controller.signal.aborted,
+            cancelled: controller.signal.aborted,
             sessions: sessions.length,
-            batches: batchesRun,
+            batches: progress.batches,
             nodes: totalNodes,
             edges: totalEdges,
           },
         };
       } catch {
         return graphDisabledResponse();
+      } finally {
+        req.signal?.removeEventListener("abort", onDisconnect);
+        if (graphBuild?.controller === controller) graphBuild = null;
       }
     },
   );
@@ -1924,6 +1965,20 @@ export function registerApiTriggers(
     type: "http",
     function_id: "api::graph-build",
     config: { api_path: "/agentmemory/graph/build", http_method: "POST" },
+  });
+
+  sdk.registerFunction("api::graph-build-cancel",
+    async (req: ApiRequest): Promise<Response> => {
+      const authErr = checkAuth(req, secret);
+      if (authErr) return authErr;
+      graphBuild?.controller.abort();
+      return { status_code: 200, body: { cancelled: graphBuild !== null } };
+    },
+  );
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::graph-build-cancel",
+    config: { api_path: "/agentmemory/graph/build/cancel", http_method: "POST" },
   });
 
   // Import graphify's structural graph (graphify-out/graph.json) into the
@@ -2505,7 +2560,7 @@ export function registerApiTriggers(
           body: { error: "queryText, queryImageRef, or queryImageBase64 required" },
         };
       }
-      const topKParsed = parseOptionalPositiveInt(body["topK"]);
+      const topKParsed = parseOptionalPositiveInt(body["topK"] ?? body["limit"]);
       if (topKParsed === null) {
         return { status_code: 400, body: { error: "topK must be a positive integer" } };
       }
@@ -2746,7 +2801,7 @@ export function registerApiTriggers(
       if (!req.body?.title) {
         return { status_code: 400, body: { error: "title is required" } };
       }
-      const result = await sdk.trigger({ function_id: "mem::action-create", payload: pickFields(req.body, ["title", "description", "priority", "createdBy", "project", "tags", "parentId", "sourceObservationIds", "sourceMemoryIds", "edges"]) });
+      const result = await sdk.trigger({ function_id: "mem::action-create", payload: withTagArray(pickFields(req.body, ["title", "description", "priority", "createdBy", "project", "tags", "parentId", "sourceObservationIds", "sourceMemoryIds", "edges"])) });
       return { status_code: 201, body: result };
     },
   );
@@ -2772,7 +2827,7 @@ export function registerApiTriggers(
       if (!req.body?.actionId) {
         return { status_code: 400, body: { error: "actionId is required" } };
       }
-      const result = await sdk.trigger({ function_id: "mem::action-update", payload: pickFields(req.body, ["actionId", "status", "title", "description", "priority", "assignedTo", "result", "tags"]) });
+      const result = await sdk.trigger({ function_id: "mem::action-update", payload: withTagArray(pickFields(req.body, ["actionId", "status", "title", "description", "priority", "assignedTo", "result", "tags"])) });
       return { status_code: 200, body: result };
     },
   );
@@ -3216,7 +3271,7 @@ export function registerApiTriggers(
         memories = memories.filter((m) => m.project === project || m.global === true);
         actions = actions.filter((a) => a.project === project);
       }
-      const body: Record<string, unknown> = {
+      const delta: Record<string, unknown[]> = {
         memories: df(memories, "updatedAt"),
         actions: df(actions, "updatedAt"),
       };
@@ -3224,21 +3279,24 @@ export function registerApiTriggers(
         const semantic = await kv.list<import("../types.js").SemanticMemory>(KV.semantic);
         const procedural = await kv.list<import("../types.js").ProceduralMemory>(KV.procedural);
         const relations = await kv.list<import("../types.js").MemoryRelation>(KV.relations);
-        body.semantic = df(semantic, "updatedAt");
-        body.procedural = df(procedural, "updatedAt");
-        body.relations = df(relations, "createdAt");
+        delta.semantic = df(semantic, "updatedAt");
+        delta.procedural = df(procedural, "updatedAt");
+        delta.relations = df(relations, "createdAt");
         // B-mode: graph frozen — never enumerate the graph scope for the
         // mesh-sync delta body.
         if (!graphLegDisabled()) {
           const graphNodes = await kv.list<import("../types.js").GraphNode>(KV.graphNodes);
           const graphEdges = await kv.list<import("../types.js").GraphEdge>(KV.graphEdges);
-          body.graphNodes = graphNodes.filter(
+          delta.graphNodes = graphNodes.filter(
             (n) => new Date(n.updatedAt || n.createdAt).getTime() > sinceTime,
           );
-          body.graphEdges = df(graphEdges, "createdAt");
+          delta.graphEdges = df(graphEdges, "createdAt");
         }
       }
-      // Fail an oversized export with 413 rather than on heap.
+      const cursor = req.query_params?.["cursor"] as string | undefined;
+      const paged = pageMeshDelta(delta, cursor);
+      if (!paged) return { status_code: 400, body: { error: "Invalid 'cursor'" } };
+      const body = { ...paged.page, nextCursor: paged.nextCursor };
       const oversized = checkPayloadSize(
         body,
         "use ?since to fetch only changes after a timestamp, or ?project to scope the export",

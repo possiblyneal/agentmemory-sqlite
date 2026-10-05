@@ -100,3 +100,56 @@ describe("api::mesh-export project scoping", () => {
     expect(memories.map((m) => m.id).sort()).toEqual(["m-alpha", "m-beta"]);
   });
 });
+
+describe("api::mesh-export pagination", () => {
+  const bigMemory = (id: string) => memory(id, "alpha", "x".repeat(3 * 1024 * 1024));
+
+  async function page(sdk: ReturnType<typeof mockSdk>, cursor?: string) {
+    const handler = sdk._fns.get("api::mesh-export")!;
+    return handler({
+      headers: { authorization: `Bearer ${SECRET}` },
+      query_params: cursor ? { cursor } : {},
+    }) as Promise<{ status_code: number; body: Record<string, unknown> & { nextCursor: string | null } }>;
+  }
+
+  it("splits a delta over the page budget across cursor pages, none over the cap", async () => {
+    const kv = mockKV();
+    for (const id of ["m1", "m2", "m3", "m4", "m5"]) await kv.set(KV.memories, id, bigMemory(id));
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, kv as never, SECRET);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const res = await page(sdk, cursor);
+      expect(res.status_code).toBe(200);
+      expect(Buffer.byteLength(JSON.stringify(res.body))).toBeLessThan(16 * 1024 * 1024);
+      seen.push(...(res.body.memories as Memory[]).map((m) => m.id));
+      cursor = res.body.nextCursor ?? undefined;
+      pages++;
+    } while (cursor);
+
+    expect(pages).toBeGreaterThan(1);
+    expect(seen.sort()).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+  });
+
+  it("returns a null nextCursor when the delta fits one page", async () => {
+    const kv = mockKV();
+    await kv.set(KV.memories, "m1", memory("m1", "alpha"));
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, kv as never, SECRET);
+
+    const res = await page(sdk);
+
+    expect(res.body.nextCursor).toBeNull();
+    expect((res.body.memories as Memory[]).map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("rejects a malformed cursor", async () => {
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+
+    expect((await page(sdk, "garbage")).status_code).toBe(400);
+  });
+});

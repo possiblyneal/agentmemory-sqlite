@@ -3,7 +3,12 @@ import type {
   CompressedObservation,
   ObservationType,
 } from "../types.js";
-import { truncate as truncateMiddleOut } from "../prompts/compression.js";
+import {
+  truncate as truncateMiddleOut,
+  TOOL_INPUT_MAX,
+  TOOL_OUTPUT_MAX,
+} from "../prompts/compression.js";
+import { stripPrivateData } from "./privacy.js";
 
 // Zero-LLM compression path. Converts a RawObservation into a
 // CompressedObservation using only heuristics — no Claude call, no token
@@ -84,6 +89,11 @@ function stringifyForNarrative(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+function scrubbedAndCapped(v: unknown, max: number): string | undefined {
+  const s = stringifyForNarrative(v);
+  return s ? truncateMiddleOut(stripPrivateData(s), max) : undefined;
 }
 
 function truncate(s: string, n: number): string {
@@ -198,6 +208,10 @@ export function buildSyntheticCompression(
   };
   if (raw.toolName) result.toolName = raw.toolName;
   if (raw.userPrompt) result.userPrompt = raw.userPrompt;
+  const toolInput = scrubbedAndCapped(raw.toolInput, TOOL_INPUT_MAX);
+  if (toolInput) result.toolInput = toolInput;
+  const assistantResponse = scrubbedAndCapped(raw.assistantResponse, TOOL_OUTPUT_MAX);
+  if (assistantResponse) result.assistantResponse = assistantResponse;
   if (raw.modality) result.modality = raw.modality;
   if (raw.imageData) result.imageData = raw.imageData;
   if (raw.agentId) result.agentId = raw.agentId;

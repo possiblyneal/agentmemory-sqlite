@@ -8,6 +8,8 @@ import { getMaxSourceObservationIds } from "../config.js";
 // the head would pin it to its first sighting and let the cap trim away the
 // very evidence that arrived last. A duplicate-free run shorter than the cap
 // comes back untouched, ids and order intact.
+export const MAX_SOURCE_LIST_IDS = 100;
+
 export function capSourceIds(
   ids: string[],
   max: number = getMaxSourceObservationIds(),

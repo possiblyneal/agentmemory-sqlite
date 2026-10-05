@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -19,6 +22,7 @@ import type {
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
+    store,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
@@ -30,6 +34,16 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(
+      scope: string,
+      after: string | undefined,
+      limit: number,
+    ): Promise<Array<{ key: string; value: T }>> =>
+      [...(store.get(scope)?.entries() ?? [])]
+        .filter(([key]) => key > (after ?? ""))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .slice(0, limit)
+        .map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -550,6 +564,36 @@ describe("Graph Functions", () => {
     expect(huge.truncated).toBe(false);
   });
 
+  it("paginate reports a total at least the returned count and truncates when nodes are hidden", async () => {
+    const nodes = ["a", "b", "c"].map((id) => ({
+      id,
+      type: "concept",
+      name: id,
+      properties: {},
+      sourceObservationIds: [],
+      createdAt: "2026-01-01T00:00:00Z",
+    }));
+    await kv.set("mem:graph:snapshot", "current", {
+      version: 1,
+      topNodes: nodes,
+      topEdges: [],
+      topDegrees: {},
+      stats: { totalNodes: 1, totalEdges: 0, nodesByType: { concept: 1 }, edgesByType: {} },
+      updatedAt: "2026-01-01T00:00:00Z",
+      dirty: false,
+    });
+
+    for (const nodeType of [undefined, "concept"]) {
+      const page = (await sdk.trigger("mem::graph-query", {
+        limit: 2,
+        nodeType,
+      })) as GraphQueryResult;
+      expect(page.nodes.length).toBe(2);
+      expect(page.totalNodes).toBeGreaterThanOrEqual(3);
+      expect(page.truncated).toBe(true);
+    }
+  });
+
   it("paginate excludes edges whose endpoints fall outside the page", async () => {
     for (let i = 0; i < 60; i++) {
       await kv.set("mem:graph:nodes", `x_${i.toString().padStart(3, "0")}`, {
@@ -777,6 +821,40 @@ describe("Graph Functions", () => {
       expect(snap?.stats.totalNodes).toBe(0);
     });
 
+    it("graph-reset holds when it interleaves with an in-flight extraction write", async () => {
+      const base = mockKV();
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let readStarted!: () => void;
+      const started = new Promise<void>((r) => (readStarted = r));
+      const gatedKV = {
+        ...base,
+        get: async <T>(scope: string, key: string): Promise<T | null> => {
+          const value = await base.get<T>(scope, key);
+          if (scope === "mem:graph:snapshot") {
+            readStarted();
+            await gate;
+          }
+          return value;
+        },
+      };
+      const gatedSdk = mockSdk();
+      registerGraphFunction(gatedSdk as never, gatedKV as never, mockProvider as never);
+
+      const extraction = gatedSdk.trigger("mem::graph-extract", { observations: [testObs] });
+      await started;
+      const reset = gatedSdk.trigger("mem::graph-reset", {});
+      release();
+      await Promise.all([extraction, reset]);
+
+      const snap = await base.get<{ stats: { totalNodes: number }; resetAt?: string }>(
+        "mem:graph:snapshot",
+        "current",
+      );
+      expect(snap?.stats.totalNodes).toBe(0);
+      expect(snap?.resetAt).toBeDefined();
+    });
+
     it("graph-reset writes empty snapshot; legacy rows stay as orphans (#825)", async () => {
       await sdk.trigger("mem::graph-extract", { observations: [testObs] });
       // Index entries exist after the extract.
@@ -869,14 +947,8 @@ describe("Graph Functions", () => {
       expect(result.nodes).toEqual([]);
     });
 
-    it("graph-snapshot-rebuild refuses corpora past REBUILD_SAFE_NODE_CEILING", async () => {
-      // Direct-poke the mock store with > 25K node values so kv.list
-      // returns them without paying the per-set cost. Each node only
-      // needs id/type/name/stale=false for the rebuild path.
+    it("graph-snapshot-rebuild rebuilds a corpus past 25,000 nodes in pages without listing it (#825)", async () => {
       const localKv = mockKV();
-      // Walk the implementation detail: mockKV stores entries in a
-      // Map under the scope key. Push directly to that map via the
-      // public `set` API in a tight loop.
       const COUNT = 25001;
       const sets: Array<Promise<unknown>> = [];
       for (let i = 0; i < COUNT; i++) {
@@ -886,12 +958,24 @@ describe("Graph Functions", () => {
             type: "concept",
             name: `bulk-${i}`,
             properties: {},
-            sourceObservationIds: [],
+            sourceObservationIds: i === 0 ? ["obs_a"] : [],
             createdAt: "2026-01-01T00:00:00Z",
             stale: false,
           }),
         );
       }
+      sets.push(
+        localKv.set("mem:graph:edges", "be_0", {
+          id: "be_0",
+          type: "related_to",
+          sourceNodeId: "bn_0",
+          targetNodeId: "bn_1",
+          weight: 1,
+          sourceObservationIds: [],
+          createdAt: "2026-01-01T00:00:00Z",
+          stale: false,
+        }),
+      );
       await Promise.all(sets);
       const listed: string[] = [];
       const recordingKv = {
@@ -908,11 +992,14 @@ describe("Graph Functions", () => {
       const result = (await localSdk.trigger(
         "mem::graph-snapshot-rebuild",
         { force: true },
-      )) as { success: boolean; tooLarge?: boolean; totalNodes?: number };
-      expect(result.success).toBe(false);
-      expect(result.tooLarge).toBe(true);
-      expect(result.totalNodes).toBeGreaterThanOrEqual(25001);
-      expect(listed).toEqual(["mem:graph:nodes"]);
+      )) as { success: boolean; totalNodes?: number; totalEdges?: number };
+      expect(result.success).toBe(true);
+      expect(result.totalNodes).toBe(COUNT);
+      expect(result.totalEdges).toBe(1);
+      expect(listed).toEqual([]);
+      expect(await localKv.get("mem:graph:obs-nodes", "obs_a")).toEqual(["bn_0"]);
+      expect(await localKv.get("mem:graph:adjacency", "bn_1")).toEqual(["be_0"]);
+      expect(localKv.store.get("mem:graph:name-shards")?.size).toBe(64);
     });
 
     // #825: new pre-flight refusal when no snapshot exists (signals
@@ -940,6 +1027,17 @@ describe("Graph Functions", () => {
       expect(result.success).toBe(false);
       expect(result.legacyCorpus).toBe(true);
       expect(result.error).toMatch(/graph\/reset|force/);
+    });
+
+    it("graph-reset deletes adjacency and obs-nodes rows from before the reset (#825)", async () => {
+      await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+      expect(kv.store.get("mem:graph:obs-nodes")?.size).toBeGreaterThan(0);
+      expect(kv.store.get("mem:graph:adjacency")?.size).toBeGreaterThan(0);
+
+      await sdk.trigger("mem::graph-reset", {});
+
+      expect(kv.store.get("mem:graph:obs-nodes")?.size ?? 0).toBe(0);
+      expect(kv.store.get("mem:graph:adjacency")?.size ?? 0).toBe(0);
     });
 
     it("graph-reset is enumeration-free (does not call kv.list)", async () => {
@@ -1412,5 +1510,71 @@ describe("graph-extract importance and concepts (#90)", () => {
 
     expect(result.success).toBe(false);
     expect(await stored("obs_a")).toEqual(original);
+  });
+});
+
+describe("graph file identity across worktrees", () => {
+  const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, stdio: "pipe" });
+  let root: string;
+  let main: string;
+  let worktree: string;
+  let sdk: ReturnType<typeof mockSdk>;
+  let kv: ReturnType<typeof mockKV>;
+  const ORIG_GRAPH_FLAG = process.env["GRAPH_EXTRACTION_ENABLED"];
+
+  const noopProvider = { name: "noop", compress: vi.fn(), summarize: vi.fn() };
+
+  async function extract(sessionId: string, cwd: string, files: string[]) {
+    const session: Session = {
+      id: sessionId,
+      project: "proj",
+      cwd,
+      startedAt: "2026-02-01T10:00:00Z",
+      status: "active",
+      observationCount: 1,
+    };
+    await kv.set("mem:sessions", sessionId, session);
+    await sdk.trigger("mem::graph-extract", {
+      observations: [{ ...testObs, id: `obs_${sessionId}`, sessionId, concepts: [], files }],
+    });
+  }
+
+  async function fileNames(): Promise<string[]> {
+    const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+    return nodes.filter((n) => n.type === "file").map((n) => n.name);
+  }
+
+  beforeEach(() => {
+    mkdirSync("tmp", { recursive: true });
+    root = realpathSync(mkdtempSync(join("tmp", "graph-files-")));
+    main = join(root, "main");
+    worktree = join(root, "wt");
+    mkdirSync(main);
+    sh("git init -q -b main", main);
+    sh("git -c user.email=a@b -c user.name=n commit -q --allow-empty -m init", main);
+    sh(`git worktree add -q ${worktree}`, main);
+    sdk = mockSdk();
+    kv = mockKV();
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
+    registerGraphFunction(sdk as never, kv as never, noopProvider as never);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (ORIG_GRAPH_FLAG === undefined) delete process.env["GRAPH_EXTRACTION_ENABLED"];
+    else process.env["GRAPH_EXTRACTION_ENABLED"] = ORIG_GRAPH_FLAG;
+  });
+
+  it("gives the same file one node across two worktrees of a repo", async () => {
+    await extract("ses_a", main, [join(main, "src/index.ts")]);
+    await extract("ses_b", worktree, [join(worktree, "src/index.ts")]);
+
+    expect(await fileNames()).toEqual(["src/index.ts"]);
+  });
+
+  it("keeps a path outside every checkout absolute", async () => {
+    await extract("ses_a", main, ["/etc/hosts", join(main, "a.ts")]);
+
+    expect((await fileNames()).sort()).toEqual(["/etc/hosts", "a.ts"]);
   });
 });

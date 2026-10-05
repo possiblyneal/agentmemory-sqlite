@@ -66,7 +66,7 @@ describe("api::graph-build endpoint (#666)", () => {
   });
 
   it("response shape matches what the viewer expects (success + nodes)", () => {
-    expect(api).toMatch(/success:\s*true,\s*sessions:[\s\S]*?nodes:\s*totalNodes/);
+    expect(api).toMatch(/success:\s*!controller\.signal\.aborted,[\s\S]*?sessions:[\s\S]*?nodes:\s*totalNodes/);
   });
 });
 

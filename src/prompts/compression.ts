@@ -39,8 +39,8 @@ Rules:
 // userPrompt median = 9.7K with max 35K - the old 2K cap was cutting 91% of
 // all prompts to a fifth of their length. Caps exist for the pathological
 // paste, not for normal traffic; they should sit above the real distribution.
-const TOOL_INPUT_MAX = 4000;
-const TOOL_OUTPUT_MAX = 10000;
+export const TOOL_INPUT_MAX = 4000;
+export const TOOL_OUTPUT_MAX = 10000;
 const USER_PROMPT_MAX = 40000;
 
 export function buildCompressionPrompt(observation: {

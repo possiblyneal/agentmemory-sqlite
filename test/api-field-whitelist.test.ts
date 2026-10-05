@@ -109,3 +109,23 @@ describe.each(ROUTES)("%s field whitelist", (route, fn, fields) => {
     expect(received).toEqual(allowed);
   });
 });
+
+describe.each([
+  ["api::action-create", "mem::action-create", { title: "t" }],
+  ["api::action-update", "mem::action-update", { actionId: "a" }],
+])("%s tag normalisation", (route, fn, base) => {
+  it("stores CSV string tags as an array", async () => {
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+    let received: { tags?: unknown } | undefined;
+    sdk._fns.set(fn, (data: { tags?: unknown }) => {
+      received = data;
+      return { success: true };
+    });
+    await sdk._fns.get(route)!({
+      headers: { authorization: `Bearer ${SECRET}` },
+      body: { ...base, tags: "bug, auth,," },
+    });
+    expect(received?.tags).toEqual(["bug", "auth"]);
+  });
+});
