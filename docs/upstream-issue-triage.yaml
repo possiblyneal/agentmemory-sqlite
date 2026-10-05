@@ -1173,8 +1173,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Viewer Actions tab hangs forever if any action has tags as a string."
-    disposition: candidate
-    status: "present-here — api::actions forwards tags unchecked (src/triggers/api.ts:2749) and mem::action-create stores them as given (src/functions/actions.ts:40), while the viewer calls (a.tags || []).join/.map (src/viewer/index.html:3488, 3528), which throw on a string."
+    disposition: already-fixed
+    fixed_by: "api::action-create and api::action-update normalise CSV string tags to an array (withTagArray, src/triggers/api.ts) and the viewer renders a legacy string tag through tagList; test/api-field-whitelist.test.ts, test/viewer-dashboard.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/906
   - number: 907
     title: "Request to add available APIs for batch session deletion and graph cleanup"
@@ -1358,8 +1358,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Dashboard MEMORIES tile counts only memory_save facts, reading 1 on a healthy install."
-    disposition: candidate
-    status: "present-here — the Memories tile renders d.memories.length from memories?latest=true&limit=500 (src/viewer/index.html:1481, 1585), which counts mem:memories only, not semantic facts."
+    disposition: already-fixed
+    fixed_by: "The Memories tile reads the memories response total, and Semantic Facts keep their own tile (src/viewer/index.html renderDashboard); test/viewer-dashboard.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/951
     fix_prs: [973]
   - number: 952
@@ -2436,8 +2436,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Viewer renders array-valued session summaries as [object Object]."
-    disposition: candidate
-    status: "present-here — api::sessions replaces summary with the SessionSummary object (src/triggers/api.ts:1082-1083) and the viewer renders s.firstPrompt || s.summary through esc(truncate(...)) (src/viewer/index.html:3234, 3298), printing [object Object] when firstPrompt is missing."
+    disposition: already-fixed
+    fixed_by: "The viewer renders an object session summary through summaryText (narrative, then title) in the Sessions list and detail (src/viewer/index.html); test/viewer-dashboard.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1229
     fix_prs: [1332]
   - number: 1232
@@ -2615,8 +2615,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Dashboard Memories card uses the length of a limited fetch, capping at 500."
-    disposition: candidate
-    status: "present-here — the tile is the .length of a limit=500 fetch rather than the response's total (src/viewer/index.html:1481, 1585), so it sticks at 500; same edit as rohitg00/agentmemory#951."
+    disposition: already-fixed
+    fixed_by: "The Memories tile reads the response total instead of the length of the limit=500 page (src/viewer/index.html); test/viewer-dashboard.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1279
     fix_prs: [1347]
   - number: 1292
@@ -2780,8 +2780,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Viewer conflates fetch failure with empty, flipping between stats and the new-install hero."
-    disposition: candidate
-    status: "partly-present-here — the panel no longer blanks (src/viewer/index.html:1476) and failure is kept apart from empty (:1504-1508, 1574), but every live event still fires all 11 dashboard requests with no coalescing (:4026-4029, 1478-1490)."
+    disposition: already-fixed
+    fixed_by: "Live events mark the dashboard dirty and scheduleDashboardRefresh coalesces them to one loadDashboard per 5 s (src/viewer/index.html); test/viewer-dashboard.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1340
     fix_prs: [1342]
   - number: 1341

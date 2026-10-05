@@ -54,6 +54,13 @@ function pickFields(body: unknown, fields: readonly string[]): Record<string, un
   return picked;
 }
 
+function withTagArray(payload: Record<string, unknown>): Record<string, unknown> {
+  if (typeof payload.tags === "string") {
+    payload.tags = payload.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+  return payload;
+}
+
 function checkAuth(
   req: ApiRequest,
   secret: string | undefined,
@@ -2746,7 +2753,7 @@ export function registerApiTriggers(
       if (!req.body?.title) {
         return { status_code: 400, body: { error: "title is required" } };
       }
-      const result = await sdk.trigger({ function_id: "mem::action-create", payload: pickFields(req.body, ["title", "description", "priority", "createdBy", "project", "tags", "parentId", "sourceObservationIds", "sourceMemoryIds", "edges"]) });
+      const result = await sdk.trigger({ function_id: "mem::action-create", payload: withTagArray(pickFields(req.body, ["title", "description", "priority", "createdBy", "project", "tags", "parentId", "sourceObservationIds", "sourceMemoryIds", "edges"])) });
       return { status_code: 201, body: result };
     },
   );
@@ -2772,7 +2779,7 @@ export function registerApiTriggers(
       if (!req.body?.actionId) {
         return { status_code: 400, body: { error: "actionId is required" } };
       }
-      const result = await sdk.trigger({ function_id: "mem::action-update", payload: pickFields(req.body, ["actionId", "status", "title", "description", "priority", "assignedTo", "result", "tags"]) });
+      const result = await sdk.trigger({ function_id: "mem::action-update", payload: withTagArray(pickFields(req.body, ["actionId", "status", "title", "description", "priority", "assignedTo", "result", "tags"])) });
       return { status_code: 200, body: result };
     },
   );
