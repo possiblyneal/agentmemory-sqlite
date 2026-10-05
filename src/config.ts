@@ -262,6 +262,25 @@ export function loadEmbeddingConfig(): EmbeddingConfig {
   };
 }
 
+const EMBEDDING_PROVIDERS = ["gemini", "openai", "voyage", "cohere", "openrouter", "local"];
+
+export function embeddingConfigWarnings(env?: Record<string, string>): string[] {
+  const source = env ?? getMergedEnv();
+  const warnings: string[] = [];
+  const forced = source["EMBEDDING_PROVIDER"];
+  if (forced && !EMBEDDING_PROVIDERS.includes(forced)) {
+    warnings.push(
+      `EMBEDDING_PROVIDER="${forced}" is not recognised (use ${EMBEDDING_PROVIDERS.join(", ")}); running BM25-only`,
+    );
+  }
+  if (source["AGENTMEMORY_EMBEDDING_PROVIDER"]) {
+    warnings.push(
+      "AGENTMEMORY_EMBEDDING_PROVIDER is ignored; the variable is named EMBEDDING_PROVIDER",
+    );
+  }
+  return warnings;
+}
+
 export function detectEmbeddingProvider(
   env?: Record<string, string>,
 ): string | null {

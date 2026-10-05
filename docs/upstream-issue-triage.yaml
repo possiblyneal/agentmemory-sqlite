@@ -169,8 +169,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Local embedding stays at none despite a correct xenova config."
-    disposition: candidate
-    status: "partly-present-here — EMBEDDING_PROVIDER=local works, but an unrecognised value falls to `default: return null` (src/providers/embedding/index.ts:47) and the misnamed AGENTMEMORY_EMBEDDING_PROVIDER is never read (src/config.ts:269), so boot logs BM25-only (src/index.ts:195) with no warning."
+    disposition: already-fixed
+    fixed_by: "embeddingConfigWarnings() warns at boot on an unknown EMBEDDING_PROVIDER or the misnamed AGENTMEMORY_EMBEDDING_PROVIDER (src/config.ts, src/index.ts); test/embedding-provider.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/395
     fix_prs: [412, 1283]
   - number: 399
@@ -1116,8 +1116,8 @@ issues:
     difficulty: low
     kind: bug
     note: "Slot tools return opaque Internal error when AGENTMEMORY_SLOTS is off."
-    disposition: candidate
-    status: "present-here — the slot tool cases call sdk.trigger with no isSlotsEnabled() guard (src/mcp/server.ts:1257), so the unregistered function falls to the catch-all 500 'Internal error' (server.ts:1370-1378); REST has the guard (src/triggers/api.ts:2563)."
+    disposition: already-fixed
+    fixed_by: "mcp::tools::call answers 503 'Memory slots not enabled' for memory_slot_* when isSlotsEnabled() is false (src/mcp/server.ts); test/slots-project-surfaces.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/888
     fix_prs: [894]
   - number: 889
@@ -1303,8 +1303,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Local embedding provider never activates in 0.9.27; smart-search silently BM25-only."
-    disposition: candidate
-    status: "partly-present-here — boot now logs 'Embedding provider: none (BM25-only mode)' (src/index.ts:195), but local is never auto-detected (src/config.ts:265-278) and plugin/skills/agentmemory-config/SKILL.md:21 says no key means BM25 plus local embeddings."
+    disposition: already-fixed
+    fixed_by: "embeddingConfigWarnings() warns at boot on an unknown EMBEDDING_PROVIDER or the misnamed AGENTMEMORY_EMBEDDING_PROVIDER (src/config.ts, src/index.ts), and plugin/skills/agentmemory-config/SKILL.md now says no key means BM25-only unless local is chosen."
     url: https://github.com/rohitg00/agentmemory/issues/931
     fix_prs: [1284]
     mentioned_by_prs: [1283]
@@ -1781,8 +1781,8 @@ issues:
     difficulty: med
     kind: bug
     note: "memory_heal reports project backfill fixable but fixes nothing."
-    disposition: candidate
-    status: "present-here — memory-project-coverage is marked fixable (src/functions/diagnostics.ts:531, 539), but mem::heal's memories branch only clears isLatest on superseded rows (diagnostics.ts:1324-1369) and inferMemoryProjects leaves session-less memories ambiguous (src/functions/migrate.ts:47-50)."
+    disposition: already-fixed
+    fixed_by: "memory-project-coverage is fixable only when a dry-run inferMemoryProjects can resolve rows, and lists the session-less ones as needing the Operator (src/functions/diagnostics.ts); test/global-memory.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1066
   - number: 1067
     title: "connect claude-code hardcodes ~/.claude.json / ~/.claude/settings.json, ignoring CLAUDE_CONFIG_DIR"
@@ -2457,8 +2457,8 @@ issues:
     difficulty: low
     kind: bug
     note: "CPU percent is single-core scale but thresholds assume total capacity, so multi-core hosts report critical."
-    disposition: candidate
-    status: "present-here — CPU percent is per-core (src/health/monitor.ts:36-37) but is compared against 80/90 machine-wide thresholds (src/health/thresholds.ts:79-84, src/config.ts:430-431); AGENTMEMORY_HEALTH_CPU_*_PERCENT is the only workaround."
+    disposition: already-fixed
+    fixed_by: "CPU percent is divided by availableParallelism() before the threshold check (src/health/monitor.ts), covered in test/health-monitor-probe.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1235
     fix_prs: [1236, 1286]
     mentioned_by_prs: [1237]

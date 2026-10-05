@@ -13,6 +13,7 @@ import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
 import { logger } from "../logger.js";
+import { isSlotsEnabled } from "../functions/slots.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
 import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
 
@@ -106,6 +107,17 @@ export function registerMcpEndpoints(
       void metricsStore
         ?.record(`mcp_tool:${name}`, 0, true)
         .catch(() => undefined);
+
+      if (name.startsWith("memory_slot_") && !isSlotsEnabled()) {
+        return {
+          status_code: 503,
+          body: {
+            error: "Memory slots not enabled",
+            flag: "AGENTMEMORY_SLOTS",
+            enableHow: "Set AGENTMEMORY_SLOTS=true (in ~/.agentmemory/.env or the shell) and restart.",
+          },
+        };
+      }
 
       try {
         switch (name) {

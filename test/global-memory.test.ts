@@ -186,6 +186,27 @@ describe("Global Memory (#95)", () => {
     expect(coverage?.message).toMatch(/^1 of 2 latest memories have no project scope/);
   });
 
+  it("memory-project-coverage is not fixable when no project-less Memory has a Session to resolve it", async () => {
+    await remember({ content: "accidentally unscoped" });
+
+    const result = (await sdk.trigger("mem::diagnose", { categories: ["memories"] })) as {
+      checks: DiagnosticCheck[];
+    };
+    const coverage = result.checks.find((c) => c.name === "memory-project-coverage");
+    expect(coverage?.fixable).toBe(false);
+    expect(coverage?.message).toMatch(/need the Operator/);
+  });
+
+  it("memory-project-coverage is fixable when a Session resolves the project", async () => {
+    await savedInApiSession("resolvable from its session");
+
+    const result = (await sdk.trigger("mem::diagnose", { categories: ["memories"] })) as {
+      checks: DiagnosticCheck[];
+    };
+    const coverage = result.checks.find((c) => c.name === "memory-project-coverage");
+    expect(coverage?.fixable).toBe(true);
+  });
+
   it("the project-inference migration leaves a Global Memory's project unset", async () => {
     const memory = await savedInApiSession("global preference", { global: true });
     await inferMemoryProjects(kv as never);

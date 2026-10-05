@@ -18,7 +18,7 @@ AGENTMEMORY_INJECT_CONTEXT=true
 
 ## Defaults worth knowing
 
-- No API key is required. Without one, agentmemory runs zero-LLM with BM25 plus local embeddings.
+- No API key is required. Without one, agentmemory runs zero-LLM and BM25-only; local embeddings run only when `EMBEDDING_PROVIDER=local` is set. An unrecognised `EMBEDDING_PROVIDER` or the misnamed `AGENTMEMORY_EMBEDDING_PROVIDER` logs a boot warning.
 - Token-spending features ship OFF on purpose: `AGENTMEMORY_AUTO_COMPRESS` (LLM summaries) costs tokens per observation and `AGENTMEMORY_INJECT_CONTEXT` injects recalled context at session start plus up to three strong matches per user prompt.
 - Tool visibility: `AGENTMEMORY_TOOLS=all` (default) or `core` for the lean set.
 - Auth: set `AGENTMEMORY_SECRET` to require `Authorization: Bearer` on the REST API.

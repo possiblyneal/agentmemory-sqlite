@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { getHeapStatistics } from "node:v8";
 import type { ISdk } from "../engine/types.js";
 import type { HealthSnapshot } from "../types.js";
@@ -34,7 +35,9 @@ export function registerHealthMonitor(
     const userDelta = currentCpu.user - prevCpuUsage.user;
     const systemDelta = currentCpu.system - prevCpuUsage.system;
     const cpuPercent =
-      elapsedMs > 0 ? ((userDelta + systemDelta) / 1000 / elapsedMs) * 100 : 0;
+      elapsedMs > 0
+        ? ((userDelta + systemDelta) / 1000 / elapsedMs / availableParallelism()) * 100
+        : 0;
     prevCpuUsage = currentCpu;
     prevCpuTime = now;
 
