@@ -1313,12 +1313,12 @@
       }
     }
     function getViewerToken() {
-      try { return sessionStorage.getItem(VIEWER_TOKEN_STORAGE_KEY) || ''; } catch (_) { return ''; }
+      try { return localStorage.getItem(VIEWER_TOKEN_STORAGE_KEY) || ''; } catch (_) { return ''; }
     }
     function setViewerToken(token) {
       try {
-        if (token) sessionStorage.setItem(VIEWER_TOKEN_STORAGE_KEY, token);
-        else sessionStorage.removeItem(VIEWER_TOKEN_STORAGE_KEY);
+        if (token) localStorage.setItem(VIEWER_TOKEN_STORAGE_KEY, token);
+        else localStorage.removeItem(VIEWER_TOKEN_STORAGE_KEY);
       } catch (_) {}
     }
     function showViewerAuthPrompt() {
