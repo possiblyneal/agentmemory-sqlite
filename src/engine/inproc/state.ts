@@ -283,6 +283,32 @@ export class SqliteState {
     return rows.map((r) => ({ key: r.key, value: JSON.parse(r.value) }));
   }
 
+  listNewest(
+    scope: string,
+    opts: { limit: number; operation?: string; from?: string; to?: string },
+  ): unknown[] {
+    const where = ["scope = ?"];
+    const args: Array<string | number> = [scope];
+    if (opts.operation !== undefined) {
+      where.push("json_extract(value, '$.operation') = ?");
+      args.push(opts.operation);
+    }
+    if (opts.from !== undefined) {
+      where.push("json_extract(value, '$.timestamp') >= ?");
+      args.push(opts.from);
+    }
+    if (opts.to !== undefined) {
+      where.push("json_extract(value, '$.timestamp') <= ?");
+      args.push(opts.to);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT value FROM kv WHERE ${where.join(" AND ")} ORDER BY json_extract(value, '$.timestamp') DESC, seq LIMIT ?`,
+      )
+      .all(...args, opts.limit) as Array<{ value: string }>;
+    return rows.map((r) => JSON.parse(r.value));
+  }
+
   bytes(scope: string): number {
     const row = this.db
       .prepare("SELECT COALESCE(SUM(LENGTH(CAST(value AS BLOB))), 0) AS n FROM kv WHERE scope = ?")
@@ -464,6 +490,7 @@ export function stateFunctions(
     "state::list": async (p) => cooperate(store.list(p.scope)),
     "state::list-page": async (p) => cooperate(store.listPage(p.scope, p.after, p.limit)),
     "state::bytes": async (p) => cooperate(store.bytes(p.scope)),
+    "state::list-newest": async (p) => cooperate(store.listNewest(p.scope, p.opts)),
     "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
     "state::delete-many-if-unchanged": async (p) =>

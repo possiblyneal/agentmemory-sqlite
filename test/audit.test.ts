@@ -8,7 +8,9 @@ import { recordAudit, queryAudit, evictOldestAudit } from "../src/functions/audi
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
+  const listNewestCalls: Array<{ scope: string; opts: Record<string, unknown> }> = [];
   return {
+    listNewestCalls,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
@@ -23,6 +25,25 @@ function mockKV() {
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
+    },
+    listNewest: async <T>(
+      scope: string,
+      opts: { limit: number; operation?: string; from?: string; to?: string },
+    ): Promise<T[]> => {
+      listNewestCalls.push({ scope, opts });
+      const rows = Array.from(store.get(scope)?.values() ?? []) as Array<{
+        timestamp: string;
+        operation: string;
+      }>;
+      return rows
+        .filter(
+          (e) =>
+            (opts.operation === undefined || e.operation === opts.operation) &&
+            (opts.from === undefined || e.timestamp >= opts.from) &&
+            (opts.to === undefined || e.timestamp <= opts.to),
+        )
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, opts.limit) as T[];
     },
   };
 }
@@ -102,6 +123,44 @@ describe("Audit Functions", () => {
 
     const entries = await queryAudit(kv as never, { limit: 3 });
     expect(entries.length).toBe(3);
+  });
+
+  it("queryAudit asks storage for only the newest matches and never lists the scope", async () => {
+    const list = vi.spyOn(kv, "list");
+    for (let i = 0; i < 6; i++) {
+      await kv.set("mem:audit", `aud_${i}`, {
+        id: `aud_${i}`,
+        timestamp: new Date(Date.UTC(2026, 0, 1 + i)).toISOString(),
+        operation: i % 2 ? "delete" : "observe",
+      });
+    }
+
+    const entries = await queryAudit(kv as never, {
+      operation: "observe",
+      dateFrom: "2026-01-02T00:00:00.000Z",
+      limit: 2,
+    });
+
+    expect(entries.map((e) => e.id)).toEqual(["aud_4", "aud_2"]);
+    expect(list).not.toHaveBeenCalled();
+    expect(kv.listNewestCalls).toEqual([
+      {
+        scope: "mem:audit",
+        opts: {
+          limit: 2,
+          operation: "observe",
+          from: "2026-01-02T00:00:00.000Z",
+          to: undefined,
+        },
+      },
+    ]);
+  });
+
+  it("queryAudit defaults the limit to 100 and rejects an invalid date", async () => {
+    await queryAudit(kv as never);
+    expect(kv.listNewestCalls[0].opts.limit).toBe(100);
+    await expect(queryAudit(kv as never, { dateFrom: "nope" })).rejects.toThrow("Invalid dateFrom");
+    await expect(queryAudit(kv as never, { dateTo: "nope" })).rejects.toThrow("Invalid dateTo");
   });
 
   it("evictOldestAudit keeps the newest AGENTMEMORY_AUDIT_MAX entries", async () => {

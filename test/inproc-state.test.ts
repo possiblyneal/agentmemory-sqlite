@@ -26,6 +26,28 @@ describe("inproc state store", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("list-newest returns the newest matching rows first, filtered and limited in SQL", async () => {
+    const fns = stateFunctions(store);
+    const rows: Array<[string, string, string]> = [
+      ["a", "2026-01-01T00:00:00.000Z", "observe"],
+      ["b", "2026-01-03T00:00:00.000Z", "delete"],
+      ["c", "2026-01-02T00:00:00.000Z", "observe"],
+      ["d", "2026-01-04T00:00:00.000Z", "observe"],
+      ["e", "2026-01-04T00:00:00.000Z", "observe"],
+    ];
+    for (const [key, timestamp, operation] of rows) {
+      await fns["state::set"]({ scope: "audit", key, value: { id: key, timestamp, operation } });
+    }
+    await fns["state::set"]({ scope: "other", key: "z", value: { id: "z", timestamp: "2027-01-01T00:00:00.000Z", operation: "observe" } });
+    const ids = async (opts: object) =>
+      ((await fns["state::list-newest"]({ scope: "audit", opts })) as Array<{ id: string }>).map((r) => r.id);
+
+    expect(await ids({ limit: 10 })).toEqual(["d", "e", "b", "c", "a"]);
+    expect(await ids({ limit: 2 })).toEqual(["d", "e"]);
+    expect(await ids({ limit: 10, operation: "observe", from: "2026-01-02T00:00:00.000Z" })).toEqual(["d", "e", "c"]);
+    expect(await ids({ limit: 10, to: "2026-01-02T00:00:00.000Z" })).toEqual(["c", "a"]);
+  });
+
   it("lists the scopes under a prefix and nothing beside it", async () => {
     const fns = stateFunctions(store);
     for (const scope of ["mem:obs:a", "mem:obs:b", "mem:obs;x", "mem:sessions"]) {
