@@ -3,6 +3,7 @@ import {
   createEmbeddingProvider,
   withEmbeddingGuards,
 } from "../src/providers/embedding/index.js";
+import { embeddingConfigWarnings } from "../src/config.js";
 import { GeminiEmbeddingProvider } from "../src/providers/embedding/gemini.js";
 import { OpenAIEmbeddingProvider } from "../src/providers/embedding/openai.js";
 import type { EmbeddingProvider } from "../src/types.js";
@@ -264,5 +265,24 @@ describe("withEmbeddingGuards", () => {
       }),
     );
     expect(withoutImage.embedImage).toBeUndefined();
+  });
+});
+
+describe("embeddingConfigWarnings", () => {
+  it("is silent for a recognised provider and for no provider", () => {
+    expect(embeddingConfigWarnings({ EMBEDDING_PROVIDER: "local" })).toEqual([]);
+    expect(embeddingConfigWarnings({})).toEqual([]);
+  });
+
+  it("warns on an unrecognised EMBEDDING_PROVIDER", () => {
+    const warnings = embeddingConfigWarnings({ EMBEDDING_PROVIDER: "xenova" });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/"xenova" is not recognised/);
+  });
+
+  it("warns on the misnamed AGENTMEMORY_EMBEDDING_PROVIDER", () => {
+    const warnings = embeddingConfigWarnings({ AGENTMEMORY_EMBEDDING_PROVIDER: "local" });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/AGENTMEMORY_EMBEDDING_PROVIDER/);
   });
 });

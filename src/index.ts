@@ -4,6 +4,7 @@ import {
   loadConfig,
   getEnvVar,
   loadEmbeddingConfig,
+  embeddingConfigWarnings,
   loadFallbackConfig,
   loadClaudeBridgeConfig,
   loadTeamConfig,
@@ -186,6 +187,9 @@ async function main() {
   bootLog(
     `Provider: ${config.provider.provider} (${config.provider.model})`,
   );
+  for (const warning of embeddingConfigWarnings()) {
+    console.warn(`[agentmemory] ${warning}`);
+  }
   if (embeddingProvider) {
     bootLog(
       `Embedding provider: ${embeddingProvider.name} (${embeddingProvider.dimensions} dims)`,

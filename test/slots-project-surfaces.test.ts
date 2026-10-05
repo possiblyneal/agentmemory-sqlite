@@ -117,3 +117,24 @@ describe("slot surfaces carry project", () => {
     expect(del.status_code).toBe(200);
   });
 });
+
+describe("MCP slot tools with slots disabled", () => {
+  const ORIGINAL = process.env["AGENTMEMORY_SLOTS"];
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env["AGENTMEMORY_SLOTS"];
+    else process.env["AGENTMEMORY_SLOTS"] = ORIGINAL;
+  });
+
+  it("answers that slots are not enabled instead of Internal error", async () => {
+    delete process.env["AGENTMEMORY_SLOTS"];
+    const sdk = mockSdk();
+    registerMcpEndpoints(sdk as never, mockKV() as never, SECRET);
+    const res = (await sdk._fns.get("mcp::tools::call")!({
+      headers: AUTH,
+      body: { name: "memory_slot_list", arguments: {} },
+    })) as Reply;
+    expect(res.status_code).toBe(503);
+    expect(res.body.error).toBe("Memory slots not enabled");
+    expect(res.body.flag).toBe("AGENTMEMORY_SLOTS");
+  });
+});

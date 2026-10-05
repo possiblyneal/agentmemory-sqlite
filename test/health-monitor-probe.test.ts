@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { availableParallelism } from "node:os";
 import { registerHealthMonitor } from "../src/health/monitor.js";
 import { KV } from "../src/state/schema.js";
 import type { HealthSnapshot } from "../src/types.js";
@@ -64,5 +65,29 @@ describe("health monitor store probe", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const snapshot = await latestAfterFirstSample(mockKV("hang"), 5000);
     expect(snapshot.kvConnectivity).toMatchObject({ status: "error", error: "kv_probe_failed" });
+  });
+});
+
+describe("health monitor cpu", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("reports cpu against total core capacity", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    let user = 0;
+    vi.spyOn(process, "cpuUsage").mockImplementation(() => ({ user, system: 0 }));
+    const kv = mockKV("ok");
+    const monitor = registerHealthMonitor(mockSdk() as never, kv as never);
+    await vi.waitFor(async () => {
+      expect(await kv.get(KV.health, "latest")).not.toBeNull();
+    });
+    user = 30_000_000;
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(async () => {
+      expect((await kv.get<HealthSnapshot>(KV.health, "latest"))!.cpu.percent).toBeCloseTo(100 / availableParallelism(), 1);
+    });
+    monitor.stop();
   });
 });
