@@ -1930,7 +1930,7 @@ async function runRemove(): Promise<void> {
   }
 
   p.outro(
-    "Done. agentmemory cleanly removed. The npm package itself: npm uninstall -g @agentmemory/agentmemory",
+    "Done. agentmemory cleanly removed. The linked binary itself: npm unlink -g @agentmemory/agentmemory",
   );
 }
 

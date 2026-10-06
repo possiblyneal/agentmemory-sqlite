@@ -63,7 +63,7 @@ The main reason to use persistent memory at all: token cost. Here's what one yea
 | supermemory | Not published | Cloud pricing | Managed API, no local token budget |
 | Mem0 | Varies by integration | Varies | Extraction-based, no token budget |
 
-**agentmemory ships with a built-in token savings calculator.** Run `npx @agentmemory/agentmemory status` after a few sessions and you'll see exactly how many tokens you've saved vs. pasting the full history.
+**agentmemory ships with a built-in token savings calculator.** Run `agentmemory status` after a few sessions and you'll see exactly how many tokens you've saved vs. pasting the full history.
 
 ---
 

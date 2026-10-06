@@ -49,8 +49,8 @@ number to plan against. p50 will lie to you.
 ### Running it
 
 ```bash
-# 1. Start the daemon however you normally do (npx, Docker, etc.)
-npx @agentmemory/agentmemory
+# 1. Start the daemon however you normally do (a linked `agentmemory` binary, Docker, etc.)
+agentmemory
 
 # 2. From the repo root, in another shell:
 npm run bench:load
