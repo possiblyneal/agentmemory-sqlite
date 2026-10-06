@@ -2,14 +2,13 @@
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
-import { recordMissedInjection, missReason } from "./_missed-injection.js";
+import { INJECT_TIMEOUT_MS, recordMissedInjection, missReason } from "./_missed-injection.js";
 
 hydrateHookEnv();
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
-const INJECT_TIMEOUT_MS = 1500;
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };

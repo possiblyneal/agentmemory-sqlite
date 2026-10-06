@@ -158,6 +158,7 @@ function hookCwd(data) {
 }
 //#endregion
 //#region src/hooks/_missed-injection.ts
+const INJECT_TIMEOUT_MS = 1500;
 const MAX_BYTES = 256 * 1024;
 const KEEP_ENTRIES = 1e3;
 function missedInjectionsPath() {
@@ -185,7 +186,6 @@ hydrateHookEnv();
 const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
-const INJECT_TIMEOUT_MS = 1500;
 const REGISTER_TIMEOUT_MS = 800;
 function authHeaders() {
 	const h = { "Content-Type": "application/json" };

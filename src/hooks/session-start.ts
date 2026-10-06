@@ -2,7 +2,7 @@
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
-import { recordMissedInjection, missReason } from "./_missed-injection.js";
+import { INJECT_TIMEOUT_MS, recordMissedInjection, missReason } from "./_missed-injection.js";
 
 hydrateHookEnv();
 
@@ -22,7 +22,6 @@ const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
 // concurrent fan-out (Slack bots, multi-agent harnesses) and becomes a
 // positive feedback loop that OOM-kills iii-engine (#221). Cap tight on
 // both paths and skip the await entirely when the response is unused.
-const INJECT_TIMEOUT_MS = 1500;
 const REGISTER_TIMEOUT_MS = 800;
 
 function authHeaders(): Record<string, string> {

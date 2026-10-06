@@ -1,3 +1,4 @@
+import { daemonCall } from "../daemon-http.js";
 import { startSandbox, type EmbeddingMode, type Sandbox } from "../sandbox.js";
 import { randomUUID } from "node:crypto";
 import type {
@@ -51,20 +52,8 @@ function probeSessionId(): string {
   return `eval-probe-${randomUUID()}`;
 }
 
-function authHeaders(secret?: string): Record<string, string> {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (secret) h.Authorization = `Bearer ${secret}`;
-  return h;
-}
-
 async function post<T>(state: Pick<AgentMemoryState, "baseUrl" | "secret">, path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${state.baseUrl}/agentmemory/${path}`, {
-    method: "POST",
-    headers: authHeaders(state.secret),
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`${path} failed: ${res.status} ${await res.text()}`);
-  return (await res.json()) as T;
+  return (await daemonCall<T>(state.baseUrl, path, { body, secret: state.secret })).body;
 }
 
 function normalize(text: string): string {
@@ -150,7 +139,9 @@ async function querySearch(q: Question, state: AgentMemoryState, k: number): Pro
   const seen = new Set<string>();
   for (const row of body.results ?? []) {
     const memoryId = row.obsId ?? row.id;
-    const sessionId = row.sessionId ?? (memoryId ? state.memoryToSession.get(memoryId) : undefined);
+    // A remembered eval Session comes back under the "memory" placeholder
+    // Session, so its own mapping must win.
+    const sessionId = (memoryId && state.memoryToSession.get(memoryId)) || row.sessionId;
     if (!sessionId || seen.has(sessionId)) continue;
     seen.add(sessionId);
     ranked.push({ sessionId, score: row.score ?? 0 });

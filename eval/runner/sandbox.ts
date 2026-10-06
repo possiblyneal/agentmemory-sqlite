@@ -8,6 +8,7 @@ export type EmbeddingMode = "local" | "none";
 
 export interface Sandbox {
   baseUrl: string;
+  sqlitePath: string;
   stop(): Promise<void>;
 }
 
@@ -52,7 +53,9 @@ async function isUp(baseUrl: string): Promise<boolean> {
 // The daemon reads ~/.agentmemory/.env and inherits provider keys from the
 // shell, so the sandbox gets its own HOME under the repo's tmp/ and an env
 // built from scratch: no LLM provider (synthetic compression, no summaries)
-// and only the embedding provider the run asks for.
+// and only the embedding provider the run asks for. A shell that sets
+// EMBEDDING_PROVIDER and OPENAI_EMBEDDING_* picks a remote embedder for every
+// run that uses embeddings at all; the endpoint is never written in the repo.
 function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
@@ -64,7 +67,16 @@ function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode)
     if (key.startsWith("HF_") && value !== undefined) env[key] = value;
   }
   if (embeddings === "local") env.EMBEDDING_PROVIDER = "local";
+  if (embeddings !== "none") {
+    for (const [key, value] of Object.entries(process.env)) {
+      const forwarded = key === "EMBEDDING_PROVIDER" || key.startsWith("OPENAI_EMBEDDING_");
+      if (forwarded && value !== undefined) env[key] = value;
+    }
+  }
   if (process.env.RERANK_ENABLED) env.RERANK_ENABLED = process.env.RERANK_ENABLED;
+  if (process.env.AGENTMEMORY_INJECT_CONTEXT) {
+    env.AGENTMEMORY_INJECT_CONTEXT = process.env.AGENTMEMORY_INJECT_CONTEXT;
+  }
   return env;
 }
 
@@ -89,11 +101,12 @@ export async function startSandbox(opts: {
   mkdirSync(resolve(dir, "home"), { recursive: true });
   const log = openSync(logPath, "w");
 
+  const sqlitePath = resolve(dir, "agentmemory.sqlite");
   const child: ChildProcess = spawn(
     process.execPath,
     [cli, "--instance", String(opts.instance)],
     {
-      env: sandboxEnv(resolve(dir, "home"), resolve(dir, "agentmemory.sqlite"), opts.embeddings),
+      env: sandboxEnv(resolve(dir, "home"), sqlitePath, opts.embeddings),
       stdio: ["ignore", log, log],
     },
   );
@@ -124,5 +137,5 @@ export async function startSandbox(opts: {
     }
     await new Promise((r) => setTimeout(r, 200));
   }
-  return { baseUrl, stop };
+  return { baseUrl, sqlitePath, stop };
 }

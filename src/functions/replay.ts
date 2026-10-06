@@ -326,7 +326,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::replay::import-jsonl",
     async (
-      data: { path?: string; maxFiles?: number } = {},
+      data: { path?: string; maxFiles?: number; project?: string } = {},
     ): Promise<
       | {
           success: true;
@@ -422,6 +422,9 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
 
         const parsed = parseJsonlText(text, generateId("sess"));
         if (parsed.observations.length === 0) continue;
+        // A transcript from a since-deleted worktree can no longer name its
+        // repo from its cwd, so the caller may name the project instead.
+        if (data.project) parsed.project = data.project;
 
         const firstPromptObs = parsed.observations.find(
           (o) => typeof o.userPrompt === "string" && o.userPrompt.trim().length > 0,
