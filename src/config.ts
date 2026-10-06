@@ -533,6 +533,13 @@ export function getBackupKeep(): number {
   return keep >= 0 ? keep : BACKUP_KEEP_DEFAULT;
 }
 
+const INSIGHT_MAX_IDLE_DAYS_DEFAULT = 180;
+
+export function getInsightMaxIdleDays(): number {
+  const days = safeParseInt(getMergedEnv()["AGENTMEMORY_INSIGHT_MAX_IDLE_DAYS"], INSIGHT_MAX_IDLE_DAYS_DEFAULT);
+  return days > 0 ? days : INSIGHT_MAX_IDLE_DAYS_DEFAULT;
+}
+
 export function isConsolidationEnabled(): boolean {
   const env = getMergedEnv();
   const explicit = env["CONSOLIDATION_ENABLED"];
