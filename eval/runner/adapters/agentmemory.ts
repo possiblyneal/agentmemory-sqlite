@@ -133,12 +133,12 @@ interface StoredObservation {
 }
 
 async function storedObservations(state: AgentMemoryState, sessionId: string): Promise<StoredObservation[]> {
-  const res = await fetch(
-    `${state.baseUrl}/agentmemory/observations?sessionId=${encodeURIComponent(sessionId)}`,
-    { headers: authHeaders(state.secret) },
+  const { body } = await daemonCall<{ observations?: StoredObservation[] }>(
+    state.baseUrl,
+    `observations?sessionId=${encodeURIComponent(sessionId)}`,
+    { secret: state.secret },
   );
-  if (!res.ok) throw new Error(`observations failed: ${res.status} ${await res.text()}`);
-  return ((await res.json()) as { observations?: StoredObservation[] }).observations ?? [];
+  return body.observations ?? [];
 }
 
 // What the sandbox holds, not what the dataset says: the daemon has to have
