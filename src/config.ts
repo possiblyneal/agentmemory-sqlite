@@ -215,7 +215,8 @@ export function getClaudeJsonPath(): string {
 
 export function getSqlitePath(): string {
   return (
-    getEnvVar("AGENTMEMORY_SQLITE_PATH") || join(DATA_DIR, "agentmemory.sqlite")
+    getEnvVar("AGENTMEMORY_SQLITE_PATH") ||
+    join(getEnvVar("AGENTMEMORY_DATA_DIR") || DATA_DIR, "agentmemory.sqlite")
   );
 }
 
