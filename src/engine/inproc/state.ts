@@ -406,6 +406,26 @@ export class SqliteState {
     });
   }
 
+  // set() per row in one transaction, but only where the stored row's updatedAt
+  // still equals the one the caller read (`updatedAt` on the entry; `value`
+  // carries its own new one): a row rewritten since then (an Insight
+  // reinforced mid-decay-sweep) is kept. Returns the keys actually written.
+  setManyIfUnchanged(
+    scope: string,
+    entries: Array<{ key: string; value: unknown; updatedAt: string }>,
+  ): string[] {
+    return this.transaction(() => {
+      const written: string[] = [];
+      for (const { key, value, updatedAt } of entries) {
+        const prev = this.read(scope, key);
+        if ((prev.value as { updatedAt?: unknown } | null)?.updatedAt !== updatedAt) continue;
+        this.set(scope, key, value);
+        written.push(key);
+      }
+      return written;
+    });
+  }
+
   update(scope: string, key: string, ops: UpdateOp[]): {
     old_value: unknown;
     new_value: unknown;
@@ -480,7 +500,7 @@ async function cooperate<T>(result: T): Promise<T> {
 }
 
 // The function handlers, in the exact shapes `src/state/kv.ts` sends and the
-// engine returns (`state::set-many` and `state::delete-many-if-unchanged` are
+// engine returns (`state::set-many`, `state::set-many-if-unchanged` and `state::delete-many-if-unchanged` are
 // inproc-only; kv.ts never sends them to iii). Registered on the shim by `sdk.ts`.
 export function stateFunctions(
   store: SqliteState,
@@ -496,6 +516,8 @@ export function stateFunctions(
     "state::list-newest": async (p) => cooperate(store.listNewest(p.scope, p.opts)),
     "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
+    "state::set-many-if-unchanged": async (p) =>
+      cooperate(store.setManyIfUnchanged(p.scope, p.entries ?? [])),
     "state::delete-many-if-unchanged": async (p) =>
       cooperate(store.deleteManyIfUnchanged(p.scope, p.entries ?? [])),
   };

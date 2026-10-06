@@ -545,7 +545,7 @@ export function registerReflectFunctions(
         loadProjectTime(kv),
       ]);
       const timestamp = new Date().toISOString();
-      const dirty: Insight[] = [];
+      const dirty: Array<{ insight: Insight; readUpdatedAt: string }> = [];
       const expired: Array<{ key: string; updatedAt: string }> = [];
       const activeWeeksApplied: Record<string, number> = {};
 
@@ -573,20 +573,24 @@ export function registerReflectFunctions(
             expired.push({ key: insight.id, updatedAt: insight.updatedAt });
             continue;
           }
+          const readUpdatedAt = insight.updatedAt;
           insight.confidence = confidence;
           insight.lastDecayedAt = timestamp;
           insight.updatedAt = timestamp;
-          dirty.push(insight);
+          dirty.push({ insight, readUpdatedAt });
         }
       }
 
       // Awaited batches, not a fan-out: N un-awaited sets run back to back on
       // the event loop under inproc (see StateKV.setMany).
-      await kv.setMany(KV.insights, dirty.map((i) => ({ key: i.id, value: i })));
+      const decayedIds = await kv.setManyIfUnchanged(
+        KV.insights,
+        dirty.map(({ insight, readUpdatedAt }) => ({ key: insight.id, value: insight, updatedAt: readUpdatedAt })),
+      );
       const deletedIds = await kv.deleteManyIfUnchanged(KV.insights, expired);
-      await recordAudit(kv, "reflect", "mem::insight-decay-sweep", [...dirty.map((i) => i.id), ...deletedIds], {
+      await recordAudit(kv, "reflect", "mem::insight-decay-sweep", [...decayedIds, ...deletedIds], {
         event: "insight.decay",
-        decayed: dirty.length,
+        decayed: decayedIds.length,
         deleted: deletedIds.length,
         deletedIds,
         activeWeeks: activeWeeksApplied,
@@ -594,7 +598,7 @@ export function registerReflectFunctions(
         timestamp,
       });
 
-      return { success: true, decayed: dirty.length, deleted: deletedIds.length, total: items.length };
+      return { success: true, decayed: decayedIds.length, deleted: deletedIds.length, total: items.length };
     },
   );
 }

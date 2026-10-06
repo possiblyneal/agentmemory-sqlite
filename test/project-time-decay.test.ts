@@ -31,6 +31,19 @@ function mockKV() {
       for (const e of entries) await set(scope, e.key, e.value);
       return entries.length;
     },
+    setManyIfUnchanged: async <T>(
+      scope: string,
+      entries: Array<{ key: string; value: T; updatedAt: string }>,
+    ): Promise<string[]> => {
+      const written: string[] = [];
+      for (const { key, value, updatedAt } of entries) {
+        const row = store.get(scope)?.get(key) as { updatedAt?: string } | undefined;
+        if (row?.updatedAt !== updatedAt) continue;
+        store.get(scope)!.set(key, value);
+        written.push(key);
+      }
+      return written;
+    },
     deleteManyIfUnchanged: async (
       scope: string,
       entries: Array<{ key: string; updatedAt: string }>,
@@ -48,7 +61,7 @@ function mockKV() {
       store.get(scope)?.delete(key);
     },
     list: async <T>(scope: string): Promise<T[]> =>
-      Array.from(store.get(scope)?.values() ?? []) as T[],
+      structuredClone(Array.from(store.get(scope)?.values() ?? [])) as T[],
   };
 }
 

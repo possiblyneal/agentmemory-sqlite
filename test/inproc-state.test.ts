@@ -406,6 +406,32 @@ describe("inproc state store: batched writes and event-loop cooperation", () => 
     expect(store.db.isTransaction).toBe(false);
   });
 
+  it("state::set-many-if-unchanged writes only rows whose updatedAt still matches", async () => {
+    const fns = stateFunctions(store);
+    const events: StateEvent[] = [];
+    store.watchScope("s");
+    store.onEvent((e) => events.push(e));
+    await fns["state::set"]({ scope: "s", key: "same", value: { updatedAt: "t1", v: 1 } });
+    await fns["state::set"]({ scope: "s", key: "rewritten", value: { updatedAt: "t2", v: 1 } });
+    events.length = 0;
+
+    const written = await fns["state::set-many-if-unchanged"]({
+      scope: "s",
+      entries: [
+        { key: "same", updatedAt: "t1", value: { updatedAt: "t3", v: 2 } },
+        { key: "rewritten", updatedAt: "t1", value: { updatedAt: "t3", v: 2 } },
+        { key: "missing", updatedAt: "t1", value: { updatedAt: "t3", v: 2 } },
+      ],
+    });
+
+    expect(written).toEqual(["same"]);
+    expect(await fns["state::get"]({ scope: "s", key: "same" })).toEqual({ updatedAt: "t3", v: 2 });
+    expect(await fns["state::get"]({ scope: "s", key: "rewritten" })).toEqual({ updatedAt: "t2", v: 1 });
+    expect(await fns["state::get"]({ scope: "s", key: "missing" })).toBeNull();
+    expect(events.map((e) => [e.event_type, e.key])).toEqual([["state:updated", "same"]]);
+    expect(store.db.isTransaction).toBe(false);
+  });
+
   it("a long run of awaited state calls lets a macrotask run before it finishes", async () => {
     const fns = stateFunctions(store);
     await fns["state::set"]({ scope: "s", key: "k", value: { n: 0 } });
