@@ -11,6 +11,7 @@ import type {
   Session,
 } from "../types.js";
 import { questionPath } from "../types.js";
+import { VERSION } from "../../../src/version.js";
 
 interface Needle {
   text: string;
@@ -87,12 +88,16 @@ export function attribute(context: string, needles: Needle[]): RankedDoc[] {
     .map(([sessionId, at]) => ({ sessionId, score: -at }));
 }
 
-function observePayload(s: Session, o: EvalObservation, index: number) {
+function observeTimestamp(s: Session, index: number): string {
   const base = Date.parse(s.timestamp ?? "2026-01-01T00:00:00Z");
+  return new Date(base + index * 1000).toISOString();
+}
+
+function observePayload(s: Session, o: EvalObservation, index: number) {
   const common = {
     sessionId: s.id,
     ...projectScope(s.project),
-    timestamp: new Date(base + index * 1000).toISOString(),
+    timestamp: observeTimestamp(s, index),
   };
   if (o.tool === "prompt") {
     return { ...common, hookType: "prompt_submit", data: { prompt: o.output } };
@@ -114,9 +119,74 @@ async function ingestCaptured(state: AgentMemoryState, s: Session): Promise<void
   const observations = s.observations ?? [];
   for (let i = 0; i < observations.length; i++) {
     await post(state, "observe", observePayload(s, observations[i], i));
-    state.needles.push({ text: needleFor(observations[i].output), sessionId: s.id });
+    if (!observations[i].routine) {
+      state.needles.push({ text: needleFor(observations[i].output), sessionId: s.id });
+    }
   }
   await post(state, "session/end", { sessionId: s.id });
+  await applyImportance(state, s);
+}
+
+interface StoredObservation {
+  timestamp: string;
+  importance?: number;
+}
+
+async function storedObservations(state: AgentMemoryState, sessionId: string): Promise<StoredObservation[]> {
+  const res = await fetch(
+    `${state.baseUrl}/agentmemory/observations?sessionId=${encodeURIComponent(sessionId)}`,
+    { headers: authHeaders(state.secret) },
+  );
+  if (!res.ok) throw new Error(`observations failed: ${res.status} ${await res.text()}`);
+  return ((await res.json()) as { observations?: StoredObservation[] }).observations ?? [];
+}
+
+// What the sandbox holds, not what the dataset says: the daemon has to have
+// kept more than one importance, or the ranking is as unexercised as before.
+async function assertStoredImportanceVaried(state: AgentMemoryState, sessions: Session[]): Promise<void> {
+  const rated = sessions.filter((s) => s.observations?.some((o) => o.importance !== undefined));
+  if (rated.length === 0) return;
+  const stored = await Promise.all(rated.map((s) => storedObservations(state, s.id)));
+  const values = new Set(stored.flat().map((o) => o.importance));
+  if (values.size < 2) throw new Error("the sandbox stored a single Observation importance");
+}
+
+// Synthetic compression rates every Observation 5 and the sandbox has no LLM
+// to rate them, so the dataset's fixed ratings are written back through the
+// import endpoint, which merges over the stored rows by id.
+async function applyImportance(state: AgentMemoryState, s: Session): Promise<void> {
+  const rated = new Map<string, number>();
+  (s.observations ?? []).forEach((o, i) => {
+    if (o.importance !== undefined) rated.set(observeTimestamp(s, i), o.importance);
+  });
+  if (rated.size === 0) return;
+  const stored = await storedObservations(state, s.id);
+  const updated = stored
+    .filter((o) => rated.has(o.timestamp))
+    .map((o) => ({ ...o, importance: rated.get(o.timestamp) }));
+  if (updated.length !== rated.size) {
+    throw new Error(`${s.id}: stored ${updated.length} of ${rated.size} rated Observations`);
+  }
+  const result = await post<{ success?: boolean; error?: string }>(state, "import", {
+    exportData: {
+      version: VERSION,
+      sessions: [],
+      memories: [],
+      summaries: [],
+      observations: { [s.id]: updated },
+    },
+    strategy: "merge",
+  });
+  if (!result.success) throw new Error(`importance import failed: ${result.error}`);
+}
+
+// A rated dataset must rate on more than one value, or session-start ranking
+// by importance would be exercised no more than under synthetic compression.
+export function assertVariedImportance(sessions: Session[]): void {
+  const ratings = sessions.flatMap((s) => (s.observations ?? []).map((o) => o.importance));
+  if (ratings.some((r) => r !== undefined) && new Set(ratings).size < 2) {
+    throw new Error("rated Observations all carry one importance; the ranking would go unexercised");
+  }
 }
 
 async function ingestRemembered(state: AgentMemoryState, s: Session): Promise<void> {
@@ -188,6 +258,7 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
       memoryToSession: new Map(),
     };
     try {
+      assertVariedImportance(sessions);
       const ordered = [...sessions].sort((a, b) =>
         (a.timestamp ?? "").localeCompare(b.timestamp ?? ""),
       );
@@ -195,6 +266,7 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
         if (s.observations?.length) await ingestCaptured(state, s);
         else await ingestRemembered(state, s);
       }
+      await assertStoredImportanceVaried(state, sessions);
     } catch (err) {
       await sandbox?.stop();
       throw err;

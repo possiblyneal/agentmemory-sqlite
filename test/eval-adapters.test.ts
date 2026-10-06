@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
+import { assertVariedImportance, attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
 import { randomAdapter } from "../eval/runner/adapters/random.js";
 import { aggregate, compareToBaseline, scoreQuestion } from "../eval/runner/score.js";
@@ -192,5 +192,17 @@ describe("coding-agent-life-v2 dataset", () => {
         true,
       );
     }
+  });
+
+  it("rates every captured Observation on more than one importance value", () => {
+    const observations = sessions.flatMap((s) => s.observations ?? []);
+    expect(observations.every((o) => Number.isInteger(o.importance) && o.importance! >= 1 && o.importance! <= 10)).toBe(true);
+    expect(new Set(observations.map((o) => o.importance)).size).toBeGreaterThan(1);
+    expect(() => assertVariedImportance(sessions)).not.toThrow();
+  });
+
+  it("refuses a rated dataset that rates everything alike", () => {
+    const flat: Session[] = [{ id: "s", observations: [{ tool: "Read", output: "a", importance: 5 }, { tool: "Read", output: "b", importance: 5 }] }];
+    expect(() => assertVariedImportance(flat)).toThrow(/one importance/);
   });
 });
