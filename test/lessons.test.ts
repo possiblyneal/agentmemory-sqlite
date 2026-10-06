@@ -444,6 +444,29 @@ describe("Lessons", () => {
       expect(await kv.get("mem:lessons", tomb.id)).toBeNull();
     });
 
+    it("the boot purge deletes tombstones and leaves live Lessons alone", async () => {
+      const tomb = await tombstone("purged at boot");
+      const live = (await sdk.trigger("mem::lesson-save", { content: "still live" })) as { lesson: Lesson };
+
+      const result = (await sdk.trigger("mem::lesson-purge-tombstones", {})) as { deleted: number };
+
+      expect(result.deleted).toBe(1);
+      expect(await kv.get("mem:lessons", tomb.id)).toBeNull();
+      expect(await kv.get("mem:lessons", live.lesson.id)).not.toBeNull();
+    });
+
+    it("strengthening a tombstone reports it not found and leaves it unreinforced", async () => {
+      const tomb = await tombstone("strengthened tombstone");
+
+      const result = (await sdk.trigger("mem::lesson-strengthen", { lessonId: tomb.id })) as {
+        success: boolean;
+        error?: string;
+      };
+
+      expect(result).toEqual({ success: false, error: "lesson not found" });
+      expect((await kv.get<Lesson>("mem:lessons", tomb.id))!.reinforcements).toBe(0);
+    });
+
     it("saving a tombstoned Lesson again stores a fresh Lesson the sweep keeps", async () => {
       const tomb = await tombstone("saved again");
 

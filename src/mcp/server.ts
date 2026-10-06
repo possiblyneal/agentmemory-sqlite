@@ -13,7 +13,7 @@ import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
 import { isOversizedPayload } from "../state/payload-bound.js";
-import { parsePage, listSessionsPage } from "../functions/sessions-page.js";
+import { DEFAULT_PAGE_LIMIT, listSessionsPage } from "../functions/sessions-page.js";
 import { logger } from "../logger.js";
 import { isSlotsEnabled } from "../functions/slots.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
@@ -357,11 +357,18 @@ export function registerMcpEndpoints(
           }
 
           case "memory_sessions": {
+            const limit = args.limit ?? DEFAULT_PAGE_LIMIT;
+            const offset = args.offset ?? 0;
+            if (!Number.isInteger(limit) || (limit as number) <= 0) {
+              return { status_code: 400, body: { error: "limit must be a positive integer" } };
+            }
+            if (!Number.isInteger(offset) || (offset as number) < 0) {
+              return { status_code: 400, body: { error: "offset must be a non-negative integer" } };
+            }
             const page = await listSessionsPage(
               kv,
-              parsePage({
-                limit: typeof args.limit === "number" ? String(args.limit) : undefined,
-              }),
+              { limit: limit as number, offset: offset as number },
+              isAgentScopeIsolated() ? getAgentId() : undefined,
             );
             return {
               status_code: 200,

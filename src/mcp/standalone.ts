@@ -109,6 +109,11 @@ function parseLimit(raw: unknown, fallback = DEFAULT_LIMIT): number {
   return Math.min(Math.floor(n), MAX_LIMIT);
 }
 
+function parseOffset(raw: unknown): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
 function textResponse(payload: unknown, pretty = false): {
   content: Array<{ type: string; text: string }>;
 } {
@@ -131,6 +136,7 @@ interface Validated {
   global?: boolean;
   query?: string;
   limit?: number;
+  offset?: number;
   format?: string;
   tokenBudget?: number;
   memoryIds?: string[];
@@ -204,6 +210,7 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
     }
     case "memory_sessions": {
       v.limit = parseLimit(args["limit"], 20);
+      v.offset = parseOffset(args["offset"]);
       return v;
     }
     case "memory_governance_delete": {
@@ -274,7 +281,7 @@ async function handleProxy(
     }
     case "memory_sessions": {
       const result = await handle.call(
-        `/agentmemory/sessions?limit=${v.limit}`,
+        `/agentmemory/sessions?limit=${v.limit}&offset=${v.offset}`,
         { method: "GET" },
       );
       return textResponse(result, true);
@@ -362,7 +369,8 @@ async function handleLocal(
       const sessions =
         await kvInstance.list<Record<string, unknown>>("mem:sessions");
       const limit = v.limit ?? 20;
-      return textResponse({ sessions: sessions.slice(0, limit) }, true);
+      const offset = v.offset ?? 0;
+      return textResponse({ sessions: sessions.slice(offset, offset + limit) }, true);
     }
 
     case "memory_governance_delete": {

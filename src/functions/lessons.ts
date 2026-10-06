@@ -242,7 +242,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       }
 
       const lesson = await kv.get<Lesson>(KV.lessons, data.lessonId);
-      if (!lesson) {
+      if (!lesson || lesson.deleted) {
         return { success: false, error: "lesson not found" };
       }
 
@@ -287,6 +287,41 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       return { success: true, lesson };
     },
   );
+
+  async function purgeLessons(
+    expired: Array<{ key: string; updatedAt: string }>,
+    functionId: string,
+    reason: string,
+  ): Promise<string[]> {
+    if (expired.length === 0) return [];
+    const deletedIds = await kv.deleteManyIfUnchanged(KV.lessons, expired);
+    for (const id of deletedIds) {
+      lessonRecords.delete(id);
+      if (lessonIndex) lessonIndex.remove(id);
+    }
+    if (deletedIds.length > 0) {
+      noteLessonMutation();
+      await recordAudit(kv, "lesson_delete", functionId, deletedIds, {
+        action: "delete",
+        actor: "system",
+        reason,
+        deleted: deletedIds.length,
+        deletedIds,
+      });
+    }
+    return deletedIds;
+  }
+
+  // Older releases left deleted Lessons as deleted: true tombstones, which
+  // readers no longer filter out; boot runs this whatever LESSON_DECAY_ENABLED says.
+  sdk.registerFunction("mem::lesson-purge-tombstones", async () => {
+    const lessons = await kv.list<Lesson>(KV.lessons);
+    const tombstones = lessons
+      .filter((lesson) => lesson.deleted)
+      .map((lesson) => ({ key: lesson.id, updatedAt: lesson.updatedAt }));
+    const deletedIds = await purgeLessons(tombstones, "mem::lesson-purge-tombstones", "tombstone-purge");
+    return { success: true, deleted: deletedIds.length };
+  });
 
   sdk.registerFunction("mem::lesson-decay-sweep", 
     async () => {
@@ -347,16 +382,11 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
           dirty.map(({ lesson, readUpdatedAt }) => ({ key: lesson.id, value: lesson, updatedAt: readUpdatedAt })),
         ),
       );
-      const deletedIds =
-        expired.length > 0 ? await kv.deleteManyIfUnchanged(KV.lessons, expired) : [];
+      const deletedIds = await purgeLessons(expired, "mem::lesson-decay-sweep", "decay-sweep");
       for (const { lesson } of dirty) {
         if (decayedIds.has(lesson.id)) lessonRecords.set(lesson.id, lesson);
       }
-      for (const id of deletedIds) {
-        lessonRecords.delete(id);
-        if (lessonIndex) lessonIndex.remove(id);
-      }
-      if (decayedIds.size > 0 || deletedIds.length > 0) noteLessonMutation();
+      if (decayedIds.size > 0) noteLessonMutation();
       for (const event of auditEvents.filter((e) => decayedIds.has(e.id))) {
         await recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", [event.id], {
           action: "decay",
@@ -365,15 +395,6 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
           activeWeeks: event.activeWeeks,
           before: { confidence: event.beforeConfidence },
           after: { confidence: event.afterConfidence },
-        });
-      }
-      if (deletedIds.length > 0) {
-        await recordAudit(kv, "lesson_delete", "mem::lesson-decay-sweep", deletedIds, {
-          action: "delete",
-          actor: "system",
-          reason: "decay-sweep",
-          deleted: deletedIds.length,
-          deletedIds,
         });
       }
 

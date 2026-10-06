@@ -20,7 +20,7 @@ function mockKV(sessions: Array<Record<string, unknown>>) {
   };
 }
 
-async function listSessions(
+async function callSessions(
   sessions: Array<Record<string, unknown>>,
   args: Record<string, unknown> = {},
 ) {
@@ -35,6 +35,14 @@ async function listSessions(
     headers: { authorization: `Bearer ${SECRET}` },
     body: { name: "memory_sessions", arguments: args },
   });
+  return res;
+}
+
+async function listSessions(
+  sessions: Array<Record<string, unknown>>,
+  args: Record<string, unknown> = {},
+) {
+  const res = await callSessions(sessions, args);
   return JSON.parse(res.body.content[0].text);
 }
 
@@ -56,5 +64,33 @@ describe("memory_sessions", () => {
     const out = await listSessions(rows, { limit: 2 });
     expect(out.sessions.map((s: { id: string }) => s.id)).toEqual(["new", "mid"]);
     expect(out.total).toBe(4);
+  });
+
+  it("skips offset Sessions from the newest", async () => {
+    const out = await listSessions(rows, { limit: 2, offset: 1 });
+    expect(out.sessions.map((s: { id: string }) => s.id)).toEqual(["mid", "old"]);
+    expect(out.total).toBe(4);
+  });
+
+  it.each([{ limit: 0 }, { limit: 2.5 }, { limit: "5" }, { offset: -1 }, { offset: 1.5 }])(
+    "rejects %o instead of falling back to a default",
+    async (args) => {
+      const res = await callSessions(rows, args);
+      expect(res.status_code).toBe(400);
+    },
+  );
+
+  it("shows only this agent's Sessions when agent scope is isolated, as REST does", async () => {
+    vi.stubEnv("AGENT_ID", "agent-a");
+    vi.stubEnv("AGENTMEMORY_AGENT_SCOPE", "isolated");
+    try {
+      const out = await listSessions([
+        { id: "mine", agentId: "agent-a", startedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "theirs", agentId: "agent-b", startedAt: "2026-01-02T00:00:00.000Z" },
+      ]);
+      expect(out.sessions.map((s: { id: string }) => s.id)).toEqual(["mine"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

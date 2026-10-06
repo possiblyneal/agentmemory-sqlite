@@ -219,8 +219,9 @@ upstream deliberately: this fork does not own those package names.
 Nothing is published from here — there is no release workflow and `dist/` is gitignored, so
 the only install path is clone → `npm ci` → `npm run build` →
 `npm link`. Any doc that tells a user how to install must describe that path, never
-`npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. There is no exception:
-`plugin/.mcp.json` and the entry `agentmemory connect` writes both run this fork's own
+`npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. The only files that may
+quote those commands are the ones `test/consistency.test.ts` exempts; that list is the one place
+exceptions live. `plugin/.mcp.json` and the entry `agentmemory connect` writes both run this fork's own
 `agentmemory mcp` from `PATH`, which defaults an omitted `project` to the one resolved from its
 cwd (`src/mcp/default-project.ts`; an explicit `project` or `scope: "global"` wins). Never point
 either at the `@agentmemory/mcp` npm shim, which passes no project. The translated `READMEs/` were deleted rather than kept

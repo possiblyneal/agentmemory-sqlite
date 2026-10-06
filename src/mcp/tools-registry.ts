@@ -186,6 +186,7 @@ export const CORE_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         limit: { type: "number", description: "Max sessions to return (default 100)" },
+        offset: { type: "number", description: "Sessions to skip from the newest (default 0)" },
       },
     },
   },

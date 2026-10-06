@@ -573,9 +573,11 @@ async function main() {
     bootLog(`Auto-forget: enabled (every ${autoForgetIntervalMs / 60000}m)`);
   }
 
+  sdk.trigger({ function_id: "mem::lesson-purge-tombstones", payload: {} }).catch((err) =>
+    logger.error("Lesson tombstone purge failed", { error: err instanceof Error ? err.message : String(err) }),
+  );
+
   if (process.env.LESSON_DECAY_ENABLED !== "false") {
-    // First sweep shortly after boot also purges Lessons older releases left
-    // as deleted: true tombstones, which readers no longer filter out.
     const runLessonDecay = async () => {
       try {
         await sdk.trigger({ function_id: "mem::lesson-decay-sweep", payload: {} });

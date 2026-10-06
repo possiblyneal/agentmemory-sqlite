@@ -964,8 +964,8 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
   });
 
-  it("retries a fold whose first reply fails to parse", async () => {
-    const { handler, provider } = await withPriorSummary("ses_retry", 8, 5, "obs_4", [
+  it("retries a fold whose first reply fails to parse as a whole-Session summary", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_retry", 8, 5, "obs_4", [
       "not xml",
       summaryXml({ title: "second try" }),
     ]);
@@ -974,7 +974,11 @@ describe("mem::summarize incremental fold", () => {
 
     expect(result.summary.title).toBe("second try");
     expect(provider.calls).toHaveLength(2);
-    expect(provider.calls[1].user).toContain("prior narrative text");
+    expect(provider.calls[0].user).toContain("prior narrative text");
+    expect(provider.calls[1].user).toContain("Session observations (8 total)");
+    expect(provider.calls[1].user).not.toContain("prior narrative text");
+    const stored: any = await kv.get("summaries", "ses_retry");
+    expect(stored.observationCount).toBe(8);
   });
 
   it("reuses without calling the provider when no new Observations arrived", async () => {

@@ -488,8 +488,8 @@ export function registerSummarizeFunction(
         // A live Session is summarized every turn, so when a prior summary
         // still marks a real position in the Observation order, only the
         // Observations after it are sent and folded into that summary. A
-        // fold prompt (prior summary included) too big for one chunk falls
-        // back to the whole Session.
+        // fold prompt (prior summary included) too big for one chunk, or a
+        // fold whose first attempt fails, falls back to the whole Session.
         const priorCount = existing?.observationCount ?? 0;
         const foldable =
           !data.force &&
@@ -505,11 +505,12 @@ export function registerSummarizeFunction(
           const [tokens] = await countObservationTokens(provider, [prompt], budget, sessionId);
           if (fitsOneChunk([tokens!], budget)) foldPrompt = prompt;
         }
-        if (!foldPrompt) planned = await planChunks(provider, compressed, sessionId, concurrency);
         for (let attempt = 1; attempt <= 2; attempt++) {
-          const produced = foldPrompt
+          const fold = attempt === 1 ? foldPrompt : null;
+          if (!fold) planned ??= await planChunks(provider, compressed, sessionId, concurrency);
+          const produced = fold
             ? {
-                response: await provider.summarize(FOLD_SYSTEM, foldPrompt),
+                response: await provider.summarize(FOLD_SYSTEM, fold),
                 mode: "folded" as const,
                 chunks: 1,
               }

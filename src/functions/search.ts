@@ -148,8 +148,7 @@ export async function rebuildBm25FromContent(
 // replace). Memories and observations both get access-log rows (search
 // records observation hits), so the log always goes with the content. In
 // inproc mode the content row, the access-log row and the vector rows go in
-// ONE transaction, so a crash cannot leave a vector for content that is gone;
-// with iii the steps are sequential.
+// ONE transaction, so a crash cannot leave a vector for content that is gone.
 export async function deleteIndexed(kv: StateKV, scope: string, id: string): Promise<void> {
   const state = inprocState
   // recordAccess is a read-modify-write under this lock; take it so a

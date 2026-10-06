@@ -2,7 +2,7 @@ import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import type { Session, SessionSummary } from "../types.js";
 
-const DEFAULT_PAGE_LIMIT = 100;
+export const DEFAULT_PAGE_LIMIT = 100;
 const SUMMARY_BATCH = 10;
 
 export type Page = { limit: number | "all"; offset: number };
