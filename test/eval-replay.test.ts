@@ -8,7 +8,7 @@ import {
 } from "../eval/runner/replay-answer-key.js";
 import {
   scoreSession,
-  summarize,
+  summarizeReplay,
   worstCases,
   type Probe,
   type ProbeItem,
@@ -282,7 +282,7 @@ describe("scoreSession", () => {
   });
 });
 
-describe("summarize", () => {
+describe("summarizeReplay", () => {
   const earlier = session("e1", "2026-09-01T10:00:00Z", [{ user: "x" }, { tool: "Edit", file: `${CWD}/src/cart.ts` }]);
   const hit = session("c1", "2026-09-08T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/src/cart.ts` }]);
   const miss = session("c2", "2026-09-15T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/src/cart.ts` }]);
@@ -297,7 +297,7 @@ describe("summarize", () => {
     ]),
     scoreSession(miss, deriveAnswerKey(miss, [earlier, hit]), [probe("search", 1, [item({ ref: "observation:a", files: ["src/cart.ts"] })])]),
   ];
-  const summary = summarize(scores, { storeBytesStart: 1000, storeBytesEnd: 3000 });
+  const summary = summarizeReplay(scores, { storeBytesStart: 1000, storeBytesEnd: 3000 });
 
   it("scores each Goal line from the probes", () => {
     expect(summary.rightContent).toMatchObject({ injectedItems: 2, usedItems: 1, usedShare: 0.5 });

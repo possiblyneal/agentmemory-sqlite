@@ -74,6 +74,9 @@ function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode)
     }
   }
   if (process.env.RERANK_ENABLED) env.RERANK_ENABLED = process.env.RERANK_ENABLED;
+  if (process.env.AGENTMEMORY_INJECT_CONTEXT) {
+    env.AGENTMEMORY_INJECT_CONTEXT = process.env.AGENTMEMORY_INJECT_CONTEXT;
+  }
   return env;
 }
 

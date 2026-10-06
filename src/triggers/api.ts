@@ -676,12 +676,21 @@ export function registerApiTriggers(
 
   sdk.registerFunction("api::replay::import",
     async (
-      req: ApiRequest<{ path?: string; maxFiles?: number }>,
+      req: ApiRequest<{ path?: string; maxFiles?: number; project?: string }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const payload: { path?: string; maxFiles?: number } = {};
+      const payload: { path?: string; maxFiles?: number; project?: string } = {};
+      if (body.project !== undefined) {
+        if (typeof body.project !== "string" || body.project.trim().length === 0) {
+          return {
+            status_code: 400,
+            body: { error: "project must be a non-empty string" },
+          };
+        }
+        payload.project = body.project.trim();
+      }
       if (body.path !== undefined) {
         if (typeof body.path !== "string" || body.path.trim().length === 0) {
           return {

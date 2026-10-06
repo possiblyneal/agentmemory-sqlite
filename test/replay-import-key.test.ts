@@ -142,6 +142,24 @@ describe("import-jsonl re-key on parsed.sessionId (#775)", () => {
     expect((sessionWrites.at(-1)!.value as any).id).toBe("sess-no-id");
   });
 
+  it("files the imported Session under the caller's project when one is given", async () => {
+    writeFixture("sess-named");
+    const kv = mockKV();
+    const sdk = mockSdk(kv);
+    registerReplayFunctions(sdk, kv as never);
+
+    const result = (await sdk.trigger("mem::replay::import-jsonl", {
+      path: tmpRoot,
+      project: "main-checkout",
+    })) as { success: boolean; imported?: number };
+
+    expect(result.success).toBe(true);
+    const sessionWrites = kv
+      .getSetCalls()
+      .filter((c) => c.scope === KV.sessions && c.key === "sess-named");
+    expect((sessionWrites.at(-1)!.value as any).project).toBe("main-checkout");
+  });
+
   it("fresh import (no existing row) still writes session keyed by parsed.sessionId", async () => {
     writeFixture("sess-fresh");
     const kv = mockKV();

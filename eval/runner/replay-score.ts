@@ -6,13 +6,16 @@ import {
   type AnswerKey,
   type KeyItem,
 } from "./replay-answer-key.js";
+import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
 
 export type ProbeKind = "session-start" | "prompt-context" | "search";
 
+export type ItemKind = "observation" | "summary" | "lesson" | "memory";
+
 export interface ProbeItem {
   ref: string;
-  kind: string;
+  kind: ItemKind;
   sessionId?: string;
   project?: string;
   files: string[];
@@ -30,7 +33,7 @@ export interface Probe {
 
 export interface ScoredItem {
   ref: string;
-  kind: string;
+  kind: ItemKind;
   firstTurn: number;
   used: boolean;
   leak: boolean;
@@ -123,8 +126,6 @@ export function scoreSession(session: ReplaySession, key: AnswerKey, probes: Pro
   };
 }
 
-export const HOOK_TIMEOUT_MS = 1500;
-
 export interface RunMeta {
   storeBytesStart: number;
   storeBytesEnd: number;
@@ -147,7 +148,7 @@ function percentile(sorted: number[], p: number): number | null {
 
 const DAY_MS = 86_400_000;
 
-export function summarize(scores: SessionScore[], meta: RunMeta) {
+export function summarizeReplay(scores: SessionScore[], meta: RunMeta) {
   const items = scores.flatMap((s) => s.items);
   const outcomes = scores.flatMap((s) => s.outcomes);
   const kinds = ["file", "correction", "decision"] as const;
@@ -217,7 +218,7 @@ export function summarize(scores: SessionScore[], meta: RunMeta) {
             n: ms.length,
             p50: percentile(ms, 0.5),
             p99: percentile(ms, 0.99),
-            overHookTimeout: ms.filter((m) => m > HOOK_TIMEOUT_MS).length,
+            overHookTimeout: ms.filter((m) => m > INJECT_TIMEOUT_MS).length,
           },
         ];
       }),
@@ -230,7 +231,7 @@ export function summarize(scores: SessionScore[], meta: RunMeta) {
   };
 }
 
-export type ReplaySummary = ReturnType<typeof summarize>;
+export type ReplaySummary = ReturnType<typeof summarizeReplay>;
 
 export interface WorstCase {
   category: "miss" | "noise" | "leak";
@@ -243,7 +244,9 @@ const MISS_SEVERITY: Record<KeyItem["kind"], number> = { correction: 3, decision
 
 // Misses rank by how costly the Operator found them, noise by how much it cost
 // the Agent to read, and leaks are all equal.
-export function worstCases(scores: SessionScore[], perCategory = 20): WorstCase[] {
+const WORST_PER_CATEGORY = 20;
+
+export function worstCases(scores: SessionScore[]): WorstCase[] {
   const misses = scores
     .flatMap((s) => s.outcomes.filter((o) => !o.injected).map((o) => ({ s, o })))
     .sort(
@@ -252,7 +255,7 @@ export function worstCases(scores: SessionScore[], perCategory = 20): WorstCase[
         (b.o.key.kind === "file" ? b.o.key.earlierSessionIds.length : 0) -
           (a.o.key.kind === "file" ? a.o.key.earlierSessionIds.length : 0),
     )
-    .slice(0, perCategory)
+    .slice(0, WORST_PER_CATEGORY)
     .map(({ s, o }) => ({
       category: "miss" as const,
       sessionId: s.sessionId,
@@ -265,7 +268,7 @@ export function worstCases(scores: SessionScore[], perCategory = 20): WorstCase[
   const noise = scores
     .flatMap((s) => s.items.filter((i) => !i.used && !i.leak).map((i) => ({ s, i })))
     .sort((a, b) => b.i.chars - a.i.chars)
-    .slice(0, perCategory)
+    .slice(0, WORST_PER_CATEGORY)
     .map(({ s, i }) => ({
       category: "noise" as const,
       sessionId: s.sessionId,
@@ -274,7 +277,7 @@ export function worstCases(scores: SessionScore[], perCategory = 20): WorstCase[
     }));
   const leaks = scores
     .flatMap((s) => s.items.filter((i) => i.leak).map((i) => ({ s, i })))
-    .slice(0, perCategory)
+    .slice(0, WORST_PER_CATEGORY)
     .map(({ s, i }) => ({
       category: "leak" as const,
       sessionId: s.sessionId,

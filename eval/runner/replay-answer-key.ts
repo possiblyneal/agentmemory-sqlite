@@ -7,8 +7,10 @@ export interface FileNeed {
   earlierSessionIds: string[];
 }
 
-export interface RepeatedCorrection {
-  kind: "correction";
+// A user turn that echoes an earlier Session's turn: a correction the Operator
+// had to give twice, or a decision brought up again.
+export interface EchoedTurn {
+  kind: "correction" | "decision";
   turn: number;
   text: string;
   earlierSessionId: string;
@@ -16,21 +18,12 @@ export interface RepeatedCorrection {
   earlierText: string;
 }
 
-export interface RevisitedDecision {
-  kind: "decision";
-  turn: number;
-  text: string;
-  earlierSessionId: string;
-  earlierTurn: number;
-  earlierText: string;
-}
-
-export type KeyItem = FileNeed | RepeatedCorrection | RevisitedDecision;
+export type KeyItem = FileNeed | EchoedTurn;
 
 export interface AnswerKey {
   files: FileNeed[];
-  corrections: RepeatedCorrection[];
-  decisions: RevisitedDecision[];
+  corrections: EchoedTurn[];
+  decisions: EchoedTurn[];
 }
 
 const STOPWORDS = new Set(
@@ -138,42 +131,27 @@ export function filesNeeded(session: ReplaySession, earlier: ReplaySession[]): F
   return [...needs.values()];
 }
 
-export function repeatedCorrections(session: ReplaySession, earlier: ReplaySession[]): RepeatedCorrection[] {
-  const pool = earlierTurns(earlier, isCorrection);
+function echoedTurns(
+  kind: EchoedTurn["kind"],
+  session: ReplaySession,
+  earlier: ReplaySession[],
+  earlierKeep: (text: string) => boolean,
+  keep: (text: string) => boolean,
+): EchoedTurn[] {
+  const pool = earlierTurns(earlier, earlierKeep);
   return session.userTurns.flatMap((t) => {
-    if (!isCorrection(t.text)) return [];
-    const match = bestMatch(t.text, pool);
+    const match = keep(t.text) ? bestMatch(t.text, pool) : null;
     if (!match) return [];
-    return [
-      {
-        kind: "correction" as const,
-        turn: t.turn,
-        text: t.text,
-        earlierSessionId: match.sessionId,
-        earlierTurn: match.turn,
-        earlierText: match.text,
-      },
-    ];
+    return [{ kind, turn: t.turn, text: t.text, earlierSessionId: match.sessionId, earlierTurn: match.turn, earlierText: match.text }];
   });
 }
 
-export function decisionsRevisited(session: ReplaySession, earlier: ReplaySession[]): RevisitedDecision[] {
-  const pool = earlierTurns(earlier, isDecision);
-  return session.userTurns.flatMap((t) => {
-    if (isCorrection(t.text)) return [];
-    const match = bestMatch(t.text, pool);
-    if (!match) return [];
-    return [
-      {
-        kind: "decision" as const,
-        turn: t.turn,
-        text: t.text,
-        earlierSessionId: match.sessionId,
-        earlierTurn: match.turn,
-        earlierText: match.text,
-      },
-    ];
-  });
+export function repeatedCorrections(session: ReplaySession, earlier: ReplaySession[]): EchoedTurn[] {
+  return echoedTurns("correction", session, earlier, isCorrection, isCorrection);
+}
+
+export function decisionsRevisited(session: ReplaySession, earlier: ReplaySession[]): EchoedTurn[] {
+  return echoedTurns("decision", session, earlier, isDecision, (text) => !isCorrection(text));
 }
 
 // Only earlier Sessions of the same project count: Recall is scoped by

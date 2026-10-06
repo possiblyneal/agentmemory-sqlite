@@ -91,7 +91,7 @@ The `agentmemory` adapter starts a fresh sandbox per question there, since every
 
 ```sh
 npm run build
-npm run eval:replay -- --projects=-home-neal-code-homelab,-home-neal-code-glydr --cap 40
+npm run eval:replay -- --projects=-home-neal-code-homelab,-home-neal-orca-workspaces-homelab-eel,-home-neal-code-glydr --cap 40
 ```
 
 `runner/replay.ts` replays real Claude Code Sessions from `~/.claude/projects/<dir>/*.jsonl` (read-only) in start-time order, all projects interleaved, into one throwaway daemon. It is not part of CI and not published: the data is private. Before it ingests Session k it probes what the Agent would have been given, against a store holding only Sessions 1..k-1:
@@ -99,9 +99,13 @@ npm run eval:replay -- --projects=-home-neal-code-homelab,-home-neal-code-glydr 
 - `session/start` with the Session's real id, cwd and project, so the session-start Injection and the per-Session dedupe of later Injections behave as in a live Session;
 - `prompt-context` for each real human prompt (the per-prompt Injection), and `smart-search` (top 5, project-scoped) for the same prompt as a query-driven baseline;
 
-then ingests Session k through `/agentmemory/replay/import-jsonl`, the path `agentmemory import-jsonl` uses. What each probe delivered is read back from `GET /agentmemory/injections` (the daemon's own record of the Injected Memories), not guessed from the text.
+then ingests Session k through `/agentmemory/replay/import-jsonl`, the path `agentmemory import-jsonl` uses, naming the project explicitly (below). What each probe delivered is read back from `GET /agentmemory/injections` (the daemon's own record of the Injected Memories), not guessed from the text.
 
-Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` because they start with `-`), `--cap N` (Sessions per project, earliest first, default 40), `--min-turns N` (default 2; drops the one-prompt automated `claude -p` runs that otherwise dominate), `--max-prompts N` (prompts probed per Session, default 40), `--instance N` (default 9, never 0; ports 3111+100N), `--embeddings local|none` (default `local`), `--out DIR` (default `tmp/eval-replay`). Subagent transcripts (`agent-*.jsonl`, `subagents/`), sidechain entries, harness-written turns, slash-command wrappers and files over 20 MB are skipped.
+Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` because they start with `-`), `--cap N` (Sessions per resolved project, earliest first, default 40), `--min-turns N` (default 2; drops the one-prompt automated `claude -p` runs that otherwise dominate), `--max-prompts N` (prompts probed per Session, default 40), `--instance N` (default 9, never 0; ports 3111+100N), `--embeddings local|none` (default `local`), `--out DIR` (default `tmp/eval-replay`). Subagent transcripts (`agent-*.jsonl`, `subagents/`), sidechain entries, harness-written turns, slash-command wrappers and files over 20 MB are skipped.
+
+Each Session is filed under its repository the way the live hooks' `resolveProject()` files it: the main checkout's basename, shared by every worktree. The runner asks git for the common dir from the Session's cwd (or its nearest surviving ancestor), falls back to the Orca layout `<...>/workspaces/<repo>/<worktree>` for a deleted worktree, and otherwise keeps the importer's name; it passes the result as `project` to the import. So list every directory of a repository (main checkout and worktrees) in `--projects` to replay it whole.
+
+The sandbox runs with `AGENTMEMORY_INJECT_CONTEXT=true`, as the Operator's live daemon does, unless the shell sets it.
 
 Providers are recorded in `summary.json`. There is no LLM provider, so Memories are synthetic and there are no summaries or Crystals worth recalling. For a remote embedder set the same variables the daemon reads in the shell, for example `EMBEDDING_PROVIDER=openai OPENAI_EMBEDDING_BASE_URL=... OPENAI_EMBEDDING_API_KEY=... OPENAI_EMBEDDING_MODEL=... OPENAI_EMBEDDING_DIMENSIONS=...`; the sandbox forwards `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*` (and `RERANK_ENABLED`) when set and `--embeddings` is not `none`. Never commit an endpoint.
 
@@ -127,7 +131,7 @@ Session start is turn 0; a prompt's Injection arrives before the work on that pr
 | Right moment | share of key items delivered in time by Injection alone, by search alone, and by either; split by rule |
 | Right scope | Injected items whose project is not Session k's project (target 0) |
 | Durable beats recent | share of repeated corrections whose earlier correction was injected before the repeat |
-| Least record | store bytes at the end per distinct item ever used |
+| Least record | store bytes at the end (database + WAL) per distinct item ever used |
 | Never on the critical path | p50/p99 of each probe, and how many exceeded the 1.5 s hook timeout |
 | Operator attention | store growth in bytes per replayed week (span of start times, at least one day) |
 
@@ -136,12 +140,16 @@ Session start is turn 0; a prompt's Injection arrives before the work on that pr
 The key is a proxy and the numbers are not accuracy:
 
 - A file the Agent read again is not proof the Agent needed the Memory about it; a Memory that was used without touching a file is invisible. The audit in each scorecard measures how many proxy misses were real.
-- `CLAUDE.md` files count as needed files although Claude Code loads them without Recall, and an automated "Another Claude session sent a message" turn (a teammate agent's report) counts as a human prompt, as a probe and as a decision source. The first audit found these two behind 13 of 20 proxy misses (`docs/benchmarks/2026-10-06-replay-eval.md`).
+- `CLAUDE.md` files count as needed files although Claude Code loads them without Recall, and an automated "Another Claude session sent a message" turn (a teammate agent's report) counts as a human prompt, as a probe and as a decision source. Skill expansions and continuation summaries count as prompts too. The first audit found these behind 9 of 20 proxy misses, and terse replies whose need came from earlier in the Session behind 10 more (`docs/benchmarks/2026-10-06-replay-eval.md`).
 - Correction and decision detection is by phrase and word overlap. It misses paraphrases and corrections the Operator typed in an unusual way, and flags quotations or pasted text that happen to match.
 - Items count as "used" by the same word-overlap test, so a Memory that shaped the Agent's behaviour without sharing words with any prompt counts as noise.
-- Project is the importer's (git toplevel basename, else cwd basename), not the live hooks' `resolveProject()`; a worktree of the same repository is a separate project here, so Sessions in different worktrees never recall each other.
+- The hooks' `-<6 hex>` suffix for a second repository with the same basename (`~/.agentmemory/project-names.json`) is not reproduced: two such repositories replay as one project.
+- Sessions are ordered by start time and ingested whole, so a Session that overlapped a later-starting one (parallel worktrees) is in the store before the later one is probed, including turns that happened after that probe's moment.
 - Without an LLM provider the sandbox holds no Memories beyond lessons the importer extracts by phrase, so the "titles and concepts of earlier Memories" form of a revisited decision is not measured; decisions come from earlier human turns.
-- Only prompts up to `--max-prompts` are probed, and only Sessions with `--min-turns` human turns are replayed. History before the oldest transcript on disk is absent.
+- Which repositories to replay is the caller's pick; the runner does not choose the busiest N.
+- Only prompts up to `--max-prompts` are probed (default 40, so the tail of a long Session is never scored), and only Sessions with `--min-turns` human turns are replayed. History before the oldest transcript on disk is absent.
+- Every probe is compared against the 1.5 s Injection timeout of the context-injecting hooks (`INJECT_TIMEOUT_MS`), including `smart-search`, which has no hook.
+- "Least record" divides the final store size (database plus WAL) by distinct used items; the WAL is not checkpointed first, and the store includes Sessions replayed after the last use.
 - Files outside the Session's cwd (`~/.claude`, `/tmp`) are ignored on both sides.
 
 ## Repo layout

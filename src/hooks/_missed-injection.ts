@@ -14,6 +14,10 @@ export interface MissedInjection {
   reason: string;
 }
 
+// How long a context-injecting hook waits for its Injection before it
+// records a Missed Injection and lets the prompt through.
+export const INJECT_TIMEOUT_MS = 1500;
+
 const MAX_BYTES = 256 * 1024;
 const KEEP_ENTRIES = 1000;
 

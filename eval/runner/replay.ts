@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -8,14 +9,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { deriveAnswerKey } from "./replay-answer-key.js";
 import {
   scoreSession,
-  summarize,
+  summarizeReplay,
   worstCases,
   type Probe,
+  type ItemKind,
   type ProbeItem,
   type ProbeKind,
   type SessionScore,
@@ -27,8 +30,10 @@ import {
   relativeToCwd,
   type ReplaySession,
 } from "./replay-transcript.js";
+import { daemonCall } from "./daemon-http.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 
+const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
 const SEARCH_LIMIT = 5;
 const MAX_TRANSCRIPT_BYTES = 20_000_000;
 
@@ -53,7 +58,7 @@ function parseOptions(): Options {
       instance: { type: "string", default: "9" },
       embeddings: { type: "string", default: "local" },
       root: { type: "string", default: join(homedir(), ".claude/projects") },
-      out: { type: "string", default: "tmp/eval-replay" },
+      out: { type: "string", default: join(REPO_TMP, "eval-replay") },
     },
   });
   const positive = (name: string, raw: string, min = 1): number => {
@@ -69,6 +74,12 @@ function parseOptions(): Options {
     console.error("--projects is required: comma-separated directory names under ~/.claude/projects");
     process.exit(2);
   }
+  // The worst-cases file quotes private transcripts, so output never leaves tmp/.
+  const out = resolve(values.out as string);
+  if (relative(REPO_TMP, out).startsWith("..")) {
+    console.error(`--out must be under ${REPO_TMP}, got: ${out}`);
+    process.exit(2);
+  }
   if (values.embeddings !== "local" && values.embeddings !== "none") {
     console.error(`--embeddings must be local or none, got: ${values.embeddings}`);
     process.exit(2);
@@ -81,18 +92,43 @@ function parseOptions(): Options {
     instance: positive("instance", values.instance as string),
     embeddings: values.embeddings,
     root: resolve(values.root as string),
-    out: resolve(values.out as string),
+    out,
   };
 }
 
 interface Loaded {
   sessions: ReplaySession[];
-  perProject: Record<string, { files: number; replayable: number; replayed: number; skippedLarge: number }>;
+  perDirectory: Record<string, { files: number; skippedLarge: number }>;
+  perProject: Record<string, { replayable: number; replayed: number }>;
+}
+
+function mainCheckoutName(dir: string): string | undefined {
+  try {
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    }).trim();
+    return basename(common) === ".git" ? basename(dirname(common)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Mirrors the live hooks' resolveProject: every worktree of a repo files
+// under its main checkout's name. A deleted worktree resolves from its
+// nearest surviving ancestor inside the repo, or from the Orca layout
+// <...>/workspaces/<repo>/<worktree>; anything else keeps the importer's name.
+function repoProject(cwd: string, importerName: string): string {
+  let dir = cwd;
+  while (!existsSync(dir) && dir !== dirname(dir)) dir = dirname(dir);
+  return mainCheckoutName(dir) ?? cwd.match(/\/workspaces\/([^/]+)\/[^/]+/)?.[1] ?? importerName;
 }
 
 function loadSessions(opts: Options): Loaded {
-  const picked: ReplaySession[] = [];
-  const perProject: Loaded["perProject"] = {};
+  const byProject = new Map<string, ReplaySession[]>();
+  const perDirectory: Loaded["perDirectory"] = {};
+  const projectByCwd = new Map<string, string>();
   const seen = new Set<string>();
   for (const dir of opts.projects) {
     const path = join(opts.root, dir);
@@ -101,8 +137,7 @@ function loadSessions(opts: Options): Loaded {
       process.exit(2);
     }
     const files = readdirSync(path).filter(isMainTranscriptName);
-    const stats = { files: files.length, replayable: 0, replayed: 0, skippedLarge: 0 };
-    const parsed: ReplaySession[] = [];
+    const stats = { files: files.length, skippedLarge: 0 };
     for (const name of files) {
       const file = join(path, name);
       if (statSync(file).size > MAX_TRANSCRIPT_BYTES) {
@@ -110,36 +145,26 @@ function loadSessions(opts: Options): Loaded {
         continue;
       }
       const session = parseTranscript(readFileSync(file, "utf8"), file);
-      if (session && session.userTurns.length >= opts.minTurns && !seen.has(session.id)) {
-        seen.add(session.id);
-        parsed.push(session);
-      }
+      if (!session || session.userTurns.length < opts.minTurns || seen.has(session.id)) continue;
+      seen.add(session.id);
+      if (!projectByCwd.has(session.cwd)) projectByCwd.set(session.cwd, repoProject(session.cwd, session.project));
+      session.project = projectByCwd.get(session.cwd)!;
+      byProject.set(session.project, [...(byProject.get(session.project) ?? []), session]);
     }
-    stats.replayable = parsed.length;
-    const chosen = orderByStart(parsed).slice(0, opts.cap);
-    stats.replayed = chosen.length;
-    perProject[dir] = stats;
+    perDirectory[dir] = stats;
+  }
+  const picked: ReplaySession[] = [];
+  const perProject: Loaded["perProject"] = {};
+  for (const [project, sessions] of byProject) {
+    const chosen = orderByStart(sessions).slice(0, opts.cap);
+    perProject[project] = { replayable: sessions.length, replayed: chosen.length };
     picked.push(...chosen);
   }
-  return { sessions: orderByStart(picked), perProject };
+  return { sessions: orderByStart(picked), perDirectory, perProject };
 }
 
-async function call<T>(baseUrl: string, path: string, init?: RequestInit): Promise<{ body: T; ms: number }> {
-  const t0 = performance.now();
-  const res = await fetch(`${baseUrl}/agentmemory/${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(300_000),
-  });
-  const text = await res.text();
-  const ms = performance.now() - t0;
-  if (!res.ok) throw new Error(`${path} failed: ${res.status} ${text.slice(0, 200)}`);
-  return { body: JSON.parse(text) as T, ms };
-}
-
-const post = <T>(baseUrl: string, path: string, body: unknown) =>
-  call<T>(baseUrl, path, { method: "POST", body: JSON.stringify(body) });
-const get = <T>(baseUrl: string, path: string) => call<T>(baseUrl, path);
+const post = <T>(baseUrl: string, path: string, body: unknown) => daemonCall<T>(baseUrl, path, { body });
+const get = <T>(baseUrl: string, path: string) => daemonCall<T>(baseUrl, path);
 
 interface ObsRow {
   id: string;
@@ -150,11 +175,20 @@ interface ObsRow {
   files?: string[];
 }
 
+interface ItemRef {
+  kind: ItemKind;
+  id: string;
+  files?: string[];
+}
+
 interface InjectionRecordRow {
   source: string;
   at: string;
-  injected: Array<{ kind: string; id: string; files?: string[] }>;
+  injected: ItemRef[];
 }
+
+// Lessons and Memories by id, which carry their own project and text.
+type Extra = Map<string, { project?: string; text: string }>;
 
 interface Resolver {
   observations: Map<string, { session: ReplaySession; row: ObsRow }>;
@@ -165,11 +199,7 @@ function obsText(row: ObsRow): string {
   return [row.title, row.narrative, ...(row.facts ?? [])].filter(Boolean).join("\n");
 }
 
-function itemFor(
-  ref: { kind: string; id: string; files?: string[] },
-  resolver: Resolver,
-  extra: Map<string, { project?: string; text: string }>,
-): ProbeItem {
+function itemFor(ref: ItemRef, resolver: Resolver, extra: Extra): ProbeItem {
   const key = `${ref.kind}:${ref.id}`;
   const obs = resolver.observations.get(ref.id);
   if (obs) {
@@ -187,8 +217,8 @@ function itemFor(
 
 // Lessons and Memories carry their own project and text; they are fetched
 // once per Session that needs them, because import adds Lessons as it goes.
-async function lessonsAndMemories(baseUrl: string): Promise<Map<string, { project?: string; text: string }>> {
-  const out = new Map<string, { project?: string; text: string }>();
+async function lessonsAndMemories(baseUrl: string): Promise<Extra> {
+  const out: Extra = new Map();
   const lessons = await get<{ lessons?: Array<{ id: string; content: string; project?: string }> }>(baseUrl, "lessons?limit=1000").catch(() => null);
   for (const l of lessons?.body.lessons ?? []) out.set(l.id, { project: l.project, text: l.content });
   const memories = await get<{ memories?: Array<{ id: string; title?: string; content?: string; project?: string }> }>(baseUrl, "memories?limit=1000").catch(() => null);
@@ -217,53 +247,34 @@ async function probeSession(
   resolver: Resolver,
 ): Promise<Probe[]> {
   const probes: Probe[] = [];
-  const injectionKinds: Array<{ kind: ProbeKind; turn: number; probe: Probe }> = [];
-  const failed = (kind: ProbeKind, turn: number): Probe => ({ kind, turn, latencyMs: 0, chars: 0, items: [], failed: true });
-
-  try {
-    const { body, ms } = await post<{ context?: string }>(baseUrl, "session/start", {
-      sessionId: session.id,
-      project: session.project,
-      cwd: session.cwd,
-    });
-    const probe: Probe = { kind: "session-start", turn: 0, latencyMs: ms, chars: body.context?.length ?? 0, items: [] };
-    probes.push(probe);
-    injectionKinds.push({ kind: "session-start", turn: 0, probe });
-  } catch (err) {
-    console.warn(`  session-start probe failed: ${errorMessage(err)}`);
-    probes.push(failed("session-start", 0));
-  }
-
-  for (const turn of session.userTurns.slice(0, maxPrompts)) {
+  const attempt = async (kind: ProbeKind, turn: number, run: () => Promise<Omit<Probe, "kind" | "turn">>) => {
     try {
-      const { body, ms } = await post<{ context?: string }>(baseUrl, "prompt-context", {
-        sessionId: session.id,
-        prompt: turn.text,
-        project: session.project,
-      });
-      const probe: Probe = { kind: "prompt-context", turn: turn.turn, latencyMs: ms, chars: body.context?.length ?? 0, items: [] };
-      probes.push(probe);
-      injectionKinds.push({ kind: "prompt-context", turn: turn.turn, probe });
+      probes.push({ kind, turn, ...(await run()) });
     } catch (err) {
-      console.warn(`  prompt-context probe failed at turn ${turn.turn}: ${errorMessage(err)}`);
-      probes.push(failed("prompt-context", turn.turn));
+      console.warn(`  ${kind} probe failed at turn ${turn}: ${errorMessage(err)}`);
+      probes.push({ kind, turn, latencyMs: 0, chars: 0, items: [], failed: true });
     }
-    try {
+  };
+  const injection = (path: string, body: unknown) => async () => {
+    const { body: res, ms } = await post<{ context?: string }>(baseUrl, path, body);
+    return { latencyMs: ms, chars: res.context?.length ?? 0, items: [] };
+  };
+
+  await attempt("session-start", 0, injection("session/start", { sessionId: session.id, project: session.project, cwd: session.cwd }));
+  for (const turn of session.userTurns.slice(0, maxPrompts)) {
+    await attempt("prompt-context", turn.turn, injection("prompt-context", { sessionId: session.id, prompt: turn.text, project: session.project }));
+    await attempt("search", turn.turn, async () => {
       const { body, ms } = await post<{ results?: SearchRow[] }>(baseUrl, "smart-search", {
         query: turn.text,
         limit: SEARCH_LIMIT,
         project: session.project,
       });
-      const extra = new Map<string, { project?: string; text: string }>();
-      const items = (body.results ?? []).map((r) => {
-        const id = r.obsId ?? r.id ?? "";
-        return itemFor({ kind: "observation", id }, resolver, extra);
+      const items = (body.results ?? []).flatMap((r) => {
+        const id = r.obsId ?? r.id;
+        return id ? [itemFor({ kind: "observation", id }, resolver, new Map())] : [];
       });
-      probes.push({ kind: "search", turn: turn.turn, latencyMs: ms, chars: items.reduce((n, i) => n + i.text.length, 0), items });
-    } catch (err) {
-      console.warn(`  search probe failed at turn ${turn.turn}: ${errorMessage(err)}`);
-      probes.push(failed("search", turn.turn));
-    }
+      return { latencyMs: ms, chars: items.reduce((n, i) => n + i.text.length, 0), items };
+    });
   }
 
   // The daemon records each Injection as it answers; read the records back
@@ -272,13 +283,19 @@ async function probeSession(
   const { body } = await get<{ injections?: InjectionRecordRow[] }>(baseUrl, `injections?sessionId=${encodeURIComponent(session.id)}`);
   const records = [...(body.injections ?? [])].sort((a, b) => a.at.localeCompare(b.at));
   const extra = await lessonsAndMemories(baseUrl);
-  const delivered = injectionKinds.filter(({ probe }) => !probe.failed);
-  if (records.length !== delivered.length) {
-    console.warn(`  injection records (${records.length}) do not match probes (${delivered.length})`);
+  // Records are paired with probes per source: a session-start record exists
+  // only when the daemon runs with injection on, so position across sources
+  // would shift every later probe onto the wrong record.
+  for (const [kind, source] of [["session-start", "session-start"], ["prompt-context", "prompt-submit"]] as const) {
+    const ofKind = probes.filter((p) => p.kind === kind && !p.failed);
+    const ofSource = records.filter((r) => r.source === source);
+    if (ofKind.length !== ofSource.length) {
+      console.warn(`  ${source} injection records (${ofSource.length}) do not match probes (${ofKind.length})`);
+    }
+    ofKind.forEach((probe, i) => {
+      probe.items = (ofSource[i]?.injected ?? []).map((ref) => itemFor(ref, resolver, extra));
+    });
   }
-  delivered.forEach(({ probe }, i) => {
-    probe.items = (records[i]?.injected ?? []).map((ref) => itemFor(ref, resolver, extra));
-  });
   return probes;
 }
 
@@ -302,12 +319,15 @@ function worstCasesMarkdown(scores: SessionScore[]): string {
 
 async function main(): Promise<void> {
   const opts = parseOptions();
-  const { sessions, perProject } = loadSessions(opts);
-  console.log(`replaying ${sessions.length} Sessions from ${opts.projects.length} projects, instance ${opts.instance}`);
+  const { sessions, perDirectory, perProject } = loadSessions(opts);
+  console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories), instance ${opts.instance}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
   writeFileSync(ndjson, "");
 
+  // The Operator's live daemon injects; without this the sandbox's session
+  // start writes no Injection record and delivers nothing to score.
+  process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
   const ingested: ReplaySession[] = [];
@@ -325,7 +345,7 @@ async function main(): Promise<void> {
 
       const importStart = Date.now();
       try {
-        await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath });
+        await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath, project: session.project });
         const { body } = await get<{ observations?: ObsRow[] }>(sandbox.baseUrl, `observations?sessionId=${encodeURIComponent(session.id)}`);
         for (const row of body.observations ?? []) resolver.observations.set(row.id, { session, row });
         resolver.sessions.set(session.id, session);
@@ -342,7 +362,7 @@ async function main(): Promise<void> {
       );
     }
     const meta = { storeBytesStart: bytesStart, storeBytesEnd: storeBytes(sandbox.sqlitePath) };
-    const summary = summarize(scores, meta);
+    const summary = summarizeReplay(scores, meta);
     const run = {
       date: new Date().toISOString(),
       options: { ...opts, root: undefined, out: undefined },
@@ -353,6 +373,7 @@ async function main(): Promise<void> {
         rerank: process.env.RERANK_ENABLED ?? "off",
         llm: "none",
       },
+      directories: perDirectory,
       projects: perProject,
       minutes: (Date.now() - t0) / 60_000,
     };
