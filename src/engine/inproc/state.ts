@@ -16,6 +16,8 @@
 //
 // `seq` is the rowid, so it is monotonic across inserts and untouched by an
 // in-place update; `ORDER BY seq` reproduces the engine's insertion order.
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export type StateEventType =
@@ -152,6 +154,7 @@ export class SqliteState {
   private writeHook: ((scope: string, key: string) => void) | null = null;
 
   constructor(path: string) {
+    mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL");
     // Authoritative store, tiny write rate: durability of an acknowledged
