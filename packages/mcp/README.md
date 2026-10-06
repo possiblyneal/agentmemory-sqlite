@@ -31,7 +31,7 @@ This package depends on `@agentmemory/agentmemory` and forwards to its
 installed, you can call the same entrypoint directly:
 
 ```bash
-npx @agentmemory/agentmemory mcp
+agentmemory mcp
 ```
 
 Both commands do the same thing.

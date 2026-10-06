@@ -6,14 +6,12 @@ Part of the data-source-connectors effort tracked in issue #62.
 
 ## Install
 
-```bash
-npm install -g @agentmemory/fs-watcher
-```
-
-Or run without installing:
+Nothing is published. From a clone of this repository:
 
 ```bash
-npx @agentmemory/fs-watcher ~/work/my-repo
+cd integrations/filesystem-watcher
+npm link
+agentmemory-fs-watcher ~/work/my-repo
 ```
 
 ## Usage
