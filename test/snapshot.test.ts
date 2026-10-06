@@ -275,6 +275,18 @@ describe("snapshot-restore replaces each captured store", () => {
     expect(result.counts.lessons).toEqual({ written: 1, removed: 1 });
   });
 
+  it("drops a Lesson row marked deleted instead of restoring it", async () => {
+    await kv.set("mem:lessons", "lsn_tomb", { ...lesson("lsn_tomb", "Old tombstone"), deleted: true });
+    await sdk.trigger("mem::snapshot-create", { message: "with tombstone" });
+
+    const result = (await sdk.trigger("mem::snapshot-restore", {
+      commitHash: "abc1234",
+    })) as RestoreResult;
+
+    expect((await kv.list<Lesson>("mem:lessons")).map((l) => l.id)).toEqual(["lsn_1"]);
+    expect(result.counts.lessons).toEqual({ written: 1, removed: 1 });
+  });
+
   it("leaves a store the snapshot never captured untouched and names it", async () => {
     snapshotFile.content = JSON.stringify({
       version: "0.9.29",

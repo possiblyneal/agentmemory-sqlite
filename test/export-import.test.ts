@@ -231,6 +231,27 @@ describe("Export/Import Functions", () => {
     expect(memHit.some((r) => r.obsId === "mem_imported")).toBe(true);
   });
 
+  it("import drops a Lesson row marked deleted by an old export", async () => {
+    const base = {
+      content: "x", context: "", confidence: 0.5, reinforcements: 0, source: "manual" as const,
+      sourceIds: [], tags: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      decayRate: 0.05,
+    };
+    const exportData = {
+      version: "0.3.0",
+      exportedAt: new Date().toISOString(),
+      sessions: [], observations: {}, memories: [], summaries: [],
+      lessons: [
+        { ...base, id: "lsn_live" },
+        { ...base, id: "lsn_dead", deleted: true },
+      ],
+    } as ExportData;
+
+    await sdk.trigger("mem::import", { exportData, strategy: "merge" });
+
+    expect((await kv.list<{ id: string }>("mem:lessons")).map((l) => l.id)).toEqual(["lsn_live"]);
+  });
+
   it("import with skip strategy does not overwrite existing", async () => {
     const exportData: ExportData = {
       version: "0.3.0",

@@ -889,7 +889,7 @@ export const V070_TOOLS: McpToolDef[] = [
   {
     name: "memory_lesson_delete",
     description:
-      "Soft-delete a lesson by id. Deleted lessons are excluded from recall and list; re-saving the same content creates a fresh lesson.",
+      "Delete a lesson by id. A deleted lesson is gone from recall and list; re-saving the same content creates a fresh lesson.",
     inputSchema: {
       type: "object",
       properties: {

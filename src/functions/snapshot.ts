@@ -99,8 +99,10 @@ interface StoreCounts {
 async function replaceStore(
   kv: StateKV,
   store: DurableStore,
-  rows: SnapshotRow[],
+  captured: SnapshotRow[],
 ): Promise<StoreCounts> {
+  const rows =
+    store.field === "lessons" ? captured.filter((r) => r.deleted !== true) : captured;
   const keep = new Set(rows.map(store.keyOf));
   const existing = await kv.list<SnapshotRow>(store.scope);
   const stale = existing.map(store.keyOf).filter((key) => !keep.has(key));

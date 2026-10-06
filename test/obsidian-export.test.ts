@@ -241,18 +241,6 @@ describe("Obsidian Export", () => {
     expect(result.error).toContain(exportRoot);
   });
 
-  it("skips deleted lessons", async () => {
-    const lesson = makeLesson("lsn_deleted");
-    (lesson as any).deleted = true;
-    await kv.set("mem:lessons", lesson.id, lesson);
-
-    const result = (await sdk.trigger("mem::obsidian-export", {})) as {
-      exported: Record<string, number>;
-    };
-
-    expect(result.exported.lessons).toBe(0);
-  });
-
   it("skips non-latest memories", async () => {
     const mem = makeMemory("mem_old");
     mem.isLatest = false;

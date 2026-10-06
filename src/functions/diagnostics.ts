@@ -554,13 +554,11 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("lessons")) {
-        // Counts only live lessons (deleted=true rows are tombstoned).
         // Catches bad confidence values that would silently break recall
         // scoring (memory_lesson_recall multiplies by confidence).
         const lessons = await kv.list<Lesson>(KV.lessons);
-        const live = lessons.filter((l) => !l.deleted);
         let lessonIssues = 0;
-        for (const l of live) {
+        for (const l of lessons) {
           // Number.isFinite rejects NaN / Infinity / non-numbers; a
           // corrupted row passing those would silently survive the < / >
           // range check (e.g. NaN < 0 is false, NaN > 1 is false, so the
@@ -586,7 +584,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             name: "lessons-ok",
             category: "lessons",
             status: "pass",
-            message: `All ${live.length} lessons are healthy (${lessons.length - live.length} tombstoned)`,
+            message: `All ${lessons.length} lessons are healthy`,
             fixable: false,
           });
         }

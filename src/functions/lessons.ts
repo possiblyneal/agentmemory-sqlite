@@ -6,7 +6,6 @@ import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
-import { getLessonTombstoneMs } from "../config.js";
 import { loadProjectTime } from "../state/project-time.js";
 
 // Dedicated BM25 index for lessons, with the full records cached
@@ -41,10 +40,8 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
       const all = await kv.list<Lesson>(KV.lessons);
       if (generation !== lessonIndexGeneration) return;
       for (const l of all) {
-        if (!l.deleted) {
-          idx.add(lessonToObservation(l));
-          lessonRecords.set(l.id, l);
-        }
+        idx.add(lessonToObservation(l));
+        lessonRecords.set(l.id, l);
       }
       lessonIndex = idx;
     })().finally(() => {
@@ -85,7 +82,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const fp = fingerprintId("lsn", data.content.trim().toLowerCase());
       const existing = await kv.get<Lesson>(KV.lessons, fp);
 
-      if (existing && !existing.deleted) {
+      if (existing) {
         reinforceLesson(existing);
         let indexedTextChanged = false;
         if (data.context && !existing.context) {
@@ -176,7 +173,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const scored: Array<{ lesson: Lesson; score: number }> = [];
       for (let i = 0; i < hits.length; i++) {
         const l = lessonRecords.get(hits[i].obsId);
-        if (!l || l.deleted || l.confidence < minConfidence) continue;
+        if (!l || l.confidence < minConfidence) continue;
         if (data.project && l.project && l.project !== data.project) continue;
 
         const relevance = maxHit > 0 ? hits[i].score / maxHit : 0;
@@ -223,9 +220,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const minConfidence = data.minConfidence ?? 0;
       let lessons = await kv.list<Lesson>(KV.lessons);
 
-      lessons = lessons.filter(
-        (l) => !l.deleted && l.confidence >= minConfidence,
-      );
+      lessons = lessons.filter((l) => l.confidence >= minConfidence);
 
       if (data.project) {
         lessons = lessons.filter((l) => l.project === data.project);
@@ -247,7 +242,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       }
 
       const lesson = await kv.get<Lesson>(KV.lessons, data.lessonId);
-      if (!lesson || lesson.deleted) {
+      if (!lesson) {
         return { success: false, error: "lesson not found" };
       }
 
@@ -274,14 +269,11 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       }
 
       const lesson = await kv.get<Lesson>(KV.lessons, data.lessonId);
-      if (!lesson || lesson.deleted) {
+      if (!lesson) {
         return { success: false, error: "lesson not found" };
       }
 
-      lesson.deleted = true;
-      lesson.updatedAt = new Date().toISOString();
-
-      await kv.set(KV.lessons, lesson.id, lesson);
+      await kv.delete(KV.lessons, lesson.id);
       lessonRecords.delete(lesson.id);
       if (lessonIndex) lessonIndex.remove(lesson.id);
       noteLessonMutation();
@@ -303,28 +295,19 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         loadProjectTime(kv),
       ]);
       let decayed = 0;
-      let softDeleted = 0;
       const timestamp = new Date().toISOString();
       const dirty: Lesson[] = [];
       const auditEvents: Array<{
         id: string;
-        action: "decay" | "soft-delete";
         activeWeeks: number;
         beforeConfidence: number;
         afterConfidence: number;
-        beforeDeleted: boolean;
-        afterDeleted: boolean;
       }> = [];
-
-      const tombstoneMs = getLessonTombstoneMs();
-      const cutoff = Date.parse(timestamp) - tombstoneMs;
       const expired: Array<{ key: string; updatedAt: string }> = [];
 
       for (const lesson of lessons) {
         if (lesson.deleted) {
-          if (tombstoneMs > 0 && Date.parse(lesson.updatedAt) < cutoff) {
-            expired.push({ key: lesson.id, updatedAt: lesson.updatedAt });
-          }
+          expired.push({ key: lesson.id, updatedAt: lesson.updatedAt });
           continue;
         }
 
@@ -338,27 +321,21 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
 
         if (newConfidence !== lesson.confidence) {
           const beforeConfidence = lesson.confidence;
-          const beforeDeleted = !!lesson.deleted;
-          lesson.confidence = Math.round(newConfidence * 1000) / 1000;
+          const confidence = Math.round(newConfidence * 1000) / 1000;
+          if (confidence <= 0.1 && lesson.reinforcements === 0) {
+            expired.push({ key: lesson.id, updatedAt: lesson.updatedAt });
+            continue;
+          }
+          lesson.confidence = confidence;
           lesson.lastDecayedAt = timestamp;
           lesson.updatedAt = timestamp;
-
-          if (lesson.confidence <= 0.1 && lesson.reinforcements === 0) {
-            lesson.deleted = true;
-            softDeleted++;
-          } else {
-            decayed++;
-          }
-
+          decayed++;
           dirty.push(lesson);
           auditEvents.push({
             id: lesson.id,
-            action: lesson.deleted ? "soft-delete" : "decay",
             activeWeeks,
             beforeConfidence,
-            afterConfidence: lesson.confidence,
-            beforeDeleted,
-            afterDeleted: !!lesson.deleted,
+            afterConfidence: confidence,
           });
         }
       }
@@ -366,51 +343,35 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       // Awaited batches, not a fan-out: N un-awaited sets run back to back on
       // the event loop under inproc (see StateKV.setMany).
       await kv.setMany(KV.lessons, dirty.map((l) => ({ key: l.id, value: l })));
-      for (const l of dirty) {
-        if (l.deleted) {
-          lessonRecords.delete(l.id);
-          if (lessonIndex) lessonIndex.remove(l.id);
-        } else {
-          lessonRecords.set(l.id, l);
-        }
+      const deletedIds =
+        expired.length > 0 ? await kv.deleteManyIfUnchanged(KV.lessons, expired) : [];
+      for (const l of dirty) lessonRecords.set(l.id, l);
+      for (const id of deletedIds) {
+        lessonRecords.delete(id);
+        if (lessonIndex) lessonIndex.remove(id);
       }
-      if (dirty.length > 0) noteLessonMutation();
+      if (dirty.length > 0 || deletedIds.length > 0) noteLessonMutation();
       for (const event of auditEvents) {
         await recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", [event.id], {
-          action: event.action,
+          action: "decay",
           actor: "system",
           reason: "decay-sweep",
           activeWeeks: event.activeWeeks,
-          before: {
-            confidence: event.beforeConfidence,
-            deleted: event.beforeDeleted,
-          },
-          after: {
-            confidence: event.afterConfidence,
-            deleted: event.afterDeleted,
-          },
+          before: { confidence: event.beforeConfidence },
+          after: { confidence: event.afterConfidence },
         });
       }
-
-      const purgedIds =
-        expired.length > 0 ? await kv.deleteManyIfUnchanged(KV.lessons, expired) : [];
-      if (purgedIds.length > 0) {
-        await recordAudit(kv, "lesson_delete", "mem::lesson-decay-sweep", purgedIds, {
-          action: "purge",
+      if (deletedIds.length > 0) {
+        await recordAudit(kv, "lesson_delete", "mem::lesson-decay-sweep", deletedIds, {
+          action: "delete",
           actor: "system",
-          reason: "tombstone-expired",
-          purged: purgedIds.length,
-          purgedIds,
+          reason: "decay-sweep",
+          deleted: deletedIds.length,
+          deletedIds,
         });
       }
 
-      return {
-        success: true,
-        decayed,
-        softDeleted,
-        purged: purgedIds.length,
-        total: lessons.length,
-      };
+      return { success: true, decayed, deleted: deletedIds.length, total: lessons.length };
     },
   );
 }

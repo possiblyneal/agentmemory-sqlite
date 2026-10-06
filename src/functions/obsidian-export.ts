@@ -324,7 +324,7 @@ export function registerObsidianExportFunction(
         }
 
         for (const l of lessons.filter(
-          (l): l is Lesson & { id: string } => hasExportId(l) && !l.deleted,
+          (l): l is Lesson & { id: string } => hasExportId(l),
         )) {
           const filename = `${sanitize(l.id)}.md`;
           const filepath = join(dirs.lessons, filename);
