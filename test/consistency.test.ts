@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 vi.mock("../src/logger.js", () => ({
@@ -61,6 +62,35 @@ describe("Consistency checks", () => {
     const tools = getAllTools();
     const names = new Set(tools.map((t) => t.name));
     expect(names.size).toBe(tools.length);
+  });
+
+  it("Current Stats names the registered MCP tool count", () => {
+    expect(readText("CLAUDE.md")).toContain(`- ${getAllTools().length} MCP tools`);
+  });
+
+  it("no tracked file tells a user to install from upstream's npm package", () => {
+    const forbidden = [
+      "npx @agentmemory/agentmemory",
+      "npx -y @agentmemory/agentmemory",
+      "npm install -g @agentmemory/",
+    ];
+    const exempt = (path: string) =>
+      path === "CLAUDE.md" ||
+      path === "test/consistency.test.ts" ||
+      /^docs\/upstream-.*-triage\.yaml$/.test(path) ||
+      path.startsWith("packages/mcp/");
+    const tracked = execFileSync("git", ["ls-files", "-z"], {
+      cwd: ROOT,
+      encoding: "utf-8",
+      maxBuffer: 64 * 1024 * 1024,
+    })
+      .split("\0")
+      .filter((path) => path && !exempt(path) && existsSync(join(ROOT, path)));
+    const offenders = tracked.filter((path) => {
+      const text = readText(path);
+      return forbidden.some((phrase) => text.includes(phrase));
+    });
+    expect(offenders).toEqual([]);
   });
 
   it("all tools have name, description, and inputSchema", () => {

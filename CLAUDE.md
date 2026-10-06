@@ -250,6 +250,8 @@ unchecked: the note is still upstream's claim, not a verified defect.
 
 ## Current Stats (v0.9.29)
 
+`test/consistency.test.ts` enforces the install-path rule above (with its own exemption list) and the MCP tool and REST endpoint counts here; `test/tool-count-consistency.test.ts` enforces the hook and skill counts.
+
 - 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
 - 134 REST endpoints
 - 6 MCP resources, 3 MCP prompts
