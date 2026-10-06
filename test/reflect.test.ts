@@ -635,6 +635,54 @@ describe("Reflect", () => {
       expect(after!.confidence).toBe(0.6);
     });
 
+    describe("idle age cap", () => {
+      const day = 86400000;
+      const seed = (id: string, idleDays: number, reinforcements = 5) => {
+        const at = new Date(Date.now() - idleDays * day).toISOString();
+        return kv.set("mem:insights", id, {
+          id, title: id, content: id, confidence: 0.9, reinforcements,
+          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+          tags: [], createdAt: at, updatedAt: at, lastReinforcedAt: at, decayRate: 0.05,
+        });
+      };
+
+      it("deletes a reinforced Insight idle past the default 180 days and audits it", async () => {
+        await seed("ins_idle", 181);
+        await seed("ins_recent", 179);
+
+        const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+
+        expect(result.deleted).toBe(1);
+        expect(await kv.get<Insight>("mem:insights", "ins_idle")).toBeNull();
+        expect(await kv.get<Insight>("mem:insights", "ins_recent")).not.toBeNull();
+        const [entry] = await kv.list<{ details: Record<string, unknown> }>("mem:audit");
+        expect(entry.details).toMatchObject({ deletedIds: ["ins_idle"] });
+      });
+
+      it("ignores decay writes when judging idleness", async () => {
+        await seed("ins_decayed", 10);
+        const row = (await kv.get<Insight>("mem:insights", "ins_decayed"))!;
+        row.createdAt = new Date(Date.now() - 400 * day).toISOString();
+        await kv.set("mem:insights", "ins_decayed", row);
+
+        const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+        expect(result.deleted).toBe(0);
+      });
+
+      it("honours AGENTMEMORY_INSIGHT_MAX_IDLE_DAYS", async () => {
+        vi.stubEnv("AGENTMEMORY_INSIGHT_MAX_IDLE_DAYS", "30");
+        try {
+          await seed("ins_idle", 31);
+          await seed("ins_recent", 29);
+          const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+          expect(result.deleted).toBe(1);
+          expect(await kv.get<Insight>("mem:insights", "ins_idle")).toBeNull();
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+    });
+
     it("names the deleted Insights in the audit apart from the decayed ones", async () => {
       const old = new Date(Date.now() - 21 * 86400000).toISOString();
       const base = {

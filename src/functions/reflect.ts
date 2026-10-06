@@ -22,6 +22,7 @@ import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-index
 import { loadProjectTime } from "../state/project-time.js";
 import { logger } from "../logger.js";
 import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
+import { getInsightMaxIdleDays } from "../config.js";
 
 // A cluster takes every fact sharing a word with its concepts, which on the
 // Operator's broker reached 100k+ tokens and starved sibling slots during
@@ -545,12 +546,19 @@ export function registerReflectFunctions(
         loadProjectTime(kv),
       ]);
       const timestamp = new Date().toISOString();
+      const idleCutoff = Date.now() - getInsightMaxIdleDays() * 86400000;
       const dirty: Array<{ insight: Insight; readUpdatedAt: string }> = [];
       const expired: Array<{ key: string; updatedAt: string }> = [];
       const activeWeeksApplied: Record<string, number> = {};
 
       for (const insight of items) {
         if (insight.deleted) {
+          expired.push({ key: insight.id, updatedAt: insight.updatedAt });
+          continue;
+        }
+
+        const lastUsedAt = Date.parse(insight.lastReinforcedAt || insight.createdAt);
+        if (lastUsedAt < idleCutoff) {
           expired.push({ key: insight.id, updatedAt: insight.updatedAt });
           continue;
         }
