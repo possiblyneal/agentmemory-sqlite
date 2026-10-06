@@ -91,3 +91,57 @@ Concepts: ${concepts}`
   })
   return `Partial summaries (${partials.length} chunks of one session, chronological):\n\n${sections.join('\n\n---\n\n')}`
 }
+
+export const FOLD_SYSTEM = `You are updating the existing summary of an ongoing coding session. You are given the current session summary and the new compressed observations recorded since it was written. Fold the new observations into the summary. The summary already covers everything before them.
+
+Output EXACTLY this XML format with no additional text:
+
+<summary>
+  <title>Short session title (max 100 chars)</title>
+  <narrative>3-5 sentence narrative covering the whole session</narrative>
+  <decisions>
+    <decision>Key technical decision made</decision>
+  </decisions>
+  <files>
+    <file>path/to/modified/file</file>
+  </files>
+  <concepts>
+    <concept>key concept from session</concept>
+  </concepts>
+</summary>
+
+Rules:
+- Rewrite the narrative so it covers the whole session, not only the new observations
+- Keep every existing decision unless a new observation reverses it; add new ones
+- Union (deduplicate) all files and concepts
+- Title should capture the session's overall outcome so far`
+
+export interface FoldPrior {
+  title: string
+  narrative: string
+  keyDecisions: string[]
+  filesModified: string[]
+  concepts: string[]
+}
+
+export function buildFoldPrompt(
+  prior: FoldPrior,
+  observations: SummaryObservation[],
+  priorObservationCount: number,
+): string {
+  const decisions = prior.keyDecisions.map((d) => `  - ${d}`).join('\n')
+  const files = prior.filesModified.map((f) => `  - ${f}`).join('\n')
+  const lines = observations.map((o, i) => renderSummaryObservation(o, priorObservationCount + i))
+  return `Current summary (covers observations 1-${priorObservationCount}):
+Title: ${prior.title}
+Narrative: ${prior.narrative}
+Decisions:
+${decisions}
+Files:
+${files}
+Concepts: ${prior.concepts.join(', ')}
+
+New observations (${observations.length} total, ${priorObservationCount + 1}-${priorObservationCount + observations.length}):
+
+${lines.join('\n\n---\n\n')}`
+}
