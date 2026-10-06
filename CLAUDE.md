@@ -10,9 +10,10 @@ possible to be able to do that. Every feature here is judged against that senten
 - **Right moment** — context arrives at hook boundaries (session start, user prompt,
   pre-compact) without the Agent having to know to ask. Memory the Agent must remember to
   query is memory that goes unused.
-- **Right scope** — results are bounded by project, branch, and Session
-  (`scope: "project" | "global"`, `src/types.ts:277`). One repo's work never surfaces in
-  another's.
+- **Right scope** — results are bounded by project and Session
+  (`scope: "project" | "global"`, `src/types.ts:309`). Branch is not a bound: every branch
+  and worktree of a repo shares one project (`test/branch-recall.test.ts`). One repo's work
+  never surfaces in another's.
 - **Least record that restates** — store the smallest durable claim that reconstructs a
   decision later: the conclusion and why, not the transcript that produced it. Observations
   are raw and cheap; a Memory earns its place by being worth re-reading.
