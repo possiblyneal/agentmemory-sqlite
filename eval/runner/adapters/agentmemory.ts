@@ -119,7 +119,9 @@ async function ingestCaptured(state: AgentMemoryState, s: Session): Promise<void
   const observations = s.observations ?? [];
   for (let i = 0; i < observations.length; i++) {
     await post(state, "observe", observePayload(s, observations[i], i));
-    state.needles.push({ text: needleFor(observations[i].output), sessionId: s.id });
+    if (!observations[i].routine) {
+      state.needles.push({ text: needleFor(observations[i].output), sessionId: s.id });
+    }
   }
   await post(state, "session/end", { sessionId: s.id });
   await applyImportance(state, s);

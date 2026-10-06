@@ -22,7 +22,7 @@
 
 
   { "id": "s-001", "path": "session-start", "project": "shipctl", "type": "project-coverage", "goldSessionIds": ["sess-001", "sess-002", "sess-003", "sess-004", "sess-005", "sess-006", "sess-007", "sess-008", "sess-009", "sess-010", "sess-011", "sess-012", "sess-013", "sess-014", "sess-015", "sess-016"] },
-  { "id": "s-002", "path": "session-start", "project": "ledger-api", "type": "project-coverage", "goldSessionIds": ["ledg-001", "ledg-002", "ledg-003", "ledg-004", "ledg-005"] },
+  { "id": "s-002", "path": "session-start", "project": "ledger-api", "type": "project-coverage", "goldSessionIds": ["ledg-001", "ledg-002", "ledg-003", "ledg-004", "ledg-005", "ledg-006"] },
   { "id": "s-n01", "path": "session-start", "project": "fresh-repo", "type": "no-answer", "goldSessionIds": [] },
   {"id": "p-001", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "staging deploys are failing auth again and SHIPCTL_TOKEN looks unset, check how we resolve the token", "goldSessionIds": ["sess-001", "sess-014", "sess-016"]},
   {"id": "p-002", "path": "prompt-submit", "project": "shipctl", "type": "task", "question": "the arm64 docker image build broke on CI again", "goldSessionIds": ["sess-002"]},

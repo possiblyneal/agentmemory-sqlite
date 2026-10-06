@@ -4,7 +4,7 @@ Recall benchmarks for agentmemory, scored on what each Injection puts in front o
 
 Two families:
 
-- **coding-agent-life-v2** — in-house corpus of 21 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 38 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
+- **coding-agent-life-v2** — in-house corpus of 22 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 38 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
 - **LongMemEval** — public 500-question long-term memory benchmark over multi-session chat, search path only.
 
 ## Paths
@@ -177,13 +177,13 @@ eval/
 │   └── replay-score.ts            per-Goal-line scoring, summary, worst cases
 └── data/
     └── coding-agent-life-v2/
-        ├── sessions.json          21 Sessions as tool-call Observations, each with a fixed 1-10 importance
+        ├── sessions.json          22 Sessions as tool-call Observations, each with a fixed 1-10 importance
         └── queries.json           38 questions with path, project and gold Session ids
 ```
 
 Reports land in `eval/reports/<bench>/` (gitignored): `scores.ndjson` (one row per question, with the Session ids returned) and `summary.json`.
 
-Published scorecards land in `docs/benchmarks/YYYY-MM-DD-<bench>.md`; the current one is [2026-10-05-coding-agent-life-v2](../docs/benchmarks/2026-10-05-coding-agent-life-v2.md).
+Published scorecards land in `docs/benchmarks/YYYY-MM-DD-<bench>.md`; the current one is [2026-10-06-coding-agent-life-v2](../docs/benchmarks/2026-10-06-coding-agent-life-v2.md).
 
 ## Writing a new adapter
 
@@ -202,4 +202,4 @@ Published scorecards land in `docs/benchmarks/YYYY-MM-DD-<bench>.md`; the curren
 
 ## Writing a new question
 
-Add it to `data/coding-agent-life-v2/queries.json` with a `path`, a `project`, and the gold Session ids — `[]` when the right Injection is nothing. Every captured Observation carries an `importance` (1-10: decisions and fixes high, routine reads low). Session-start keeps a Session's top 5 Observations by importance, so a rating only changes the Injection for a Session with more than 5 Observations; none has yet. Every Observation's first 48 output characters must be unique across Sessions, because that is how an Injection is attributed; `test/eval-adapters.test.ts` checks it.
+Add it to `data/coding-agent-life-v2/queries.json` with a `path`, a `project`, and the gold Session ids — `[]` when the right Injection is nothing. Every captured Observation carries an `importance` (1-10: decisions and fixes high, routine reads low). Session-start keeps a Session's top 5 Observations by importance, so a rating only changes the Injection for a Session with more than 5 Observations. `ledg-006` is that Session: its gold content is four high-importance Observations, and its prompt and four low-importance ones carry `"routine": true`, which keeps them out of attribution, so inverting the sort in `src/functions/context.ts` drops the Session from the Injection and `eval:gate` fails. Do not mark gold content routine, and give a Session's Edits different files (the same tool input is deduplicated). Every Observation's first 48 output characters must be unique across Sessions, because that is how an Injection is attributed; `test/eval-adapters.test.ts` checks it.

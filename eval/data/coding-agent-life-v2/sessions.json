@@ -203,5 +203,21 @@
       { "tool": "prompt", "output": "ledger cache grows without bound under load", "importance": 5 },
       { "tool": "Edit", "file": "src/cache.rs", "output": "exchange-rate cache given a 15 minute TTL via moka", "importance": 8 }
     ]
+  },
+  {
+    "id": "ledg-006",
+    "project": "ledger-api",
+    "timestamp": "2026-04-20T10:00:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "partner webhooks reach the settlement endpoint unsigned, anyone can fake a payout", "importance": 4, "routine": true },
+      { "tool": "Edit", "file": "src/webhooks.rs", "output": "settlement webhook verifies an HMAC-SHA256 signature in constant time, rejects timestamps over 5 minutes old", "importance": 9 },
+      { "tool": "Edit", "file": "src/webhook_rejections.rs", "output": "unsigned or stale deliveries answer 401 and land in a rejections table", "importance": 8 },
+      { "tool": "Write", "file": "tests/webhook_signature.rs", "output": "tests replay a valid signed payload, a tampered body and an expired timestamp", "importance": 7 },
+      { "tool": "Bash", "output": "partner sandbox sent 200 signed payouts, all accepted, 12 forged ones rejected", "importance": 6 },
+      { "tool": "Read", "file": "Cargo.toml", "output": "manifest lists hmac and sha2 at versions the lockfile already pins", "importance": 2, "routine": true },
+      { "tool": "Glob", "pattern": "src/**/*.rs", "output": "41 source files under src, nothing else touches the settlement route", "importance": 2, "routine": true },
+      { "tool": "Read", "file": "README.md", "output": "readme section on partner onboarding is still accurate", "importance": 3, "routine": true },
+      { "tool": "Bash", "output": "cargo fmt reported no formatting changes", "importance": 3, "routine": true }
+    ]
   }
 ]
