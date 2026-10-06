@@ -13,6 +13,7 @@ import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
 import { isOversizedPayload } from "../state/payload-bound.js";
+import { parsePage, listSessionsPage } from "../functions/sessions-page.js";
 import { logger } from "../logger.js";
 import { isSlotsEnabled } from "../functions/slots.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
@@ -356,12 +357,17 @@ export function registerMcpEndpoints(
           }
 
           case "memory_sessions": {
-            const sessions = await kv.list(KV.sessions);
+            const page = await listSessionsPage(
+              kv,
+              parsePage({
+                limit: typeof args.limit === "number" ? String(args.limit) : undefined,
+              }),
+            );
             return {
               status_code: 200,
               body: {
                 content: [
-                  { type: "text", text: JSON.stringify({ sessions }, null, 2) },
+                  { type: "text", text: JSON.stringify(page, null, 2) },
                 ],
               },
             };

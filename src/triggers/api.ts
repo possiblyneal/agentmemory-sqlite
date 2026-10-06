@@ -1,5 +1,6 @@
 import { TriggerAction, type ISdk, type ApiRequest } from "../engine/types.js";
-import type { Session, CompressedObservation, HookPayload, CommitLink, SessionSummary, InjectedRef, InjectionSource } from "../types.js";
+import { parsePage, takePage, listSessionsPage } from "../functions/sessions-page.js";
+import type { Session, CompressedObservation, HookPayload, CommitLink, InjectedRef, InjectionSource } from "../types.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
@@ -142,32 +143,7 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-const DEFAULT_PAGE_LIMIT = 100;
 export const SESSION_IDLE_END_MS = 30 * 60_000;
-
-type Page = { limit: number | "all"; offset: number };
-
-function parsePage(query: Record<string, unknown> | undefined): Page {
-  const rawLimit = query?.["limit"];
-  const rawOffset = query?.["offset"];
-  const parsedLimit = typeof rawLimit === "string" ? Number(rawLimit) : Number.NaN;
-  const parsedOffset = typeof rawOffset === "string" ? Number(rawOffset) : Number.NaN;
-  const limit =
-    rawLimit === "all"
-      ? "all"
-      : Number.isInteger(parsedLimit) && parsedLimit > 0
-        ? parsedLimit
-        : DEFAULT_PAGE_LIMIT;
-  const offset =
-    Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
-  return { limit, offset };
-}
-
-function takePage<T>(rows: T[], page: Page): T[] {
-  return page.limit === "all"
-    ? rows.slice(page.offset)
-    : rows.slice(page.offset, page.offset + page.limit);
-}
 
 function countInjection(context: string | undefined): void {
   const counters = getCounters();
@@ -1062,7 +1038,6 @@ export function registerApiTriggers(
     async (req: ApiRequest): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const sessions = await kv.list<Session>(KV.sessions);
       const normalizedAgentId =
         typeof req.query_params?.["agentId"] === "string"
           ? req.query_params["agentId"].trim()
@@ -1074,35 +1049,12 @@ export function registerApiTriggers(
         ? undefined
         : explicitAgentId ??
           (isAgentScopeIsolated() ? getAgentId() : undefined);
-      const filtered = (
-        filterAgentId
-          ? sessions.filter((s) => s.agentId === filterAgentId)
-          : sessions
-      ).sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
-      const page = parsePage(req.query_params);
-      const paged = takePage(filtered, page);
-      // Bounded fan-out: each kv.get is a full engine invocation, so
-      // Promise.all over hundreds of sessions saturates the invocation
-      // pool. Batch in chunks of 10 (parallel within a chunk, sequential
-      // across chunks); the summaries array stays index-aligned with
-      // `paged`.
-      const summaries: Array<SessionSummary | null> = [];
-      for (let batch = 0; batch < paged.length; batch += 10) {
-        const chunk = paged.slice(batch, batch + 10);
-        const results = await Promise.all(
-          chunk.map((s) =>
-            kv.get<SessionSummary>(KV.summaries, s.id).catch(() => null),
-          ),
-        );
-        summaries.push(...results);
-      }
-      const withSummary = paged.map((s, i) =>
-        summaries[i] ? { ...s, summary: summaries[i] } : s,
+      const body = await listSessionsPage(
+        kv,
+        parsePage(req.query_params),
+        filterAgentId,
       );
-      return {
-        status_code: 200,
-        body: { sessions: withSummary, total: filtered.length, ...page },
-      };
+      return { status_code: 200, body };
     },
   );
   sdk.registerTrigger({
