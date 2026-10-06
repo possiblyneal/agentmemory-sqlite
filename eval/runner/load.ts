@@ -25,10 +25,10 @@ export function loadLongMemEval(path: string, limit?: number): Question[] {
         `LongMemEval row ${r.question_id}: haystack_session_ids (${r.haystack_session_ids.length}) and haystack_sessions (${r.haystack_sessions.length}) length mismatch`,
       );
     }
-    const haystack: Session[] = r.haystack_session_ids.map((id, i) => ({
-      id,
-      content: flattenSession(r.haystack_sessions[i]),
-    }));
+    // _s ships some empty haystack Sessions (never gold); /remember rejects them.
+    const haystack: Session[] = r.haystack_session_ids
+      .map((id, i) => ({ id, content: flattenSession(r.haystack_sessions[i]) }))
+      .filter((s) => s.content);
     questions.push({
       id: r.question_id,
       type: r.question_type,

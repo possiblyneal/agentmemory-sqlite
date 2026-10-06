@@ -150,7 +150,9 @@ async function querySearch(q: Question, state: AgentMemoryState, k: number): Pro
   const seen = new Set<string>();
   for (const row of body.results ?? []) {
     const memoryId = row.obsId ?? row.id;
-    const sessionId = row.sessionId ?? (memoryId ? state.memoryToSession.get(memoryId) : undefined);
+    // A remembered eval Session comes back under the "memory" placeholder
+    // Session, so its own mapping must win.
+    const sessionId = (memoryId && state.memoryToSession.get(memoryId)) || row.sessionId;
     if (!sessionId || seen.has(sessionId)) continue;
     seen.add(sessionId);
     ranked.push({ sessionId, score: row.score ?? 0 });
