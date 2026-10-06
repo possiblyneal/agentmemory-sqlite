@@ -2334,8 +2334,8 @@ issues:
     kind: bug
     note: "Lesson and insight tombstones need physical reclamation."
     disposition: already-fixed
-    fixed_by: "mem::lesson-decay-sweep tombstone purge"
-    status: "fixed-here — mem::lesson-decay-sweep deletes Lesson tombstones older than AGENTMEMORY_LESSON_TOMBSTONE_DAYS (default 30, 0 keeps) via deleteManyIfUnchanged and records a lesson_delete audit row; Insights were already reclaimed in reflect.ts."
+    fixed_by: "mem::lesson-delete and mem::lesson-decay-sweep delete Lessons outright"
+    status: "fixed-here — mem::lesson-delete deletes the row and mem::lesson-decay-sweep deletes decayed Lessons and any legacy tombstones via deleteManyIfUnchanged, recording a lesson_delete audit row; Insights were already reclaimed in reflect.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1193
   - number: 1196
     title: "Replay loses raw prompt/tool/response content under default synthetic compression"

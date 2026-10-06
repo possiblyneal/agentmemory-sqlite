@@ -1,7 +1,7 @@
 {
   "name": "@agentmemory/agentmemory",
   "version": "0.9.29",
-  "description": "Persistent memory for AI coding agents, powered by iii-engine's three primitives",
+  "description": "Persistent memory for AI coding agents, on a single in-process SQLite engine",
   "type": "module",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
@@ -39,7 +39,6 @@
     "agent",
     "memory",
     "persistent",
-    "iii-engine",
     "claude-code",
     "coding-agent",
     "context",

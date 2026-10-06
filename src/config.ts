@@ -215,7 +215,8 @@ export function getClaudeJsonPath(): string {
 
 export function getSqlitePath(): string {
   return (
-    getEnvVar("AGENTMEMORY_SQLITE_PATH") || join(DATA_DIR, "agentmemory.sqlite")
+    getEnvVar("AGENTMEMORY_SQLITE_PATH") ||
+    join(getEnvVar("AGENTMEMORY_DATA_DIR") || DATA_DIR, "agentmemory.sqlite")
   );
 }
 
@@ -515,16 +516,6 @@ export function getIdleSessionMs(): number {
   return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
 }
 
-const LESSON_TOMBSTONE_DEFAULT_DAYS = 30;
-
-export function getLessonTombstoneMs(): number {
-  const days = safeParseInt(
-    getMergedEnv()["AGENTMEMORY_LESSON_TOMBSTONE_DAYS"],
-    LESSON_TOMBSTONE_DEFAULT_DAYS,
-  );
-  return Math.max(0, days) * 24 * 60 * 60 * 1000;
-}
-
 const SIGNAL_TTL_DEFAULT_DAYS = 30;
 
 export function getSignalDefaultTtlMs(): number {
@@ -540,6 +531,16 @@ const BACKUP_KEEP_DEFAULT = 7;
 export function getBackupKeep(): number {
   const keep = safeParseInt(getMergedEnv()["AGENTMEMORY_BACKUP_KEEP"], BACKUP_KEEP_DEFAULT);
   return keep >= 0 ? keep : BACKUP_KEEP_DEFAULT;
+}
+
+const INSIGHT_MAX_IDLE_WEEKS_DEFAULT = 26;
+
+export function getInsightMaxIdleWeeks(): number {
+  const weeks = safeParseInt(
+    getMergedEnv()["AGENTMEMORY_INSIGHT_MAX_IDLE_WEEKS"],
+    INSIGHT_MAX_IDLE_WEEKS_DEFAULT,
+  );
+  return weeks > 0 ? weeks : INSIGHT_MAX_IDLE_WEEKS_DEFAULT;
 }
 
 export function isConsolidationEnabled(): boolean {

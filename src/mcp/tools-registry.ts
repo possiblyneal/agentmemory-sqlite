@@ -181,8 +181,14 @@ export const CORE_TOOLS: McpToolDef[] = [
   {
     name: "memory_sessions",
     description:
-      "List recent sessions with their status and observation counts.",
-    inputSchema: { type: "object", properties: {} },
+      "List recent sessions, newest first, with their status and observation counts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max sessions to return (default 100)" },
+        offset: { type: "number", description: "Sessions to skip from the newest (default 0)" },
+      },
+    },
   },
   {
     name: "memory_smart_search",
@@ -884,7 +890,7 @@ export const V070_TOOLS: McpToolDef[] = [
   {
     name: "memory_lesson_delete",
     description:
-      "Soft-delete a lesson by id. Deleted lessons are excluded from recall and list; re-saving the same content creates a fresh lesson.",
+      "Delete a lesson by id. A deleted lesson is gone from recall and list; re-saving the same content creates a fresh lesson.",
     inputSchema: {
       type: "object",
       properties: {

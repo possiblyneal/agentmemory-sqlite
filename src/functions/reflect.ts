@@ -22,6 +22,7 @@ import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-index
 import { loadProjectTime } from "../state/project-time.js";
 import { logger } from "../logger.js";
 import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
+import { getInsightMaxIdleWeeks } from "../config.js";
 
 // A cluster takes every fact sharing a word with its concepts, which on the
 // Operator's broker reached 100k+ tokens and starved sibling slots during
@@ -261,7 +262,7 @@ export function registerReflectFunctions(
           kv.list<Crystal>(KV.crystals).catch(() => []),
         ]);
 
-      let activeLessons = lessons.filter((l) => !l.deleted);
+      let activeLessons = lessons;
       let scopedSemantic = semanticMemories;
       let scopedCrystals = crystals;
       const scopedNodes = graph.nodes;
@@ -545,12 +546,19 @@ export function registerReflectFunctions(
         loadProjectTime(kv),
       ]);
       const timestamp = new Date().toISOString();
-      const dirty: Insight[] = [];
+      const maxIdleWeeks = getInsightMaxIdleWeeks();
+      const dirty: Array<{ insight: Insight; readUpdatedAt: string }> = [];
       const expired: Array<{ key: string; updatedAt: string }> = [];
       const activeWeeksApplied: Record<string, number> = {};
 
       for (const insight of items) {
         if (insight.deleted) {
+          expired.push({ key: insight.id, updatedAt: insight.updatedAt });
+          continue;
+        }
+
+        const lastUsedAt = insight.lastReinforcedAt || insight.createdAt;
+        if (activeWeeksSince(insight.project, lastUsedAt, timestamp) > maxIdleWeeks) {
           expired.push({ key: insight.id, updatedAt: insight.updatedAt });
           continue;
         }
@@ -573,20 +581,24 @@ export function registerReflectFunctions(
             expired.push({ key: insight.id, updatedAt: insight.updatedAt });
             continue;
           }
+          const readUpdatedAt = insight.updatedAt;
           insight.confidence = confidence;
           insight.lastDecayedAt = timestamp;
           insight.updatedAt = timestamp;
-          dirty.push(insight);
+          dirty.push({ insight, readUpdatedAt });
         }
       }
 
       // Awaited batches, not a fan-out: N un-awaited sets run back to back on
       // the event loop under inproc (see StateKV.setMany).
-      await kv.setMany(KV.insights, dirty.map((i) => ({ key: i.id, value: i })));
+      const decayedIds = await kv.setManyIfUnchanged(
+        KV.insights,
+        dirty.map(({ insight, readUpdatedAt }) => ({ key: insight.id, value: insight, updatedAt: readUpdatedAt })),
+      );
       const deletedIds = await kv.deleteManyIfUnchanged(KV.insights, expired);
-      await recordAudit(kv, "reflect", "mem::insight-decay-sweep", [...dirty.map((i) => i.id), ...deletedIds], {
+      await recordAudit(kv, "reflect", "mem::insight-decay-sweep", [...decayedIds, ...deletedIds], {
         event: "insight.decay",
-        decayed: dirty.length,
+        decayed: decayedIds.length,
         deleted: deletedIds.length,
         deletedIds,
         activeWeeks: activeWeeksApplied,
@@ -594,7 +606,7 @@ export function registerReflectFunctions(
         timestamp,
       });
 
-      return { success: true, decayed: dirty.length, deleted: deletedIds.length, total: items.length };
+      return { success: true, decayed: decayedIds.length, deleted: deletedIds.length, total: items.length };
     },
   );
 }

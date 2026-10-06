@@ -10,9 +10,10 @@ possible to be able to do that. Every feature here is judged against that senten
 - **Right moment** — context arrives at hook boundaries (session start, user prompt,
   pre-compact) without the Agent having to know to ask. Memory the Agent must remember to
   query is memory that goes unused.
-- **Right scope** — results are bounded by project, branch, and Session
-  (`scope: "project" | "global"`, `src/types.ts:277`). One repo's work never surfaces in
-  another's.
+- **Right scope** — results are bounded by project and Session
+  (`scope: "project" | "global"`, `src/types.ts:309`). Branch is not a bound: every branch
+  and worktree of a repo shares one project (`test/branch-recall.test.ts`). One repo's work
+  never surfaces in another's.
 - **Least record that restates** — store the smallest durable claim that reconstructs a
   decision later: the conclusion and why, not the transcript that produced it. Observations
   are raw and cheap; a Memory earns its place by being worth re-reading.
@@ -218,8 +219,9 @@ upstream deliberately: this fork does not own those package names.
 Nothing is published from here — there is no release workflow and `dist/` is gitignored, so
 the only install path is clone → `npm ci` → `npm run build` →
 `npm link`. Any doc that tells a user how to install must describe that path, never
-`npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. There is no exception:
-`plugin/.mcp.json` and the entry `agentmemory connect` writes both run this fork's own
+`npx`/`npm install -g @agentmemory/*`, which resolve to upstream's code. The only files that may
+quote those commands are the ones `test/consistency.test.ts` exempts; that list is the one place
+exceptions live. `plugin/.mcp.json` and the entry `agentmemory connect` writes both run this fork's own
 `agentmemory mcp` from `PATH`, which defaults an omitted `project` to the one resolved from its
 cwd (`src/mcp/default-project.ts`; an explicit `project` or `scope: "global"` wins). Never point
 either at the `@agentmemory/mcp` npm shim, which passes no project. The translated `READMEs/` were deleted rather than kept
@@ -248,6 +250,8 @@ this tree also carries `status`, whose leading token says what the read found
 unchecked: the note is still upstream's claim, not a verified defect.
 
 ## Current Stats (v0.9.29)
+
+`test/consistency.test.ts` enforces the install-path rule above (with its own exemption list) and the MCP tool and REST endpoint counts here; `test/tool-count-consistency.test.ts` enforces the hook and skill counts.
 
 - 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
 - 134 REST endpoints

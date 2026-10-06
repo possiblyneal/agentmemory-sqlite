@@ -150,23 +150,6 @@ describe("mem::context — lessons auto-injection (#457)", () => {
     expect(result.context).not.toContain("other-project-lesson");
   });
 
-  it("excludes deleted lessons", async () => {
-    await seedLesson(kv, {
-      id: "lesson_deleted",
-      content: "tombstoned-lesson",
-      project: "/tmp/proj",
-      confidence: 0.9,
-      deleted: true,
-    });
-
-    const result = await handler({
-      sessionId: "ses_deleted",
-      project: "/tmp/proj",
-    });
-
-    expect(result.context).not.toContain("tombstoned-lesson");
-  });
-
   it("caps at the top 10 lessons by confidence", async () => {
     for (let i = 0; i < 15; i++) {
       await seedLesson(kv, {

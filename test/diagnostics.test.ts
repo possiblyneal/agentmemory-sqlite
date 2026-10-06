@@ -1118,16 +1118,11 @@ describe("Diagnostics Functions", () => {
   });
 
   describe("per-store tally categories (#lesson-visibility)", () => {
-    it("lessons category: passes with valid live lessons + ignores tombstoned", async () => {
+    it("lessons category: passes with valid lessons", async () => {
       await kv.set(KV.lessons, "lsn_live", {
         id: "lsn_live", content: "x", context: "", confidence: 0.8,
         reinforcements: 0, source: "manual", sourceIds: [], tags: [],
         createdAt: "", updatedAt: "", decayRate: 0.05,
-      });
-      await kv.set(KV.lessons, "lsn_tomb", {
-        id: "lsn_tomb", content: "x", context: "", confidence: 0.5,
-        reinforcements: 0, source: "manual", sourceIds: [], tags: [],
-        createdAt: "", updatedAt: "", decayRate: 0.05, deleted: true,
       });
 
       const result = (await sdk.trigger("mem::diagnose", {
@@ -1136,7 +1131,7 @@ describe("Diagnostics Functions", () => {
 
       const ok = result.checks.find((c) => c.name === "lessons-ok");
       expect(ok?.status).toBe("pass");
-      expect(ok?.message).toMatch(/All 1 lessons.*1 tombstoned/);
+      expect(ok?.message).toMatch(/All 1 lessons are healthy/);
     });
 
     it("lessons category: warns on out-of-range confidence", async () => {

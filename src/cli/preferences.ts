@@ -1,14 +1,13 @@
 // JSON-backed CLI preferences.
 //
 // Lives at `~/.agentmemory/preferences.json`. The agentmemory daemon
-// already owns `~/.agentmemory/.env`, `iii.pid`, `engine-state.json` —
-// adding one more sibling here keeps the install-state surface in one
-// place.
+// already owns `~/.agentmemory/.env` and the pidfile — adding one more
+// sibling here keeps the install-state surface in one place.
 //
 // All functions are synchronous, mirroring the pidfile / engine-state
 // helpers in src/cli.ts. We never throw: read failures collapse to
 // defaults; write failures swallow silently. Preferences are a UX
-// nicety, not data — corrupting `iii.pid` matters, corrupting this
+// nicety, not data — corrupting the pidfile matters, corrupting this
 // file does not.
 //
 // Writes are atomic via tmp + rename so a Ctrl+C between the open and
@@ -37,18 +36,13 @@ export interface Prefs {
   // The first onboarding sets this to true so the second invocation
   // skips the banner.
   skipSplash: boolean;
-  // Set to true when the user declines the "install iii console?"
-  // prompt. iii console is first-class engine UI but optional at the
-  // install step — once the user says no, we stop asking.
-  skipConsoleInstall: boolean;
   // ISO timestamp of the first time onboarding completed. Set once,
   // never updated, so we can show "you joined agentmemory N days ago"
   // copy in /status later without keeping a separate file.
   firstRunAt: string | null;
   // Set to true once the user has answered the context-injection prompt
   // (either way). We never re-ask after this so the prompt stays a
-  // one-time choice, matching the skipConsoleInstall
-  // never-nag pattern.
+  // one-time choice.
   injectContextChosen: boolean;
 }
 
@@ -56,7 +50,6 @@ const DEFAULTS: Prefs = {
   schemaVersion: 1,
   lastProvider: null,
   skipSplash: false,
-  skipConsoleInstall: false,
   firstRunAt: null,
   injectContextChosen: false,
 };

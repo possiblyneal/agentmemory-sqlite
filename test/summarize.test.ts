@@ -861,3 +861,132 @@ describe("mem::summarize Session Summary reuse", () => {
     expect(provider.calls).toHaveLength(1);
   });
 });
+
+describe("mem::summarize incremental fold", () => {
+  const ORIGINAL_ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  async function withPriorSummary(
+    sessionId: string,
+    obsCount: number,
+    priorCount: number,
+    priorLastId: string = `obs_${priorCount - 1}`,
+    responses: string[] = [summaryXml({ title: "folded" })],
+  ) {
+    const provider = makeProvider(responses);
+    const { handler, kv } = await setupHandler({ sessionId, obsCount, provider });
+    await kv.set("summaries", sessionId, {
+      sessionId,
+      project: "test-project",
+      createdAt: new Date().toISOString(),
+      title: "prior title",
+      narrative: "prior narrative text",
+      keyDecisions: ["prior decision"],
+      filesModified: ["src/prior.ts"],
+      concepts: ["prior-concept"],
+      observationCount: priorCount,
+      lastObservationId: priorLastId,
+    });
+    return { handler, kv, provider };
+  }
+
+  it("first call with no prior summary sends every Observation", async () => {
+    const provider = makeProvider([summaryXml({ title: "first" })]);
+    const { handler } = await setupHandler({ sessionId: "ses_first", obsCount: 6, provider });
+
+    await handler({ sessionId: "ses_first" });
+
+    expect(provider.calls).toHaveLength(1);
+    expect(provider.calls[0].user).toContain("Session observations (6 total)");
+    expect(provider.calls[0].user).toContain("obs 0");
+  });
+
+  it("with a prior summary sends only the new Observations plus the prior summary", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_fold", 8, 5);
+
+    const result: any = await handler({ sessionId: "ses_fold" });
+
+    expect(result.success).toBe(true);
+    expect(result.summary.title).toBe("folded");
+    expect(provider.calls).toHaveLength(1);
+    const { user } = provider.calls[0];
+    expect(user).toContain("prior narrative text");
+    expect(user).toContain("prior decision");
+    for (const i of [5, 6, 7]) expect(user).toContain(`obs ${i}\n`);
+    for (const i of [0, 1, 2, 3, 4]) expect(user).not.toContain(`obs ${i}\n`);
+    const stored: any = await kv.get("summaries", "ses_fold");
+    expect(stored.observationCount).toBe(8);
+    expect(stored.lastObservationId).toBe("obs_7");
+  });
+
+  it("re-summarizes the whole Session when the prior summary's last Observation is no longer at its count", async () => {
+    const { handler, provider } = await withPriorSummary("ses_moved", 8, 5, "obs_deleted");
+
+    await handler({ sessionId: "ses_moved" });
+
+    expect(provider.calls).toHaveLength(1);
+    expect(provider.calls[0].user).toContain("Session observations (8 total)");
+  });
+
+  it("force re-summarizes the whole Session", async () => {
+    const { handler, provider } = await withPriorSummary("ses_ff", 8, 5);
+
+    await handler({ sessionId: "ses_ff", force: true });
+
+    expect(provider.calls[0].user).toContain("Session observations (8 total)");
+  });
+
+  const countByLength = async (text: string) => Math.ceil(text.length / 4);
+
+  it("re-summarizes the whole Session when the new Observations exceed one chunk", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const { handler, provider } = await withPriorSummary("ses_big", 8, 5);
+    provider.countTokens = countByLength;
+
+    await handler({ sessionId: "ses_big" });
+
+    expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
+  });
+
+  it("re-summarizes the whole Session when the prior summary pushes the fold past one chunk", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(5);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const { handler, kv, provider } = await withPriorSummary("ses_long_prior", 6, 5);
+    provider.countTokens = countByLength;
+    const prior: any = await kv.get("summaries", "ses_long_prior");
+    await kv.set("summaries", "ses_long_prior", { ...prior, narrative: "prior narrative text ".repeat(100) });
+
+    await handler({ sessionId: "ses_long_prior" });
+
+    expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
+  });
+
+  it("retries a fold whose first reply fails to parse as a whole-Session summary", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_retry", 8, 5, "obs_4", [
+      "not xml",
+      summaryXml({ title: "second try" }),
+    ]);
+
+    const result: any = await handler({ sessionId: "ses_retry" });
+
+    expect(result.summary.title).toBe("second try");
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[0].user).toContain("prior narrative text");
+    expect(provider.calls[1].user).toContain("Session observations (8 total)");
+    expect(provider.calls[1].user).not.toContain("prior narrative text");
+    const stored: any = await kv.get("summaries", "ses_retry");
+    expect(stored.observationCount).toBe(8);
+  });
+
+  it("reuses without calling the provider when no new Observations arrived", async () => {
+    const { handler, provider } = await withPriorSummary("ses_same", 5, 5);
+
+    const result: any = await handler({ sessionId: "ses_same" });
+
+    expect(result.reused).toBe(true);
+    expect(provider.calls).toHaveLength(0);
+  });
+});

@@ -78,7 +78,7 @@ echo "agentmemory backfill — server: $URL"
 
 # --- liveness ---
 if ! curl -fsS "${META_CURL_OPTS[@]}" "$URL/agentmemory/livez" >/dev/null; then
-  echo "server not reachable at $URL (try: npx @agentmemory/agentmemory)" >&2
+  echo "server not reachable at $URL (try: agentmemory)" >&2
   exit 1
 fi
 
@@ -206,7 +206,7 @@ for row in "${rows[@]}"; do
   body="$(jq -nc --arg id "$id" '{sessionId:$id}')"
   resp="$(curl -sS "${WORK_CURL_OPTS[@]}" -X POST "$URL/agentmemory/summarize" \
     -H 'content-type: application/json' --data "$body" || echo '{"success":false,"error":"curl_failed"}')"
-  # iii's HTTP layer occasionally returns non-JSON (HTML 5xx, empty body
+  # The daemon can return non-JSON (HTML 5xx, empty body
   # on timeout, etc.). Validate before parsing so `set -e` doesn't abort
   # the whole backfill loop on a single bad response.
   if jq -e . >/dev/null 2>&1 <<<"$resp"; then

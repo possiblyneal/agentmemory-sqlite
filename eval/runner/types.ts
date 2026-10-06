@@ -3,6 +3,11 @@ export interface EvalObservation {
   file?: string;
   pattern?: string;
   output: string;
+  // 1-10, the rating a compression LLM would give; the sandbox has none.
+  importance?: number;
+  // Filler: an Injection that carries only this Observation does not count as
+  // carrying its Session, so a gold Session is found through its real content.
+  routine?: boolean;
 }
 
 export interface Session {

@@ -645,7 +645,7 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         });
       }
       if (importData.lessons) {
-        await runChunked(importData.lessons, async (lesson) => {
+        await runChunked(importData.lessons.filter((l) => l.deleted !== true), async (lesson) => {
           if (strategy === "skip") {
             const existing = await kv.get(KV.lessons, lesson.id).catch(() => null);
             if (existing) { stats.skipped++; return; }

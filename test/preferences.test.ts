@@ -34,7 +34,6 @@ describe("cli preferences", () => {
     expect(p.schemaVersion).toBe(1);
     expect(p.lastProvider).toBeNull();
     expect(p.skipSplash).toBe(false);
-    expect(p.skipConsoleInstall).toBe(false);
     expect(p.firstRunAt).toBeNull();
   });
 

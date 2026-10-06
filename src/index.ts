@@ -118,7 +118,7 @@ import { DedupMap } from "./functions/dedup.js";
 import { registerHealthMonitor } from "./health/monitor.js";
 import { initMetrics } from "./telemetry/setup.js";
 import { VERSION } from "./version.js";
-import { bootLog } from "./logger.js";
+import { bootLog, logger } from "./logger.js";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -573,14 +573,19 @@ async function main() {
     bootLog(`Auto-forget: enabled (every ${autoForgetIntervalMs / 60000}m)`);
   }
 
+  sdk.trigger({ function_id: "mem::lesson-purge-tombstones", payload: {} }).catch((err) =>
+    logger.error("Lesson tombstone purge failed", { error: err instanceof Error ? err.message : String(err) }),
+  );
+
   if (process.env.LESSON_DECAY_ENABLED !== "false") {
-    const lessonDecayTimer = setInterval(async () => {
+    const runLessonDecay = async () => {
       try {
         await sdk.trigger({ function_id: "mem::lesson-decay-sweep", payload: {} });
       } catch {}
-    }, 86400000);
-    lessonDecayTimer.unref();
-    bootLog(`Lesson decay sweep: enabled (every 24h)`);
+    };
+    setTimeout(runLessonDecay, FIRST_SWEEP_DELAY_MS).unref();
+    setInterval(runLessonDecay, 86400000).unref();
+    bootLog(`Lesson decay sweep: enabled (5 min after boot, then every 24h)`);
   }
 
   if (process.env.EVICTION_ENABLED !== "false") {
@@ -616,11 +621,15 @@ async function main() {
   setInterval(runAuditEviction, 86400000).unref();
 
   if (process.env.INSIGHT_DECAY_ENABLED !== "false") {
-    const insightDecayTimer = setInterval(async () => {
+    const runInsightDecay = async () => {
       try {
         await sdk.trigger({ function_id: "mem::insight-decay-sweep", payload: {} });
-      } catch {}
-    }, 86400000);
+      } catch (err) {
+        logger.error("Insight decay sweep failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+    };
+    setTimeout(runInsightDecay, FIRST_SWEEP_DELAY_MS).unref();
+    const insightDecayTimer = setInterval(runInsightDecay, 86400000);
     insightDecayTimer.unref();
   }
 

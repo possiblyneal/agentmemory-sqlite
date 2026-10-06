@@ -54,10 +54,12 @@ Memory that merely lacks a project is unscoped, not global.
 _Avoid_: shared memory, unscoped memory
 
 **Session Summary**:
-The distilled account of one Session, produced from its Observations each time the Session
-stops.
+The distilled account of one Session, produced each time the Session stops.
 A Session Summary is current until an Observation arrives after it was written, and a
-current one is reused rather than reproduced.
+current one is reused rather than reproduced. A stale one is folded forward: only the
+Observations after its recorded count are sent, with the prior summary, and the whole Session
+is re-read only on `force`, when that count no longer marks its last Observation, or when the
+new Observations exceed one chunk.
 _Avoid_: session digest, recap
 
 **Lesson**:
