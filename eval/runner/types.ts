@@ -3,6 +3,8 @@ export interface EvalObservation {
   file?: string;
   pattern?: string;
   output: string;
+  // 1-10, the rating a compression LLM would give; the sandbox has none.
+  importance?: number;
 }
 
 export interface Session {

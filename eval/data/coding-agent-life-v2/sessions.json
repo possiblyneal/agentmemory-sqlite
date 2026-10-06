@@ -4,11 +4,11 @@
     "project": "shipctl",
     "timestamp": "2026-04-08T09:14:00Z",
     "observations": [
-      { "tool": "prompt", "output": "auth check broken on staging when SHIPCTL_TOKEN unset, falling back to wrong env var" },
-      { "tool": "Read", "file": "src/auth.rs", "output": "token lookup order today is SC_TOKEN first, then SHIP_TOKEN, then SHIPCTL_TOKEN; legacy path skips validation" },
-      { "tool": "Edit", "file": "src/auth.rs", "output": "precedence flipped to SHIPCTL_TOKEN then SHIP_TOKEN then legacy SC_TOKEN, plus a minimum length check" },
-      { "tool": "Write", "file": "tests/auth_precedence.rs", "output": "regression test covering all three token env names and the length check" },
-      { "tool": "Bash", "output": "gh pr create opened PR #11 auth env var precedence fix with regression test" }
+      { "tool": "prompt", "output": "auth check broken on staging when SHIPCTL_TOKEN unset, falling back to wrong env var", "importance": 5 },
+      { "tool": "Read", "file": "src/auth.rs", "output": "token lookup order today is SC_TOKEN first, then SHIP_TOKEN, then SHIPCTL_TOKEN; legacy path skips validation", "importance": 3 },
+      { "tool": "Edit", "file": "src/auth.rs", "output": "precedence flipped to SHIPCTL_TOKEN then SHIP_TOKEN then legacy SC_TOKEN, plus a minimum length check", "importance": 9 },
+      { "tool": "Write", "file": "tests/auth_precedence.rs", "output": "regression test covering all three token env names and the length check", "importance": 7 },
+      { "tool": "Bash", "output": "gh pr create opened PR #11 auth env var precedence fix with regression test", "importance": 6 }
     ]
   },
   {
@@ -16,10 +16,10 @@
     "project": "shipctl",
     "timestamp": "2026-04-08T14:30:00Z",
     "observations": [
-      { "tool": "prompt", "output": "docker build failing for arm64 on the M2 runner" },
-      { "tool": "Edit", "file": "Dockerfile", "output": "builder stage now FROM --platform=$BUILDPLATFORM so the arm64 image cross-builds" },
-      { "tool": "Edit", "file": "Makefile", "output": "BUILDX_PLATFORMS set to linux/amd64,linux/arm64 for the multi-arch image target" },
-      { "tool": "Bash", "output": "docker buildx build for both platforms succeeded locally on apple silicon" }
+      { "tool": "prompt", "output": "docker build failing for arm64 on the M2 runner", "importance": 4 },
+      { "tool": "Edit", "file": "Dockerfile", "output": "builder stage now FROM --platform=$BUILDPLATFORM so the arm64 image cross-builds", "importance": 9 },
+      { "tool": "Edit", "file": "Makefile", "output": "BUILDX_PLATFORMS set to linux/amd64,linux/arm64 for the multi-arch image target", "importance": 7 },
+      { "tool": "Bash", "output": "docker buildx build for both platforms succeeded locally on apple silicon", "importance": 6 }
     ]
   },
   {
@@ -27,9 +27,9 @@
     "project": "shipctl",
     "timestamp": "2026-04-09T10:02:00Z",
     "observations": [
-      { "tool": "prompt", "output": "retry logic is duplicated across the handlers, consolidate it" },
-      { "tool": "Write", "file": "src/retry.rs", "output": "retry_with_backoff helper: exponential backoff base 200ms, cap 30s, full jitter" },
-      { "tool": "Edit", "file": "src/handlers.rs", "output": "all four handler callsites now call retry_with_backoff, about 80 lines removed" }
+      { "tool": "prompt", "output": "retry logic is duplicated across the handlers, consolidate it", "importance": 4 },
+      { "tool": "Write", "file": "src/retry.rs", "output": "retry_with_backoff helper: exponential backoff base 200ms, cap 30s, full jitter", "importance": 8 },
+      { "tool": "Edit", "file": "src/handlers.rs", "output": "all four handler callsites now call retry_with_backoff, about 80 lines removed", "importance": 7 }
     ]
   },
   {
@@ -37,10 +37,10 @@
     "project": "shipctl",
     "timestamp": "2026-04-10T11:45:00Z",
     "observations": [
-      { "tool": "prompt", "output": "add helm chart support to shipctl" },
-      { "tool": "Edit", "file": "src/cli/mod.rs", "output": "registered the new helm install subcommand with --namespace and --values flags" },
-      { "tool": "Write", "file": "src/cli/helm.rs", "output": "helm subcommand shells out to the helm CLI and threads namespace and values through" },
-      { "tool": "Bash", "output": "PR #14 opened for helm chart support with 12 integration tests, Aria approved" }
+      { "tool": "prompt", "output": "add helm chart support to shipctl", "importance": 4 },
+      { "tool": "Edit", "file": "src/cli/mod.rs", "output": "registered the new helm install subcommand with --namespace and --values flags", "importance": 7 },
+      { "tool": "Write", "file": "src/cli/helm.rs", "output": "helm subcommand shells out to the helm CLI and threads namespace and values through", "importance": 8 },
+      { "tool": "Bash", "output": "PR #14 opened for helm chart support with 12 integration tests, Aria approved", "importance": 6 }
     ]
   },
   {
@@ -48,9 +48,9 @@
     "project": "shipctl",
     "timestamp": "2026-04-11T16:20:00Z",
     "observations": [
-      { "tool": "prompt", "output": "test flake on the macos runner, emits_changekind_file_delete keeps failing" },
-      { "tool": "Read", "file": "tests/fs_watcher.rs", "output": "emits_changekind_file_delete waits 800ms, fsevents propagation on apple silicon is slower" },
-      { "tool": "Edit", "file": "tests/fs_watcher.rs", "output": "wait raised to 1500ms and describe-level retry of 2 added, all 15 fs-watcher tests green" }
+      { "tool": "prompt", "output": "test flake on the macos runner, emits_changekind_file_delete keeps failing", "importance": 4 },
+      { "tool": "Read", "file": "tests/fs_watcher.rs", "output": "emits_changekind_file_delete waits 800ms, fsevents propagation on apple silicon is slower", "importance": 3 },
+      { "tool": "Edit", "file": "tests/fs_watcher.rs", "output": "wait raised to 1500ms and describe-level retry of 2 added, all 15 fs-watcher tests green", "importance": 8 }
     ]
   },
   {
@@ -58,10 +58,10 @@
     "project": "shipctl",
     "timestamp": "2026-04-12T09:50:00Z",
     "observations": [
-      { "tool": "prompt", "output": "memory leak in the long-running daemon, RSS grows 5MB per minute" },
-      { "tool": "Read", "file": "src/cache.rs", "output": "artifact cache is an unbounded HashMap that never evicts entries" },
-      { "tool": "Edit", "file": "src/cache.rs", "output": "swapped the HashMap for an LruCache capped at 10k entries" },
-      { "tool": "Bash", "output": "six hour soak test holds RSS steady at 180MB, opened PR #16 for the leak" }
+      { "tool": "prompt", "output": "memory leak in the long-running daemon, RSS grows 5MB per minute", "importance": 5 },
+      { "tool": "Read", "file": "src/cache.rs", "output": "artifact cache is an unbounded HashMap that never evicts entries", "importance": 3 },
+      { "tool": "Edit", "file": "src/cache.rs", "output": "swapped the HashMap for an LruCache capped at 10k entries", "importance": 9 },
+      { "tool": "Bash", "output": "six hour soak test holds RSS steady at 180MB, opened PR #16 for the leak", "importance": 6 }
     ]
   },
   {
@@ -69,10 +69,10 @@
     "project": "shipctl",
     "timestamp": "2026-04-13T13:15:00Z",
     "observations": [
-      { "tool": "prompt", "output": "github API rate-limiting us when listing PRs, 5000 per hour is not enough during ci" },
-      { "tool": "Grep", "file": "src", "pattern": "list_pulls", "output": "list_pulls is called from src/github/client.rs on every poll" },
-      { "tool": "Edit", "file": "src/github/client.rs", "output": "conditional requests send If-None-Match with the stored etag and reuse cached 304 bodies" },
-      { "tool": "Bash", "output": "added the http-cache crate, real API calls dropped by roughly 70 percent" }
+      { "tool": "prompt", "output": "github API rate-limiting us when listing PRs, 5000 per hour is not enough during ci", "importance": 4 },
+      { "tool": "Grep", "file": "src", "pattern": "list_pulls", "output": "list_pulls is called from src/github/client.rs on every poll", "importance": 2 },
+      { "tool": "Edit", "file": "src/github/client.rs", "output": "conditional requests send If-None-Match with the stored etag and reuse cached 304 bodies", "importance": 9 },
+      { "tool": "Bash", "output": "added the http-cache crate, real API calls dropped by roughly 70 percent", "importance": 6 }
     ]
   },
   {
@@ -80,10 +80,10 @@
     "project": "shipctl",
     "timestamp": "2026-04-15T10:30:00Z",
     "observations": [
-      { "tool": "prompt", "output": "schema migration for the run_history table needs zero downtime" },
-      { "tool": "Edit", "file": "src/db/mod.rs", "output": "run_history migration split into three phases: nullable column with dual-write, backfill and flip reads, drop old column" },
-      { "tool": "Write", "file": "migrations/0007_run_history.sql", "output": "phase one adds the nullable column without an ALTER TABLE lock" },
-      { "tool": "Bash", "output": "staging migration of 2M run_history rows finished in 4 seconds" }
+      { "tool": "prompt", "output": "schema migration for the run_history table needs zero downtime", "importance": 4 },
+      { "tool": "Edit", "file": "src/db/mod.rs", "output": "run_history migration split into three phases: nullable column with dual-write, backfill and flip reads, drop old column", "importance": 9 },
+      { "tool": "Write", "file": "migrations/0007_run_history.sql", "output": "phase one adds the nullable column without an ALTER TABLE lock", "importance": 8 },
+      { "tool": "Bash", "output": "staging migration of 2M run_history rows finished in 4 seconds", "importance": 6 }
     ]
   },
   {
@@ -91,9 +91,9 @@
     "project": "shipctl",
     "timestamp": "2026-04-16T15:40:00Z",
     "observations": [
-      { "tool": "prompt", "output": "docs site is stale, set up auto-deploy from main" },
-      { "tool": "Write", "file": ".github/workflows/docs.yml", "output": "docs workflow runs mdbook build and deploys to cloudflare pages with PR previews" },
-      { "tool": "Bash", "output": "shipctl.dev custom domain wired to the cloudflare pages project" }
+      { "tool": "prompt", "output": "docs site is stale, set up auto-deploy from main", "importance": 4 },
+      { "tool": "Write", "file": ".github/workflows/docs.yml", "output": "docs workflow runs mdbook build and deploys to cloudflare pages with PR previews", "importance": 7 },
+      { "tool": "Bash", "output": "shipctl.dev custom domain wired to the cloudflare pages project", "importance": 5 }
     ]
   },
   {
@@ -101,9 +101,9 @@
     "project": "shipctl",
     "timestamp": "2026-04-17T11:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "release pipeline: cut v0.3.0 with binaries for linux, macos and windows" },
-      { "tool": "Write", "file": ".github/workflows/release.yml", "output": "tag-triggered release workflow: cross-rs static linux, native macos and windows, gh release upload, crates.io publish" },
-      { "tool": "Bash", "output": "PR #19 carries the cross-platform release workflow" }
+      { "tool": "prompt", "output": "release pipeline: cut v0.3.0 with binaries for linux, macos and windows", "importance": 4 },
+      { "tool": "Write", "file": ".github/workflows/release.yml", "output": "tag-triggered release workflow: cross-rs static linux, native macos and windows, gh release upload, crates.io publish", "importance": 8 },
+      { "tool": "Bash", "output": "PR #19 carries the cross-platform release workflow", "importance": 6 }
     ]
   },
   {
@@ -111,7 +111,7 @@
     "project": "shipctl",
     "timestamp": "2026-04-08T17:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "standup notes: shipped #11 auth fix this morning, starting on docker arm64 next" }
+      { "tool": "prompt", "output": "standup notes: shipped #11 auth fix this morning, starting on docker arm64 next", "importance": 3 }
     ]
   },
   {
@@ -119,7 +119,7 @@
     "project": "shipctl",
     "timestamp": "2026-04-10T18:30:00Z",
     "observations": [
-      { "tool": "prompt", "output": "preferences: rust analyzer over rls, always run cargo clippy before commit, 2-space indent in yaml but tabs in rust" }
+      { "tool": "prompt", "output": "preferences: rust analyzer over rls, always run cargo clippy before commit, 2-space indent in yaml but tabs in rust", "importance": 8 }
     ]
   },
   {
@@ -127,9 +127,9 @@
     "project": "shipctl",
     "timestamp": "2026-04-15T19:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "review Aria's PR #18 for the schema migration" },
-      { "tool": "Read", "file": "src/db/mod.rs", "output": "dual-write step races when two writers hit the same run_history row" },
-      { "tool": "Bash", "output": "Aria added a per-row advisory lock to the dual-write, review approved" }
+      { "tool": "prompt", "output": "review Aria's PR #18 for the schema migration", "importance": 4 },
+      { "tool": "Read", "file": "src/db/mod.rs", "output": "dual-write step races when two writers hit the same run_history row", "importance": 3 },
+      { "tool": "Bash", "output": "Aria added a per-row advisory lock to the dual-write, review approved", "importance": 6 }
     ]
   },
   {
@@ -137,7 +137,7 @@
     "project": "shipctl",
     "timestamp": "2026-04-16T20:10:00Z",
     "observations": [
-      { "tool": "prompt", "output": "post-mortem: SHIPCTL_TOKEN was unset in staging and fell back to SC_TOKEN with wrong perms, delivery delayed 40min; actions are precedence test, startup validation, alert on auth fallback" }
+      { "tool": "prompt", "output": "post-mortem: SHIPCTL_TOKEN was unset in staging and fell back to SC_TOKEN with wrong perms, delivery delayed 40min; actions are precedence test, startup validation, alert on auth fallback", "importance": 9 }
     ]
   },
   {
@@ -145,7 +145,7 @@
     "project": "shipctl",
     "timestamp": "2026-04-17T16:45:00Z",
     "observations": [
-      { "tool": "prompt", "output": "preference: stick to async-std rather than tokio for new code, agreed in arch review" }
+      { "tool": "prompt", "output": "preference: stick to async-std rather than tokio for new code, agreed in arch review", "importance": 8 }
     ]
   },
   {
@@ -153,9 +153,9 @@
     "project": "shipctl",
     "timestamp": "2026-04-18T10:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "post-mortem action item: validate auth config at startup" },
-      { "tool": "Edit", "file": "src/auth.rs", "output": "validate_auth_env runs at startup and refuses to boot when only SC_TOKEN is present" },
-      { "tool": "Edit", "file": "src/main.rs", "output": "main calls validate_auth_env before starting the scheduler" }
+      { "tool": "prompt", "output": "post-mortem action item: validate auth config at startup", "importance": 7 },
+      { "tool": "Edit", "file": "src/auth.rs", "output": "validate_auth_env runs at startup and refuses to boot when only SC_TOKEN is present", "importance": 9 },
+      { "tool": "Edit", "file": "src/main.rs", "output": "main calls validate_auth_env before starting the scheduler", "importance": 6 }
     ]
   },
   {
@@ -163,9 +163,9 @@
     "project": "ledger-api",
     "timestamp": "2026-04-09T09:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "ledger-api rejects valid JWTs after the key rotation" },
-      { "tool": "Read", "file": "src/auth.rs", "output": "JWKS keys are cached forever so the rotated signing key is never fetched" },
-      { "tool": "Edit", "file": "src/auth.rs", "output": "JWKS cache now refreshes on unknown kid with a 5 minute floor between fetches" }
+      { "tool": "prompt", "output": "ledger-api rejects valid JWTs after the key rotation", "importance": 5 },
+      { "tool": "Read", "file": "src/auth.rs", "output": "JWKS keys are cached forever so the rotated signing key is never fetched", "importance": 3 },
+      { "tool": "Edit", "file": "src/auth.rs", "output": "JWKS cache now refreshes on unknown kid with a 5 minute floor between fetches", "importance": 9 }
     ]
   },
   {
@@ -173,8 +173,8 @@
     "project": "ledger-api",
     "timestamp": "2026-04-11T10:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "reconciliation totals off by a cent on multi-currency invoices" },
-      { "tool": "Edit", "file": "src/reconcile.rs", "output": "currency amounts moved from f64 to i64 minor units with banker's rounding at conversion" }
+      { "tool": "prompt", "output": "reconciliation totals off by a cent on multi-currency invoices", "importance": 5 },
+      { "tool": "Edit", "file": "src/reconcile.rs", "output": "currency amounts moved from f64 to i64 minor units with banker's rounding at conversion", "importance": 9 }
     ]
   },
   {
@@ -182,8 +182,8 @@
     "project": "ledger-api",
     "timestamp": "2026-04-13T14:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "ledger-api image is 1.2GB, slim it down" },
-      { "tool": "Edit", "file": "Dockerfile", "output": "ledger-api runtime stage switched to distroless cc, image now 48MB" }
+      { "tool": "prompt", "output": "ledger-api image is 1.2GB, slim it down", "importance": 4 },
+      { "tool": "Edit", "file": "Dockerfile", "output": "ledger-api runtime stage switched to distroless cc, image now 48MB", "importance": 8 }
     ]
   },
   {
@@ -191,8 +191,8 @@
     "project": "ledger-api",
     "timestamp": "2026-04-14T11:00:00Z",
     "observations": [
-      { "tool": "prompt", "output": "slow balance queries on the accounts endpoint" },
-      { "tool": "Edit", "file": "src/db/mod.rs", "output": "composite index on postings account_id and posted_at, balance query p95 down from 900ms to 40ms" }
+      { "tool": "prompt", "output": "slow balance queries on the accounts endpoint", "importance": 4 },
+      { "tool": "Edit", "file": "src/db/mod.rs", "output": "composite index on postings account_id and posted_at, balance query p95 down from 900ms to 40ms", "importance": 9 }
     ]
   },
   {
@@ -200,8 +200,8 @@
     "project": "ledger-api",
     "timestamp": "2026-04-16T09:30:00Z",
     "observations": [
-      { "tool": "prompt", "output": "ledger cache grows without bound under load" },
-      { "tool": "Edit", "file": "src/cache.rs", "output": "exchange-rate cache given a 15 minute TTL via moka" }
+      { "tool": "prompt", "output": "ledger cache grows without bound under load", "importance": 5 },
+      { "tool": "Edit", "file": "src/cache.rs", "output": "exchange-rate cache given a 15 minute TTL via moka", "importance": 8 }
     ]
   }
 ]

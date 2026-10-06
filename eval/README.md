@@ -42,7 +42,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 The `agentmemory` adapters start their own daemon (`runner/sandbox.ts`) and stop it when they finish. It runs `dist/cli.mjs --instance 3` (REST 3411) with:
 
 - a store and a scratch `HOME` under `tmp/eval-sandbox/instance-3/`, deleted before and after the run, so neither your real `~/.agentmemory` store nor its `.env` is touched;
-- an environment built from scratch: `PATH`, the `HF_*` cache variables, `EMBEDDING_PROVIDER=local` unless the adapter is `agentmemory-bm25`, the shell's `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*` when set (not for `agentmemory-bm25`), and `RERANK_ENABLED` when the shell sets it (`RERANK_ENABLED=true npm run eval:coding-life` scores the cross-encoder reranker). No LLM provider, so compression is synthetic and there are no summaries;
+- an environment built from scratch: `PATH`, the `HF_*` cache variables, `EMBEDDING_PROVIDER=local` unless the adapter is `agentmemory-bm25`, the shell's `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*` when set (not for `agentmemory-bm25`), and `RERANK_ENABLED` when the shell sets it (`RERANK_ENABLED=true npm run eval:coding-life` scores the cross-encoder reranker). No LLM provider, so compression is synthetic and there are no summaries. Synthetic compression rates every Observation 5, so the runner writes each Observation's `importance` from `sessions.json` over the stored row (read back through `GET /observations`, merged through `POST /import`) and refuses to run unless the store ends up with more than one value;
 - its log at `tmp/eval-sandbox/instance-3.log`.
 
 The run refuses to start if any of the instance's three ports (REST 3411, streams 3412, viewer 3413) is in use; pick another block with `--instance N`. On a stop the daemon gets 10 seconds to exit after SIGTERM before it is killed. To score a daemon you started yourself instead, pass `--base-url http://localhost:PORT` (or set `AGENTMEMORY_BASE_URL`) — the runner then ingests into that store, so point it at a throwaway one. `npm run eval:gate` ignores both and always starts a fresh sandbox.
@@ -177,7 +177,7 @@ eval/
 │   └── replay-score.ts            per-Goal-line scoring, summary, worst cases
 └── data/
     └── coding-agent-life-v2/
-        ├── sessions.json          21 Sessions as tool-call Observations
+        ├── sessions.json          21 Sessions as tool-call Observations, each with a fixed 1-10 importance
         └── queries.json           38 questions with path, project and gold Session ids
 ```
 
@@ -202,4 +202,4 @@ Published scorecards land in `docs/benchmarks/YYYY-MM-DD-<bench>.md`; the curren
 
 ## Writing a new question
 
-Add it to `data/coding-agent-life-v2/queries.json` with a `path`, a `project`, and the gold Session ids — `[]` when the right Injection is nothing. Every Observation's first 48 output characters must be unique across Sessions, because that is how an Injection is attributed; `test/eval-adapters.test.ts` checks it.
+Add it to `data/coding-agent-life-v2/queries.json` with a `path`, a `project`, and the gold Session ids — `[]` when the right Injection is nothing. Every captured Observation carries an `importance` (1-10: decisions and fixes high, routine reads low). Session-start keeps a Session's top 5 Observations by importance, so a rating only changes the Injection for a Session with more than 5 Observations; none has yet. Every Observation's first 48 output characters must be unique across Sessions, because that is how an Injection is attributed; `test/eval-adapters.test.ts` checks it.
