@@ -165,7 +165,7 @@ export function registerContextFunction(
       // 10 to keep the block bounded since the outer token-budget loop
       // below will drop the whole block if it doesn't fit. #457.
       const relevantLessons = lessons
-        .filter((l) => !l.deleted && (!l.project || l.project === data.project))
+        .filter((l) => (!l.project || l.project === data.project))
         .sort((a, b) => projectWeighted(b, data.project) - projectWeighted(a, data.project))
         .slice(0, 10);
 

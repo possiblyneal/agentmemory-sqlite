@@ -354,7 +354,7 @@ describe("Lessons", () => {
       expect(result.decayed).toBe(0);
     });
 
-    it("soft-deletes low-confidence unreinforced lessons", async () => {
+    it("deletes low-confidence unreinforced lessons", async () => {
       const saved = (await sdk.trigger("mem::lesson-save", {
         content: "Weak lesson",
         confidence: 0.12,
@@ -365,13 +365,13 @@ describe("Lessons", () => {
       await kv.set("mem:lessons", lesson!.id, lesson!);
 
       const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as {
-        softDeleted: number;
+        deleted: number;
+        decayed: number;
       };
 
-      expect(result.softDeleted).toBe(1);
-
-      const after = await kv.get<Lesson>("mem:lessons", saved.lesson.id);
-      expect(after!.deleted).toBe(true);
+      expect(result.deleted).toBe(1);
+      expect(result.decayed).toBe(0);
+      expect(await kv.get("mem:lessons", saved.lesson.id)).toBeNull();
     });
 
     it("uses lastDecayedAt for incremental delta (not full age)", async () => {
@@ -394,60 +394,69 @@ describe("Lessons", () => {
     });
   });
 
-  describe("tombstone purge", () => {
-    const DAY = 24 * 60 * 60 * 1000;
+  describe("existing tombstones", () => {
+    beforeEach(async () => {
+      await recordProjectActivity(kv as never, "/active", new Date().toISOString());
+    });
 
-    async function tombstone(content: string, ageDays: number): Promise<Lesson> {
+    async function tombstone(content: string): Promise<Lesson> {
       const saved = (await sdk.trigger("mem::lesson-save", { content })) as { lesson: Lesson };
       const row = (await kv.get<Lesson>("mem:lessons", saved.lesson.id))!;
       row.deleted = true;
-      row.updatedAt = new Date(Date.now() - ageDays * DAY).toISOString();
       await kv.set("mem:lessons", row.id, row);
       return row;
     }
 
-    it("removes tombstones older than 30 days and keeps newer ones", async () => {
-      const old = await tombstone("old tombstone", 31);
-      const fresh = await tombstone("fresh tombstone", 5);
+    it("deletes rows an earlier version only marked deleted, however recent", async () => {
+      const tomb = await tombstone("legacy tombstone");
 
-      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { purged: number };
+      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { deleted: number };
 
-      expect(result.purged).toBe(1);
-      expect(await kv.get("mem:lessons", old.id)).toBeNull();
-      expect(await kv.get("mem:lessons", fresh.id)).not.toBeNull();
+      expect(result.deleted).toBe(1);
+      expect(await kv.get("mem:lessons", tomb.id)).toBeNull();
     });
 
-    it("keeps every tombstone when AGENTMEMORY_LESSON_TOMBSTONE_DAYS is 0", async () => {
-      vi.stubEnv("AGENTMEMORY_LESSON_TOMBSTONE_DAYS", "0");
-      try {
-        const old = await tombstone("ancient tombstone", 400);
-        const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { purged: number };
-        expect(result.purged).toBe(0);
-        expect(await kv.get("mem:lessons", old.id)).not.toBeNull();
-      } finally {
-        vi.unstubAllEnvs();
-      }
-    });
-
-    it("skips a tombstone that changed after the sweep read it", async () => {
-      const old = await tombstone("raced tombstone", 40);
+    it("skips a row that changed after the sweep read it", async () => {
+      const tomb = await tombstone("raced tombstone");
       const realList = kv.list;
       kv.list = async <T>(scope: string): Promise<T[]> => {
         const rows = await realList<T>(scope);
-        const live = (await kv.get<Lesson>("mem:lessons", old.id))!;
-        await kv.set("mem:lessons", old.id, { ...live, deleted: false, updatedAt: new Date().toISOString() });
+        const live = (await kv.get<Lesson>("mem:lessons", tomb.id))!;
+        await kv.set("mem:lessons", tomb.id, { ...live, deleted: false, updatedAt: "2099-01-01T00:00:00.000Z" });
         return rows;
       };
 
-      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { purged: number };
+      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { deleted: number };
 
-      expect(result.purged).toBe(0);
-      expect((await kv.get<Lesson>("mem:lessons", old.id))!.deleted).toBe(false);
+      expect(result.deleted).toBe(0);
+      expect((await kv.get<Lesson>("mem:lessons", tomb.id))!.deleted).toBe(false);
+    });
+
+    it("names deleted ids in a lesson_delete audit row apart from decayed ones", async () => {
+      const tomb = await tombstone("audited tombstone");
+      const old = (await sdk.trigger("mem::lesson-save", { content: "decays only", confidence: 0.8 })) as { lesson: Lesson };
+      const row = (await kv.get<Lesson>("mem:lessons", old.lesson.id))!;
+      row.createdAt = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      await kv.set("mem:lessons", row.id, row);
+
+      await sdk.trigger("mem::lesson-decay-sweep", {});
+
+      const rows = (await kv.list("mem:audit")) as Array<{
+        operation: string;
+        functionId: string;
+        targetIds: string[];
+        details: Record<string, unknown>;
+      }>;
+      const del = rows.find((r) => r.operation === "lesson_delete" && r.functionId === "mem::lesson-decay-sweep");
+      expect(del!.targetIds).toEqual([tomb.id]);
+      expect(del!.details).toMatchObject({ deleted: 1, deletedIds: [tomb.id] });
+      const decay = rows.find((r) => r.operation === "lesson_strengthen" && r.targetIds[0] === old.lesson.id);
+      expect(decay!.details).toMatchObject({ action: "decay" });
     });
   });
 
   describe("mem::lesson-delete", () => {
-    it("soft-deletes an existing lesson", async () => {
+    it("removes an existing lesson from the store", async () => {
       const saved = (await sdk.trigger("mem::lesson-save", {
         content: "Delete me",
         confidence: 0.7,
@@ -458,13 +467,11 @@ describe("Lessons", () => {
       })) as { success: boolean; lesson: Lesson };
 
       expect(result.success).toBe(true);
-      expect(result.lesson.deleted).toBe(true);
-
-      const stored = await kv.get<Lesson>("mem:lessons", saved.lesson.id);
-      expect(stored!.deleted).toBe(true);
+      expect(result.lesson.id).toBe(saved.lesson.id);
+      expect(await kv.get("mem:lessons", saved.lesson.id)).toBeNull();
     });
 
-    it("excludes a soft-deleted lesson from recall and list", async () => {
+    it("excludes a deleted lesson from recall and list", async () => {
       const saved = (await sdk.trigger("mem::lesson-save", {
         content: "Hide me from recall",
         confidence: 0.9,

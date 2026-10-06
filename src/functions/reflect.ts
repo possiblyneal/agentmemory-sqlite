@@ -261,7 +261,7 @@ export function registerReflectFunctions(
           kv.list<Crystal>(KV.crystals).catch(() => []),
         ]);
 
-      let activeLessons = lessons.filter((l) => !l.deleted);
+      let activeLessons = lessons;
       let scopedSemantic = semanticMemories;
       let scopedCrystals = crystals;
       const scopedNodes = graph.nodes;

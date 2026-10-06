@@ -515,16 +515,6 @@ export function getIdleSessionMs(): number {
   return (hours > 0 ? hours : IDLE_SESSION_DEFAULT_HOURS) * 60 * 60 * 1000;
 }
 
-const LESSON_TOMBSTONE_DEFAULT_DAYS = 30;
-
-export function getLessonTombstoneMs(): number {
-  const days = safeParseInt(
-    getMergedEnv()["AGENTMEMORY_LESSON_TOMBSTONE_DAYS"],
-    LESSON_TOMBSTONE_DEFAULT_DAYS,
-  );
-  return Math.max(0, days) * 24 * 60 * 60 * 1000;
-}
-
 const SIGNAL_TTL_DEFAULT_DAYS = 30;
 
 export function getSignalDefaultTtlMs(): number {
