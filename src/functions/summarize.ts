@@ -13,6 +13,8 @@ import {
   renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
+  FOLD_SYSTEM,
+  buildFoldPrompt,
   type ReducePartial,
 } from "../prompts/summary.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
@@ -446,8 +448,8 @@ export function registerSummarizeFunction(
       // last Observation id still match: a delete followed by a new
       // Observation keeps the count but moves the id.
       const lastObservationId = compressed[compressed.length - 1]!.id;
+      const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
       if (!data.force) {
-        const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
         if (
           existing &&
           existing.observationCount === compressed.length &&
@@ -480,18 +482,46 @@ export function registerSummarizeFunction(
         let summary: SessionSummary | null = null;
         let lastError: "empty_provider_response" | "parse_failed" | "validation_failed" =
           "empty_provider_response";
-        let mode = "single";
+        let mode: string = "single";
         let chunks = 1;
         const concurrency = Math.min(getChunkConcurrency(), data.maxChunkConcurrency ?? Infinity);
-        const planned = await planChunks(provider, compressed, sessionId, concurrency);
+        // A live Session is summarized every turn, so when a prior summary
+        // still marks a real position in the Observation order, only the
+        // Observations after it are sent and folded into that summary. A
+        // delta too big for one chunk falls back to the whole Session.
+        const priorCount = existing?.observationCount ?? 0;
+        const foldable =
+          !data.force &&
+          existing !== null &&
+          priorCount > 0 &&
+          priorCount < compressed.length &&
+          compressed[priorCount - 1]!.id === existing.lastObservationId;
+        let fold: { prior: SessionSummary; delta: CompressedObservation[] } | null = null;
+        let planned: CompressedObservation[][] | null = null;
+        if (foldable) {
+          const delta = compressed.slice(priorCount);
+          if ((await planChunks(provider, delta, sessionId, concurrency)).length === 1) {
+            fold = { prior: existing, delta };
+          }
+        }
+        if (!fold) planned = await planChunks(provider, compressed, sessionId, concurrency);
         for (let attempt = 1; attempt <= 2; attempt++) {
-          const produced = await produceSummaryXml(
-            provider,
-            planned,
-            sessionId,
-            session.project,
-            concurrency,
-          );
+          const produced = fold
+            ? {
+                response: await provider.summarize(
+                  FOLD_SYSTEM,
+                  buildFoldPrompt(fold.prior, fold.delta, priorCount),
+                ),
+                mode: "folded" as const,
+                chunks: 1,
+              }
+            : await produceSummaryXml(
+                provider,
+                planned!,
+                sessionId,
+                session.project,
+                concurrency,
+              );
           const response = produced.response;
           mode = produced.mode;
           chunks = produced.chunks;
