@@ -7,27 +7,24 @@
 // stream feed is a `ws` server. No engine, no WebSocket worker bus, no
 // 180 s invocation ceiling, no state_store.db.
 //
-// Behaviour is copied from iii 0.11.2, read from the engine source rather than
-// the SDK's `.d.mts`, because the two disagree in places the daemon can see:
+// The shapes the daemon sees are this Engine's own:
 //
-//   - `engine/src/workers/rest_api/types.rs`: `query_params`, `path_params`
-//     and `headers` are `HashMap<String, String>` — SCALAR. A repeated query
-//     key collapses to one value; the SDK's `string | string[]` is wider than
-//     the engine ever produces.
-//   - `engine/src/workers/rest_api/views.rs`: the body is parsed only for
-//     `application/json` (invalid JSON and every other content type arrive as
-//     `null`); the handler's return supplies `status_code` and `body` ONLY —
-//     headers it returns are dropped and the response is always JSON;
-//     middleware sees `{phase, request:{path_params, query_params, headers,
-//     method}, context:{}}` and answers `{action:"continue"}` or
-//     `{action:"respond", response:{status_code, headers, body}}`.
-//   - `engine/src/workers/stream/{stream,structs}.rs`: subscribers receive
-//     `{type:"stream", timestamp, streamName, groupId, id, event}` where
-//     `event` is `{type:"create"|"update", data}` for `stream::set` and
-//     `{type:"event", event:{type, data}}` for `stream::send`.
-//   - `iii-sdk/dist/index.mjs`: a failed invocation rejects with an object
-//     carrying `code` (`function_not_found` / `invocation_failed`) and
-//     `message`, which `src/index.ts`'s unhandledRejection handler reads.
+//   - `query_params`, `path_params` and `headers` are scalar strings. A repeated
+//     query key collapses to one value.
+//   - The body is parsed only for `application/json` (invalid JSON and every
+//     other content type arrive as `null`); the handler's return supplies
+//     `status_code` and `body` ONLY: headers it returns are dropped and the
+//     response is always JSON. Middleware sees `{phase, request:{path_params,
+//     query_params, headers, method}, context:{}}` and answers
+//     `{action:"continue"}` or `{action:"respond", response:{status_code,
+//     headers, body}}`.
+//   - Stream subscribers receive `{type:"stream", timestamp, streamName,
+//     groupId, id, event}` where `event` is `{type:"create"|"update", data}`
+//     for `stream::set` and `{type:"event", event:{type, data}}` for
+//     `stream::send`.
+//   - A failed invocation rejects with an `InprocInvocationError` carrying
+//     `code` (`function_not_found` / `invocation_failed`) and `message`, which
+//     `src/index.ts`'s unhandledRejection handler reads.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { ISdk } from "../types.js";
