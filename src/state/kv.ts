@@ -85,6 +85,29 @@ export class StateKV {
     })
   }
 
+  // Bounded batches like setMany. Writes only rows whose stored updatedAt is
+  // still the `updatedAt` the caller read, and returns the keys it wrote.
+  async setManyIfUnchanged<T = unknown>(
+    scope: string,
+    entries: Array<{ key: string; value: T; updatedAt: string }>,
+  ): Promise<string[]> {
+    return trackWrite(scope, async () => {
+      const written: string[] = []
+      for (let i = 0; i < entries.length; i += SET_MANY_CHUNK) {
+        written.push(
+          ...(await this.sdk.trigger<
+            { scope: string; entries: Array<{ key: string; value: T; updatedAt: string }> },
+            string[]
+          >({
+            function_id: 'state::set-many-if-unchanged',
+            payload: { scope, entries: entries.slice(i, i + SET_MANY_CHUNK) },
+          })),
+        )
+      }
+      return written
+    })
+  }
+
   // Bounded batches like setMany. Deletes only rows whose updatedAt is still
   // the one the caller read, and returns the keys it deleted.
   async deleteManyIfUnchanged(

@@ -30,6 +30,19 @@ function mockKV() {
       return entries.length;
     },
     setManyCalls,
+    setManyIfUnchanged: async <T>(
+      scope: string,
+      entries: Array<{ key: string; value: T; updatedAt: string }>,
+    ): Promise<string[]> => {
+      const written: string[] = [];
+      for (const { key, value, updatedAt } of entries) {
+        const row = store.get(scope)?.get(key) as { updatedAt?: string } | undefined;
+        if (row?.updatedAt !== updatedAt) continue;
+        store.get(scope)!.set(key, value);
+        written.push(key);
+      }
+      return written;
+    },
     deleteManyIfUnchanged: async (
       scope: string,
       entries: Array<{ key: string; updatedAt: string }>,
@@ -48,7 +61,7 @@ function mockKV() {
     },
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
-      return entries ? (Array.from(entries.values()) as T[]) : [];
+      return entries ? (structuredClone(Array.from(entries.values())) as T[]) : [];
     },
   };
 }
@@ -532,6 +545,37 @@ describe("Reflect", () => {
       expect(after!.lastDecayedAt).toBeDefined();
     });
 
+    it("keeps a concurrent reinforcement and does not count the skipped row", async () => {
+      const old = new Date(Date.now() - 21 * 86400000).toISOString();
+      const row = {
+        id: "ins_race", title: "Race", content: "Race", confidence: 0.8,
+        reinforcements: 1, sourceConceptCluster: [], sourceMemoryIds: [],
+        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        createdAt: old, updatedAt: old, decayRate: 0.05,
+      };
+      await kv.set("mem:insights", "ins_race", { ...row });
+      const list = kv.list;
+      kv.list = (async (scope: string) => {
+        const snapshot = (await list(scope)).map((r) => ({ ...(r as object) }));
+        if (scope === "mem:insights") {
+          await kv.set(scope, "ins_race", {
+            ...row, confidence: 0.95, reinforcements: 2, updatedAt: new Date().toISOString(),
+          });
+        }
+        return snapshot;
+      }) as typeof kv.list;
+
+      const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { decayed: number };
+
+      expect(result.decayed).toBe(0);
+      const after = await kv.get<Insight>("mem:insights", "ins_race");
+      expect(after!.confidence).toBe(0.95);
+      expect(after!.lastDecayedAt).toBeUndefined();
+      const [entry] = await kv.list<{ targetIds: string[]; details: Record<string, unknown> }>("mem:audit");
+      expect(entry.targetIds).toEqual([]);
+      expect(entry.details).toMatchObject({ decayed: 0 });
+    });
+
     it("deletes low-confidence unreinforced insights", async () => {
       await kv.set("mem:insights", "ins_weak", {
         id: "ins_weak", title: "Weak", content: "Weak insight", confidence: 0.12,
@@ -576,12 +620,12 @@ describe("Reflect", () => {
         deleted: true,
       };
       await kv.set("mem:insights", "ins_regen", tombstone);
-      const setMany = kv.setMany;
-      kv.setMany = async (scope, entries) => {
+      const setManyIfUnchanged = kv.setManyIfUnchanged;
+      kv.setManyIfUnchanged = async (scope, entries) => {
         await kv.set("mem:insights", "ins_regen", {
           ...tombstone, deleted: undefined, confidence: 0.6, updatedAt: new Date().toISOString(),
         });
-        return setMany(scope, entries);
+        return setManyIfUnchanged(scope, entries);
       };
 
       const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
