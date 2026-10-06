@@ -82,7 +82,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const fp = fingerprintId("lsn", data.content.trim().toLowerCase());
       const existing = await kv.get<Lesson>(KV.lessons, fp);
 
-      if (existing) {
+      if (existing && !existing.deleted) {
         reinforceLesson(existing);
         let indexedTextChanged = false;
         if (data.context && !existing.context) {
@@ -294,9 +294,8 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         kv.list<Lesson>(KV.lessons),
         loadProjectTime(kv),
       ]);
-      let decayed = 0;
       const timestamp = new Date().toISOString();
-      const dirty: Lesson[] = [];
+      const dirty: Array<{ lesson: Lesson; readUpdatedAt: string }> = [];
       const auditEvents: Array<{
         id: string;
         activeWeeks: number;
@@ -326,11 +325,11 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
             expired.push({ key: lesson.id, updatedAt: lesson.updatedAt });
             continue;
           }
+          const readUpdatedAt = lesson.updatedAt;
           lesson.confidence = confidence;
           lesson.lastDecayedAt = timestamp;
           lesson.updatedAt = timestamp;
-          decayed++;
-          dirty.push(lesson);
+          dirty.push({ lesson, readUpdatedAt });
           auditEvents.push({
             id: lesson.id,
             activeWeeks,
@@ -342,16 +341,23 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
 
       // Awaited batches, not a fan-out: N un-awaited sets run back to back on
       // the event loop under inproc (see StateKV.setMany).
-      await kv.setMany(KV.lessons, dirty.map((l) => ({ key: l.id, value: l })));
+      const decayedIds = new Set(
+        await kv.setManyIfUnchanged(
+          KV.lessons,
+          dirty.map(({ lesson, readUpdatedAt }) => ({ key: lesson.id, value: lesson, updatedAt: readUpdatedAt })),
+        ),
+      );
       const deletedIds =
         expired.length > 0 ? await kv.deleteManyIfUnchanged(KV.lessons, expired) : [];
-      for (const l of dirty) lessonRecords.set(l.id, l);
+      for (const { lesson } of dirty) {
+        if (decayedIds.has(lesson.id)) lessonRecords.set(lesson.id, lesson);
+      }
       for (const id of deletedIds) {
         lessonRecords.delete(id);
         if (lessonIndex) lessonIndex.remove(id);
       }
-      if (dirty.length > 0 || deletedIds.length > 0) noteLessonMutation();
-      for (const event of auditEvents) {
+      if (decayedIds.size > 0 || deletedIds.length > 0) noteLessonMutation();
+      for (const event of auditEvents.filter((e) => decayedIds.has(e.id))) {
         await recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", [event.id], {
           action: "decay",
           actor: "system",
@@ -371,7 +377,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         });
       }
 
-      return { success: true, decayed, deleted: deletedIds.length, total: lessons.length };
+      return { success: true, decayed: decayedIds.size, deleted: deletedIds.length, total: lessons.length };
     },
   );
 }

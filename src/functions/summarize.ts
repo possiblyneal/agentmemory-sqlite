@@ -488,7 +488,8 @@ export function registerSummarizeFunction(
         // A live Session is summarized every turn, so when a prior summary
         // still marks a real position in the Observation order, only the
         // Observations after it are sent and folded into that summary. A
-        // delta too big for one chunk falls back to the whole Session.
+        // fold prompt (prior summary included) too big for one chunk falls
+        // back to the whole Session.
         const priorCount = existing?.observationCount ?? 0;
         const foldable =
           !data.force &&
@@ -496,22 +497,19 @@ export function registerSummarizeFunction(
           priorCount > 0 &&
           priorCount < compressed.length &&
           compressed[priorCount - 1]!.id === existing.lastObservationId;
-        let fold: { prior: SessionSummary; delta: CompressedObservation[] } | null = null;
+        let foldPrompt: string | null = null;
         let planned: CompressedObservation[][] | null = null;
         if (foldable) {
-          const delta = compressed.slice(priorCount);
-          if ((await planChunks(provider, delta, sessionId, concurrency)).length === 1) {
-            fold = { prior: existing, delta };
-          }
+          const prompt = buildFoldPrompt(existing, compressed.slice(priorCount), priorCount);
+          const budget = getChunkTokens();
+          const [tokens] = await countObservationTokens(provider, [prompt], budget, sessionId);
+          if (fitsOneChunk([tokens!], budget)) foldPrompt = prompt;
         }
-        if (!fold) planned = await planChunks(provider, compressed, sessionId, concurrency);
+        if (!foldPrompt) planned = await planChunks(provider, compressed, sessionId, concurrency);
         for (let attempt = 1; attempt <= 2; attempt++) {
-          const produced = fold
+          const produced = foldPrompt
             ? {
-                response: await provider.summarize(
-                  FOLD_SYSTEM,
-                  buildFoldPrompt(fold.prior, fold.delta, priorCount),
-                ),
+                response: await provider.summarize(FOLD_SYSTEM, foldPrompt),
                 mode: "folded" as const,
                 chunks: 1,
               }

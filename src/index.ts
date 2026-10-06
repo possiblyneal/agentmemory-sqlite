@@ -574,13 +574,16 @@ async function main() {
   }
 
   if (process.env.LESSON_DECAY_ENABLED !== "false") {
-    const lessonDecayTimer = setInterval(async () => {
+    // First sweep shortly after boot also purges Lessons older releases left
+    // as deleted: true tombstones, which readers no longer filter out.
+    const runLessonDecay = async () => {
       try {
         await sdk.trigger({ function_id: "mem::lesson-decay-sweep", payload: {} });
       } catch {}
-    }, 86400000);
-    lessonDecayTimer.unref();
-    bootLog(`Lesson decay sweep: enabled (every 24h)`);
+    };
+    setTimeout(runLessonDecay, FIRST_SWEEP_DELAY_MS).unref();
+    setInterval(runLessonDecay, 86400000).unref();
+    bootLog(`Lesson decay sweep: enabled (5 min after boot, then every 24h)`);
   }
 
   if (process.env.EVICTION_ENABLED !== "false") {

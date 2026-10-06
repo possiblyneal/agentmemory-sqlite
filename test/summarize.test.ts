@@ -938,12 +938,28 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls[0].user).toContain("Session observations (8 total)");
   });
 
+  const countByLength = async (text: string) => Math.ceil(text.length / 4);
+
   it("re-summarizes the whole Session when the new Observations exceed one chunk", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     const { handler, provider } = await withPriorSummary("ses_big", 8, 5);
+    provider.countTokens = countByLength;
 
     await handler({ sessionId: "ses_big" });
+
+    expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
+  });
+
+  it("re-summarizes the whole Session when the prior summary pushes the fold past one chunk", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(5);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const { handler, kv, provider } = await withPriorSummary("ses_long_prior", 6, 5);
+    provider.countTokens = countByLength;
+    const prior: any = await kv.get("summaries", "ses_long_prior");
+    await kv.set("summaries", "ses_long_prior", { ...prior, narrative: "prior narrative text ".repeat(100) });
+
+    await handler({ sessionId: "ses_long_prior" });
 
     expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
   });

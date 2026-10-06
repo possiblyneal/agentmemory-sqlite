@@ -645,10 +645,16 @@ describe("Reflect", () => {
           tags: [], createdAt: at, updatedAt: at, lastReinforcedAt: at, decayRate: 0.05,
         });
       };
+      const workEveryWeekFor = async (weeks: number) => {
+        for (let i = 0; i < weeks; i++) {
+          await recordProjectActivity(kv as never, "/active", new Date(Date.now() - i * 7 * day).toISOString());
+        }
+      };
 
-      it("deletes a reinforced Insight idle past the default 180 days and audits it", async () => {
-        await seed("ins_idle", 181);
-        await seed("ins_recent", 179);
+      it("deletes a reinforced Insight idle past the default 26 weeks of Project Time and audits it", async () => {
+        await workEveryWeekFor(30);
+        await seed("ins_idle", 27 * 7);
+        await seed("ins_recent", 25 * 7);
 
         const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
 
@@ -659,7 +665,17 @@ describe("Reflect", () => {
         expect(entry.details).toMatchObject({ deletedIds: ["ins_idle"] });
       });
 
+      it("keeps a shelved project's Insights however long ago it was worked on", async () => {
+        await seed("ins_shelved", 400);
+
+        const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
+
+        expect(result.deleted).toBe(0);
+        expect(await kv.get<Insight>("mem:insights", "ins_shelved")).not.toBeNull();
+      });
+
       it("ignores decay writes when judging idleness", async () => {
+        await workEveryWeekFor(60);
         await seed("ins_decayed", 10);
         const row = (await kv.get<Insight>("mem:insights", "ins_decayed"))!;
         row.createdAt = new Date(Date.now() - 400 * day).toISOString();
@@ -669,11 +685,12 @@ describe("Reflect", () => {
         expect(result.deleted).toBe(0);
       });
 
-      it("honours AGENTMEMORY_INSIGHT_MAX_IDLE_DAYS", async () => {
-        vi.stubEnv("AGENTMEMORY_INSIGHT_MAX_IDLE_DAYS", "30");
+      it("honours AGENTMEMORY_INSIGHT_MAX_IDLE_WEEKS", async () => {
+        vi.stubEnv("AGENTMEMORY_INSIGHT_MAX_IDLE_WEEKS", "4");
         try {
-          await seed("ins_idle", 31);
-          await seed("ins_recent", 29);
+          await workEveryWeekFor(10);
+          await seed("ins_idle", 5 * 7);
+          await seed("ins_recent", 3 * 7);
           const result = (await sdk.trigger("mem::insight-decay-sweep", {})) as { deleted: number };
           expect(result.deleted).toBe(1);
           expect(await kv.get<Insight>("mem:insights", "ins_idle")).toBeNull();

@@ -10,7 +10,6 @@ import type { Lesson } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
-  const setManyCalls: Array<{ scope: string; keys: string[] }> = [];
   return {
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
@@ -20,15 +19,20 @@ function mockKV() {
       store.get(scope)!.set(key, data);
       return data;
     },
-    setMany: async <T>(scope: string, entries: Array<{ key: string; value: T }>): Promise<number> => {
-      setManyCalls.push({ scope, keys: entries.map((e) => e.key) });
+    setManyIfUnchanged: async <T>(
+      scope: string,
+      entries: Array<{ key: string; value: T; updatedAt: string }>,
+    ): Promise<string[]> => {
+      const written: string[] = [];
       for (const e of entries) {
-        if (!store.has(scope)) store.set(scope, new Map());
-        store.get(scope)!.set(e.key, e.value);
+        const row = store.get(scope)?.get(e.key) as { updatedAt?: string } | undefined;
+        if (row && row.updatedAt === e.updatedAt) {
+          store.get(scope)!.set(e.key, e.value);
+          written.push(e.key);
+        }
       }
-      return entries.length;
+      return written;
     },
-    setManyCalls,
     deleteManyIfUnchanged: async (
       scope: string,
       entries: Array<{ key: string; updatedAt: string }>,
@@ -48,7 +52,7 @@ function mockKV() {
     },
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
-      return entries ? (Array.from(entries.values()) as T[]) : [];
+      return entries ? (Array.from(entries.values(), (v) => structuredClone(v)) as T[]) : [];
     },
   };
 }
@@ -392,6 +396,30 @@ describe("Lessons", () => {
       expect(after!.confidence).toBeCloseTo(0.55, 2);
       expect(after!.confidence).toBeGreaterThan(0.4);
     });
+
+    it("keeps a reinforcement that lands after the sweep read the Lesson", async () => {
+      const saved = (await sdk.trigger("mem::lesson-save", {
+        content: "Raced lesson",
+        confidence: 0.8,
+      })) as { lesson: Lesson };
+      const row = (await kv.get<Lesson>("mem:lessons", saved.lesson.id))!;
+      row.createdAt = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      row.updatedAt = row.createdAt;
+      await kv.set("mem:lessons", row.id, row);
+      const realList = kv.list;
+      kv.list = async <T>(scope: string): Promise<T[]> => {
+        const rows = await realList<T>(scope);
+        if (scope === "mem:lessons") await sdk.trigger("mem::lesson-save", { content: "Raced lesson" });
+        return rows;
+      };
+
+      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { decayed: number };
+
+      expect(result.decayed).toBe(0);
+      const after = (await kv.get<Lesson>("mem:lessons", row.id))!;
+      expect(after.reinforcements).toBe(1);
+      expect(after.lastDecayedAt).toBeUndefined();
+    });
   });
 
   describe("existing tombstones", () => {
@@ -414,6 +442,22 @@ describe("Lessons", () => {
 
       expect(result.deleted).toBe(1);
       expect(await kv.get("mem:lessons", tomb.id)).toBeNull();
+    });
+
+    it("saving a tombstoned Lesson again stores a fresh Lesson the sweep keeps", async () => {
+      const tomb = await tombstone("saved again");
+
+      const resaved = (await sdk.trigger("mem::lesson-save", { content: "saved again" })) as {
+        action?: string;
+        lesson: Lesson;
+      };
+      const result = (await sdk.trigger("mem::lesson-decay-sweep", {})) as { deleted: number };
+
+      expect(resaved.action).toBe("created");
+      expect(result.deleted).toBe(0);
+      const after = (await kv.get<Lesson>("mem:lessons", tomb.id))!;
+      expect(after.deleted).toBeUndefined();
+      expect(after.reinforcements).toBe(0);
     });
 
     it("skips a row that changed after the sweep read it", async () => {
