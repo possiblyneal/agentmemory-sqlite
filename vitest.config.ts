@@ -17,6 +17,7 @@ export default defineConfig({
     env: {
       HOME: testHome,
       USERPROFILE: testHome,
+      AGENTMEMORY_PROMPT_RERANK: "off",
     },
   },
 });

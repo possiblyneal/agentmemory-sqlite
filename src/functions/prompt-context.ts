@@ -6,6 +6,8 @@ import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { getPromptRerankConfig } from "../config.js";
+import { rerankDocuments } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
@@ -22,7 +24,7 @@ const SEARCH_LIMIT = 10;
 interface SearchHit {
   score: number;
   sessionId: string;
-  observation: { id: string; narrative?: string; files?: string[] };
+  observation: { id: string; title?: string; narrative?: string; files?: string[] };
 }
 
 type NarratedHit = SearchHit & { observation: { narrative: string } };
@@ -44,6 +46,28 @@ function wordCount(prompt: string): number {
 async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
   const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
   return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
+}
+
+interface Candidate {
+  hit: NarratedHit;
+  ref: InjectedRef;
+}
+
+// Narrows BM25's selection to what the reranker scores at or above the
+// threshold, best first. Returns the selection unchanged when the gate is
+// off, cooling down, or failed.
+async function gateByRelevance(prompt: string, candidates: Candidate[]): Promise<Candidate[]> {
+  if (candidates.length === 0) return candidates;
+  const documents = candidates.map(({ hit }) =>
+    `${hit.observation.title ?? ""} ${hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)}`.trim(),
+  );
+  const scores = await rerankDocuments(prompt, documents);
+  if (!scores) return candidates;
+  const { minScore } = getPromptRerankConfig();
+  return scores
+    .filter(({ score }) => score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .map(({ index }) => candidates[index]);
 }
 
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
@@ -76,10 +100,10 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
           r.score >= floor && !!r.observation.narrative && !seen.has(refKey({ kind: "summary", id: r.sessionId })),
       );
       const refs = await Promise.all(strong.map((r) => refFor(kv, r)));
-      const chosen = strong
+      const candidates = strong
         .map((hit, i) => ({ hit, ref: refs[i] }))
-        .filter(({ ref }) => !seen.has(refKey(ref)))
-        .slice(0, MAX_RESULTS);
+        .filter(({ ref }) => !seen.has(refKey(ref)));
+      const chosen = (await gateByRelevance(prompt, candidates)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
       const lines = chosen.map(({ hit }) => escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));

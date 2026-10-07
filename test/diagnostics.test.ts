@@ -219,7 +219,7 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 20 checks = 8 original (actions, leases, sentinels, sketches, signals,
+      // 21 checks = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
@@ -227,8 +227,9 @@ describe("Diagnostics Functions", () => {
       // 1 store write probe (#1166) +
       // 1 Missed Injection record (#73) +
       // 1 Unrecalled Memory report (#76) +
-      // 1 injected-item use report (#85).
-      expect(result.summary.pass).toBe(19);
+      // 1 injected-item use report (#85) +
+      // 1 prompt rerank gate report (#169).
+      expect(result.summary.pass).toBe(20);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
@@ -669,6 +670,12 @@ describe("Diagnostics Functions", () => {
       expect(check.message).toBe(
         "3 Missed Injections in the last 24h: session-start/connection 2, prompt-submit/timeout 1",
       );
+    });
+
+    it("reports the prompt rerank gate state after the Missed Injection check", async () => {
+      const gate = (await injectionChecks()).find((c) => c.name === "prompt-rerank-gate");
+      expect(gate?.status).toBe("pass");
+      expect(gate?.message).toBe("Prompt rerank gate off: prompt-submit Injection is BM25-only");
     });
   });
 
