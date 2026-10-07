@@ -7,7 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { registerPromptContextFunction } from "../src/functions/prompt-context.js";
-import { promptGateState, resetPromptGate } from "../src/functions/prompt-rerank.js";
+import { injectionGateState, resetInjectionGate } from "../src/functions/prompt-rerank.js";
 import { getPromptRerankConfig } from "../src/config.js";
 import { logger } from "../src/logger.js";
 import { KV } from "../src/state/schema.js";
@@ -59,7 +59,7 @@ describe("mem::prompt-context reranker gate", () => {
 
   beforeEach(async () => {
     for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
-    resetPromptGate();
+    resetInjectionGate();
     requests = [];
     reply = scoring({});
     server = createServer((req, res) => {
@@ -167,6 +167,8 @@ describe("mem::prompt-context reranker gate", () => {
 
   describe("fails open to the BM25 selection", () => {
     const bm25Ids = ["obs_a", "obs_b", "obs_c"];
+    const results = (...pairs: Array<[number, unknown]>) =>
+      JSON.stringify({ results: pairs.map(([index, relevance_score]) => ({ index, relevance_score })) });
 
     beforeEach(() => {
       hits = bm25Hits();
@@ -175,25 +177,28 @@ describe("mem::prompt-context reranker gate", () => {
     it("on a 500 reply", async () => {
       reply = () => ({ status: 500, body: "boom" });
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(promptGateState().lastFailure?.reason).toBe("http_500");
+      expect(injectionGateState().lastFailure?.reason).toBe("http_500");
     });
 
     it.each([
       ["non-JSON", "not json"],
       ["no results array", "{}"],
-      ["an index out of range", JSON.stringify({ results: [{ index: 7, relevance_score: 0.9 }] })],
-      ["a non-numeric score", JSON.stringify({ results: [{ index: 0, relevance_score: "high" }] })],
+      ["an index out of range", results([0, 0.9], [1, 0.9], [7, 0.9])],
+      ["a non-numeric score", results([0, "high"], [1, 0.9], [2, 0.9])],
+      ["a duplicated index", results([0, 0.9], [0, 0.8], [1, 0.9])],
+      ["a partial list", results([0, 0.9], [1, 0.9])],
+      ["an empty list", results()],
     ])("on a malformed body: %s", async (_name, body) => {
       reply = () => ({ body });
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(promptGateState().lastFailure?.reason).toBe("malformed");
+      expect(injectionGateState().lastFailure?.reason).toBe("malformed");
     });
 
     it("on a timeout", async () => {
       process.env.AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS = "150";
       reply = () => ({ hang: true });
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(promptGateState().lastFailure?.reason).toBe("timeout");
+      expect(injectionGateState().lastFailure?.reason).toBe("timeout");
     });
 
     it("on a refused connection", async () => {
@@ -203,7 +208,7 @@ describe("mem::prompt-context reranker gate", () => {
       await new Promise((done) => closed.close(done));
       process.env.AGENTMEMORY_PROMPT_RERANK_URL = `http://127.0.0.1:${port}/v1/rerank`;
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(promptGateState().lastFailure?.reason).toBe("connection");
+      expect(injectionGateState().lastFailure?.reason).toBe("connection");
     });
   });
 
@@ -223,10 +228,19 @@ describe("mem::prompt-context reranker gate", () => {
       expect(requests).toHaveLength(1);
       expect(logger.warn).toHaveBeenCalledTimes(1);
 
+      expect(injectionGateState()).toMatchObject({ calls: 1, fallbacks: 2, failing: true });
+
       vi.advanceTimersByTime(2_000);
       reply = scoring({ obs_c: 0.8 });
       expect((await run()).injected.map((r) => r.id)).toEqual(["obs_c"]);
       expect(requests).toHaveLength(2);
+      expect(injectionGateState()).toMatchObject({ failing: false, lastFailure: { reason: "http_500" } });
+    });
+
+    it("warns once when concurrent prompts fail together", async () => {
+      reply = () => ({ status: 503 });
+      await Promise.all([run(), run(), run()]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -244,7 +258,13 @@ describe("mem::prompt-context reranker gate", () => {
     hits = bm25Hits();
     reply = scoring({ obs_a: 0.5 });
     await run();
-    expect(promptGateState()).toMatchObject({ enabled: true, calls: 1, fallbacks: 0, lastFailure: null });
+    expect(injectionGateState()).toMatchObject({
+      enabled: true,
+      calls: 1,
+      fallbacks: 0,
+      failing: false,
+      lastFailure: null,
+    });
   });
 });
 
@@ -281,6 +301,11 @@ describe("getPromptRerankConfig", () => {
       minScore: 0.03,
       timeoutMs: 1000,
     });
+  });
+
+  it("never waits longer than 1000 ms, which keeps the gate inside the hook's Injection timeout", () => {
+    process.env.AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS = "5000";
+    expect(getPromptRerankConfig().timeoutMs).toBe(1000);
   });
 
   it("accepts valid overrides", () => {

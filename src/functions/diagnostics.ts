@@ -5,7 +5,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
 import { readMissedInjections } from "../hooks/_missed-injection.js";
-import { promptGateState } from "./prompt-rerank.js";
+import { injectionGateState } from "./prompt-rerank.js";
 import { inferMemoryProjects } from "./migrate.js";
 import { loadProjectTime } from "../state/project-time.js";
 import { injectedItemUse, resolveInsightFiles, withFiles } from "./injections.js";
@@ -806,18 +806,18 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("injections")) {
-        const gate = promptGateState();
+        const gate = injectionGateState();
         const counts = `${gate.calls} calls, ${gate.fallbacks} fallbacks`;
         const failure = gate.lastFailure
           ? `, last failure ${gate.lastFailure.reason} at ${gate.lastFailure.at} (${gate.lastFailure.sinceBootSeconds}s since boot)`
           : "";
         checks.push({
-          name: "prompt-rerank-gate",
+          name: "injection-gate",
           category: "injections",
-          status: gate.enabled && gate.lastFailure ? "warn" : "pass",
+          status: gate.enabled && gate.failing ? "warn" : "pass",
           message: gate.enabled
-            ? `Prompt rerank gate on (${gate.url}): ${counts}${failure}`
-            : "Prompt rerank gate off: prompt-submit Injection is BM25-only",
+            ? `Injection Gate on (${gate.url}): ${counts}${failure}`
+            : "Injection Gate off: prompt-submit Injection is BM25-only",
           fixable: false,
         });
       }

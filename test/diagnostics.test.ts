@@ -672,10 +672,10 @@ describe("Diagnostics Functions", () => {
       );
     });
 
-    it("reports the prompt rerank gate state after the Missed Injection check", async () => {
-      const gate = (await injectionChecks()).find((c) => c.name === "prompt-rerank-gate");
+    it("reports the Injection Gate state after the Missed Injection check", async () => {
+      const gate = (await injectionChecks()).find((c) => c.name === "injection-gate");
       expect(gate?.status).toBe("pass");
-      expect(gate?.message).toBe("Prompt rerank gate off: prompt-submit Injection is BM25-only");
+      expect(gate?.message).toBe("Injection Gate off: prompt-submit Injection is BM25-only");
     });
   });
 

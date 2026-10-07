@@ -596,7 +596,9 @@ export interface PromptRerankConfig {
 
 const PROMPT_RERANK_DEFAULT_URL = "http://ai.lan:9202/v1/rerank";
 const PROMPT_RERANK_DEFAULT_MIN_SCORE = 0.03;
-const PROMPT_RERANK_DEFAULT_TIMEOUT_MS = 1000;
+// The hook aborts Injection at 1500 ms and mem::search shares that budget,
+// so the gate may only shorten its wait, never lengthen it.
+const PROMPT_RERANK_MAX_TIMEOUT_MS = 1000;
 
 function positiveNumber(value: string | undefined, fallback: number): number {
   const parsed = value?.trim() ? Number(value) : NaN;
@@ -622,7 +624,10 @@ export function getPromptRerankConfig(): PromptRerankConfig {
     url: httpUrl(env["AGENTMEMORY_PROMPT_RERANK_URL"], PROMPT_RERANK_DEFAULT_URL),
     minScore: positiveNumber(env["AGENTMEMORY_PROMPT_RERANK_MIN"], PROMPT_RERANK_DEFAULT_MIN_SCORE),
     timeoutMs: Math.ceil(
-      positiveNumber(env["AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS"], PROMPT_RERANK_DEFAULT_TIMEOUT_MS),
+      Math.min(
+        PROMPT_RERANK_MAX_TIMEOUT_MS,
+        positiveNumber(env["AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS"], PROMPT_RERANK_MAX_TIMEOUT_MS),
+      ),
     ),
   };
 }

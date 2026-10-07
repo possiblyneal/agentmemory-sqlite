@@ -132,8 +132,9 @@ found nothing that bore on the work.
 _Avoid_: miss, no-op
 
 **Injection Gate**:
-The reranker check on prompt-submit Injection: it scores the candidates BM25 selected, keeps
-those at or above a threshold, orders them by score, and never adds one BM25 did not select.
+The reranker check on prompt-submit Injection: before the top-3 cut, it scores every candidate
+that clears the BM25 floor, keeps those at or above a threshold, orders them by score, and
+never admits one below the floor.
 A gate that rejects every candidate leaves an Empty Injection. On a timeout, connection error,
 non-2xx reply or malformed body it falls back to the BM25 selection and sits out a 60 s
 cooldown. A gate fallback is not a Missed Injection, because the daemon still answered.
