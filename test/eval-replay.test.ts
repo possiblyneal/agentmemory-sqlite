@@ -15,6 +15,14 @@ import {
 } from "../eval/runner/replay-score.js";
 import { hookPayloads } from "../eval/runner/replay-hooks.js";
 import {
+  bankId,
+  filesInText,
+  injectionText,
+  recallItems,
+  recallQuery,
+  stopRetains,
+} from "../eval/runner/replay-hindsight.js";
+import {
   isMainTranscriptName,
   parseTranscript,
   type ReplaySession,
@@ -440,5 +448,77 @@ describe("hookPayloads", () => {
     });
     expect(payloads[2].data).toMatchObject({ tool_name: "Bash", tool_input: JSON.stringify({ command: "npm test" }) });
     expect((payloads[2].data.error as string).length).toBe(4000);
+  });
+});
+
+describe("Hindsight mapping", () => {
+  const entry = (e: Record<string, unknown>) => JSON.stringify({ sessionId: "k1", cwd: CWD, ...e });
+  const prompt = (text: string) => entry({ type: "user", message: { role: "user", content: text } });
+  const reply = (text: string) =>
+    entry({ type: "assistant", message: { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }, { type: "text", text }] } });
+  const toolCall = entry({
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "tool_use", id: "u1", name: "Read", input: { file_path: `${CWD}/src/cart.ts` } }] },
+  });
+  const toolResult = entry({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "u1", content: "x" }] } });
+  const turns = (n: number) => Array.from({ length: n }, (_, i) => [prompt(`prompt number ${i + 1}`), reply(`answer number ${i + 1}`)]).flat();
+
+  it("names one bank per project and skips prompts too short to recall", () => {
+    expect(bankId("shop")).toBe("claude-code::shop");
+    expect(recallQuery("  ok ")).toBeNull();
+    expect(recallQuery("x".repeat(900))).toHaveLength(800);
+  });
+
+  it("retains every 10th Stop, then the rest at SessionEnd as a new document", () => {
+    const retains = stopRetains([...turns(10), prompt("eleventh prompt"), toolCall, toolResult, reply("final answer")].join("\n"), "k1");
+    expect(retains.map((r) => r.documentId)).toEqual(["k1", "k1-c1"]);
+    expect(retains[0].messageCount).toBe(20);
+    expect(retains[0].content.startsWith("[role: user]\nprompt number 1\n[user:end]\n\n[role: assistant]\nanswer number 1\n[assistant:end]")).toBe(true);
+    // After the first retain only the last role:user message onward is sent,
+    // and a tool result is one.
+    expect(retains[1].content).toBe("[role: assistant]\nfinal answer\n[assistant:end]");
+  });
+
+  it("counts no Stop for an interrupted turn and keeps memory blocks out of a retain", () => {
+    const interrupted = [
+      prompt("start something long"),
+      reply("working"),
+      entry({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
+    ];
+    const retains = stopRetains([...interrupted, ...turns(9), prompt("<hindsight_memories>old</hindsight_memories>next")].join("\n"), "k1");
+    expect(retains).toHaveLength(1);
+    expect(retains[0].documentId).toBe("k1");
+    expect(retains[0].content).not.toContain("old");
+    expect(retains[0].content).toContain("[role: user]\nnext\n[user:end]");
+  });
+
+  it("formats the Injection the way recall.py does", () => {
+    const now = new Date("2026-09-01T10:05:30Z");
+    expect(injectionText([], now)).toBe("");
+    const text = injectionText([{ id: "a", text: "Cart totals round half up", type: "observation", mentioned_at: "2026-08-30" }], now);
+    expect(text).toMatch(/^<hindsight_memories>\n/);
+    expect(text).toContain("Current time - 2026-09-01 10:05 UTC\n\n- Cart totals round half up [observation] (2026-08-30)\n</hindsight_memories>");
+  });
+
+  it("finds the files a unit names, relative to the project's working directories", () => {
+    expect(filesInText(`Edited ${CWD}/src/cart.ts and ./test/cart.test.ts; /elsewhere/x.ts is not ours.`, [CWD]).sort()).toEqual([
+      "src/cart.ts",
+      "test/cart.test.ts",
+    ]);
+  });
+
+  it("maps recalled units to items owned by their bank's project, so another project's unit is a leak", () => {
+    const items = recallItems(
+      [
+        { id: "u1", text: "Totals live in src/cart.ts", document_id: "k1-c2" },
+        { id: "u2", text: "Invoices are monthly" },
+      ],
+      new Map([["u1", "shop"], ["u2", "billing"]]),
+      [CWD],
+    );
+    expect(items[0]).toEqual({ ref: "hindsight:u1", kind: "memory", sessionId: "k1", project: "shop", files: ["src/cart.ts"], text: "Totals live in src/cart.ts" });
+    const s = session("k2", "2026-09-02T10:00:00Z", [{ user: "change the cart totals" }]);
+    const score = scoreSession(s, deriveAnswerKey(s, []), [{ kind: "prompt-context", turn: 1, latencyMs: 5, chars: 10, items }]);
+    expect(score.items.map((i) => i.leak)).toEqual([false, true]);
   });
 });
