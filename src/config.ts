@@ -587,6 +587,51 @@ export function isContextInjectionEnabled(): boolean {
   return getMergedEnv()["AGENTMEMORY_INJECT_CONTEXT"] === "true";
 }
 
+export interface PromptRerankConfig {
+  enabled: boolean;
+  url: string;
+  minScore: number;
+  timeoutMs: number;
+}
+
+const PROMPT_RERANK_DEFAULT_URL = "http://ai.lan:9202/v1/rerank";
+const PROMPT_RERANK_DEFAULT_MIN_SCORE = 0.03;
+// The hook aborts Injection at 1500 ms and mem::search shares that budget,
+// so the gate may only shorten its wait, never lengthen it.
+const PROMPT_RERANK_MAX_TIMEOUT_MS = 1000;
+
+function positiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = value?.trim() ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function httpUrl(value: string | undefined, fallback: string): string {
+  try {
+    const { protocol } = new URL(value ?? "");
+    return protocol === "http:" || protocol === "https:" ? (value as string) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// The reranker gate on prompt-submit Injection is ON by default and fails
+// open to BM25, so an unreachable endpoint costs one timeout a minute.
+export function getPromptRerankConfig(): PromptRerankConfig {
+  const env = getMergedEnv();
+  const gate = (env["AGENTMEMORY_PROMPT_RERANK"] ?? "").trim().toLowerCase();
+  return {
+    enabled: !["false", "0", "off"].includes(gate),
+    url: httpUrl(env["AGENTMEMORY_PROMPT_RERANK_URL"], PROMPT_RERANK_DEFAULT_URL),
+    minScore: positiveNumber(env["AGENTMEMORY_PROMPT_RERANK_MIN"], PROMPT_RERANK_DEFAULT_MIN_SCORE),
+    timeoutMs: Math.ceil(
+      Math.min(
+        PROMPT_RERANK_MAX_TIMEOUT_MS,
+        positiveNumber(env["AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS"], PROMPT_RERANK_MAX_TIMEOUT_MS),
+      ),
+    ),
+  };
+}
+
 export function getConsolidationDecayDays(): number {
   return safeParseInt(getMergedEnv()["CONSOLIDATION_DECAY_DAYS"], 30);
 }

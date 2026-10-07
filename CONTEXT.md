@@ -131,6 +131,15 @@ An Injection the daemon answered with nothing to inject. The daemon was reachabl
 found nothing that bore on the work.
 _Avoid_: miss, no-op
 
+**Injection Gate**:
+The reranker check on prompt-submit Injection: before the top-3 cut, it scores every candidate
+that clears the BM25 floor, keeps those at or above a threshold, orders them by score, and
+never admits one below the floor.
+A gate that rejects every candidate leaves an Empty Injection. On a timeout, connection error,
+non-2xx reply or malformed body it falls back to the BM25 selection and sits out a 60 s
+cooldown. A gate fallback is not a Missed Injection, because the daemon still answered.
+_Avoid_: rerank filter, relevance filter
+
 **Injection Record**:
 The daemon's note of one answered Injection: the path that served it (session start, context,
 or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,

@@ -77,6 +77,19 @@ function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode)
   if (process.env.AGENTMEMORY_INJECT_CONTEXT) {
     env.AGENTMEMORY_INJECT_CONTEXT = process.env.AGENTMEMORY_INJECT_CONTEXT;
   }
+  if (process.env.AGENTMEMORY_PROMPT_RERANK_URL) {
+    for (const key of [
+      "AGENTMEMORY_PROMPT_RERANK",
+      "AGENTMEMORY_PROMPT_RERANK_URL",
+      "AGENTMEMORY_PROMPT_RERANK_MIN",
+      "AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS",
+    ]) {
+      const value = process.env[key];
+      if (value) env[key] = value;
+    }
+  } else {
+    env.AGENTMEMORY_PROMPT_RERANK = "off";
+  }
   return env;
 }
 
