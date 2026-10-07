@@ -131,13 +131,17 @@ npm run eval:replay -- --projects=-home-neal-code-homelab,-home-neal-orca-worksp
 
 then ingests Session k through `/agentmemory/replay/import-jsonl`, the path `agentmemory import-jsonl` uses, naming the project explicitly (below). What each probe delivered is read back from `GET /agentmemory/injections` (the daemon's own record of the Injected Memories), not guessed from the text.
 
-Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` because they start with `-`), `--cap N` (Sessions per resolved project, earliest first, default 40), `--min-turns N` (default 2; drops the one-prompt automated `claude -p` runs that otherwise dominate), `--max-prompts N` (prompts probed per Session, default 40), `--instance N` (default 9, never 0; ports 3111+100N), `--embeddings local|none` (default `local`), `--out DIR` (default `tmp/eval-replay`). Subagent transcripts (`agent-*.jsonl`, `subagents/`), sidechain entries, harness-written turns, slash-command wrappers and files over 20 MB are skipped.
+Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` because they start with `-`), `--cap N` (Sessions per resolved project, earliest first, default 40), `--min-turns N` (default 2; drops the one-prompt automated `claude -p` runs that otherwise dominate), `--max-prompts N` (prompts probed per Session, default 40), `--instance N` (default 9, never 0; ports 3111+100N), `--embeddings local|none` (default `local`), `--out DIR` (default `tmp/eval-replay`), `--llm` (below). Subagent transcripts (`agent-*.jsonl`, `subagents/`), sidechain entries and files over 20 MB are skipped. Only turns the Operator typed count as prompts, for the key and for probing: skill bodies (`Base directory for this skill:`, meta turns), continuation summaries, Harness Messages and the "Another Claude session sent a message" relay, slash-command wrappers, `!` shell escapes and their output, and turns that are only `<system-reminder>` are dropped.
 
 Each Session is filed under its repository the way the live hooks' `resolveProject()` files it: the main checkout's basename, shared by every worktree. The runner asks git for the common dir from the Session's cwd (or its nearest surviving ancestor), falls back to the Orca layout `<...>/workspaces/<repo>/<worktree>` for a deleted worktree, and otherwise keeps the importer's name; it passes the result as `project` to the import. So list every directory of a repository (main checkout and worktrees) in `--projects` to replay it whole.
 
 The sandbox runs with `AGENTMEMORY_INJECT_CONTEXT=true`, as the Operator's live daemon does, unless the shell sets it.
 
-Providers are recorded in `summary.json`. There is no LLM provider, so Memories are synthetic and there are no summaries or Crystals worth recalling. For a remote embedder set the same variables the daemon reads in the shell, for example `EMBEDDING_PROVIDER=openai OPENAI_EMBEDDING_BASE_URL=... OPENAI_EMBEDDING_API_KEY=... OPENAI_EMBEDDING_MODEL=... OPENAI_EMBEDDING_DIMENSIONS=...`; the sandbox forwards `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*` (and `RERANK_ENABLED`) when set and `--embeddings` is not `none`. Never commit an endpoint.
+Providers are recorded in `summary.json`. Without `--llm` there is no LLM provider, so Memories are synthetic and there are no summaries or Crystals worth recalling.
+
+`--llm` forwards the OpenAI-compatible provider from the shell (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, `OPENAI_TIMEOUT_MS`, `AGENTMEMORY_LLM_TIMEOUT_MS`, `AGENTMEMORY_LLM_MAX_CONCURRENCY`) and sets `AGENTMEMORY_AUTO_COMPRESS=true` unless the shell sets it. `import-jsonl` always compresses synthetically, so under `--llm` Session k goes in the way the live hooks send it instead: each prompt and each finished tool call to `/observe` (the hooks' truncation; no assistant text), then the runner waits until every Observation has its compression, awaits `/summarize`, and posts `/session/end`. The consolidation that the end of a Session fans out is not waited for, and the importer's phrase-extracted lessons do not exist on this path. `summary.json` records the model, the base URL's host and the `mem::compress` / `mem::summarize` call counts and mean latency, never a key. Source the provider for that one command, for example `env $(grep -E '^(OPENAI_API_KEY|OPENAI_BASE_URL|OPENAI_MODEL|OPENAI_REASONING_EFFORT|AGENTMEMORY_LLM_[A-Z_]+)=' ~/.agentmemory/.env | xargs) npm run eval:replay -- --llm ...`.
+
+For a remote embedder set the same variables the daemon reads in the shell, for example `EMBEDDING_PROVIDER=openai OPENAI_EMBEDDING_BASE_URL=... OPENAI_EMBEDDING_API_KEY=... OPENAI_EMBEDDING_MODEL=... OPENAI_EMBEDDING_DIMENSIONS=...`; the sandbox forwards `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*` (and `RERANK_ENABLED`) when set and `--embeddings` is not `none`. Never commit an endpoint.
 
 Output under `tmp/eval-replay/` (gitignored, because it quotes private transcripts): `summary.json` (run config, providers, per-Goal-line numbers), `scores.ndjson` (one row per Session), `worst-cases.md` (up to 20 misses, noise items and leaks, each with Session id and turn). Only the aggregates go into a scorecard under `docs/benchmarks/`.
 
@@ -147,11 +151,11 @@ Derived from Session k's transcript against earlier Sessions of the same project
 
 | Rule | Key item | Delivered when |
 |---|---|---|
-| Files needed | a file Session k read or edited (project-relative path) that an earlier Session also read or edited, at its first turn of use | a probe at turn <= that turn returned an item whose files list names it |
+| Files needed | a file Session k read or edited (project-relative path) that an earlier Session also read or edited, at its first turn of use; never `CLAUDE.md`, `AGENTS.md`, `CONTEXT.md`, `GLOSSARY.md` or `LESSONS.md`, which the Agent reads by convention | a probe at turn <= that turn returned an item whose files list names it |
 | Repeated correction | a human turn of k that looks like a correction (`no`, `don't`, `I told you`, `stop doing`, ...; at most 500 chars) and shares >= 3 content words and at least half the shorter side with an earlier correction | an Injection at turn < k's turn returned an item holding >= 60% of the earlier correction's content words |
 | Decision revisited | a non-correction turn of k that shares the same overlap with an earlier turn phrased as a decision (`decided`, `go with`, `from now on`, `we'll use`, ...) | an Injection at turn <= k's turn returned an item holding >= 60% of that earlier turn's words |
 
-Session start is turn 0; a prompt's Injection arrives before the work on that prompt. A repeated correction means the Agent went wrong on the prompt before it, so the Injection at the correction's own turn is too late. The same key is also checked against the `smart-search` probes, for the "search alone" baseline (the same deadline).
+Session start is turn 0; a prompt's Injection arrives before the work on that prompt. A file need first used after a terse reply (fewer than 3 content words, such as "go ahead" or "2") that follows a substantive prompt of the same Session is keyed with `terse: true` and reported as `rightMoment.terse`, outside the headline and the worst cases: its need came from the earlier prompt, whose probes already count because they precede the deadline. A repeated correction means the Agent went wrong on the prompt before it, so the Injection at the correction's own turn is too late. The same key is also checked against the `smart-search` probes, for the "search alone" baseline (the same deadline).
 
 #### Scoring per Goal line
 
@@ -170,11 +174,11 @@ Session start is turn 0; a prompt's Injection arrives before the work on that pr
 The key is a proxy and the numbers are not accuracy:
 
 - A file the Agent read again is not proof the Agent needed the Memory about it; a Memory that was used without touching a file is invisible. The audit in each scorecard measures how many proxy misses were real.
-- `CLAUDE.md` files count as needed files although Claude Code loads them without Recall, and an automated "Another Claude session sent a message" turn (a teammate agent's report) counts as a human prompt, as a probe and as a decision source. Skill expansions and continuation summaries count as prompts too. The first audit found these behind 9 of 20 proxy misses, and terse replies whose need came from earlier in the Session behind 10 more (`docs/benchmarks/2026-10-06-replay-eval.md`).
 - Correction and decision detection is by phrase and word overlap. It misses paraphrases and corrections the Operator typed in an unusual way, and flags quotations or pasted text that happen to match.
 - Items count as "used" by the same word-overlap test, so a Memory that shaped the Agent's behaviour without sharing words with any prompt counts as noise.
 - The hooks' `-<6 hex>` suffix for a second repository with the same basename (`~/.agentmemory/project-names.json`) is not reproduced: two such repositories replay as one project.
 - Sessions are ordered by start time and ingested whole, so a Session that overlapped a later-starting one (parallel worktrees) is in the store before the later one is probed, including turns that happened after that probe's moment.
+- Under `--llm`, consolidation runs on the daemon's wall-clock cooldown, which a replay compresses, so how many consolidation passes a probe has seen differs from the live daemon.
 - Without an LLM provider the sandbox holds no Memories beyond lessons the importer extracts by phrase, so the "titles and concepts of earlier Memories" form of a revisited decision is not measured; decisions come from earlier human turns.
 - Which repositories to replay is the caller's pick; the runner does not choose the busiest N.
 - Only prompts up to `--max-prompts` are probed (default 40, so the tail of a long Session is never scored), and only Sessions with `--min-turns` human turns are replayed. History before the oldest transcript on disk is absent.
@@ -209,6 +213,7 @@ eval/
 │   ├── replay.ts                  replay runner over ~/.claude/projects transcripts (daemon glue)
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
+│   ├── replay-hooks.ts            transcript → the /observe payloads the hooks would have sent (--llm)
 │   └── replay-score.ts            per-Goal-line scoring, summary, worst cases
 ├── holdout-ledger.ndjson          one line per holdout look (every `--split holdout` or `all`)
 └── data/

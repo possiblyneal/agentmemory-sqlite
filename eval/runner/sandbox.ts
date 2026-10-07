@@ -52,11 +52,24 @@ async function isUp(baseUrl: string): Promise<boolean> {
 
 // The daemon reads ~/.agentmemory/.env and inherits provider keys from the
 // shell, so the sandbox gets its own HOME under the repo's tmp/ and an env
-// built from scratch: no LLM provider (synthetic compression, no summaries)
-// and only the embedding provider the run asks for. A shell that sets
+// built from scratch: no LLM provider unless the run asks for one, and only
+// the embedding provider the run asks for. A shell that sets
 // EMBEDDING_PROVIDER and OPENAI_EMBEDDING_* picks a remote embedder for every
 // run that uses embeddings at all; the endpoint is never written in the repo.
-function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode) {
+// A run that opts into an LLM gets the OpenAI-compatible provider settings
+// from the shell, and nothing else that would pick a different provider.
+const LLM_ENV = [
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_MODEL",
+  "OPENAI_REASONING_EFFORT",
+  "OPENAI_TIMEOUT_MS",
+  "AGENTMEMORY_LLM_TIMEOUT_MS",
+  "AGENTMEMORY_LLM_MAX_CONCURRENCY",
+  "AGENTMEMORY_AUTO_COMPRESS",
+];
+
+function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode, llm: boolean) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: home,
@@ -90,12 +103,19 @@ function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode)
   } else {
     env.AGENTMEMORY_PROMPT_RERANK = "off";
   }
+  if (llm) {
+    for (const key of LLM_ENV) {
+      const value = process.env[key];
+      if (value !== undefined) env[key] = value;
+    }
+  }
   return env;
 }
 
 export async function startSandbox(opts: {
   instance: number;
   embeddings: EmbeddingMode;
+  llm?: boolean;
 }): Promise<Sandbox> {
   const cli = resolve(REPO_ROOT, "dist/cli.mjs");
   if (!existsSync(cli)) throw new Error(`${cli} not found; run npm run build first`);
@@ -119,7 +139,7 @@ export async function startSandbox(opts: {
     process.execPath,
     [cli, "--instance", String(opts.instance)],
     {
-      env: sandboxEnv(resolve(dir, "home"), sqlitePath, opts.embeddings),
+      env: sandboxEnv(resolve(dir, "home"), sqlitePath, opts.embeddings, opts.llm === true),
       stdio: ["ignore", log, log],
     },
   );
