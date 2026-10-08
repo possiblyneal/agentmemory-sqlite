@@ -245,7 +245,7 @@ const READ_ONLY_COMMANDS: Record<string, (args: string[]) => boolean> = {
   fgrep: always,
   rg: noneOf(/^--pre/),
   ls: always,
-  tree: noneOf(/^(-[a-zA-Z]*o|--o)/),
+  tree: noneOf(/^(-[a-zA-Z]*[oR]|--o)/),
   head: always,
   tail: always,
   wc: always,
@@ -261,8 +261,9 @@ const READ_ONLY_COMMANDS: Record<string, (args: string[]) => boolean> = {
   realpath: always,
   which: always,
   true: always,
-  sort: noneOf(/^(-[a-zA-Z]*o|--o)/),
-  uniq: (args) => args.filter((a) => a === "-" || !a.startsWith("-")).length <= 1,
+  sort: noneOf(/^(-[a-zA-Z]*o|--o|--c)/),
+  uniq: (args) =>
+    !args.includes("--") && args.filter((a) => a === "-" || !a.startsWith("-")).length <= 1,
   find: noneOf(/^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/),
   git: isReadOnlyGit,
 };

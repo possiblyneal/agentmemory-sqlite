@@ -99,6 +99,9 @@ describe("isReadOnlyObservation", () => {
     ["empty command", bash("")],
     ["no command", toolCall("Bash", {})],
     ["Object prototype name", bash("toString a")],
+    ["uniq operand after --", bash("uniq -- -in out")],
+    ["tree -R writes HTML", bash("tree -R -L 1 -H .")],
+    ["sort --compress-program", bash("sort --compress-program=sh -S1K big")],
   ];
 
   it.each(readOnly)("%s is read-only", (_label, raw) => {
