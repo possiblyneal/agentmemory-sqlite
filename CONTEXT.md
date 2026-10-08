@@ -106,6 +106,13 @@ _Avoid_: cache, summary, materialized view
 
 ### What happens to it
 
+**Compression**:
+Turning one Observation into the structured record that search indexes: a title, facts, a
+narrative, concepts and files. Synthetic Compression builds it with no LLM and is the default.
+LLM Compression (auto-compress) has a model write it instead, except for a read-only tool
+call — one that only read or listed — which stays synthetic.
+_Avoid_: summarization (that is a Session Summary), distillation
+
 **Extraction**:
 Turning a batch of Observations into Entities, Relations, and Memories. Extraction is
 best-effort per batch: a batch that cannot be written is dropped, not partially applied.

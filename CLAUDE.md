@@ -153,6 +153,20 @@ case "memory_your_tool": {
 ### Injection Gate
 Prompt-submit Injection (`mem::prompt-context`) is reranker-gated and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`; state under `/diagnostics` `injections`). A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
+### Auto-compress
+With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
+only when it has content and `isReadOnlyObservation()` (`src/functions/observe.ts`) is false.
+That predicate keeps synthetic a successful `post_tool_use` of Read, Grep, Glob, LS, ToolSearch,
+ListAgents, TaskList or TaskGet, and a Bash call whose every segment (split on `&&`, `||`, `;`,
+`|`, `&`, honouring quotes) is a known read-only command (`READ_ONLY_COMMANDS`: cat, grep, rg,
+ls, head, tail, wc, jq, `find` without `-exec`/`-delete`, read-only `git` subcommands, …), named
+bare or under `/bin/` or `/usr/bin/`. Any stderr, interruption, file redirection (one to
+`/dev/null` is allowed), command or process substitution, `$'…'` quoting, or unknown command
+keeps it on the LLM path, as do failures, prompts, subagent results and edits. Widen the table
+only with a command that cannot write or run another program under any flag, abbreviated long
+options included; `sed` is absent because its script can do both. The `compress` field of the
+"Observation captured" log says which path ran (`llm`, `read-only`, `synthetic`).
+
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:
 

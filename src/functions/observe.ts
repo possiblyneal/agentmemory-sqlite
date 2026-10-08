@@ -183,6 +183,158 @@ function hasCompressibleContent(raw: RawObservation): boolean {
   );
 }
 
+// Tools whose call only reads or lists: the synthetic record already holds the
+// input and the head and tail of the output, so an LLM summary adds little that
+// Recall needs.
+const READ_ONLY_TOOLS = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "LS",
+  "ToolSearch",
+  "ListAgents",
+  "TaskList",
+  "TaskGet",
+]);
+
+const always = (): boolean => true;
+const noneOf =
+  (forbidden: RegExp) =>
+  (args: string[]): boolean =>
+    !args.some((a) => forbidden.test(a));
+
+const GIT_READ_ONLY = new Set([
+  "status",
+  "log",
+  "diff",
+  "show",
+  "rev-parse",
+  "ls-files",
+  "blame",
+  "describe",
+  "shortlog",
+  "rev-list",
+  "merge-base",
+  "cat-file",
+  "grep",
+]);
+
+function isReadOnlyGit(args: string[]): boolean {
+  let i = 0;
+  while (args[i] === "--no-pager" || args[i] === "-C") i += args[i] === "-C" ? 2 : 1;
+  const [sub, ...rest] = args.slice(i);
+  if (rest.some((a) => a.startsWith("--output"))) return false;
+  if (sub === "grep" && rest.some((a) => /^(-[a-zA-Z]*O|--op)/.test(a))) return false;
+  if (GIT_READ_ONLY.has(sub)) return true;
+  if (sub === "branch") {
+    return rest.every((a) =>
+      /^(-a|-r|-v|-vv|--all|--remotes|--list|--show-current|--verbose|--no-color|--color)$/.test(a),
+    );
+  }
+  return false;
+}
+
+const READ_ONLY_COMMANDS: Record<string, (args: string[]) => boolean> = {
+  cd: always,
+  pwd: always,
+  cat: always,
+  echo: always,
+  printf: always,
+  grep: always,
+  egrep: always,
+  fgrep: always,
+  rg: noneOf(/^--pre/),
+  ls: always,
+  tree: noneOf(/^(-[a-zA-Z]*[oR]|--o)/),
+  head: always,
+  tail: always,
+  wc: always,
+  jq: always,
+  stat: always,
+  file: noneOf(/^(-[a-zA-Z]*C|--c)/),
+  diff: always,
+  nl: always,
+  cut: always,
+  tr: always,
+  basename: always,
+  dirname: always,
+  realpath: always,
+  which: always,
+  true: always,
+  sort: noneOf(/^(-[a-zA-Z]*o|--o|--c)/),
+  uniq: (args) =>
+    !args.includes("--") && args.filter((a) => a === "-" || !a.startsWith("-")).length <= 1,
+  find: noneOf(/^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/),
+  git: isReadOnlyGit,
+};
+
+function shellSegments(command: string): string[][] | null {
+  const text = command.replace(/((\d|&)?>>?\s*\/dev\/null|\d?>&\d)(?=[\s;&|]|$)/g, " ");
+  const segments: string[][] = [[]];
+  let token = "";
+  let quote: "'" | '"' | null = null;
+  const endToken = () => {
+    if (token) segments[segments.length - 1].push(token);
+    token = "";
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && c === "\\") token += text[++i] ?? "";
+      else if (quote === '"' && (c === "`" || (c === "$" && text[i + 1] === "("))) return null;
+      else token += c;
+      continue;
+    }
+    if (c === "\\") {
+      token += text[++i] ?? "";
+    } else if (c === "$" && text[i + 1] === "'") {
+      return null;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+    } else if (c === "`" || c === ">" || (c === "$" && text[i + 1] === "(") || (c === "<" && text[i + 1] === "(")) {
+      return null;
+    } else if (c === "&" || c === "|" || c === ";" || c === "\n") {
+      endToken();
+      segments.push([]);
+    } else if (/\s/.test(c)) {
+      endToken();
+    } else {
+      token += c;
+    }
+  }
+  if (quote) return null;
+  endToken();
+  return segments.filter((s) => s.length > 0);
+}
+
+function isReadOnlyCommand(command: string): boolean {
+  const segments = shellSegments(command);
+  if (!segments || segments.length === 0) return false;
+  return segments.every(([name, ...args]) => {
+    const base = name.replace(/^\/(usr\/)?bin\//, "");
+    return Object.hasOwn(READ_ONLY_COMMANDS, base) && READ_ONLY_COMMANDS[base](args);
+  });
+}
+
+function reportsError(output: unknown): boolean {
+  if (typeof output === "string") {
+    return /"stderr":\s*"[^"]|"interrupted":\s*true|"is_error":\s*true/.test(output);
+  }
+  if (!output || typeof output !== "object") return false;
+  const o = output as Record<string, unknown>;
+  return (typeof o["stderr"] === "string" && o["stderr"].trim() !== "") || o["interrupted"] === true || o["is_error"] === true;
+}
+
+export function isReadOnlyObservation(raw: RawObservation): boolean {
+  if (raw.hookType !== "post_tool_use" || !raw.toolName) return false;
+  if (reportsError(raw.toolOutput)) return false;
+  if (READ_ONLY_TOOLS.has(raw.toolName)) return true;
+  if (raw.toolName !== "Bash") return false;
+  const command = (raw.toolInput as { command?: unknown } | undefined)?.command;
+  return typeof command === "string" && isReadOnlyCommand(command);
+}
+
 function promptOf(data: unknown): string {
   const prompt = (data as { prompt?: unknown } | null)?.prompt;
   return typeof prompt === "string" ? prompt : "";
@@ -511,8 +663,11 @@ export function registerObserveFunction(
         // Per-observation LLM compression is opt-in as of 0.8.8.
         // Default path: build a zero-LLM synthetic compression so recall
         // and BM25 search still work without burning the user's Claude
-        // token allocation on every tool invocation.
-        const llmCompress = isAutoCompressEnabled() && hasCompressibleContent(raw);
+        // token allocation on every tool invocation. With auto-compress on, a
+        // read-only call stays synthetic too.
+        const compressible = isAutoCompressEnabled() && hasCompressibleContent(raw);
+        const readOnly = compressible && isReadOnlyObservation(raw);
+        const llmCompress = compressible && !readOnly;
         if (llmCompress) {
           await sdk.trigger({
             function_id: "mem::compress",
@@ -553,7 +708,7 @@ export function registerObserveFunction(
           obsId,
           sessionId: payload.sessionId,
           hook: payload.hookType,
-          compress: llmCompress ? "llm" : "synthetic",
+          compress: llmCompress ? "llm" : readOnly ? "read-only" : "synthetic",
         });
         return { observationId: obsId };
       });

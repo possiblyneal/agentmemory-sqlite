@@ -19,7 +19,7 @@ AGENTMEMORY_INJECT_CONTEXT=true
 ## Defaults worth knowing
 
 - No API key is required. Without one, agentmemory runs zero-LLM and BM25-only; local embeddings run only when `EMBEDDING_PROVIDER=local` is set. An unrecognised `EMBEDDING_PROVIDER` or the misnamed `AGENTMEMORY_EMBEDDING_PROVIDER` logs a boot warning.
-- Token-spending features ship OFF on purpose: `AGENTMEMORY_AUTO_COMPRESS` (LLM summaries) costs tokens per observation and `AGENTMEMORY_INJECT_CONTEXT` injects recalled context at session start plus up to three strong matches per user prompt.
+- Token-spending features ship OFF on purpose: `AGENTMEMORY_AUTO_COMPRESS` (LLM summaries) costs tokens per observation (read-only tool calls such as Read, Grep, Glob and Bash pipelines of `cat`/`grep`/`sed -n`/`git status`-style commands stay zero-LLM) and `AGENTMEMORY_INJECT_CONTEXT` injects recalled context at session start plus up to three strong matches per user prompt.
 - Injection Gate: when Injection is on, each prompt's BM25 candidates are reranked by an OpenAI-style `/v1/rerank` endpoint (`AGENTMEMORY_PROMPT_RERANK_URL`, default `http://ai.lan:9202/v1/rerank`) and only those scoring at least `AGENTMEMORY_PROMPT_RERANK_MIN` (0.03) are injected. It is on by default (`AGENTMEMORY_PROMPT_RERANK=off` disables it), waits at most `AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS` (1000, the cap), and on any failure injects the BM25 selection and skips the endpoint for 60 s. `/diagnostics` reports it under `injections`.
 - Tool visibility: `AGENTMEMORY_TOOLS=all` (default) or `core` for the lean set.
 - Auth: set `AGENTMEMORY_SECRET` to require `Authorization: Bearer` on the REST API.
