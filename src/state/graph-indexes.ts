@@ -213,6 +213,46 @@ export async function unlinkObservationNodes(
   ).catch(() => {});
 }
 
+// The node's sources are all gone by the time it is removed, so their
+// obs-node rows are dropped whole rather than edited.
+export async function unindexGraphNode(
+  kv: StateKV,
+  node: GraphNode,
+): Promise<void> {
+  const shard = nameShardKey(node.id);
+  await withKeyedLock(`gidx:shard:${shard}`, async () => {
+    const entries =
+      (await kv.get<NameCatalogEntry[]>(KV.graphNameShards, shard)) ?? [];
+    if (entries.some((e) => e.id === node.id)) {
+      await kv.set(
+        KV.graphNameShards,
+        shard,
+        entries.filter((e) => e.id !== node.id),
+      );
+    }
+  });
+  await withKeyedLock(`gidx:adj:${node.id}`, () =>
+    kv.delete(KV.graphAdjacency, node.id),
+  );
+  for (const obsId of node.sourceObservationIds ?? []) {
+    await unlinkObservationNodes(kv, obsId);
+  }
+}
+
+export async function unindexGraphEdge(
+  kv: StateKV,
+  nodeId: string,
+  edgeId: string,
+): Promise<void> {
+  await withKeyedLock(`gidx:adj:${nodeId}`, async () => {
+    const edgeIds = (await kv.get<string[]>(KV.graphAdjacency, nodeId)) ?? [];
+    if (!edgeIds.includes(edgeId)) return;
+    const rest = edgeIds.filter((id) => id !== edgeId);
+    if (rest.length > 0) await kv.set(KV.graphAdjacency, nodeId, rest);
+    else await kv.delete(KV.graphAdjacency, nodeId);
+  });
+}
+
 export async function indexGraphEdge(
   kv: StateKV,
   edge: GraphEdge,

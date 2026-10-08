@@ -9,7 +9,7 @@ import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
-import { unlinkObservationNodes } from "../state/graph-indexes.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
 import { safeAudit } from "./audit.js";
 import { decrementImageRef, deleteUnreferencedImage, incrementImageRef } from "./image-refs.js";
@@ -100,12 +100,11 @@ async function evictOverCap(
         (a.timestamp ?? "").localeCompare(b.timestamp ?? ""),
     )
     .slice(0, excess);
-  let evicted = 0;
+  const evictedIds: string[] = [];
   for (const obs of victims) {
     try {
       await deleteIndexed(kv, scope, obs.id);
-      await unlinkObservationNodes(kv, obs.id);
-      evicted++;
+      evictedIds.push(obs.id);
     } catch (err) {
       logger.warn("Session cap eviction failed", {
         sessionId,
@@ -133,6 +132,8 @@ async function evictOverCap(
       sessionId,
     });
   }
+  await evictGraphForSources(kv, evictedIds, "mem::observe");
+  const evicted = evictedIds.length;
   if (!capWarnedSessions.has(sessionId)) {
     capWarnedSessions.add(sessionId);
     logger.warn("Session observation cap reached; evicting least important from now on", {

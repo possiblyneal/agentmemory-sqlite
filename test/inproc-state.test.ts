@@ -61,6 +61,19 @@ describe("inproc state store", () => {
     ]);
   });
 
+  it("reports which keys exist in any scope under a prefix", async () => {
+    const fns = stateFunctions(store);
+    await fns["state::set"]({ scope: "mem:obs:a", key: "o1", value: 1 });
+    await fns["state::set"]({ scope: "mem:obs:b", key: "o2", value: 1 });
+    await fns["state::set"]({ scope: "mem:obs;x", key: "o3", value: 1 });
+    await fns["state::set"]({ scope: "mem:memories", key: "o4", value: 1 });
+
+    const keys = ["o1", "o2", "o3", "o4", "o5", ...Array.from({ length: 1500 }, (_, i) => `pad${i}`)];
+    expect(
+      (await fns["state::existing-keys"]({ prefix: "mem:obs:", keys }) as string[]).sort(),
+    ).toEqual(["o1", "o2"]);
+  });
+
   it("pages a scope in key order after a cursor", async () => {
     const fns = stateFunctions(store);
     for (const key of ["c", "a", "b", "d"]) {

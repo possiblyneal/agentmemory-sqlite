@@ -5,6 +5,7 @@ import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { lowerObservationCounts } from "./observe.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 import { refersToDifferentDates } from "../state/memory-utils.js";
 import { logger } from "../logger.js";
 
@@ -38,6 +39,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
 
       const memories = await kv.list<Memory>(KV.memories);
       const deletedIds = new Set<string>();
+      const evictedSourceIds: string[] = [];
       for (const mem of memories) {
         if (mem.forgetAfter) {
           const expiry = new Date(mem.forgetAfter).getTime();
@@ -49,6 +51,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                 await decrementImageRef(kv, sdk, mem.imageRef);
               }
               await deleteIndexed(kv, KV.memories, mem.id);
+              evictedSourceIds.push(mem.id);
               await recordAudit(kv, "delete", "mem::auto-forget", [mem.id], {
                 resource: "memory",
                 reason: "auto-forget TTL",
@@ -180,6 +183,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                 deletedOk = false;
               }
               if (deletedOk) {
+                evictedSourceIds.push(obs.id);
                 removedBySession.set(
                   sessions[i].id,
                   (removedBySession.get(sessions[i].id) ?? 0) + 1,
@@ -201,6 +205,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       await lowerObservationCounts(kv, removedBySession);
+      await evictGraphForSources(kv, evictedSourceIds, "mem::auto-forget");
 
       logger.info("Auto-forget complete", {
         ttlExpired: result.ttlExpired.length,

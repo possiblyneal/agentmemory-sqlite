@@ -137,6 +137,18 @@ written ahead of the queue. A failure after the row is stored is never queued, s
 it would duplicate the row. Session-cap eviction runs only after the row is stored, and its
 errors are logged, not returned. A daemon restart before the disk frees loses the queue.
 
+### Graph Eviction
+A path that deletes Observations or Memories calls `evictGraphForSources(kv, ids, functionId)`
+(`src/functions/graph-eviction.ts`) after the rows are gone, in place of
+`unlinkObservationNodes`. It removes each Entity and Relation whose Provenance is non-empty,
+below `getMaxSourceObservationIds()`, and names no stored Observation or Memory, with its
+incident Relations, every `gidx`/name/edge-key/degree row and the Graph Snapshot counts. It
+decides and deletes under `GRAPH_WRITE_LOCK`, so a source Extraction adds meanwhile keeps the
+record; it never throws, and is audited as `delete` with `resource: "graph"`. Candidates come
+from obs-node rows, which are capped and incomplete, so `mem::evict` (non-dry-run) also runs
+`sweepOrphanedGraph`: one full pass over nodes, edges and obs-node rows, 500 rows a page,
+resumable from `system:graphOrphanSweep` in `KV.state`.
+
 ### MCP Tool Handler
 ```typescript
 case "memory_your_tool": {
