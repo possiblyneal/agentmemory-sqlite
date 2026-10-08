@@ -33,7 +33,7 @@ export interface GraphEvictionCounts {
   edges: number;
 }
 
-const NONE: GraphEvictionCounts = { nodes: 0, edges: 0 };
+const NONE: Readonly<GraphEvictionCounts> = Object.freeze({ nodes: 0, edges: 0 });
 
 const SOURCE_SCOPE_PREFIXES = [KV.observations(""), KV.memories];
 
@@ -86,8 +86,10 @@ async function removeEdges(
 ): Promise<void> {
   for (const edge of edges) {
     const live = isLiveGraphRecord(edge, snap?.resetAt);
-    await kv.delete(KV.graphEdges, edge.id);
-    await kv.delete(KV.graphEdgeHistory, edge.id);
+    await Promise.all([
+      kv.delete(KV.graphEdges, edge.id),
+      kv.delete(KV.graphEdgeHistory, edge.id),
+    ]);
     const key = edgeIndexKey(edge.sourceNodeId, edge.targetNodeId, edge.type);
     if ((await kv.get<string>(KV.graphEdgeKey, key)) === edge.id) {
       await kv.delete(KV.graphEdgeKey, key);
@@ -219,8 +221,8 @@ async function auditRemoval(
 }
 
 // Call after the sources' rows are deleted. Never throws: a failure is logged
-// and the orphan sweep picks the records up later. The sources' obs-node rows
-// are dropped either way, as they were before Graph Eviction existed.
+// and those records stay. The sources' obs-node rows are dropped either way,
+// as they were before Graph Eviction existed.
 export async function evictGraphForSources(
   kv: StateKV,
   sourceIds: string[],
@@ -254,73 +256,5 @@ export async function evictGraphForSources(
     return NONE;
   } finally {
     await Promise.all(sourceIds.map((id) => unlinkObservationNodes(kv, id)));
-  }
-}
-
-interface SweepCursor {
-  phase: "nodes" | "edges" | "obs-nodes";
-  after?: string;
-}
-const SWEEP_KEY = "system:graphOrphanSweep";
-const SWEEP_PAGE = 500;
-const SWEEP_PHASES: SweepCursor["phase"][] = ["nodes", "edges", "obs-nodes"];
-
-export interface GraphSweepCounts extends GraphEvictionCounts {
-  obsLinks: number;
-}
-
-// Catches what source-time eviction cannot see: records orphaned before it
-// existed, sources whose obs-node row was capped short of a node, and nodes
-// left by a Memory eviction or with the graph leg off. One full pass per
-// call, a page at a time under the write lock; the cursor is saved after each
-// page, so a pass cut short by a restart resumes where it stopped.
-export async function sweepOrphanedGraph(
-  kv: StateKV,
-  functionId: string,
-): Promise<GraphSweepCounts> {
-  const totals: GraphSweepCounts = { nodes: 0, edges: 0, obsLinks: 0 };
-  if (graphLegDisabled()) return totals;
-  let cursor: SweepCursor = (await kv.get<SweepCursor>(KV.state, SWEEP_KEY)) ?? {
-    phase: "nodes",
-  };
-  for (;;) {
-    let lastKey: string | undefined;
-    if (cursor.phase === "obs-nodes") {
-      const rows = await kv.listPage<string[]>(KV.graphObsNodes, cursor.after, SWEEP_PAGE);
-      lastKey = rows.at(-1)?.key;
-      const live = await liveSourceIds(kv, rows.map((r) => r.key));
-      const gone = rows.filter((r) => !live.has(r.key)).map((r) => r.key);
-      await Promise.all(gone.map((id) => unlinkObservationNodes(kv, id)));
-      totals.obsLinks += gone.length;
-    } else {
-      const phase = cursor.phase;
-      const after = cursor.after;
-      const removed = await withKeyedLock(GRAPH_WRITE_LOCK, async () => {
-        const scope = phase === "nodes" ? KV.graphNodes : KV.graphEdges;
-        const rows = await kv.listPage<GraphNode & GraphEdge>(scope, after, SWEEP_PAGE);
-        lastKey = rows.at(-1)?.key;
-        const records = rows.map((r) => r.value);
-        return phase === "nodes"
-          ? pruneUnlocked(kv, records, [])
-          : pruneUnlocked(kv, [], records);
-      });
-      const counts = await auditRemoval(kv, functionId, removed, {
-        reason: "orphaned_provenance",
-      });
-      totals.nodes += counts.nodes;
-      totals.edges += counts.edges;
-    }
-
-    if (lastKey !== undefined) {
-      cursor = { phase: cursor.phase, after: lastKey };
-    } else {
-      const next = SWEEP_PHASES[SWEEP_PHASES.indexOf(cursor.phase) + 1];
-      if (!next) {
-        await kv.delete(KV.state, SWEEP_KEY);
-        return totals;
-      }
-      cursor = { phase: next };
-    }
-    await kv.set(KV.state, SWEEP_KEY, cursor);
   }
 }

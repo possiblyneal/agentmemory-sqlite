@@ -4,6 +4,8 @@ import { KV } from "../state/schema.js";
 import type { Memory, GraphNode, GraphEdge } from "../types.js";
 import { recordAudit } from "./audit.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
+import { GRAPH_WRITE_LOCK } from "./graph.js";
 
 export function registerCascadeFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::cascade-update", 
@@ -28,38 +30,40 @@ export function registerCascadeFunction(sdk: ISdk, kv: StateKV): void {
       // below still runs on the non-graph memories scope.
       if (obsIds.size > 0 && !graphLegDisabled()) {
         const now = new Date().toISOString();
-        const nodes = await kv.list<GraphNode>(KV.graphNodes);
-        for (const node of nodes) {
-          if (node.stale) continue;
-          const overlap = (node.sourceObservationIds ?? []).some((id) => obsIds.has(id));
-          if (overlap) {
-            node.stale = true;
-            node.updatedAt = now;
-            await kv.set(KV.graphNodes, node.id, node);
-            await recordAudit(kv, "consolidate", "mem::cascade-update", [node.id], {
-              resourceType: "GraphNode",
-              change: "marked stale from superseded memory",
-              supersededMemoryId: data.supersededMemoryId,
-            });
-            flaggedNodes++;
+        await withKeyedLock(GRAPH_WRITE_LOCK, async () => {
+          const nodes = await kv.list<GraphNode>(KV.graphNodes);
+          for (const node of nodes) {
+            if (node.stale) continue;
+            const overlap = (node.sourceObservationIds ?? []).some((id) => obsIds.has(id));
+            if (overlap) {
+              node.stale = true;
+              node.updatedAt = now;
+              await kv.set(KV.graphNodes, node.id, node);
+              await recordAudit(kv, "consolidate", "mem::cascade-update", [node.id], {
+                resourceType: "GraphNode",
+                change: "marked stale from superseded memory",
+                supersededMemoryId: data.supersededMemoryId,
+              });
+              flaggedNodes++;
+            }
           }
-        }
 
-        const edges = await kv.list<GraphEdge>(KV.graphEdges);
-        for (const edge of edges) {
-          if (edge.stale) continue;
-          const overlap = (edge.sourceObservationIds ?? []).some((id) => obsIds.has(id));
-          if (overlap) {
-            edge.stale = true;
-            await kv.set(KV.graphEdges, edge.id, edge);
-            await recordAudit(kv, "consolidate", "mem::cascade-update", [edge.id], {
-              resourceType: "GraphEdge",
-              change: "marked stale from superseded memory",
-              supersededMemoryId: data.supersededMemoryId,
-            });
-            flaggedEdges++;
+          const edges = await kv.list<GraphEdge>(KV.graphEdges);
+          for (const edge of edges) {
+            if (edge.stale) continue;
+            const overlap = (edge.sourceObservationIds ?? []).some((id) => obsIds.has(id));
+            if (overlap) {
+              edge.stale = true;
+              await kv.set(KV.graphEdges, edge.id, edge);
+              await recordAudit(kv, "consolidate", "mem::cascade-update", [edge.id], {
+                resourceType: "GraphEdge",
+                change: "marked stale from superseded memory",
+                supersededMemoryId: data.supersededMemoryId,
+              });
+              flaggedEdges++;
+            }
           }
-        }
+        });
       }
 
       const supersededConcepts = new Set(

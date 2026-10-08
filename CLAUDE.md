@@ -138,16 +138,19 @@ it would duplicate the row. Session-cap eviction runs only after the row is stor
 errors are logged, not returned. A daemon restart before the disk frees loses the queue.
 
 ### Graph Eviction
-A path that deletes Observations or Memories calls `evictGraphForSources(kv, ids, functionId)`
+Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
+eviction, `mem::auto-forget`, `mem::forget`, `mem::retention-evict`, `mem::governance-delete`,
+`mem::governance-bulk`) calls `evictGraphForSources(kv, ids, functionId)`
 (`src/functions/graph-eviction.ts`) after the rows are gone, in place of
 `unlinkObservationNodes`. It removes each Entity and Relation whose Provenance is non-empty,
 below `getMaxSourceObservationIds()`, and names no stored Observation or Memory, with its
-incident Relations, every `gidx`/name/edge-key/degree row and the Graph Snapshot counts. It
-decides and deletes under `GRAPH_WRITE_LOCK`, so a source Extraction adds meanwhile keeps the
-record; it never throws, and is audited as `delete` with `resource: "graph"`. Candidates come
-from obs-node rows, which are capped and incomplete, so `mem::evict` (non-dry-run) also runs
-`sweepOrphanedGraph`: one full pass over nodes, edges and obs-node rows, 500 rows a page,
-resumable from `system:graphOrphanSweep` in `KV.state`.
+incident Relations, every `gidx`/name/edge-key/degree/edge-history row and the Graph Snapshot
+counts. It decides and deletes under `GRAPH_WRITE_LOCK`, which every graph writer
+(`persistGraphDelta`, temporal-graph, cascade, file-node merge) also holds; it never throws,
+and is audited as `delete` with `resource: "graph"`. Candidates come only from the evicted
+sources' obs-node rows: there is no sweep, so records orphaned before this existed stay on
+disk. Import `replace` and snapshot restore rewrite the graph from their own file and do not
+call it.
 
 ### MCP Tool Handler
 ```typescript

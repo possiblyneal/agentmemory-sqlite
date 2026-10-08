@@ -4,7 +4,8 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { mockKV } from "./helpers/mocks.js";
+import { mockKV, mockSdk } from "./helpers/mocks.js";
+import { registerGovernanceFunction } from "../src/functions/governance.js";
 import { KV } from "../src/state/schema.js";
 import {
   GRAPH_WRITE_LOCK,
@@ -13,10 +14,7 @@ import {
   nameIndexKey,
   persistGraphDelta,
 } from "../src/functions/graph.js";
-import {
-  evictGraphForSources,
-  sweepOrphanedGraph,
-} from "../src/functions/graph-eviction.js";
+import { evictGraphForSources } from "../src/functions/graph-eviction.js";
 import { loadNameCatalog } from "../src/state/graph-indexes.js";
 import { withKeyedLock } from "../src/state/keyed-mutex.js";
 import type { AuditEntry, GraphEdge, GraphNode, GraphSnapshot } from "../src/types.js";
@@ -184,45 +182,15 @@ describe("Graph Eviction", () => {
     expect(await kv.get(KV.graphObsNodes, "obs_gone")).toBeNull();
   });
 
-  describe("orphan sweep", () => {
-    it("removes orphans no obs-node row points at and drops rows for gone sources", async () => {
-      const kv = mockKV();
-      await storeObservation(kv, "obs_live");
-      await persistGraphDelta(
-        kv as never,
-        [node("orphan", ["obs_gone"]), node("kept", ["obs_live"])],
-        [edge("e_k", "kept", "kept", ["obs_old"])],
-        [],
-      );
-      await kv.delete(KV.graphObsNodes, "obs_gone");
-      await kv.set(KV.graphObsNodes, "obs_stale", ["kept"]);
+  it("mem::governance-delete evicts what the deleted Memory alone sourced", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    registerGovernanceFunction(sdk as never, kv as never);
+    await kv.set(KV.memories, "mem_1", { id: "mem_1" });
+    await persistGraphDelta(kv as never, [node("a", ["mem_1"])], [], []);
 
-      const totals = await sweepOrphanedGraph(kv as never, "mem::evict");
+    await sdk.trigger("mem::governance-delete", { memoryIds: ["mem_1"] });
 
-      expect(totals).toEqual({ nodes: 1, edges: 1, obsLinks: 1 });
-      expect(await kv.get(KV.graphNodes, "orphan")).toBeNull();
-      expect(await kv.get(KV.graphNodes, "kept")).not.toBeNull();
-      expect(await kv.get(KV.graphEdges, "e_k")).toBeNull();
-      expect(await kv.get(KV.graphObsNodes, "obs_stale")).toBeNull();
-      expect(await kv.get(KV.graphObsNodes, "obs_live")).toEqual(["kept"]);
-      expect(await kv.get(KV.state, "system:graphOrphanSweep")).toBeNull();
-      expect((await graphAudits(kv)).map((a) => a.details?.reason)).toEqual([
-        "orphaned_provenance",
-        "orphaned_provenance",
-      ]);
-    });
-
-    it("resumes an interrupted pass from its saved cursor", async () => {
-      const kv = mockKV();
-      await persistGraphDelta(kv as never, [node("a", ["obs_gone"]), node("b", ["obs_gone"])], [], []);
-      await kv.set(KV.state, "system:graphOrphanSweep", { phase: "nodes", after: "a" });
-
-      expect((await sweepOrphanedGraph(kv as never, "mem::evict")).nodes).toBe(1);
-      expect(await kv.get(KV.graphNodes, "a")).not.toBeNull();
-      expect(await kv.get(KV.graphNodes, "b")).toBeNull();
-
-      expect((await sweepOrphanedGraph(kv as never, "mem::evict")).nodes).toBe(1);
-      expect(await kv.get(KV.graphNodes, "a")).toBeNull();
-    });
+    expect(await kv.get(KV.graphNodes, "a")).toBeNull();
   });
 });

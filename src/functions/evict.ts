@@ -11,7 +11,7 @@ import { StateKV } from "../state/kv.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
-import { evictGraphForSources, sweepOrphanedGraph } from "./graph-eviction.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
 import { logger } from "../logger.js";
 
@@ -412,14 +412,8 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
 
       if (!dryRun) {
         const graph = await evictGraphForSources(kv, evictedSourceIds, "mem::evict");
-        const swept = await sweepOrphanedGraph(kv, "mem::evict").catch((err) => {
-          logger.warn("Graph orphan sweep failed; it resumes on the next eviction", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return { nodes: 0, edges: 0 };
-        });
-        stats.graphNodes = graph.nodes + swept.nodes;
-        stats.graphEdges = graph.edges + swept.edges;
+        stats.graphNodes = graph.nodes;
+        stats.graphEdges = graph.edges;
       }
 
       logger.info("Eviction complete", { stats });
