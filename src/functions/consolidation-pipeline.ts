@@ -221,16 +221,16 @@ export function registerConsolidationPipelineFunction(
     if (runsSemantic || runsReflect) {
       const startedAt = new Date().toISOString();
       const summaries = await kv.list<SessionSummary>(KV.summaries);
-      const cursor = await loadUnscopedCursor();
-      const retryProjects = new Set(cursor.retryProjects);
-      const projects = data?.project
-        ? [data.project]
-        : [...new Set([
+      const cursor = data?.project ? null : await loadUnscopedCursor();
+      const retryProjects = new Set(cursor?.retryProjects);
+      const projects = cursor
+        ? [...new Set([
             ...retryProjects,
             ...summaries
               .filter((s) => s.project && s.createdAt > cursor.lastRunAt)
               .map((s) => s.project),
-          ])];
+          ])]
+        : [data!.project!];
       const semanticByProject: Record<string, unknown> = {};
       const reflectByProject: Record<string, unknown> = {};
       for (const project of projects) {

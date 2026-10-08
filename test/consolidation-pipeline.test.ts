@@ -530,6 +530,26 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(await kv.get("mem:config", "consolidation:unscopedCursor")).toEqual(stored);
   });
 
+  it("a scoped run does not read the cursor", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    sdk.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    const get = kv.get;
+    kv.get = async <T>(scope: string, key: string) => {
+      if (scope === "mem:config") throw new Error("disk I/O error");
+      return get<T>(scope, key);
+    };
+
+    const scoped = (await sdk.trigger("mem::consolidate-pipeline", {
+      tier: "reflect",
+      project: "alpha",
+    })) as { results: { reflect: Record<string, unknown> } };
+
+    expect(scoped.results.reflect).toEqual({ alpha: { success: true } });
+  });
+
   it("credits a fact another project already holds to this project's Sessions too", async () => {
     const sdk = mockSdk();
     const kv = mockKV();
