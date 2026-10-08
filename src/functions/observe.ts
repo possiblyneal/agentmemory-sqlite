@@ -224,8 +224,8 @@ function isReadOnlyGit(args: string[]): boolean {
   while (args[i] === "--no-pager" || args[i] === "-C") i += args[i] === "-C" ? 2 : 1;
   const [sub, ...rest] = args.slice(i);
   if (rest.some((a) => a.startsWith("--output"))) return false;
+  if (sub === "grep" && rest.some((a) => /^(-[a-zA-Z]*O|--op)/.test(a))) return false;
   if (GIT_READ_ONLY.has(sub)) return true;
-  // `git branch` lists only when every argument is a listing flag.
   if (sub === "branch") {
     return rest.every((a) =>
       /^(-a|-r|-v|-vv|--all|--remotes|--list|--show-current|--verbose|--no-color|--color)$/.test(a),
@@ -234,8 +234,6 @@ function isReadOnlyGit(args: string[]): boolean {
   return false;
 }
 
-// Each command maps to a check of its arguments; a command missing from the
-// map is not read-only.
 const READ_ONLY_COMMANDS: Record<string, (args: string[]) => boolean> = {
   cd: always,
   pwd: always,
@@ -245,15 +243,15 @@ const READ_ONLY_COMMANDS: Record<string, (args: string[]) => boolean> = {
   grep: always,
   egrep: always,
   fgrep: always,
-  rg: always,
+  rg: noneOf(/^--pre/),
   ls: always,
-  tree: always,
+  tree: noneOf(/^(-[a-zA-Z]*o|--o)/),
   head: always,
   tail: always,
   wc: always,
   jq: always,
   stat: always,
-  file: always,
+  file: noneOf(/^(-[a-zA-Z]*C|--c)/),
   diff: always,
   nl: always,
   cut: always,
@@ -263,19 +261,14 @@ const READ_ONLY_COMMANDS: Record<string, (args: string[]) => boolean> = {
   realpath: always,
   which: always,
   true: always,
-  sed: noneOf(/^(-[a-zA-Z]*i|--in-place)/),
-  sort: noneOf(/^(-[a-zA-Z]*o|--output)/),
-  uniq: (args) => args.filter((a) => !a.startsWith("-")).length <= 1,
+  sort: noneOf(/^(-[a-zA-Z]*o|--o)/),
+  uniq: (args) => args.filter((a) => a === "-" || !a.startsWith("-")).length <= 1,
   find: noneOf(/^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/),
   git: isReadOnlyGit,
 };
 
-// Splits a shell command into the argument lists of its pipeline and list
-// segments (on &&, ||, ;, |, & and newlines), honouring quotes. Returns null
-// for anything that could write or run unseen code: an output redirection to
-// a file, command substitution or process substitution.
 function shellSegments(command: string): string[][] | null {
-  const text = command.replace(/(\d|&)?>>?\s*\/dev\/null|\d?>&\d/g, " ");
+  const text = command.replace(/((\d|&)?>>?\s*\/dev\/null|\d?>&\d)(?=[\s;&|]|$)/g, " ");
   const segments: string[][] = [[]];
   let token = "";
   let quote: "'" | '"' | null = null;
@@ -294,6 +287,8 @@ function shellSegments(command: string): string[][] | null {
     }
     if (c === "\\") {
       token += text[++i] ?? "";
+    } else if (c === "$" && text[i + 1] === "'") {
+      return null;
     } else if (c === "'" || c === '"') {
       quote = c;
     } else if (c === "`" || c === ">" || (c === "$" && text[i + 1] === "(") || (c === "<" && text[i + 1] === "(")) {
@@ -316,7 +311,7 @@ function isReadOnlyCommand(command: string): boolean {
   const segments = shellSegments(command);
   if (!segments || segments.length === 0) return false;
   return segments.every(([name, ...args]) => {
-    const base = name.split("/").pop()!;
+    const base = name.replace(/^\/(usr\/)?bin\//, "");
     return Object.hasOwn(READ_ONLY_COMMANDS, base) && READ_ONLY_COMMANDS[base](args);
   });
 }
@@ -330,9 +325,6 @@ function reportsError(output: unknown): boolean {
   return (typeof o["stderr"] === "string" && o["stderr"].trim() !== "") || o["interrupted"] === true || o["is_error"] === true;
 }
 
-// A successful tool call that only read or listed. Auto-compress sends it to
-// synthetic compression instead of the LLM. Anything unrecognised is not
-// read-only, so it stays on the LLM path.
 export function isReadOnlyObservation(raw: RawObservation): boolean {
   if (raw.hookType !== "post_tool_use" || !raw.toolName) return false;
   if (reportsError(raw.toolOutput)) return false;

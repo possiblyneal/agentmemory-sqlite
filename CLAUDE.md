@@ -159,10 +159,12 @@ only when it has content and `isReadOnlyObservation()` (`src/functions/observe.t
 That predicate keeps synthetic a successful `post_tool_use` of Read, Grep, Glob, LS, ToolSearch,
 ListAgents, TaskList or TaskGet, and a Bash call whose every segment (split on `&&`, `||`, `;`,
 `|`, `&`, honouring quotes) is a known read-only command (`READ_ONLY_COMMANDS`: cat, grep, rg,
-ls, head, tail, wc, jq, `sed` without `-i`, `find` without `-exec`/`-delete`, read-only `git`
-subcommands, …). Any stderr, interruption, file redirection, command or process substitution,
-or unknown command keeps it on the LLM path, as do failures, prompts, subagent results and
-edits. Widen the table only with a command that cannot write. The `compress` field of the
+ls, head, tail, wc, jq, `find` without `-exec`/`-delete`, read-only `git` subcommands, …), named
+bare or under `/bin/` or `/usr/bin/`. Any stderr, interruption, file redirection (one to
+`/dev/null` is allowed), command or process substitution, `$'…'` quoting, or unknown command
+keeps it on the LLM path, as do failures, prompts, subagent results and edits. Widen the table
+only with a command that cannot write or run another program under any flag, abbreviated long
+options included; `sed` is absent because its script can do both. The `compress` field of the
 "Observation captured" log says which path ran (`llm`, `read-only`, `synthetic`).
 
 ### Hook Scripts
