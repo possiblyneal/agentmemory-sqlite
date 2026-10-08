@@ -292,7 +292,7 @@ async function main() {
 
   if (isAutoCompressEnabled()) {
     bootLog(
-      `WARNING: AGENTMEMORY_AUTO_COMPRESS=true — every PostToolUse observation will be sent to your LLM provider for compression. This spends API tokens proportional to your session tool-use frequency. Set AGENTMEMORY_AUTO_COMPRESS=false to disable.`,
+      `WARNING: AGENTMEMORY_AUTO_COMPRESS=true — every PostToolUse observation that is not a read-only call will be sent to your LLM provider for compression. This spends API tokens proportional to your session tool-use frequency. Set AGENTMEMORY_AUTO_COMPRESS=false to disable.`,
     );
   } else {
     bootLog(

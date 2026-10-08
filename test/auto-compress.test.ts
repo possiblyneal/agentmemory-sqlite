@@ -140,10 +140,37 @@ describe("mem::observe auto-compress gate (#138)", () => {
     const kv = mockKV();
     registerObserveFunction(sdk as never, kv as never);
 
-    await sdk.trigger("mem::observe", validPayload());
+    await sdk.trigger(
+      "mem::observe",
+      validPayload({
+        data: {
+          tool_name: "Edit",
+          tool_input: { file_path: "src/foo.ts", old_string: "a", new_string: "b" },
+          tool_output: "ok",
+        },
+      }),
+    );
 
     const compressCalls = sdk.triggered.filter((t) => t.id === "mem::compress");
     expect(compressCalls).toHaveLength(1);
+  });
+
+  it("AGENTMEMORY_AUTO_COMPRESS=true: a read-only call stays synthetic", async () => {
+    process.env["AGENTMEMORY_AUTO_COMPRESS"] = "true";
+    const { registerObserveFunction } = await import(
+      "../src/functions/observe.js"
+    );
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    const { observationId } = (await sdk.trigger("mem::observe", validPayload())) as {
+      observationId: string;
+    };
+
+    expect(sdk.triggered.filter((t) => t.id === "mem::compress")).toHaveLength(0);
+    const obs = await kv.get<{ confidence?: number }>(`mem:obs:ses_test`, observationId);
+    expect(obs?.confidence).toBe(0.3);
   });
 
   it("AGENTMEMORY_AUTO_COMPRESS=true: a hook with no tool payload stays synthetic (#1270)", async () => {
