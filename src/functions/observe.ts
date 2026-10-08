@@ -10,6 +10,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { buildSyntheticCompression } from "./compress-synthetic.js";
 import { evictGraphForSources } from "./graph-eviction.js";
+import { parkForCompression } from "./compress-batch.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
 import { safeAudit } from "./audit.js";
 import { decrementImageRef, deleteUnreferencedImage, incrementImageRef } from "./image-refs.js";
@@ -662,7 +663,13 @@ export function registerObserveFunction(
         const compressible = isAutoCompressEnabled() && hasCompressibleContent(raw);
         const readOnly = compressible && isReadOnlyObservation(raw);
         const llmCompress = compressible && !readOnly;
-        if (llmCompress) {
+        // An image needs mem::compress's vision step, so it goes alone. Any
+        // other LLM-worthy Observation is searchable at once as a synthetic
+        // record, and a per-Session batch upgrades it (compress-batch.ts).
+        const path = !llmCompress
+          ? readOnly ? "read-only" : "synthetic"
+          : raw.imageData ? "llm" : "llm-batch";
+        if (path === "llm") {
           await sdk.trigger({
             function_id: "mem::compress",
             payload: {
@@ -673,6 +680,7 @@ export function registerObserveFunction(
             action: TriggerAction.Void(),
           });
         } else {
+          if (path === "llm-batch") await parkForCompression(kv, raw);
           const synthetic = await storeSyntheticCompression(kv, raw);
           await sdk.trigger({
             function_id: "stream::set",
@@ -687,13 +695,20 @@ export function registerObserveFunction(
               },
             },
           });
+          if (path === "llm-batch") {
+            await sdk.trigger({
+              function_id: "mem::compress-enqueue",
+              payload: { observationId: obsId, sessionId: payload.sessionId, raw },
+              action: TriggerAction.Void(),
+            });
+          }
         }
 
         logger.info("Observation captured", {
           obsId,
           sessionId: payload.sessionId,
           hook: payload.hookType,
-          compress: llmCompress ? "llm" : readOnly ? "read-only" : "synthetic",
+          compress: path,
         });
         return { observationId: obsId };
       });

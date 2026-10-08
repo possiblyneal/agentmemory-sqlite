@@ -879,6 +879,11 @@ export function registerApiTriggers(
         return { status_code: 404, body: { error: "session_not_found" } };
       }
       clearTimeout(pendingSessionEnds.get(sessionId));
+      await sdk.trigger({
+        function_id: "mem::compress-flush",
+        payload: { sessionId },
+        action: TriggerAction.Void(),
+      });
       if (body.turnEnd === true) {
         endWhenIdle(sessionId, session.observationCount);
         return { status_code: 200, body: { success: true, deferred: true } };

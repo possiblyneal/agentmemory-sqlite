@@ -44,6 +44,7 @@ import { registerVisionSearchFunctions } from "./functions/vision-search.js";
 import { registerSlotsFunctions, isSlotsEnabled, isReflectEnabled } from "./functions/slots.js";
 import { registerDiskSizeManager } from "./functions/disk-size-manager.js";
 import { registerCompressFunction } from "./functions/compress.js";
+import { registerCompressBatchFunction } from "./functions/compress-batch.js";
 import {
   registerSearchFunction,
   getSearchIndex,
@@ -255,6 +256,7 @@ async function main() {
   }
   registerDiskSizeManager(sdk, kv);
   registerCompressFunction(sdk, kv, provider, metricsStore);
+  registerCompressBatchFunction(sdk, kv, provider, metricsStore);
   registerSearchFunction(sdk, kv);
   registerContextFunction(sdk, kv, config.tokenBudget);
   registerSummarizeFunction(sdk, kv, provider, metricsStore);
@@ -478,6 +480,11 @@ async function main() {
   }
 
   warmInBackground(embeddingProvider);
+
+  // Observations a restart left waiting for a compression batch.
+  if (isAutoCompressEnabled()) {
+    void sdk.trigger({ function_id: "mem::compress-resume", payload: {}, action: TriggerAction.Void() });
+  }
 
   // One-time repair of stores written before this fork: id lists that predate
   // their write-time bounds, duplicate file nodes, and the index shards the

@@ -64,3 +64,19 @@ export function getXmlChildren(
   }
   return items;
 }
+
+// Every `<tag id="...">` element, inner text keyed by id. A repeated id keeps
+// the last one, as getXmlPayload keeps the last root.
+export function getXmlElementsById(xml: string, tag: string): Map<string, string> {
+  const elements = new Map<string, string>();
+  if (!VALID_TAG.test(tag)) return elements;
+  const re = new RegExp(
+    `<${tag}\\s+id\\s*=\\s*"([^"<>]*)"\\s*>([\\s\\S]*?)${closeTag(tag)}`,
+    "g",
+  );
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    elements.set(m[1].trim(), m[2]);
+  }
+  return elements;
+}

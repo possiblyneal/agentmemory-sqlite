@@ -229,7 +229,21 @@ bare or under `/bin/` or `/usr/bin/`. Any stderr, interruption, file redirection
 keeps it on the LLM path, as do failures, prompts, subagent results and edits. Widen the table
 only with a command that cannot write or run another program under any flag, abbreviated long
 options included; `sed` is absent because its script can do both. The `compress` field of the
-"Observation captured" log says which path ran (`llm`, `read-only`, `synthetic`).
+"Observation captured" log says which path ran (`llm`, `llm-batch`, `read-only`,
+`synthetic`).
+
+An image goes alone to `mem::compress` (`llm`), since it needs the vision step. Every other
+LLM-bound Observation takes `llm-batch` (`src/functions/compress-batch.ts`):
+- observe parks the raw in `KV.compressPending` with reason `queued`, stores and indexes the
+  synthetic record, and enqueues it (`mem::compress-enqueue`) in an in-memory per-Session queue
+- a queue flushes at `BATCH_MAX_ITEMS`, before it would pass `BATCH_MAX_CHARS`, after
+  `BATCH_IDLE_MS` without a new item, and on `POST /agentmemory/session/end` (stop and real end)
+- one call compresses the batch; each reply block `<observation id="…">` is validated on its own
+  and overwrites its synthetic record and index entries. A missing or invalid block goes through
+  `mem::compress` alone; a failed call parks every item as `compression_failed` for
+  `api::recompress-orphans`
+- boot re-queues every `queued` entry (`mem::compress-resume`), so a restart loses nothing
+- the limits are constants, not env knobs; change them only with a measured reason
 
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:
