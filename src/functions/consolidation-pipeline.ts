@@ -50,6 +50,13 @@ function applyDecay<
 
 const DECAY_FLOOR = 0.1;
 
+const UNSCOPED_CURSOR_KEY = "consolidation:unscopedCursor";
+
+interface UnscopedCursor {
+  lastRunAt: string;
+  retryProjects: string[];
+}
+
 function forgettable<
   T extends {
     id: string;
@@ -101,9 +108,18 @@ export function registerConsolidationPipelineFunction(
   // Summaries and insights from one project must never feed another's
   // consolidation (#1344): an unscoped run consolidates each project that has
   // new summaries since the last unscoped run, one project at a time. A project
-  // whose merge or reflect failed is retried on the next unscoped run.
-  let lastUnscopedRunAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const retryProjects = new Set<string>();
+  // whose merge or reflect failed is retried on the next unscoped run. The
+  // cursor and retry set live in KV: held in memory, every restart re-ran
+  // reflect for each project summarized in the past 24h.
+  async function loadUnscopedCursor(): Promise<UnscopedCursor> {
+    const stored = await kv
+      .get<UnscopedCursor>(KV.config, UNSCOPED_CURSOR_KEY)
+      .catch(() => null);
+    return stored ?? {
+      lastRunAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      retryProjects: [],
+    };
+  }
 
   async function consolidateSemantic(summaries: SessionSummary[]) {
     if (summaries.length < 5) {
@@ -203,12 +219,14 @@ export function registerConsolidationPipelineFunction(
     if (runsSemantic || runsReflect) {
       const startedAt = new Date().toISOString();
       const summaries = await kv.list<SessionSummary>(KV.summaries);
+      const cursor = await loadUnscopedCursor();
+      const retryProjects = new Set(cursor.retryProjects);
       const projects = data?.project
         ? [data.project]
         : [...new Set([
             ...retryProjects,
             ...summaries
-              .filter((s) => s.project && s.createdAt > lastUnscopedRunAt)
+              .filter((s) => s.project && s.createdAt > cursor.lastRunAt)
               .map((s) => s.project),
           ])];
       const semanticByProject: Record<string, unknown> = {};
@@ -229,7 +247,18 @@ export function registerConsolidationPipelineFunction(
       }
       if (runsSemantic) results.semantic = semanticByProject;
       if (runsReflect) results.reflect = reflectByProject;
-      if (!data?.project) lastUnscopedRunAt = startedAt;
+      if (!data?.project) {
+        await kv
+          .set<UnscopedCursor>(KV.config, UNSCOPED_CURSOR_KEY, {
+            lastRunAt: startedAt,
+            retryProjects: [...retryProjects],
+          })
+          .catch((err) =>
+            logger.warn("Consolidation cursor not saved", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+      }
     }
 
     if (tier === "all" || tier === "procedural") {

@@ -466,6 +466,46 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(third.results.reflect).toEqual({});
   });
 
+  it("a restart does not re-run projects the last unscoped run already covered", async () => {
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+    const before = mockSdk();
+    before.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(before as never, kv as never, provider as never);
+    await before.trigger("mem::consolidate-pipeline", {});
+
+    const after = mockSdk();
+    after.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(after as never, kv as never, provider as never);
+    const rerun = (await after.trigger("mem::consolidate-pipeline", {})) as {
+      results: { reflect: Record<string, unknown> };
+    };
+
+    expect(rerun.results.reflect).toEqual({});
+  });
+
+  it("a restart still retries a project whose reflect failed before it", async () => {
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+    const before = mockSdk();
+    before.registerFunction("mem::reflect", async () => {
+      throw new Error("provider busy");
+    });
+    registerConsolidationPipelineFunction(before as never, kv as never, provider as never);
+    await before.trigger("mem::consolidate-pipeline", { tier: "reflect" });
+
+    const after = mockSdk();
+    after.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(after as never, kv as never, provider as never);
+    const retried = (await after.trigger("mem::consolidate-pipeline", { tier: "reflect" })) as {
+      results: { reflect: Record<string, unknown> };
+    };
+
+    expect(retried.results.reflect).toEqual({ alpha: { success: true } });
+  });
+
   it("credits a fact another project already holds to this project's Sessions too", async () => {
     const sdk = mockSdk();
     const kv = mockKV();
