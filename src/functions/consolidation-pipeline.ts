@@ -110,14 +110,16 @@ export function registerConsolidationPipelineFunction(
   // new summaries since the last unscoped run, one project at a time. A project
   // whose merge or reflect failed is retried on the next unscoped run. The
   // cursor and retry set live in KV: held in memory, every restart re-ran
-  // reflect for each project summarized in the past 24h.
+  // reflect for each project summarized in the past 24h. A read error aborts
+  // the run rather than falling back, since the fallback's write would wipe
+  // the stored retry set.
   async function loadUnscopedCursor(): Promise<UnscopedCursor> {
-    const stored = await kv
-      .get<UnscopedCursor>(KV.config, UNSCOPED_CURSOR_KEY)
-      .catch(() => null);
-    return stored ?? {
-      lastRunAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      retryProjects: [],
+    const stored = await kv.get<Partial<UnscopedCursor>>(KV.config, UNSCOPED_CURSOR_KEY);
+    return {
+      lastRunAt: typeof stored?.lastRunAt === "string"
+        ? stored.lastRunAt
+        : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      retryProjects: Array.isArray(stored?.retryProjects) ? stored.retryProjects : [],
     };
   }
 

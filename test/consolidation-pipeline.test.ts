@@ -506,6 +506,30 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(retried.results.reflect).toEqual({ alpha: { success: true } });
   });
 
+  it("a failed cursor read aborts the run and leaves the stored retry set intact", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    const reflected: unknown[] = [];
+    sdk.registerFunction("mem::reflect", async (payload: unknown) => {
+      reflected.push(payload);
+      return { success: true };
+    });
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    const stored = { lastRunAt: new Date().toISOString(), retryProjects: ["alpha"] };
+    await kv.set("mem:config", "consolidation:unscopedCursor", stored);
+    const get = kv.get;
+    kv.get = async () => {
+      throw new Error("disk I/O error");
+    };
+
+    await expect(sdk.trigger("mem::consolidate-pipeline", {})).rejects.toThrow("disk I/O error");
+
+    kv.get = get;
+    expect(reflected).toEqual([]);
+    expect(await kv.get("mem:config", "consolidation:unscopedCursor")).toEqual(stored);
+  });
+
   it("credits a fact another project already holds to this project's Sessions too", async () => {
     const sdk = mockSdk();
     const kv = mockKV();
