@@ -37,17 +37,20 @@ session-start do not move.
 | random | session-start | 3 | 0.208 | 0.333 | 0.000 | 2/3 | — | 0 ms |
 | random | prompt-submit | 15 | 0.056 | 0.013 | 0.000 | 1/15 | — | 0 ms |
 
-Control (gate off, same commit), prompt-submit on both adapters: 0.907 / 0.822 / 0.833
-(recall / precision / no-answer clean), 14/15, 195 chars, p50 25 ms (agentmemory) and 30 ms
-(bm25). Every other row matches the table above within latency noise.
+Control (gate off, same commit). Search and session-start rows match the table above except
+for p50 latency; `grep` and `random` do not touch the daemon.
+
+| Adapter | Path | n | Recall | Precision | No-answer clean | Hit | Mean chars | p50 |
+|---|---|---|---|---|---|---|---|---|
+| agentmemory | prompt-submit | 15 | 0.907 | 0.822 | 0.833 | 14/15 | 195 | 25 ms |
+| agentmemory-bm25 | prompt-submit | 15 | 0.907 | 0.822 | 0.833 | 14/15 | 195 | 30 ms |
 
 ## Methodology
 
-As 2026-10-06. The gate reorders the BM25 candidates that pass prompt-context's floor by
-reranker score, drops those below `AGENTMEMORY_PROMPT_RERANK_MIN`, then keeps the top 3
-(`src/functions/prompt-context.ts`). The eval sandbox forces the gate off unless
-`AGENTMEMORY_PROMPT_RERANK_URL` is set, so CI's `eval:gate` stays BM25-only and its baseline
-is unchanged.
+As 2026-10-06, with the Injection Gate described in `CLAUDE.md` (Injection Gate). The eval
+sandbox forwards the gate settings only when `AGENTMEMORY_PROMPT_RERANK_URL` is set and
+otherwise sets `AGENTMEMORY_PROMPT_RERANK=off`, so CI's `eval:gate` stays BM25-only and its
+baseline is unchanged.
 
 ## Reproduce
 
@@ -60,11 +63,16 @@ AGENTMEMORY_PROMPT_RERANK_URL=http://ai.lan:9202/v1/rerank npm run eval:coding-l
 
 ## Notes
 
-- Per question (bm25 adapter), the gate changes five prompt-submit items: `p-006` and `p-007`
-  drop off-topic Observations (precision 0.50 → 1.00, 0.33 → 1.00); the no-answer `p-n04`,
-  which BM25 lets through on the corpus-size floor noted on 2026-10-06, now injects nothing.
-  `p-002` and `p-003` trade places (precision 1.00 ↔ 0.50, net zero). The gate cannot add a
-  candidate, so `p-002`'s second item is one the control had already injected earlier in
-  the same Session and therefore skipped; this mechanism is inferred, not traced.
-- The reranker is a network dependency on `ai`. It fails open to BM25 with a 60 s cooldown;
-  with the host down the prompt-submit path is the control's BM25 path.
+- The gate ran: a fallback leaves BM25's order and top 3, which is the control, and five
+  prompt-submit questions differ from it on both adapters. The returned count and precision
+  eval Sessions found in the Injection, not Observations.
+  - `p-006` and `p-007` drop off-topic Sessions (2 → 1, 3 → 1; precision 0.50 → 1.00,
+    0.33 → 1.00).
+  - The no-answer `p-n04`, which BM25 lets through on the corpus-size floor noted on
+    2026-10-06, now injects nothing.
+  - `p-002` and `p-003` trade places (precision 1.00 ↔ 0.50, net zero). The gate reranks every
+    candidate above the floor before the top-3 cut, so it can promote one BM25
+    ranked below third; that fits `p-002` gaining a second Session.
+- End-to-end prompt-submit p50 rises 21–30 ms with the gate. #169 reported a reranker-call
+  p50 of 142 ms (Vulkan) on this set; the two measure different spans, and why the
+  end-to-end rise is smaller is not traced.

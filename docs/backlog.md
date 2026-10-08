@@ -3,6 +3,17 @@
 Work the Operator has accepted but not yet scheduled. An item moves to a GitHub issue on
 `possiblyneal/agentmemory-sqlite` when work starts, and is deleted from here when it lands.
 
+## Publish a replay scorecard with the Injection Gate on
+
+The 2026-10-07 coding-life scorecard measures the gate on synthetic questions only. Issue #169
+also asked for `eval:replay` aggregates with the gate on.
+
+- **What exists.** A cap-8 replay with LLM compression and the gate on (`possiblyneal/replay-fair`,
+  unmerged) ran on 2026-10-08, but its subset holds no answer-key items and it changes LLM and
+  gate together, so it cannot attribute the change.
+- **Done when.** A dated `docs/benchmarks/` replay scorecard compares gate off vs on on an
+  answer-keyed subset, with LLM settings held fixed.
+
 ## Keep a stale-Session recovery sweep from starving graph extraction
 
 While eviction's stale-Session recovery runs, its Summarize chunks crowd out graph
