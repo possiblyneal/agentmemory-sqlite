@@ -466,6 +466,90 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(third.results.reflect).toEqual({});
   });
 
+  it("a restart does not re-run projects the last unscoped run already covered", async () => {
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+    const before = mockSdk();
+    before.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(before as never, kv as never, provider as never);
+    await before.trigger("mem::consolidate-pipeline", {});
+
+    const after = mockSdk();
+    after.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(after as never, kv as never, provider as never);
+    const rerun = (await after.trigger("mem::consolidate-pipeline", {})) as {
+      results: { reflect: Record<string, unknown> };
+    };
+
+    expect(rerun.results.reflect).toEqual({});
+  });
+
+  it("a restart still retries a project whose reflect failed before it", async () => {
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    for (let i = 0; i < 5; i++) await kv.set("mem:summaries", `alpha_${i}`, summaryFor("alpha", i));
+    const before = mockSdk();
+    before.registerFunction("mem::reflect", async () => {
+      throw new Error("provider busy");
+    });
+    registerConsolidationPipelineFunction(before as never, kv as never, provider as never);
+    await before.trigger("mem::consolidate-pipeline", { tier: "reflect" });
+
+    const after = mockSdk();
+    after.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(after as never, kv as never, provider as never);
+    const retried = (await after.trigger("mem::consolidate-pipeline", { tier: "reflect" })) as {
+      results: { reflect: Record<string, unknown> };
+    };
+
+    expect(retried.results.reflect).toEqual({ alpha: { success: true } });
+  });
+
+  it("a failed cursor read aborts the run and leaves the stored retry set intact", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    const reflected: unknown[] = [];
+    sdk.registerFunction("mem::reflect", async (payload: unknown) => {
+      reflected.push(payload);
+      return { success: true };
+    });
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    const stored = { lastRunAt: new Date().toISOString(), retryProjects: ["alpha"] };
+    await kv.set("mem:config", "consolidation:unscopedCursor", stored);
+    const get = kv.get;
+    kv.get = async () => {
+      throw new Error("disk I/O error");
+    };
+
+    await expect(sdk.trigger("mem::consolidate-pipeline", {})).rejects.toThrow("disk I/O error");
+
+    kv.get = get;
+    expect(reflected).toEqual([]);
+    expect(await kv.get("mem:config", "consolidation:unscopedCursor")).toEqual(stored);
+  });
+
+  it("a scoped run does not read the cursor", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+    sdk.registerFunction("mem::reflect", async () => ({ success: true }));
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    const get = kv.get;
+    kv.get = async <T>(scope: string, key: string) => {
+      if (scope === "mem:config") throw new Error("disk I/O error");
+      return get<T>(scope, key);
+    };
+
+    const scoped = (await sdk.trigger("mem::consolidate-pipeline", {
+      tier: "reflect",
+      project: "alpha",
+    })) as { results: { reflect: Record<string, unknown> } };
+
+    expect(scoped.results.reflect).toEqual({ alpha: { success: true } });
+  });
+
   it("credits a fact another project already holds to this project's Sessions too", async () => {
     const sdk = mockSdk();
     const kv = mockKV();
