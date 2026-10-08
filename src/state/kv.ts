@@ -169,6 +169,14 @@ export class StateKV {
     })
   }
 
+  async existingKeys(prefix: string, keys: string[]): Promise<string[]> {
+    if (keys.length === 0) return []
+    return this.sdk.trigger<{ prefix: string; keys: string[] }, string[]>({
+      function_id: 'state::existing-keys',
+      payload: { prefix, keys },
+    })
+  }
+
   async listScopes(prefix: string): Promise<string[]> {
     return this.sdk.trigger<{ prefix: string }, string[]>({
       function_id: 'state::list-scopes',

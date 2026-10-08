@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { recordAudit, safeAudit, queryAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 import { logger } from "../logger.js";
 import { NOT_A_MEMORY_HINT } from "../mcp/tools-registry.js";
 
@@ -20,7 +21,7 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
 
       const { decrementImageRef } = await import("./image-refs.js");
 
-      let deleted = 0;
+      const deletedIds: string[] = [];
       const notFound: string[] = [];
       for (const id of data.memoryIds) {
         const mem = await kv.get<Memory>(KV.memories, id);
@@ -33,9 +34,10 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
           if (mem.imageRef) {
             await decrementImageRef(kv, sdk, mem.imageRef);
           }
-          deleted++;
+          deletedIds.push(id);
         }
       }
+      const deleted = deletedIds.length;
 
       await recordAudit(
         kv,
@@ -47,6 +49,7 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
           deleted,
         },
       );
+      await evictGraphForSources(kv, deletedIds, "mem::governance-delete");
 
       logger.info("Governance delete", {
         requested: data.memoryIds.length,
@@ -155,6 +158,8 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
           failures: failures.length > 0 ? failures : undefined,
         },
       );
+
+      await evictGraphForSources(kv, successfulIds, "mem::governance-bulk");
 
       logger.info("Governance bulk delete", {
         deleted: successfulIds.length,

@@ -9,6 +9,7 @@ import {
 } from "../state/graph-indexes.js";
 import { recordAudit } from "./audit.js";
 import { capRecordProvenance } from "./graph-provenance.js";
+import { GRAPH_WRITE_LOCK } from "./graph.js";
 import type {
   MeshPeer,
   Memory,
@@ -377,14 +378,16 @@ export function registerMeshFunction(
           });
         }
       }
-      accepted += await lwwMergeGraphNodes(kv, data.graphNodes);
-      accepted += await lwwMergeList(
-        kv,
-        KV.graphEdges,
-        data.graphEdges?.map(capRecordProvenance),
-        "mem:gedge",
-        "createdAt",
-        (edge) => indexGraphEdge(kv, edge),
+      accepted += await withKeyedLock(GRAPH_WRITE_LOCK, async () =>
+        (await lwwMergeGraphNodes(kv, data.graphNodes)) +
+        (await lwwMergeList(
+          kv,
+          KV.graphEdges,
+          data.graphEdges?.map(capRecordProvenance),
+          "mem:gedge",
+          "createdAt",
+          (edge) => indexGraphEdge(kv, edge),
+        )),
       );
       await recordAudit(kv, "mesh_sync", "mem::mesh-receive", [], {
         action: "mesh.receive",
@@ -556,16 +559,20 @@ async function applySyncData(
   }
   // B-mode: graph frozen — skip inbound graph mutation from a mesh peer.
   if (scopes.includes("graph:nodes") && !graphLegDisabled()) {
-    applied += await lwwMergeGraphNodes(kv, data.graphNodes);
+    applied += await withKeyedLock(GRAPH_WRITE_LOCK, () =>
+      lwwMergeGraphNodes(kv, data.graphNodes),
+    );
   }
   if (scopes.includes("graph:edges") && !graphLegDisabled()) {
-    applied += await lwwMergeList(
-      kv,
-      KV.graphEdges,
-      data.graphEdges?.map(capRecordProvenance),
-      "mem:gedge",
-      "createdAt",
-      (edge) => indexGraphEdge(kv, edge),
+    applied += await withKeyedLock(GRAPH_WRITE_LOCK, () =>
+      lwwMergeList(
+        kv,
+        KV.graphEdges,
+        data.graphEdges?.map(capRecordProvenance),
+        "mem:gedge",
+        "createdAt",
+        (edge) => indexGraphEdge(kv, edge),
+      ),
     );
   }
 

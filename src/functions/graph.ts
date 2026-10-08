@@ -53,7 +53,7 @@ const MAX_GRAPH_QUERY_LIMIT = 5000;
 // enumeration. Aggregate stats (nodesByType / edgesByType) are computed
 // fresh during rebuild and stored alongside.
 const SNAPSHOT_TOP_NODES = DEFAULT_GRAPH_QUERY_LIMIT;
-const SNAPSHOT_KEY = "current";
+export const SNAPSHOT_KEY = "current";
 
 // #1171: the snapshot is derived and disposable, so it holds a projection of
 // each node and edge with provenance stripped. Origin is read from the record.
@@ -84,7 +84,7 @@ function emptySnapshot(): GraphSnapshot {
 // Absence is not failure. A missing or unreadable-shaped snapshot returns
 // null and the caller treats the graph as empty; a store error propagates,
 // so a write path can tell the two apart (#1169).
-async function loadSnapshot(kv: StateKV): Promise<GraphSnapshot | null> {
+export async function loadSnapshot(kv: StateKV): Promise<GraphSnapshot | null> {
   const snap = await kv.get<GraphSnapshot>(KV.graphSnapshot, SNAPSHOT_KEY);
   if (snap && typeof snap === "object" && snap.version === 1) {
     return snap;
@@ -343,7 +343,7 @@ export function edgeIndexKey(
 //     topNodes (promote, evict tail if topNodes is full)
 //   - node IS in topNodes and its position needs resorting (re-sort
 //     topNodes in place)
-async function applyDegreeDelta(
+export async function applyDegreeDelta(
   kv: StateKV,
   snap: GraphSnapshot,
   nodeId: string,

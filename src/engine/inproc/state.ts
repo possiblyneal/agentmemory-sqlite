@@ -65,6 +65,12 @@ function encode(value: unknown): string {
   return json === undefined ? "null" : json;
 }
 
+const EXISTING_KEYS_CHUNK = 1000;
+
+function prefixUpperBound(prefix: string): string {
+  return prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -322,11 +328,28 @@ export class SqliteState {
   // A half-open range over the (scope, seq) index, so the prefix needs no
   // LIKE escaping.
   listScopes(prefix: string): string[] {
-    const hi = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
     const rows = this.db
       .prepare("SELECT DISTINCT scope FROM kv WHERE scope >= ? AND scope < ?")
-      .all(prefix, hi) as Array<{ scope: string }>;
+      .all(prefix, prefixUpperBound(prefix)) as Array<{ scope: string }>;
     return rows.map((r) => r.scope);
+  }
+
+  // Which of `keys` are stored in any scope under the prefix — an id's
+  // existence when its scope is unknown, such as an Observation's Session.
+  // Each chunk is one range scan of the covering (scope, key) index.
+  existingKeys(prefix: string, keys: string[]): string[] {
+    const hi = prefixUpperBound(prefix);
+    const found = new Set<string>();
+    for (let i = 0; i < keys.length; i += EXISTING_KEYS_CHUNK) {
+      const chunk = keys.slice(i, i + EXISTING_KEYS_CHUNK);
+      const rows = this.db
+        .prepare(
+          `SELECT key FROM kv WHERE scope >= ? AND scope < ? AND key IN (${chunk.map(() => "?").join(",")})`,
+        )
+        .all(prefix, hi, ...chunk) as Array<{ key: string }>;
+      for (const r of rows) found.add(r.key);
+    }
+    return [...found];
   }
 
   // Raw upsert used by set/update. Keeps the existing row's `seq`. Returns the
@@ -515,6 +538,7 @@ export function stateFunctions(
     "state::bytes": async (p) => cooperate(store.bytes(p.scope)),
     "state::list-newest": async (p) => cooperate(store.listNewest(p.scope, p.opts)),
     "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
+    "state::existing-keys": async (p) => cooperate(store.existingKeys(p.prefix, p.keys ?? [])),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
     "state::set-many-if-unchanged": async (p) =>
       cooperate(store.setManyIfUnchanged(p.scope, p.entries ?? [])),

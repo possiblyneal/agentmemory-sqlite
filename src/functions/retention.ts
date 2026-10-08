@@ -11,6 +11,7 @@ import type { AccessLog } from "./access-tracker.js";
 import { emptyAccessLog, normalizeAccessLog } from "./access-tracker.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 import { logger } from "../logger.js";
 
 const DEFAULT_DECAY: DecayConfig = {
@@ -373,6 +374,7 @@ export function registerRetentionFunctions(
           evictedSemantic,
           reason: "retention score below threshold",
         });
+        await evictGraphForSources(kv, evictedIds, "mem::retention-evict");
       }
 
       logger.info("Retention-based eviction complete", {

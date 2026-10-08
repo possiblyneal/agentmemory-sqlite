@@ -16,6 +16,7 @@ import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
 import { graphWritesDisabled } from "./graph.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 
 // Slicing by UTF-16 code unit can cut an astral character (emoji, some CJK
 // extensions) mid surrogate pair, leaving a lone high surrogate that renders
@@ -463,6 +464,11 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             sessionDeleted: deletedSession,
             reason: "user-initiated forget",
           },
+        );
+        await evictGraphForSources(
+          kv,
+          [...deletedMemoryIds, ...deletedObservationIds],
+          "mem::forget",
         );
       }
 

@@ -11,7 +11,7 @@ import { StateKV } from "../state/kv.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
-import { unlinkObservationNodes } from "../state/graph-indexes.js";
+import { evictGraphForSources } from "./graph-eviction.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
 import { logger } from "../logger.js";
 
@@ -37,6 +37,8 @@ interface EvictionStats {
   capEvictions: number;
   expiredMemories: number;
   nonLatestMemories: number;
+  graphNodes: number;
+  graphEdges: number;
   dryRun: boolean;
 }
 
@@ -187,6 +189,8 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         capEvictions: 0,
         expiredMemories: 0,
         nonLatestMemories: 0,
+        graphNodes: 0,
+        graphEdges: 0,
         dryRun,
       };
 
@@ -235,6 +239,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         }
       }
 
+      const evictedSourceIds: string[] = [];
       const removedBySession = new Map<string, number>();
       const countRemoval = (sessionId: string) =>
         removedBySession.set(sessionId, (removedBySession.get(sessionId) ?? 0) + 1);
@@ -263,7 +268,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 stats.lowImportanceObs++;
                 lowImportanceIds.add(o.id);
                 countRemoval(session.id);
-                await unlinkObservationNodes(kv, o.id);
+                evictedSourceIds.push(o.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "observation",
@@ -308,7 +313,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
                 stats.capEvictions++;
                 countRemoval(o.sessionId);
-                await unlinkObservationNodes(kv, o.id);
+                evictedSourceIds.push(o.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "observation",
@@ -347,6 +352,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 await deleteIndexed(kv, KV.memories, mem.id);
                 stats.expiredMemories++;
                 evictedMemIds.add(mem.id);
+                evictedSourceIds.push(mem.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "memory",
@@ -381,6 +387,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               try {
                 await deleteIndexed(kv, KV.memories, mem.id);
                 stats.nonLatestMemories++;
+                evictedSourceIds.push(mem.id);
               } catch (err) {
                 logger.warn("Eviction delete failed", {
                   resource: "memory",
@@ -401,6 +408,12 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
             }
           }
         }
+      }
+
+      if (!dryRun) {
+        const graph = await evictGraphForSources(kv, evictedSourceIds, "mem::evict");
+        stats.graphNodes = graph.nodes;
+        stats.graphEdges = graph.edges;
       }
 
       logger.info("Eviction complete", { stats });

@@ -51,7 +51,8 @@ export const KV = {
   // Read-path side-indexes so graph retrieval never enumerates the full
   // nodes/edges scopes. Maintained as hints on every write site;
   // readers verify each hit against the live record (stale flag +
-  // snapshot resetAt) so deletes/wipes need no index cleanup.
+  // snapshot resetAt) so a wipe needs no index cleanup; Graph Eviction
+  // (functions/graph-eviction.ts) still removes a deleted record's entries.
   // - graphNameShards: key `hash(nodeId) % 64` -> Array<{id, name}>.
   //   The full name catalog is readable as 64 bounded gets, preserving
   //   substring-match semantics without a kv.list.

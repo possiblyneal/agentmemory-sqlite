@@ -168,8 +168,10 @@ alone for months comes back as it was left.
 _Avoid_: active time, wall-clock age
 
 **Eviction**:
-Deliberately removing Memories that have aged out or lost relevance, under a policy. Distinct
-from Reclaim.
+Deliberately removing Memories that have aged out or lost relevance, under a policy. Evicting
+an Observation or Memory also evicts every Entity and Relation whose Provenance it was the last
+of: a Provenance below the cap that names no stored Observation or Memory. A Provenance at the
+cap may have dropped a live source, so it is never evicted. Distinct from Reclaim.
 
 **Reclaim**:
 Deleting stored bytes that no longer back any live concept — data left behind by a removed

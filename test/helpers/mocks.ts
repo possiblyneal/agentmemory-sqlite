@@ -46,6 +46,14 @@ export function mockKV() {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
     },
+    existingKeys: async (prefix: string, keys: string[]): Promise<string[]> => {
+      const found = new Set<string>();
+      for (const [scope, rows] of store) {
+        if (!scope.startsWith(prefix)) continue;
+        for (const key of keys) if (rows.has(key)) found.add(key);
+      }
+      return [...found];
+    },
     listScopes: async (prefix: string): Promise<string[]> =>
       [...store.keys()].filter((scope) => scope.startsWith(prefix)),
   };
