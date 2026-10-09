@@ -77,6 +77,9 @@ export function withEmbeddingGuards(provider: EmbeddingProvider): EmbeddingProvi
   if (provider.warm) {
     wrapped.warm = provider.warm.bind(provider);
   }
+  if (provider.embedQuery) {
+    wrapped.embedQuery = async (t) => check(await provider.embedQuery!(t.toWellFormed()), "embedQuery");
+  }
   if (provider.embedImage) {
     wrapped.embedImage = async (s: string) =>
       check(await provider.embedImage!(s), "embedImage");
@@ -95,4 +98,12 @@ export function warmInBackground(provider: EmbeddingProvider | null): void {
       }`,
     );
   });
+}
+
+export function vectorSpaceOf(provider: EmbeddingProvider): string {
+  return provider.vectorSpace ?? `${provider.name}:${provider.dimensions}`;
+}
+
+export function embedQuery(provider: EmbeddingProvider, text: string): Promise<Float32Array> {
+  return provider.embedQuery ? provider.embedQuery(text) : provider.embed(text);
 }

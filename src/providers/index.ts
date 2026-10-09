@@ -13,7 +13,12 @@ import { ResilientProvider } from "./resilient.js";
 import { FallbackChainProvider } from "./fallback-chain.js";
 import { getEnvVar, resolveModel } from "../config.js";
 
-export { createEmbeddingProvider, createImageEmbeddingProvider, warmInBackground } from "./embedding/index.js";
+export {
+  createEmbeddingProvider,
+  createImageEmbeddingProvider,
+  vectorSpaceOf,
+  warmInBackground,
+} from "./embedding/index.js";
 
 function requireEnvVar(key: string): string {
   const value = getEnvVar(key);

@@ -24,6 +24,7 @@ import { getBackupKeep, getSqlitePath } from "../config.js";
 import type { SqliteState } from "../engine/inproc/state.js";
 import { logger } from "../logger.js";
 import { getEmbeddingProvider, getSearchIndex, getVectorIndex } from "./search.js";
+import { embedQuery } from "../providers/embedding/index.js";
 
 export type SnapshotResult = {
   path: string;
@@ -119,7 +120,7 @@ export async function indexDebugLegs(input: { query?: unknown; depth?: unknown; 
   } else if (vi && vi.size > 0) {
     const ep = getEmbeddingProvider();
     if (ep) {
-      embedding = await ep.embed(input.query);
+      embedding = await embedQuery(ep, input.query);
       computed = true;
     }
   }

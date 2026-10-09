@@ -54,8 +54,20 @@ const MAX_CONSECUTIVE_BATCH_FAILURES = 3;
 // kinds are checked: a memory and an observation may share a parent id, and a
 // memory may carry a real session id, so neither lookup can exclude the
 // other. `sessionId` is the vector row's current session id.
-export function dropMismatchedVectors(index: VectorIndex, activeDim: number): number {
-  if (activeDim <= 0 || index.validateDimensions(activeDim).mismatches.length === 0) return 0;
+export const VECTOR_SPACE_KEY = "embedding:vectorSpace";
+
+// Vectors from another model or pooling can share the active dimension yet
+// still be incomparable, so a change of vector space drops them too. A store
+// with no recorded space predates the record and is treated as changed.
+export function dropMismatchedVectors(
+  index: VectorIndex,
+  activeDim: number,
+  recordedSpace: string | null,
+  activeSpace: string,
+): number {
+  const spaceChanged = recordedSpace !== activeSpace && index.size > 0;
+  const dimsChanged = activeDim > 0 && index.validateDimensions(activeDim).mismatches.length > 0;
+  if (!spaceChanged && !dimsChanged) return 0;
   const dropped = index.size;
   index.clear();
   return dropped;

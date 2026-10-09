@@ -217,6 +217,15 @@ At session start (`mem::context`) a Session Summary's block carries at most its 
 (each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
 out the rest of the budget; its `summary` ref keeps every file.
 
+### Vector space
+Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
+`${name}:${dimensions}`; the local provider adds model and pooling). Boot compares it with the
+one recorded under `KV.config` `embedding:vectorSpace` and, on any change or when none is
+recorded, drops every vector so the fill pass re-embeds them (`dropMismatchedVectors`,
+`src/functions/index-fill.ts`); Recall is BM25-only until it finishes. Query text is embedded
+through `embedQuery()` (`src/providers/embedding/index.ts`), which uses a provider's
+asymmetric query path when it has one — BGE v1.5 runs CLS pooling and prefixes its queries.
+
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
 only when it has content and `isReadOnlyObservation()` (`src/functions/observe.ts`) is false.

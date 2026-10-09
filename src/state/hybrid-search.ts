@@ -1,4 +1,5 @@
 import { SearchIndex } from "./search-index.js";
+import { embedQuery } from "../providers/embedding/index.js";
 import { VectorIndex } from "./vector-index.js";
 import type {
   EmbeddingProvider,
@@ -207,7 +208,7 @@ export class HybridSearch {
 
     if (this.vector && this.embeddingProvider && this.vector.size > 0) {
       try {
-        queryEmbedding = await this.embeddingProvider.embed(query);
+        queryEmbedding = await embedQuery(this.embeddingProvider, query);
         vectorResults = await this.vector.search(queryEmbedding, depth);
       } catch {
         // fall through to BM25-only

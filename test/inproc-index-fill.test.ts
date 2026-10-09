@@ -216,7 +216,7 @@ describe("mem::index-fill-missing", () => {
     vi.add("mem_1", "memory", v(1, 2, 3), embedInputHash(m1.title + " " + m1.content));
     vi.add("mem_2", "memory", v(1, 2, 3), embedInputHash(m2.title + " " + m2.content));
 
-    expect(dropMismatchedVectors(vi, provider.dimensions)).toBe(2);
+    expect(dropMismatchedVectors(vi, provider.dimensions, "space", "space")).toBe(2);
     expect(vi.size).toBe(0);
     expect(rows()).toEqual([]);
 
@@ -228,8 +228,21 @@ describe("mem::index-fill-missing", () => {
 
   it("dropMismatchedVectors leaves a matching index alone", () => {
     vi.add("mem_1", "memory", v(1, 2), "h");
-    expect(dropMismatchedVectors(vi, 2)).toBe(0);
+    expect(dropMismatchedVectors(vi, 2, "space", "space")).toBe(0);
     expect(vi.size).toBe(1);
+  });
+
+  it("dropMismatchedVectors drops same-dimension vectors from another vector space", () => {
+    vi.add("mem_1", "memory", v(1, 2), "h");
+    expect(dropMismatchedVectors(vi, 2, "local:bge:mean:2", "local:bge:cls:2")).toBe(1);
+    expect(vi.size).toBe(0);
+    expect(rows()).toEqual([]);
+  });
+
+  it("dropMismatchedVectors treats a store with no recorded space as changed only when it holds vectors", () => {
+    expect(dropMismatchedVectors(vi, 2, null, "local:bge:cls:2")).toBe(0);
+    vi.add("mem_1", "memory", v(1, 2), "h");
+    expect(dropMismatchedVectors(vi, 2, null, "local:bge:cls:2")).toBe(1);
   });
 
   it("claimedNow checks both content kinds behind a shared id", () => {
