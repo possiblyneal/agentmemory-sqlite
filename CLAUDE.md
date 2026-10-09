@@ -168,6 +168,15 @@ case "memory_your_tool": {
 ### Injection Gate
 Prompt-submit Injection (`mem::prompt-context`) is reranker-gated and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`; state under `/diagnostics` `injections`). A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
+### Vector space
+Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
+`${name}:${dimensions}`; the local provider adds model and pooling). Boot compares it with the
+one recorded under `KV.config` `embedding:vectorSpace` and, on any change or when none is
+recorded, drops every vector so the fill pass re-embeds them (`dropMismatchedVectors`,
+`src/functions/index-fill.ts`); Recall is BM25-only until it finishes. Query text is embedded
+through `embedQuery()` (`src/providers/embedding/index.ts`), which uses a provider's
+asymmetric query path when it has one — BGE v1.5 runs CLS pooling and prefixes its queries.
+
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
 only when it has content and `isReadOnlyObservation()` (`src/functions/observe.ts`) is false.

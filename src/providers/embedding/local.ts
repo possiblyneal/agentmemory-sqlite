@@ -5,6 +5,10 @@ import { resolveDimensions } from "./_dimensions.js";
 
 const DEFAULT_MODEL = "Xenova/all-MiniLM-L6-v2";
 const DEFAULT_DIMENSIONS = "384";
+// BGE v1.5 is trained for CLS pooling, and its model card gives this
+// instruction for short queries that retrieve longer passages.
+const BGE_V1_5 = /bge-(small|base|large)-en-v1\.5$/;
+const BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 
 type FeatureExtractor = (
   texts: string[],
@@ -14,7 +18,10 @@ type FeatureExtractor = (
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly name = "local";
   readonly dimensions: number;
+  readonly vectorSpace: string;
   private readonly modelId: string;
+  private readonly pooling: "cls" | "mean";
+  private readonly queryPrefix: string;
   private extractor: FeatureExtractor | null = null;
 
   constructor() {
@@ -25,6 +32,14 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
         (this.modelId === DEFAULT_MODEL ? DEFAULT_DIMENSIONS : undefined),
       "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS",
     );
+    const isBge = BGE_V1_5.test(this.modelId);
+    this.pooling = isBge ? "cls" : "mean";
+    this.queryPrefix = isBge ? BGE_QUERY_PREFIX : "";
+    this.vectorSpace = `local:${this.modelId}:${this.pooling}:${this.dimensions}`;
+  }
+
+  async embedQuery(text: string): Promise<Float32Array> {
+    return this.embed(this.queryPrefix + text);
   }
 
   async embed(text: string): Promise<Float32Array> {
@@ -35,7 +50,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
     const extractor = await this.getExtractor();
     const output = await extractor(texts, {
-      pooling: "mean",
+      pooling: this.pooling,
       normalize: true,
     });
     return output.tolist().map((v) => new Float32Array(v));

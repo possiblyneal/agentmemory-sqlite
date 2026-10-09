@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createEmbeddingProvider,
+  embedQuery,
   withEmbeddingGuards,
 } from "../src/providers/embedding/index.js";
 import { embeddingConfigWarnings } from "../src/config.js";
@@ -265,6 +266,33 @@ describe("withEmbeddingGuards", () => {
       }),
     );
     expect(withoutImage.embedImage).toBeUndefined();
+  });
+});
+
+describe("embedQuery", () => {
+  it("uses the provider's query path when it has one, and embed() otherwise", async () => {
+    const doc = new Float32Array([1, 0]);
+    const query = new Float32Array([0, 1]);
+    const plain: EmbeddingProvider = {
+      name: "plain",
+      dimensions: 2,
+      embed: async () => doc,
+      embedBatch: async () => [doc],
+    };
+    const asymmetric = withEmbeddingGuards({ ...plain, embedQuery: async () => query });
+    expect(await embedQuery(withEmbeddingGuards(plain), "q")).toEqual(doc);
+    expect(await embedQuery(asymmetric, "q")).toEqual(query);
+  });
+
+  it("guards the query path's dimensions", async () => {
+    const guarded = withEmbeddingGuards({
+      name: "fake",
+      dimensions: 4,
+      embed: async () => new Float32Array(4),
+      embedBatch: async () => [new Float32Array(4)],
+      embedQuery: async () => new Float32Array(2),
+    });
+    await expect(embedQuery(guarded, "q")).rejects.toThrow(/fake\.embedQuery: expected 4, got 2/);
   });
 });
 

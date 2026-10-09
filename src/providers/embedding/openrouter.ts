@@ -24,6 +24,10 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     );
   }
 
+  get vectorSpace(): string {
+    return `openrouter:${this.model}:${this.dimensions}`;
+  }
+
   async embed(text: string): Promise<Float32Array> {
     const [result] = await this.embedBatch([text]);
     return result;
