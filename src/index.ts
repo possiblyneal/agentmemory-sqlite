@@ -17,12 +17,18 @@ import {
 } from "./config.js";
 import { createInprocSdk } from "./engine/inproc/sdk.js";
 import { SqliteVectorStore } from "./engine/inproc/vectors.js";
-import { createIndexFill, dropMismatchedVectors, registerIndexFillFunction } from "./functions/index-fill.js";
+import {
+  VECTOR_SPACE_KEY,
+  createIndexFill,
+  dropMismatchedVectors,
+  registerIndexFillFunction,
+} from "./functions/index-fill.js";
 import { registerMaintenanceFunctions } from "./functions/maintenance.js";
 import {
   createProvider,
   createFallbackProvider,
   createEmbeddingProvider,
+  vectorSpaceOf,
   createImageEmbeddingProvider,
 } from "./providers/index.js";
 import { StateKV } from "./state/kv.js";
@@ -431,16 +437,24 @@ async function main() {
     const hydrated = vectorStore.hydrate(vectorIndex);
     if (hydrated > 0) bootLog(`Hydrated ${hydrated} vectors from SQLite`);
   }
-  // A dimension change makes every persisted vector unusable (cross-dimension
-  // cosine returns 0). Vectors re-derive from content, so drop them and let
-  // the fill pass below re-embed; the daemon starts either way.
+  // A change of dimension, model or pooling makes every persisted vector
+  // incomparable with new queries. Vectors re-derive from content, so drop
+  // them and let the fill pass below re-embed; the daemon starts either way.
   if (vectorIndex && embeddingProvider) {
     const before = vectorIndex.size;
-    const dropped = dropMismatchedVectors(vectorIndex, embeddingProvider.dimensions);
+    const activeSpace = vectorSpaceOf(embeddingProvider);
+    const recordedSpace = await kv.get<string>(KV.config, VECTOR_SPACE_KEY);
+    const dropped = dropMismatchedVectors(
+      vectorIndex,
+      embeddingProvider.dimensions,
+      recordedSpace,
+      activeSpace,
+    );
+    if (recordedSpace !== activeSpace) await kv.set(KV.config, VECTOR_SPACE_KEY, activeSpace);
     if (dropped > 0) {
       console.warn(
         `[agentmemory] Persisted vectors do not match the active provider ` +
-          `(${embeddingProvider.name}, ${embeddingProvider.dimensions} dimensions). ` +
+          `(${activeSpace}, recorded ${recordedSpace ?? "none"}). ` +
           `Dropped all ${before} vectors; the fill pass is re-embedding them, ` +
           `so Recall is BM25-only until it finishes.`,
       );

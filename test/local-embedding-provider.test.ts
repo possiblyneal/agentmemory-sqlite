@@ -105,6 +105,37 @@ describe("LocalEmbeddingProvider (with loaded pipeline)", () => {
     vi.unstubAllEnvs();
   });
 
+  it("pools BGE v1.5 by CLS and prefixes its queries, not its documents", async () => {
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "Xenova/bge-small-en-v1.5");
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", "384");
+    const { extractor } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    const provider = new Fresh();
+    await provider.embedBatch(["a document"]);
+    await provider.embedQuery("a query");
+    expect(extractor).toHaveBeenNthCalledWith(1, ["a document"], { pooling: "cls", normalize: true });
+    expect(extractor).toHaveBeenNthCalledWith(
+      2,
+      ["Represent this sentence for searching relevant passages: a query"],
+      { pooling: "cls", normalize: true },
+    );
+    expect(provider.vectorSpace).toBe("local:Xenova/bge-small-en-v1.5:cls:384");
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps mean pooling and unprefixed queries for other models", async () => {
+    const { extractor } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    const provider = new Fresh();
+    await provider.embedQuery("a query");
+    expect(extractor).toHaveBeenCalledWith(["a query"], { pooling: "mean", normalize: true });
+    expect(provider.vectorSpace).toBe("local:Xenova/all-MiniLM-L6-v2:mean:384");
+  });
+
   it("refuses a custom model without declared dimensions", async () => {
     vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "Xenova/bge-small-en-v1.5");
     vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", "");
