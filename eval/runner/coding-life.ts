@@ -6,6 +6,7 @@ import { grepAdapter } from "./adapters/grep.js";
 import { randomAdapter } from "./adapters/random.js";
 import { vectorAdapter } from "./adapters/vector.js";
 import { aggregate, compareToBaseline, scoreQuestion, type Baseline } from "./score.js";
+import { parseSplit, selectSplit } from "./split.js";
 import { questionPath, type Adapter, type Question, type ScoreRow, type Session } from "./types.js";
 
 const ADAPTERS: Record<string, Adapter> = {
@@ -24,6 +25,7 @@ interface CliOptions {
   instance: string;
   "base-url"?: string;
   gate?: string;
+  split?: string;
 }
 
 function parse(): CliOptions {
@@ -36,6 +38,7 @@ function parse(): CliOptions {
       instance: { type: "string", default: "3" },
       "base-url": { type: "string" },
       gate: { type: "string" },
+      split: { type: "string" },
     },
   });
   return values as unknown as CliOptions;
@@ -63,7 +66,14 @@ async function main(): Promise<void> {
   const queriesRaw = JSON.parse(
     readFileSync(resolve(opts.data, "queries.json"), "utf8"),
   ) as Array<Omit<Question, "haystack">>;
-  const questions: Question[] = queriesRaw.map((q) => ({ ...q, haystack: sessions }));
+  // The CI gate's floors are set on every question, so it never splits.
+  const questions: Question[] = selectSplit(
+    "coding-life",
+    queriesRaw.map((q) => ({ ...q, haystack: sessions })),
+    opts.gate ? undefined : parseSplit(opts.split),
+    (q) => q.id,
+    (q) => questionPath(q),
+  );
   const baseline = opts.gate
     ? (JSON.parse(readFileSync(resolve(opts.gate), "utf8")) as Baseline)
     : null;
