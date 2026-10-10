@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   let questions = selectSplit(
     "longmemeval",
     loadLongMemEval(resolve(opts.data), limit),
-    parseSplit(opts.split),
+    parseSplit(opts.split, "longmemeval"),
     (q) => q.id,
     (q) => q.type,
   );
@@ -112,9 +112,12 @@ async function main(): Promise<void> {
     const adapter = ADAPTERS[adapterName];
     console.log(`\n== ${adapter.name} ==`);
     // Each question gets its own sandbox, so workers take one instance each.
+    // After a failure no worker starts another question, and the error waits
+    // for the others to tear down so no sandbox outlives the run.
     let next = 0;
+    let failed = false;
     const worker = async (slot: number): Promise<void> => {
-      while (next < questions.length) {
+      while (!failed && next < questions.length) {
         const q = questions[next++];
         const t0 = performance.now();
         const state = await adapter.init(q.haystack, {
@@ -136,7 +139,16 @@ async function main(): Promise<void> {
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(concurrency, questions.length) }, (_, slot) => worker(slot)));
+    const settled = await Promise.allSettled(
+      Array.from({ length: Math.min(concurrency, questions.length) }, (_, slot) =>
+        worker(slot).catch((err) => {
+          failed = true;
+          throw err;
+        }),
+      ),
+    );
+    const rejected = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+    if (rejected) throw rejected.reason;
   }
 
   const agg = aggregate(rows);

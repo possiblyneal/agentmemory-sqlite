@@ -34,11 +34,13 @@ export function pooled(items: Record<string, Ratio>): number | null {
 
 // Paired over the items both runs scored, resampling items rather than runs:
 // it says whether the change moved these items, not whether a rerun of the
-// same commit would land in the same place.
+// same commit would land in the same place. `alpha` is the two-sided error
+// rate; a caller testing m metrics passes 0.05 / m.
 export function pairedBootstrap(
   base: Record<string, Ratio>,
   cand: Record<string, Ratio>,
   lowerIsBetter = false,
+  alpha = 0.05,
 ): Comparison {
   const ids = Object.keys(base).filter((id) => id in cand).sort();
   const b = ids.map((id) => base[id]);
@@ -57,8 +59,8 @@ export function pairedBootstrap(
     if (pc !== null && pb !== null) deltas.push(pc - pb);
   }
   deltas.sort((x, y) => x - y);
-  const low = deltas[Math.floor(deltas.length * 0.025)];
-  const high = deltas[Math.min(deltas.length - 1, Math.floor(deltas.length * 0.975))];
+  const low = deltas[Math.floor(deltas.length * (alpha / 2))];
+  const high = deltas[Math.min(deltas.length - 1, Math.floor(deltas.length * (1 - alpha / 2)))];
   const up = low > 0;
   const down = high < 0;
   const verdict = up || down ? ((up !== lowerIsBetter) ? "better" : "worse") : "≈";

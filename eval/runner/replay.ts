@@ -47,7 +47,7 @@ interface Options {
   embeddings: EmbeddingMode;
   root: string;
   out: string;
-  split?: Split;
+  split: Split;
 }
 
 function parseOptions(): Options {
@@ -96,7 +96,7 @@ function parseOptions(): Options {
     embeddings: values.embeddings,
     root: resolve(values.root as string),
     out,
-    split: parseSplit(values.split),
+    split: parseSplit(values.split, "replay"),
   };
 }
 
@@ -334,8 +334,9 @@ async function main(): Promise<void> {
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
-  // A Session outside the split is still imported, so later Sessions see the
-  // same store whichever split runs; it is only left unprobed and unscored.
+  // Every Session is imported whichever split runs, but only the split's
+  // Sessions are probed, and probing writes Session and Injection rows, so the
+  // dev and holdout stores differ. Compare a run only with one of its own split.
   const scored = new Set(selectSplit("replay", sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
   const ingested: ReplaySession[] = [];
   const scores: SessionScore[] = [];

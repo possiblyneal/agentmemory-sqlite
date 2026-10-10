@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { scoreCase, summarizePmb, type Belief, type PmbCase } from "../eval/runner/pmb-score.js";
 import { HOLDOUT_ENV, parseSplit, selectSplit } from "../eval/runner/split.js";
@@ -26,11 +27,24 @@ describe("eval split", () => {
     expect(selectSplit("bench", items, undefined, (x) => x.id, (x) => x.group)).toEqual(items);
   });
 
-  it("keeps the holdout sealed unless the suite opened it", () => {
-    expect(parseSplit("dev")).toBe("dev");
-    expect(() => parseSplit("holdout")).toThrow(/sealed/);
-    process.env[HOLDOUT_ENV] = "1";
-    expect(parseSplit("holdout")).toBe("holdout");
+  it("defaults to dev and logs every look that includes the holdout", () => {
+    const dir = mkdtempSync("tmp/eval-suite-test-");
+    const ledger = join(dir, "ledger.ndjson");
+    try {
+      expect(parseSplit(undefined, "bench", ledger)).toBe("dev");
+      expect(() => parseSplit("holdout", "bench", ledger)).toThrow(/sealed/);
+      expect(() => parseSplit("all", "bench", ledger)).toThrow(/sealed/);
+      process.env[HOLDOUT_ENV] = "abc-fast-holdout";
+      expect(parseSplit("holdout", "bench", ledger)).toBe("holdout");
+      expect(parseSplit("all", "bench", ledger)).toBe("all");
+      const looks = readFileSync(ledger, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+      expect(looks).toMatchObject([
+        { bench: "bench", split: "holdout", label: "abc-fast-holdout" },
+        { bench: "bench", split: "all", label: "abc-fast-holdout" },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -48,6 +62,15 @@ describe("paired bootstrap", () => {
     const cand = scores(Array.from({ length: 40 }, (_, i) => (i % 2 ? 0.7 : 0.6)));
     expect(pairedBootstrap(base, cand)).toMatchObject({ verdict: "better", n: 40 });
     expect(pairedBootstrap(base, cand, true).verdict).toBe("worse");
+  });
+
+  it("widens the interval as alpha shrinks", () => {
+    const base = scores(Array.from({ length: 40 }, (_, i) => (i % 3 ? 1 : 0)));
+    const cand = scores(Array.from({ length: 40 }, (_, i) => (i % 4 ? 1 : 0)));
+    const wide = pairedBootstrap(base, cand, false, 0.005);
+    const narrow = pairedBootstrap(base, cand);
+    expect(wide.low!).toBeLessThanOrEqual(narrow.low!);
+    expect(wide.high!).toBeGreaterThanOrEqual(narrow.high!);
   });
 
   it("pools ratios by their denominators", () => {

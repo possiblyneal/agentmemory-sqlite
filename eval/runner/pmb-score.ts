@@ -89,15 +89,15 @@ function pinnedFacts(beliefs: Belief[], userId: string, scope: string[]): Belief
       b.user_id === userId &&
       b.pinned === true &&
       b.type !== "open_question" &&
-      !b.superseded_by &&
-      !b.resolved_at &&
+      b.superseded_by == null &&
+      b.resolved_at == null &&
       inScope(b, scope),
   );
 }
 
 function openQuestions(beliefs: Belief[], userId: string, scope: string[]): Belief[] {
   return beliefs.filter(
-    (b) => b.user_id === userId && b.type === "open_question" && b.pinned === true && !b.resolved_at && inScope(b, scope),
+    (b) => b.user_id === userId && b.type === "open_question" && b.pinned === true && b.resolved_at == null && inScope(b, scope),
   );
 }
 
@@ -124,7 +124,7 @@ function expandRelations(
   return out;
 }
 
-const nonEmpty = (o: object | undefined) => o !== undefined && Object.keys(o).length > 0;
+const nonEmpty = (o: object | null | undefined) => o != null && Object.keys(o).length > 0;
 
 function passTypeOf(expect: PmbCase["expect"], expectedRelevant: Set<string>): PassType {
   if (expectedRelevant.size > 0) return "active";
@@ -173,13 +173,13 @@ export function scoreCase(
   for (const id of rb.mustExclude ?? []) check(!union.has(id), `forbidden belief surfaced: ${id}`);
   for (const id of rb.shouldInclude ?? []) check(union.has(id), `expected belief missing (shouldInclude): ${id}`);
   const only = rb.shouldOnlyInclude;
-  if (only !== undefined) {
+  if (only != null) {
     const expected = new Set(only);
     for (const id of relevant) check(expected.has(id), `unexpected belief in relevantBeliefs: ${id}`);
     for (const id of expected) check(relevantSet.has(id), `missing expected belief: ${id}`);
   }
-  if (rb.maxCount !== undefined) check(relevantSet.size <= rb.maxCount, `relevantBeliefs count ${relevantSet.size} > maxCount ${rb.maxCount}`);
-  if (rb.minCount !== undefined) check(relevantSet.size >= rb.minCount, `relevantBeliefs count ${relevantSet.size} < minCount ${rb.minCount}`);
+  if (rb.maxCount != null) check(relevantSet.size <= rb.maxCount, `relevantBeliefs count ${relevantSet.size} > maxCount ${rb.maxCount}`);
+  if (rb.minCount != null) check(relevantSet.size >= rb.minCount, `relevantBeliefs count ${relevantSet.size} < minCount ${rb.minCount}`);
   for (const [a, b] of rb.orderedBefore ?? []) {
     const ia = relevant.indexOf(a);
     const ib = relevant.indexOf(b);

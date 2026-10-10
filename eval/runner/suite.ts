@@ -1,20 +1,25 @@
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { PmbRow } from "./pmb-score.js";
 import type { SessionScore } from "./replay-score.js";
-import { HOLDOUT_ENV, type Split } from "./split.js";
+import { HOLDOUT_ENV, HOLDOUT_LEDGER, type Split } from "./split.js";
 import { pairedBootstrap, pooled, type Comparison, type ItemMetrics, type Ratio } from "./suite-stats.js";
 import type { ScoreRow } from "./types.js";
 
 type Tier = "fast" | "full";
 
+// Each bench owns a sandbox instance (ports 3111 + 100 * instance); longmemeval
+// takes 10-12, one per worker. Instance 7 is left for a live daemon.
 interface Bench {
   name: string;
   tiers: Tier[];
-  args(tier: Tier, split: Split, out: string): string[];
+  instance: number;
+  // An env var naming the bench's data, checked before anything runs.
+  input?: { env: string; hint: string };
+  args(tier: Tier, split: Split, input: string): string[];
   metrics(out: string): ItemMetrics;
   lowerIsBetter?: string[];
 }
@@ -32,7 +37,6 @@ interface RunMeta {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RUNS = join(REPO_ROOT, "tmp/eval-suite");
-const LEDGER = join(REPO_ROOT, "eval/holdout-ledger.ndjson");
 // What changes Recall without changing code; a comparison names any that differ.
 const CONFIG_KEYS = [
   "AGENTMEMORY_PROMPT_RERANK",
@@ -58,7 +62,8 @@ const BENCHES: Bench[] = [
   {
     name: "coding-life",
     tiers: ["fast", "full"],
-    args: (_tier, split, out) => ["eval/runner/coding-life.ts", "--adapters", "agentmemory", "--instance", "3", "--split", split, "--out", out],
+    instance: 3,
+    args: () => ["eval/runner/coding-life.ts", "--adapters", "agentmemory"],
     metrics(out) {
       const metrics: ItemMetrics = {};
       for (const row of readNdjson<ScoreRow>(join(out, "scores.ndjson"))) {
@@ -72,7 +77,8 @@ const BENCHES: Bench[] = [
   {
     name: "pmb",
     tiers: ["fast", "full"],
-    args: (_tier, split, out) => ["eval/runner/pmb.ts", "--instance", "4", "--split", split, "--out", out],
+    instance: 4,
+    args: () => ["eval/runner/pmb.ts"],
     metrics(out) {
       const metrics: ItemMetrics = {};
       for (const row of readNdjson<PmbRow>(join(out, "scores.ndjson"))) {
@@ -87,16 +93,15 @@ const BENCHES: Bench[] = [
   {
     name: "longmemeval",
     tiers: ["fast", "full"],
-    // Instances 10-12, one sandbox per worker.
-    args: (tier, split, out) => [
+    instance: 10,
+    input: { env: "LONGMEMEVAL_PATH", hint: "longmemeval_s.json" },
+    // A holdout look is rare, so it always takes the larger sample.
+    args: (tier, split, data) => [
       "eval/runner/longmemeval.ts",
-      "--data", process.env.LONGMEMEVAL_PATH ?? "",
+      "--data", data,
       "--adapters", "agentmemory",
-      "--stratify", tier === "fast" ? "4" : "20",
+      "--stratify", tier === "fast" && split === "dev" ? "4" : "20",
       "--concurrency", "3",
-      "--instance", "10",
-      "--split", split,
-      "--out", out,
     ],
     metrics(out) {
       const metrics: ItemMetrics = {};
@@ -110,13 +115,9 @@ const BENCHES: Bench[] = [
   {
     name: "replay",
     tiers: ["full"],
-    args: (_tier, split, out) => [
-      "eval/runner/replay.ts",
-      "--projects", process.env.AGENTMEMORY_EVAL_REPLAY_PROJECTS ?? "",
-      "--instance", "9",
-      "--split", split,
-      "--out", out,
-    ],
+    instance: 9,
+    input: { env: "AGENTMEMORY_EVAL_REPLAY_PROJECTS", hint: "the comma-separated ~/.claude/projects directories to replay" },
+    args: (_tier, _split, projects) => ["eval/runner/replay.ts", "--projects", projects],
     metrics(out) {
       const metrics: ItemMetrics = {};
       for (const s of readNdjson<SessionScore>(join(out, "scores.ndjson"))) {
@@ -136,14 +137,13 @@ function git(...args: string[]): string {
   return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
 }
 
-function runBench(bench: Bench, tier: Tier, split: Split, dir: string): Promise<number | null> {
+function runBench(bench: Bench, tier: Tier, split: Split, dir: string, input: string): Promise<number | null> {
   const out = join(dir, bench.name);
   mkdirSync(out, { recursive: true });
   const log = openSync(join(dir, `${bench.name}.log`), "w");
-  const child = spawn(join(REPO_ROOT, "node_modules/.bin/tsx"), bench.args(tier, split, out), {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", log, log],
-  });
+  const args = [...bench.args(tier, split, input), "--instance", String(bench.instance), "--split", split, "--out", out];
+  const child = spawn(join(REPO_ROOT, "node_modules/.bin/tsx"), args, { cwd: REPO_ROOT, stdio: ["ignore", log, log] });
+  closeSync(log);
   return new Promise((done) => child.once("exit", (code) => done(code)));
 }
 
@@ -154,21 +154,25 @@ function compare(dir: string, againstDir: string, benches: Bench[], meta: RunMet
   const changed = CONFIG_KEYS.filter((k) => (before.config[k] ?? "") !== (meta.config[k] ?? ""));
   console.log(`\n=== ${meta.label} vs ${before.label} ===`);
   if (changed.length > 0) console.log(`  config differs: ${changed.map((k) => `${k} ${before.config[k] ?? "∅"} → ${meta.config[k] ?? "∅"}`).join(", ")}`);
-  const report: Record<string, Record<string, Comparison>> = {};
-  let worse = false;
+  const pairs: Array<{ bench: Bench; metric: string; base: Record<string, Ratio>; cand: Record<string, Ratio> }> = [];
   for (const bench of benches) {
     if (!existsSync(join(againstDir, bench.name, "scores.ndjson")) || !existsSync(join(dir, bench.name, "scores.ndjson"))) continue;
     const base = bench.metrics(join(againstDir, bench.name));
     const cand = bench.metrics(join(dir, bench.name));
-    for (const metric of Object.keys(cand)) {
-      if (!base[metric]) continue;
-      const c = pairedBootstrap(base[metric], cand[metric], bench.lowerIsBetter?.includes(metric));
-      (report[bench.name] ??= {})[metric] = c;
-      worse ||= c.verdict === "worse";
-      console.log(
-        `  ${`${bench.name}.${metric}`.padEnd(32)} ${fmt(c.base)} → ${fmt(c.cand)}  Δ ${fmt(c.delta)} [${fmt(c.low)}, ${fmt(c.high)}] n=${c.n}  ${c.verdict}`,
-      );
-    }
+    for (const metric of Object.keys(cand)) if (base[metric]) pairs.push({ bench, metric, base: base[metric], cand: cand[metric] });
+  }
+  // Bonferroni: one comparison in twenty would flag a change by chance at 0.05.
+  const alpha = 0.05 / Math.max(1, pairs.length);
+  console.log(`  ${pairs.length} metrics, ${((1 - alpha) * 100).toFixed(1)}% intervals`);
+  const report: Record<string, Record<string, Comparison>> = {};
+  let worse = false;
+  for (const { bench, metric, base, cand } of pairs) {
+    const c = pairedBootstrap(base, cand, bench.lowerIsBetter?.includes(metric), alpha);
+    (report[bench.name] ??= {})[metric] = c;
+    worse ||= c.verdict === "worse";
+    console.log(
+      `  ${`${bench.name}.${metric}`.padEnd(32)} ${fmt(c.base)} → ${fmt(c.cand)}  Δ ${fmt(c.delta)} [${fmt(c.low)}, ${fmt(c.high)}] n=${c.n}  ${c.verdict}`,
+    );
   }
   writeFileSync(join(dir, `compare-${before.label}.json`), JSON.stringify(report, null, 2));
   return !worse;
@@ -187,13 +191,17 @@ async function main(): Promise<void> {
   const tier = values.tier as Tier;
   if (tier !== "fast" && tier !== "full") throw new Error(`--tier must be fast or full, got: ${values.tier}`);
   const benches = BENCHES.filter((b) => b.tiers.includes(tier));
-  if (!process.env.LONGMEMEVAL_PATH) throw new Error("set LONGMEMEVAL_PATH to longmemeval_s.json");
-  if (tier === "full" && !process.env.AGENTMEMORY_EVAL_REPLAY_PROJECTS) {
-    throw new Error("set AGENTMEMORY_EVAL_REPLAY_PROJECTS to the comma-separated ~/.claude/projects directories to replay");
+  const inputs: Record<string, string> = {};
+  for (const { name, input } of benches) {
+    if (!input) continue;
+    const value = process.env[input.env];
+    if (!value) throw new Error(`set ${input.env} to ${input.hint}`);
+    inputs[name] = value;
   }
 
   const commit = git("rev-parse", "--short", "HEAD");
-  const dirty = git("status", "--porcelain").length > 0;
+  // Holdout looks append to the ledger, which must not mark the next run dirty.
+  const dirty = git("status", "--porcelain", "--", ".", `:!${relative(REPO_ROOT, HOLDOUT_LEDGER)}`).length > 0;
   const split: Split = values.holdout ? "holdout" : "dev";
   const suffix = values.holdout ? "-holdout" : "";
   const label = `${values.label ?? `${commit}${dirty ? "-dirty" : ""}`}-${tier}${suffix}`;
@@ -207,24 +215,22 @@ async function main(): Promise<void> {
     config: Object.fromEntries(CONFIG_KEYS.flatMap((k) => (process.env[k] ? [[k, process.env[k]!]] : []))),
     benches: {},
   };
+  const dir = join(RUNS, label);
   const againstDir = values.against ? join(RUNS, `${values.against}-${tier}${suffix}`) : undefined;
+  if (againstDir === dir) throw new Error(`--label ${values.label} would overwrite the --against run`);
   if (againstDir && !existsSync(join(againstDir, "meta.json"))) throw new Error(`no run at ${againstDir}`);
 
-  if (values.holdout) {
-    // Logged before the runners start, so a look that crashes still counts.
-    appendFileSync(LEDGER, `${JSON.stringify({ at: meta.startedAt, label, commit, dirty, tier, against: values.against ?? null })}\n`);
-    process.env[HOLDOUT_ENV] = "1";
-  }
+  // Each runner logs its own look in the ledger under this label.
+  if (values.holdout) process.env[HOLDOUT_ENV] = label;
   if (!values["no-build"]) execFileSync("npm", ["run", "build"], { cwd: REPO_ROOT, stdio: "ignore" });
 
-  const dir = join(RUNS, label);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   console.log(`${label}: ${benches.map((b) => b.name).join(", ")} → ${dir}`);
   await Promise.all(
     benches.map(async (bench) => {
       const t0 = Date.now();
-      const exitCode = await runBench(bench, tier, split, dir);
+      const exitCode = await runBench(bench, tier, split, dir, inputs[bench.name] ?? "");
       meta.benches[bench.name] = { exitCode, seconds: Math.round((Date.now() - t0) / 1000) };
       console.log(`  ${bench.name} ${exitCode === 0 ? "done" : `FAILED (exit ${exitCode}, see ${bench.name}.log)`} in ${meta.benches[bench.name].seconds}s`);
     }),

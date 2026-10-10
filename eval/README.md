@@ -105,9 +105,9 @@ npm run eval:suite -- --tier fast --label try1 --against base
 | `fast` | coding-life (`agentmemory` adapter), PrecisionMemBench, LongMemEval (4 per type) | ~2 min |
 | `full` | the above with LongMemEval at 20 per type, plus replay of `AGENTMEMORY_EVAL_REPLAY_PROJECTS` | ~30 min, replay-bound |
 
-`--against` compares item by item with a seeded paired bootstrap (2000 resamples, 95% interval) over the items both runs scored, names any Recall config that differs between them, and calls each metric `better`, `worse` or `≈`. It exits 1 when any metric is `worse` or a bench failed. A replay metric pools over Sessions, so a long Session weighs more; `leakShare` and `charsPerUsedItem` are better lower. The interval covers item sampling, not rerun noise: with local embeddings and the reranker off, a rerun of one commit scores identically.
+`--against` compares item by item with a seeded paired bootstrap (2000 resamples) over the items both runs scored, widening each interval to 1 − 0.05/m for the m metrics compared (Bonferroni). It names any Recall config that differs between them, and calls each metric `better`, `worse` or `≈`. It exits 1 when any metric is `worse` or a bench failed. A replay metric pools over Sessions, so a long Session weighs more; `leakShare` and `charsPerUsedItem` are better lower. The interval covers item sampling, not rerun noise: with local embeddings and the reranker off, a rerun of one commit scores identically. A `--label` that would overwrite the `--against` run is refused.
 
-Every bench is split by a salted hash of the item id, 40% to a holdout within each group (question path, case category, LongMemEval type, project), in `runner/split.ts`. Runners score the dev share under `--split dev`, which is what the suite passes. The holdout is sealed: a runner refuses `--split holdout` unless `eval:suite --holdout` set `AGENTMEMORY_EVAL_HOLDOUT`, and that flag first appends the look to the committed `holdout-ledger.ndjson`. Tune on dev, look at the holdout once per change worth shipping, and compare holdout runs only with holdout runs (`--holdout --against base` reads `base-<tier>-holdout`). Never change the salt or the share: the new holdout would hold items already tuned on. Replay imports every Session whichever split runs, so the store matches, and only probes and scores the split's Sessions. The CI gate never splits.
+Every bench is split by a salted hash of the item id, 40% to a holdout within each group (question path, case category, LongMemEval type, project), in `runner/split.ts`; a group of one stays in dev. Every runner scores the dev share unless told otherwise. The holdout is sealed: `--split holdout` and `--split all` (every item, as a published scorecard needs) are refused unless `AGENTMEMORY_EVAL_HOLDOUT` names the look, and the runner appends that name, bench and commit to the committed `holdout-ledger.ndjson` before it scores anything. `eval:suite --holdout` sets it to the run label and takes the larger LongMemEval sample; for a one-off, `AGENTMEMORY_EVAL_HOLDOUT=scorecard-<date> npm run eval:coding-life -- --split all`. Tune on dev, look at the holdout once per change worth shipping, and compare holdout runs only with holdout runs (`--holdout --against base` reads `base-<tier>-holdout`). Holdout per-item files exist for that paired comparison; read the summary, not the items. Never change the salt or the share: the new holdout would hold items already tuned on. Replay imports every Session whichever split runs but probes only the split's, and probing writes Session and Injection rows, so its dev and holdout stores differ. The CI gate scores every question and never splits.
 
 ### PrecisionMemBench
 
@@ -202,15 +202,15 @@ eval/
 │   ├── longmemeval.ts             public benchmark runner (--concurrency N: one sandbox per worker)
 │   ├── pmb.ts                     PrecisionMemBench runner
 │   ├── pmb-score.ts               PrecisionMemBench case scoring, ported from upstream
-│   ├── split.ts                   dev/holdout split and the holdout seal
-│   ├── suite.ts                   eval:suite: tiers, parallel benches, holdout ledger, comparison
+│   ├── split.ts                   dev/holdout split, the holdout seal and ledger
+│   ├── suite.ts                   eval:suite: tiers, parallel benches, comparison
 │   ├── suite-stats.ts             pooled ratios and the paired bootstrap
 │   ├── coding-life.ts             in-house benchmark runner
 │   ├── replay.ts                  replay runner over ~/.claude/projects transcripts (daemon glue)
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
 │   └── replay-score.ts            per-Goal-line scoring, summary, worst cases
-├── holdout-ledger.ndjson          one line per holdout look (eval:suite --holdout)
+├── holdout-ledger.ndjson          one line per holdout look (every `--split holdout` or `all`)
 └── data/
     ├── precisionmembench/         upstream fixtures @ b95d6ab, MIT
     └── coding-agent-life-v2/

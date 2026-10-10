@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const questions: Question[] = selectSplit(
     "coding-life",
     queriesRaw.map((q) => ({ ...q, haystack: sessions })),
-    opts.gate ? undefined : parseSplit(opts.split),
+    opts.gate ? undefined : parseSplit(opts.split, "coding-life"),
     (q) => q.id,
     (q) => questionPath(q),
   );
