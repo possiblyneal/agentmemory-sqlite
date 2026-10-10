@@ -806,20 +806,24 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       if (categories.includes("injections")) {
-        const gate = injectionGateState();
-        const counts = `${gate.calls} calls, ${gate.fallbacks} fallbacks`;
-        const failure = gate.lastFailure
-          ? `, last failure ${gate.lastFailure.reason} at ${gate.lastFailure.at} (${gate.lastFailure.sinceBootSeconds}s since boot)`
-          : "";
-        checks.push({
-          name: "injection-gate",
-          category: "injections",
-          status: gate.enabled && gate.failing ? "warn" : "pass",
-          message: gate.enabled
-            ? `Injection Gate on (${gate.url}): ${counts}${failure}`
-            : "Injection Gate off: prompt-submit Injection is BM25-only",
-          fixable: false,
-        });
+        const callers = [
+          { caller: "prompt-submit", name: "injection-gate", label: "Injection Gate", off: "prompt-submit Injection is BM25-only" },
+          { caller: "search", name: "search-gate", label: "Search gate", off: "smart-search keeps every hit above its relevance floor" },
+        ] as const;
+        for (const { caller, name, label, off } of callers) {
+          const gate = injectionGateState(caller);
+          const counts = `${gate.calls} calls, ${gate.fallbacks} fallbacks`;
+          const failure = gate.lastFailure
+            ? `, last failure ${gate.lastFailure.reason} at ${gate.lastFailure.at} (${gate.lastFailure.sinceBootSeconds}s since boot)`
+            : "";
+          checks.push({
+            name,
+            category: "injections",
+            status: gate.enabled && gate.failing ? "warn" : "pass",
+            message: gate.enabled ? `${label} on (${gate.url}): ${counts}${failure}` : `${label} off: ${off}`,
+            fixable: false,
+          });
+        }
       }
 
       if (categories.includes("injection-use")) {
