@@ -6,7 +6,7 @@ import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
-import { relevantOrder } from "./prompt-rerank.js";
+import { relevantOrder, rerankDocument } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
@@ -23,7 +23,7 @@ const SEARCH_LIMIT = 10;
 interface SearchHit {
   score: number;
   sessionId: string;
-  observation: { id: string; title?: string; narrative?: string; files?: string[] };
+  observation: { id: string; timestamp?: string; title?: string; narrative?: string; files?: string[] };
 }
 
 type NarratedHit = SearchHit & { observation: { narrative: string } };
@@ -54,9 +54,7 @@ interface Candidate {
 
 async function gateByRelevance(prompt: string, candidates: Candidate[]): Promise<Candidate[]> {
   if (candidates.length === 0) return candidates;
-  const documents = candidates.map(({ hit }) =>
-    `${hit.observation.title ?? ""} ${hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)}`.trim(),
-  );
+  const documents = candidates.map(({ hit }) => rerankDocument(hit.observation));
   const order = await relevantOrder(prompt, documents);
   return order ? order.map((index) => candidates[index]) : candidates;
 }

@@ -4,6 +4,14 @@ import { fetchWithTimeout } from "../providers/_fetch.js";
 
 export const RERANK_COOLDOWN_MS = 60_000;
 export const RERANK_QUERY_CHARS = 500;
+const RERANK_NARRATIVE_CHARS = 400;
+
+// The date lets the reranker answer "what happened on <day>" questions, which
+// score near zero against title and narrative alone.
+export function rerankDocument(observation: { timestamp?: string; title?: string; narrative?: string }): string {
+  const date = observation.timestamp?.slice(0, 10) ?? "";
+  return `${date} ${observation.title ?? ""} ${(observation.narrative ?? "").slice(0, RERANK_NARRATIVE_CHARS)}`.trim();
+}
 
 type FailureReason = "timeout" | "connection" | "malformed" | `http_${number}`;
 
