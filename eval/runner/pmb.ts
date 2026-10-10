@@ -13,7 +13,7 @@ import {
   type PmbRow,
 } from "./pmb-score.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
-import { parseSplit, selectSplit } from "./split.js";
+import { openSplit, selectSplit } from "./split.js";
 
 interface CliOptions {
   data: string;
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   }
   const beliefs = JSON.parse(readFileSync(resolve(opts.data, "beliefs.seed.json"), "utf8")) as Belief[];
   const allCases = JSON.parse(readFileSync(resolve(opts.data, "retrieval.cases.json"), "utf8")) as PmbCase[];
-  const cases = selectSplit("pmb", allCases, parseSplit(opts.split, "pmb"), (c) => c.caseId, (c) => c.category);
+  const cases = selectSplit("pmb", allCases, openSplit(opts.split, "pmb"), (c) => c.caseId, (c) => c.category);
   console.log(`loaded ${beliefs.length} beliefs, ${cases.length} cases`);
 
   const outDir = resolve(opts.out);

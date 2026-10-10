@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { scoreCase, summarizePmb, type Belief, type PmbCase } from "../eval/runner/pmb-score.js";
-import { HOLDOUT_ENV, parseSplit, selectSplit } from "../eval/runner/split.js";
+import { HOLDOUT_ENV, openSplit, selectSplit } from "../eval/runner/split.js";
 import { pairedBootstrap, type Ratio } from "../eval/runner/suite-stats.js";
 
 const items = Array.from({ length: 50 }, (_, i) => ({ id: `q${i}`, group: i < 10 ? "small" : "large" }));
@@ -28,15 +28,16 @@ describe("eval split", () => {
   });
 
   it("defaults to dev and logs every look that includes the holdout", () => {
+    mkdirSync("tmp", { recursive: true });
     const dir = mkdtempSync("tmp/eval-suite-test-");
     const ledger = join(dir, "ledger.ndjson");
     try {
-      expect(parseSplit(undefined, "bench", ledger)).toBe("dev");
-      expect(() => parseSplit("holdout", "bench", ledger)).toThrow(/sealed/);
-      expect(() => parseSplit("all", "bench", ledger)).toThrow(/sealed/);
+      expect(openSplit(undefined, "bench", ledger)).toBe("dev");
+      expect(() => openSplit("holdout", "bench", ledger)).toThrow(/sealed/);
+      expect(() => openSplit("all", "bench", ledger)).toThrow(/sealed/);
       process.env[HOLDOUT_ENV] = "abc-fast-holdout";
-      expect(parseSplit("holdout", "bench", ledger)).toBe("holdout");
-      expect(parseSplit("all", "bench", ledger)).toBe("all");
+      expect(openSplit("holdout", "bench", ledger)).toBe("holdout");
+      expect(openSplit("all", "bench", ledger)).toBe("all");
       const looks = readFileSync(ledger, "utf8").trim().split("\n").map((l) => JSON.parse(l));
       expect(looks).toMatchObject([
         { bench: "bench", split: "holdout", label: "abc-fast-holdout" },

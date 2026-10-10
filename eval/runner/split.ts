@@ -44,7 +44,8 @@ export function selectSplit<T>(
   return items.filter((item) => holdout.has(idOf(item)) === (split === "holdout"));
 }
 
-export function parseSplit(value: string | undefined, bench: string, ledger = HOLDOUT_LEDGER): Split {
+// Opening `holdout` or `all` appends the look to the ledger.
+export function openSplit(value: string | undefined, bench: string, ledger = HOLDOUT_LEDGER): Split {
   const split = value ?? "dev";
   if (split !== "dev" && split !== "holdout" && split !== "all") {
     throw new Error(`--split must be dev, holdout or all, got: ${split}`);

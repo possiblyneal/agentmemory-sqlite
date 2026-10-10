@@ -11,11 +11,11 @@ import type { ScoreRow } from "./types.js";
 
 type Tier = "fast" | "full";
 
-// Each bench owns a sandbox instance (ports 3111 + 100 * instance); longmemeval
-// takes 10-12, one per worker. Instance 7 is left for a live daemon.
 interface Bench {
   name: string;
   tiers: Tier[];
+  // Ports 3111 + 100 * instance; longmemeval takes 10-12, one per worker.
+  // Instance 7 is left for a live daemon.
   instance: number;
   // An env var naming the bench's data, checked before anything runs.
   input?: { env: string; hint: string };
@@ -217,7 +217,7 @@ async function main(): Promise<void> {
   };
   const dir = join(RUNS, label);
   const againstDir = values.against ? join(RUNS, `${values.against}-${tier}${suffix}`) : undefined;
-  if (againstDir === dir) throw new Error(`--label ${values.label} would overwrite the --against run`);
+  if (againstDir === dir) throw new Error(`label ${label} would overwrite the --against run`);
   if (againstDir && !existsSync(join(againstDir, "meta.json"))) throw new Error(`no run at ${againstDir}`);
 
   // Each runner logs its own look in the ledger under this label.

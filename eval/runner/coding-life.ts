@@ -6,7 +6,7 @@ import { grepAdapter } from "./adapters/grep.js";
 import { randomAdapter } from "./adapters/random.js";
 import { vectorAdapter } from "./adapters/vector.js";
 import { aggregate, compareToBaseline, scoreQuestion, type Baseline } from "./score.js";
-import { parseSplit, selectSplit } from "./split.js";
+import { openSplit, selectSplit } from "./split.js";
 import { questionPath, type Adapter, type Question, type ScoreRow, type Session } from "./types.js";
 
 const ADAPTERS: Record<string, Adapter> = {
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const questions: Question[] = selectSplit(
     "coding-life",
     queriesRaw.map((q) => ({ ...q, haystack: sessions })),
-    opts.gate ? undefined : parseSplit(opts.split, "coding-life"),
+    opts.gate ? undefined : openSplit(opts.split, "coding-life"),
     (q) => q.id,
     (q) => questionPath(q),
   );

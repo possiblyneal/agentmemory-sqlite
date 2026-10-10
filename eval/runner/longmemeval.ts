@@ -6,7 +6,7 @@ import { grepAdapter } from "./adapters/grep.js";
 import { vectorAdapter } from "./adapters/vector.js";
 import { loadLongMemEval, stratifySample } from "./load.js";
 import { aggregate, scoreQuestion } from "./score.js";
-import { parseSplit, selectSplit } from "./split.js";
+import { openSplit, selectSplit } from "./split.js";
 import type { Adapter, ScoreRow } from "./types.js";
 
 const ADAPTERS: Record<string, Adapter> = {
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   let questions = selectSplit(
     "longmemeval",
     loadLongMemEval(resolve(opts.data), limit),
-    parseSplit(opts.split, "longmemeval"),
+    openSplit(opts.split, "longmemeval"),
     (q) => q.id,
     (q) => q.type,
   );

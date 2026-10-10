@@ -32,7 +32,7 @@ import {
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
-import { parseSplit, selectSplit, type Split } from "./split.js";
+import { openSplit, selectSplit, type Split } from "./split.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
 const SEARCH_LIMIT = 5;
@@ -96,7 +96,7 @@ function parseOptions(): Options {
     embeddings: values.embeddings,
     root: resolve(values.root as string),
     out,
-    split: parseSplit(values.split, "replay"),
+    split: openSplit(values.split, "replay"),
   };
 }
 
