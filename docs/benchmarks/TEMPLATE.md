@@ -32,7 +32,7 @@
 ```sh
 git checkout <sha>
 npm ci && npm run build
-npm run eval:coding-life
+AGENTMEMORY_EVAL_HOLDOUT=scorecard-<date> npm run eval:coding-life -- --split all
 ```
 
 ## Notes

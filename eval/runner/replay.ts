@@ -32,6 +32,7 @@ import {
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
+import { openSplit, selectSplit, type Split } from "./split.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
 const SEARCH_LIMIT = 5;
@@ -46,6 +47,7 @@ interface Options {
   embeddings: EmbeddingMode;
   root: string;
   out: string;
+  split: Split;
 }
 
 function parseOptions(): Options {
@@ -59,6 +61,7 @@ function parseOptions(): Options {
       embeddings: { type: "string", default: "local" },
       root: { type: "string", default: join(homedir(), ".claude/projects") },
       out: { type: "string", default: join(REPO_TMP, "eval-replay") },
+      split: { type: "string" },
     },
   });
   const positive = (name: string, raw: string, min = 1): number => {
@@ -93,6 +96,7 @@ function parseOptions(): Options {
     embeddings: values.embeddings,
     root: resolve(values.root as string),
     out,
+    split: openSplit(values.split, "replay"),
   };
 }
 
@@ -330,18 +334,24 @@ async function main(): Promise<void> {
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
+  // Every Session is imported whichever split runs, but only the split's
+  // Sessions are probed, and probing writes Session and Injection rows, so the
+  // dev and holdout stores differ. Compare a run only with one of its own split.
+  const scored = new Set(selectSplit("replay", sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
   const ingested: ReplaySession[] = [];
   const scores: SessionScore[] = [];
   const bytesStart = storeBytes(sandbox.sqlitePath);
   const t0 = Date.now();
   try {
     for (const [i, session] of sessions.entries()) {
-      const key = deriveAnswerKey(session, ingested);
       const probeStart = Date.now();
-      const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
-      const score = scoreSession(session, key, probes);
-      scores.push(score);
-      appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
+      let score: SessionScore | undefined;
+      if (scored.has(session.id)) {
+        const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
+        score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
+        scores.push(score);
+        appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
+      }
 
       const importStart = Date.now();
       try {
@@ -353,11 +363,12 @@ async function main(): Promise<void> {
       } catch (err) {
         console.warn(`  import failed: ${errorMessage(err)}`);
       }
-      const injected = score.items.length;
+      const scoredLine = score
+        ? `turns=${score.turns} key=${score.outcomes.length} injected=${score.items.length} ` +
+          `used=${score.items.filter((x) => x.used).length} hit=${score.outcomes.filter((o) => o.injected).length} `
+        : "unscored ";
       console.log(
-        `[${i + 1}/${sessions.length}] ${session.id.slice(0, 8)} turns=${score.turns} key=${score.outcomes.length} ` +
-          `injected=${injected} used=${score.items.filter((x) => x.used).length} ` +
-          `hit=${score.outcomes.filter((o) => o.injected).length} probe=${Math.round((importStart - probeStart) / 1000)}s ` +
+        `[${i + 1}/${sessions.length}] ${session.id.slice(0, 8)} ${scoredLine}probe=${Math.round((importStart - probeStart) / 1000)}s ` +
           `import=${Math.round((Date.now() - importStart) / 1000)}s total=${Math.round((Date.now() - t0) / 1000)}s`,
       );
     }

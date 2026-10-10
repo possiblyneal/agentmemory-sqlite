@@ -2,10 +2,12 @@
 
 Recall benchmarks for agentmemory, scored on what each Injection puts in front of the Agent.
 
-Two families:
+Four benches, run together by `eval:suite`:
 
 - **coding-agent-life-v2** — in-house corpus of 22 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 38 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
 - **LongMemEval** — public 500-question long-term memory benchmark over multi-session chat, search path only.
+- **PrecisionMemBench** — public 77-case benchmark asserting exactly which of 35 beliefs a search must and must not return; noise fails a case.
+- **Replay** — the Operator's own Claude Code transcripts, replayed in order and scored per Goal line. Private; never published beyond aggregates.
 
 ## Paths
 
@@ -87,6 +89,33 @@ LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json \
 ```
 
 The `agentmemory` adapter starts a fresh sandbox per question there, since every question brings its own haystack.
+
+### Suite: iterate without overfitting
+
+```sh
+export LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json
+npm run eval:suite -- --tier fast --label base             # once, on the commit you start from
+npm run eval:suite -- --tier fast --label try1 --against base
+```
+
+`runner/suite.ts` builds, then runs every bench of the tier at once on its own sandbox instances (coding-life 3, PrecisionMemBench 4, LongMemEval 10-12, replay 9), and writes `tmp/eval-suite/<label>-<tier>/`: `meta.json` (commit, dirty, Recall config, per-bench seconds and exit code), `summary.json`, one directory and `.log` per bench, and `compare-<label>.json` under `--against`. The label defaults to the short commit, with `-dirty` for an uncommitted tree.
+
+| Tier | Benches | Wall clock |
+|---|---|---|
+| `fast` | coding-life (`agentmemory` adapter), PrecisionMemBench, LongMemEval (4 per type) | ~2 min |
+| `full` | the above with LongMemEval at 20 per type, plus replay of `AGENTMEMORY_EVAL_REPLAY_PROJECTS` | ~30 min, replay-bound |
+
+`--against` compares item by item with a seeded paired bootstrap (2000 resamples) over the items both runs scored, widening each interval to 1 − 0.05/m for the m metrics compared (Bonferroni). It names any Recall config that differs between them, and calls each metric `better`, `worse` or `≈`. It exits 1 when any metric is `worse` or a bench failed. A replay metric pools over Sessions, so a long Session weighs more; `leakShare` and `charsPerUsedItem` are better lower. The interval covers item sampling, not rerun noise: with local embeddings and the reranker off, a rerun of one commit scores identically. A `--label` that would overwrite the `--against` run is refused.
+
+Every bench is split by a salted hash of the item id, 40% to a holdout within each group (question path, case category, LongMemEval type, project), in `runner/split.ts`; a group of one stays in dev. Every runner scores the dev share unless told otherwise. The holdout is sealed: `--split holdout` and `--split all` (every item, as a published scorecard needs) are refused unless `AGENTMEMORY_EVAL_HOLDOUT` names the look, and the runner appends that name, bench and commit to the committed `holdout-ledger.ndjson` before it scores anything. `eval:suite --holdout` sets it to the run label and takes the larger LongMemEval sample; for a one-off, `AGENTMEMORY_EVAL_HOLDOUT=scorecard-<date> npm run eval:coding-life -- --split all`. Tune on dev, look at the holdout once per change worth shipping, and compare holdout runs only with holdout runs (`--holdout --against base` reads `base-<tier>-holdout`). Holdout per-item files exist for that paired comparison; read the summary, not the items. Never change the salt or the share: the new holdout would hold items already tuned on. Replay imports every Session whichever split runs but probes only the split's, and probing writes Session and Injection rows, so its dev and holdout stores differ. The CI gate scores every question and never splits.
+
+### PrecisionMemBench
+
+```sh
+npm run build && npm run eval:pmb -- --split dev
+```
+
+`runner/pmb.ts` stores each of the 35 seed beliefs with one `/remember` under its user as the project, then runs each of the 77 cases through `smart-search` (project = the case's user, limit = its belief budget, 20 by default). `runner/pmb-score.ts` ports upstream's scoring: pinned facts, open questions and the persona prelude come from the seed, so only `relevantBeliefs` measures the daemon. `activePass` counts the 43 cases that need the right beliefs back; 34 cases pass when nothing comes back, which is why a precision miss (an extra belief) fails a case. Fixtures and license: `data/precisionmembench/`.
 
 ### Replay (the Operator's own transcripts)
 
@@ -170,13 +199,20 @@ eval/
 │   │   ├── grep.ts                tokenized substring baseline
 │   │   ├── random.ts              seeded random control
 │   │   └── vector.ts              OpenAI embeddings + cosine
-│   ├── longmemeval.ts             public benchmark runner
+│   ├── longmemeval.ts             public benchmark runner (--concurrency N: one sandbox per worker)
+│   ├── pmb.ts                     PrecisionMemBench runner
+│   ├── pmb-score.ts               PrecisionMemBench case scoring, ported from upstream
+│   ├── split.ts                   dev/holdout split, the holdout seal and ledger
+│   ├── suite.ts                   eval:suite: tiers, parallel benches, comparison
+│   ├── suite-stats.ts             pooled ratios and the paired bootstrap
 │   ├── coding-life.ts             in-house benchmark runner
 │   ├── replay.ts                  replay runner over ~/.claude/projects transcripts (daemon glue)
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
 │   └── replay-score.ts            per-Goal-line scoring, summary, worst cases
+├── holdout-ledger.ndjson          one line per holdout look (every `--split holdout` or `all`)
 └── data/
+    ├── precisionmembench/         upstream fixtures @ b95d6ab, MIT
     └── coding-agent-life-v2/
         ├── sessions.json          22 Sessions as tool-call Observations, each with a fixed 1-10 importance
         └── queries.json           38 questions with path, project and gold Session ids
