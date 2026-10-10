@@ -25,7 +25,7 @@ import { getCounters } from "../telemetry/setup.js";
 import { graphReadable } from "../state/graph-indexes.js";
 import { createProjectMatcher } from "./search.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
-import { relevantOrder, rerankDocument } from "./prompt-rerank.js";
+import { gateByRelevance } from "./prompt-rerank.js";
 
 // Chosen against the search path of eval/data/coding-agent-life-v2 (the
 // `agentmemory` and `agentmemory-bm25` adapters). Gold Sessions score as low
@@ -38,15 +38,6 @@ import { relevantOrder, rerankDocument } from "./prompt-rerank.js";
 const MIN_BM25_SCORE = 3.5;
 const MIN_BM25_RATIO_TO_BEST = 0.5;
 const MIN_COSINE_SCORE = 0.3;
-
-// The floors above are corpus-relative, so some hit always clears them; the
-// reranker is the only calibrated signal, and it is what lets a search that
-// matches nothing come back empty.
-async function gateByRelevance(query: string, hits: HybridSearchResult[]): Promise<HybridSearchResult[]> {
-  if (hits.length === 0) return hits;
-  const order = await relevantOrder(query, hits.map((h) => rerankDocument(h.observation)));
-  return order ? order.map((index) => hits[index]) : hits;
-}
 
 function aboveRelevanceFloor(hits: HybridSearchResult[]): HybridSearchResult[] {
   const best = Math.max(0, ...hits.map((h) => h.bm25Score));
@@ -273,7 +264,10 @@ export function registerSmartSearchFunction(
 
       // Scope every hit before the floor and the limit, so the floor's best
       // match is the best in-scope one and a dropped hit is refilled from the
-      // over-fetch instead of leaving the page short.
+      // over-fetch instead of leaving the page short. The floors are
+      // corpus-relative, so some hit always clears them; the reranker is the
+      // only calibrated signal and lets a search that matches nothing come back
+      // empty. It sees only the page, so a hit it drops is not refilled.
       const inProject = project ? createProjectMatcher(kv, project) : null;
       const inScope: HybridSearchResult[] = [];
       for (const r of hybridResults) {
@@ -281,7 +275,12 @@ export function registerSmartSearchFunction(
         if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
         inScope.push(r);
       }
-      const filteredHybrid = await gateByRelevance(data.query, aboveRelevanceFloor(inScope).slice(0, limit));
+      const filteredHybrid = await gateByRelevance(
+        "search",
+        data.query,
+        aboveRelevanceFloor(inScope).slice(0, limit),
+        (h) => h.observation,
+      );
 
       const compact: CompactSearchResult[] = filteredHybrid.map((r) => ({
         obsId: r.observation.id,

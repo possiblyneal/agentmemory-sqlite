@@ -166,7 +166,7 @@ case "memory_your_tool": {
 ```
 
 ### Injection Gate
-Prompt-submit Injection (`mem::prompt-context`) and `mem::smart-search` are reranker-gated through the shared `relevantOrder`/`rerankDocument` and fail open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`; state under `/diagnostics` `injections`). A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
+Prompt-submit Injection (`mem::prompt-context`) and `mem::smart-search`'s Observation hits (not its lessons, insights or semantic facts) are reranker-gated through `gateByRelevance` and fail open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Each caller keeps its own cooldown and counts, reported under `/diagnostics` `injections` as `injection-gate` and `search-gate`. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression

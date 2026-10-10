@@ -177,7 +177,7 @@ describe("mem::prompt-context reranker gate", () => {
     it("on a 500 reply", async () => {
       reply = () => ({ status: 500, body: "boom" });
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(injectionGateState().lastFailure?.reason).toBe("http_500");
+      expect(injectionGateState("prompt-submit").lastFailure?.reason).toBe("http_500");
     });
 
     it.each([
@@ -191,14 +191,14 @@ describe("mem::prompt-context reranker gate", () => {
     ])("on a malformed body: %s", async (_name, body) => {
       reply = () => ({ body });
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(injectionGateState().lastFailure?.reason).toBe("malformed");
+      expect(injectionGateState("prompt-submit").lastFailure?.reason).toBe("malformed");
     });
 
     it("on a timeout", async () => {
       process.env.AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS = "150";
       reply = () => ({ hang: true });
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(injectionGateState().lastFailure?.reason).toBe("timeout");
+      expect(injectionGateState("prompt-submit").lastFailure?.reason).toBe("timeout");
     });
 
     it("on a refused connection", async () => {
@@ -208,7 +208,7 @@ describe("mem::prompt-context reranker gate", () => {
       await new Promise((done) => closed.close(done));
       process.env.AGENTMEMORY_PROMPT_RERANK_URL = `http://127.0.0.1:${port}/v1/rerank`;
       expect((await run()).injected.map((r) => r.id)).toEqual(bm25Ids);
-      expect(injectionGateState().lastFailure?.reason).toBe("connection");
+      expect(injectionGateState("prompt-submit").lastFailure?.reason).toBe("connection");
     });
   });
 
@@ -228,13 +228,13 @@ describe("mem::prompt-context reranker gate", () => {
       expect(requests).toHaveLength(1);
       expect(logger.warn).toHaveBeenCalledTimes(1);
 
-      expect(injectionGateState()).toMatchObject({ calls: 1, fallbacks: 2, failing: true });
+      expect(injectionGateState("prompt-submit")).toMatchObject({ calls: 1, fallbacks: 2, failing: true });
 
       vi.advanceTimersByTime(2_000);
       reply = scoring({ obs_c: 0.8 });
       expect((await run()).injected.map((r) => r.id)).toEqual(["obs_c"]);
       expect(requests).toHaveLength(2);
-      expect(injectionGateState()).toMatchObject({ failing: false, lastFailure: { reason: "http_500" } });
+      expect(injectionGateState("prompt-submit")).toMatchObject({ failing: false, lastFailure: { reason: "http_500" } });
     });
 
     it("warns once when concurrent prompts fail together", async () => {
@@ -258,7 +258,7 @@ describe("mem::prompt-context reranker gate", () => {
     hits = bm25Hits();
     reply = scoring({ obs_a: 0.5 });
     await run();
-    expect(injectionGateState()).toMatchObject({
+    expect(injectionGateState("prompt-submit")).toMatchObject({
       enabled: true,
       calls: 1,
       fallbacks: 0,

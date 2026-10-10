@@ -6,7 +6,7 @@ import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
-import { relevantOrder, rerankDocument } from "./prompt-rerank.js";
+import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
@@ -47,18 +47,6 @@ async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
   return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
 }
 
-interface Candidate {
-  hit: NarratedHit;
-  ref: InjectedRef;
-}
-
-async function gateByRelevance(prompt: string, candidates: Candidate[]): Promise<Candidate[]> {
-  if (candidates.length === 0) return candidates;
-  const documents = candidates.map(({ hit }) => rerankDocument(hit.observation));
-  const order = await relevantOrder(prompt, documents);
-  return order ? order.map((index) => candidates[index]) : candidates;
-}
-
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::prompt-context",
@@ -92,7 +80,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = strong
         .map((hit, i) => ({ hit, ref: refs[i] }))
         .filter(({ ref }) => !seen.has(refKey(ref)));
-      const chosen = (await gateByRelevance(prompt, candidates)).slice(0, MAX_RESULTS);
+      const chosen = (await gateByRelevance("prompt-submit", prompt, candidates, ({ hit }) => hit.observation)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
       const lines = chosen.map(({ hit }) => escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));

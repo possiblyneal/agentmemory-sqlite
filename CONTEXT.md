@@ -141,8 +141,9 @@ _Avoid_: miss, no-op
 **Injection Gate**:
 The reranker check on prompt-submit Injection: before the top-3 cut, it scores every candidate
 that clears the BM25 floor, keeps those at or above a threshold, orders them by score, and
-never admits one below the floor. `mem::smart-search` runs the same gate over its hits after
-the relevance floor, so a search that matches nothing comes back empty.
+never admits one below the floor. `mem::smart-search` runs the same gate over its Observation
+hits after the relevance floor, so a search that matches nothing comes back empty; each
+caller has its own cooldown.
 A gate that rejects every candidate leaves an Empty Injection. On a timeout, connection error,
 non-2xx reply or malformed body it falls back to the BM25 selection and sits out a 60 s
 cooldown. A gate fallback is not a Missed Injection, because the daemon still answered.

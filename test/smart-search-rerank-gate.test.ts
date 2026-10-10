@@ -7,11 +7,11 @@ vi.mock("../src/logger.js", () => ({
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { registerSmartSearchFunction } from "../src/functions/smart-search.js";
-import { resetInjectionGate } from "../src/functions/prompt-rerank.js";
+import { injectionGateState, resetInjectionGate } from "../src/functions/prompt-rerank.js";
 import type { CompactSearchResult, CompressedObservation, HybridSearchResult } from "../src/types.js";
 import { mockKV, mockSdk } from "./helpers/mocks.js";
 
-type Reply = { status?: number; scores?: Record<string, number> };
+type Reply = { status?: number; scores?: number[] };
 
 const ENV_KEYS = ["AGENTMEMORY_PROMPT_RERANK", "AGENTMEMORY_PROMPT_RERANK_URL", "AGENTMEMORY_PROMPT_RERANK_MIN"];
 
@@ -57,9 +57,9 @@ describe("mem::smart-search reranker gate", () => {
         res.writeHead(reply.status ?? 200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
-            results: body.documents.map((doc, index) => ({
+            results: body.documents.map((_doc, index) => ({
               index,
-              relevance_score: reply.scores?.[doc.replace(/^.*title (\S+).*$/, "$1")] ?? 0,
+              relevance_score: reply.scores?.[index] ?? 0,
             })),
           }),
         );
@@ -85,7 +85,7 @@ describe("mem::smart-search reranker gate", () => {
   });
 
   it("drops hits below the threshold and orders the rest by score", async () => {
-    reply = { scores: { obs_a: 0.2, obs_b: 0.01, obs_c: 0.9 } };
+    reply = { scores: [0.2, 0.01, 0.9] };
     expect(await search()).toEqual(["obs_c", "obs_a"]);
     expect(requests[0].documents).toEqual([
       "2026-02-01 title obs_a narrative of obs_a",
@@ -95,13 +95,20 @@ describe("mem::smart-search reranker gate", () => {
   });
 
   it("returns nothing when no hit clears the threshold", async () => {
-    reply = { scores: { obs_a: 0.01, obs_b: 0.02, obs_c: 0 } };
+    reply = { scores: [0.01, 0.02, 0] };
     expect(await search()).toEqual([]);
   });
 
   it("fails open to the relevance-floor selection on a 500 reply", async () => {
     reply = { status: 500 };
     expect(await search()).toEqual(["obs_a", "obs_b", "obs_c"]);
+  });
+
+  it("counts and cools down apart from prompt-submit Injection", async () => {
+    reply = { status: 500 };
+    await search();
+    expect(injectionGateState("search")).toMatchObject({ calls: 1, fallbacks: 1, failing: true });
+    expect(injectionGateState("prompt-submit")).toMatchObject({ calls: 0, fallbacks: 0, failing: false });
   });
 
   it("never calls the endpoint when disabled", async () => {

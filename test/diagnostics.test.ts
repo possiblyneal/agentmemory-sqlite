@@ -219,7 +219,7 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 21 checks = 8 original (actions, leases, sentinels, sketches, signals,
+      // 22 checks = 8 original (actions, leases, sentinels, sketches, signals,
       // sessions, memories, mesh) + 6 added in #lesson-visibility
       // (lessons, summaries, semantic, procedural, crystals, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
@@ -228,8 +228,9 @@ describe("Diagnostics Functions", () => {
       // 1 Missed Injection record (#73) +
       // 1 Unrecalled Memory report (#76) +
       // 1 injected-item use report (#85) +
-      // 1 prompt rerank gate report (#169).
-      expect(result.summary.pass).toBe(20);
+      // 1 prompt rerank gate report (#169) +
+      // 1 search rerank gate report.
+      expect(result.summary.pass).toBe(21);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
@@ -676,6 +677,8 @@ describe("Diagnostics Functions", () => {
       const gate = (await injectionChecks()).find((c) => c.name === "injection-gate");
       expect(gate?.status).toBe("pass");
       expect(gate?.message).toBe("Injection Gate off: prompt-submit Injection is BM25-only");
+      const search = (await injectionChecks()).find((c) => c.name === "search-gate");
+      expect(search?.message).toBe("Search gate off: smart-search keeps every hit above its relevance floor");
     });
   });
 
