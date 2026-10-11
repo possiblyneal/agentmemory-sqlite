@@ -139,10 +139,13 @@ describe("Claude Bridge Functions", () => {
       strength: 5,
       version: 1,
       isLatest: true,
+      project: "my-project",
     };
     await kv.set("mem:memories", "mem_1", mem);
 
+    vi.stubEnv("AGENTMEMORY_PROJECT_NAME", "my-project");
     vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("# Agent Memory (auto-synced by agentmemory)\n");
 
     const result = (await sdk.trigger("mem::claude-bridge-sync", {})) as {
       success: boolean;
@@ -155,6 +158,7 @@ describe("Claude Bridge Functions", () => {
     expect(writeFileAtomicNoSymlink).toHaveBeenCalled();
     const writtenContent = vi.mocked(writeFileAtomicNoSymlink).mock.calls[0][1] as string;
     expect(writtenContent).toContain("Auth pattern");
+    vi.unstubAllEnvs();
   });
 
   it("claude-bridge-sync returns error when not configured", async () => {
