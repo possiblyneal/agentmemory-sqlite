@@ -1,4 +1,4 @@
-import type { MemoryProvider, CircuitBreakerState } from "../types.js";
+import type { MemoryProvider, CircuitBreakerState, ProviderUsage } from "../types.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
 import { isContentFilterRejection, isProviderBusy } from "./_fetch.js";
 import { getEnvVar } from "../config.js";
@@ -100,6 +100,10 @@ export class ResilientProvider implements MemoryProvider {
     return this.call("summarize", () =>
       this.inner.summarize(systemPrompt.toWellFormed(), userPrompt.toWellFormed()),
     );
+  }
+
+  usage(): ProviderUsage[] {
+    return this.inner.usage?.() ?? [];
   }
 
   get circuitStates(): Record<ProviderOperation, CircuitBreakerState> {
