@@ -12,6 +12,8 @@ vi.mock("../src/config.js", () => ({
 
 import { registerConsolidationPipelineFunction } from "../src/functions/consolidation-pipeline.js";
 import { isConsolidationEnabled } from "../src/config.js";
+import { logger } from "../src/logger.js";
+import { CONSOLIDATION_PROMPT_CHARS } from "../src/prompts/budget.js";
 import type { SessionSummary, Memory, SemanticMemory, ProceduralMemory } from "../src/types.js";
 
 function mockKV() {
@@ -162,6 +164,74 @@ describe("Consolidation Pipeline", () => {
     const procedural = result.results.procedural as { skipped: boolean; reason: string };
     expect(procedural.skipped).toBe(true);
     expect(procedural.reason).toContain("fewer than 2");
+  });
+
+  describe("procedural prompt budget", () => {
+    function bigPattern(i: number, sessions: number, size: number): Memory {
+      return {
+        ...makePattern(i),
+        content: `p${i} ` + "x".repeat(size),
+        sessionIds: Array.from({ length: sessions }, (_, s) => `ses_${s}`),
+      };
+    }
+
+    async function runProcedural(patterns: Memory[]) {
+      const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
+      registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+      for (const m of patterns) await kv.set("mem:memories", m.id, m);
+      const result = (await sdk.trigger("mem::consolidate-pipeline", {
+        tier: "procedural",
+      })) as { results: { procedural: { skipped?: boolean; reason?: string } } };
+      return { provider, procedural: result.results.procedural };
+    }
+
+    it("keeps the most-seen patterns that fit and logs the trim", async () => {
+      vi.mocked(logger.info).mockClear();
+      const { provider } = await runProcedural([
+        bigPattern(1, 2, 10_000),
+        bigPattern(2, 5, 10_000),
+        bigPattern(3, 3, 10_000),
+        bigPattern(4, 4, 10_000),
+      ]);
+
+      expect(provider.summarize).toHaveBeenCalledTimes(1);
+      const prompt = String(provider.summarize.mock.calls[0][1]);
+      expect(prompt.length).toBeLessThanOrEqual(CONSOLIDATION_PROMPT_CHARS);
+      expect(prompt).toContain("p2 ");
+      expect(prompt).toContain("p4 ");
+      expect(prompt).not.toContain("p3 ");
+      expect(prompt).not.toContain("p1 ");
+      expect(logger.info).toHaveBeenCalledWith(
+        "Procedural extraction trimmed to its prompt budget",
+        expect.objectContaining({ keptPatterns: 2, droppedPatterns: 2 }),
+      );
+    });
+
+    it("skips a pattern that does not fit and lets smaller ones keep filling", async () => {
+      const { provider } = await runProcedural([
+        bigPattern(1, 9, 5_000),
+        bigPattern(2, 8, 30_000),
+        bigPattern(3, 3, 5_000),
+      ]);
+
+      const prompt = String(provider.summarize.mock.calls[0][1]);
+      expect(prompt.length).toBeLessThanOrEqual(CONSOLIDATION_PROMPT_CHARS);
+      expect(prompt).toContain("p1 ");
+      expect(prompt).toContain("p3 ");
+      expect(prompt).not.toContain("p2 ");
+    });
+
+    it("makes no LLM call when fewer than 2 patterns fit", async () => {
+      const { provider, procedural } = await runProcedural([
+        bigPattern(1, 3, 30_000),
+        bigPattern(2, 2, 30_000),
+      ]);
+
+      expect(provider.summarize).not.toHaveBeenCalled();
+      expect(procedural.skipped).toBe(true);
+      expect(procedural.reason).toContain("fewer than 2");
+      expect(procedural.reason).toContain("fit");
+    });
   });
 
   it("with enough summaries, creates semantic memories from provider response", async () => {
