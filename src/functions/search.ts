@@ -2,7 +2,7 @@ import type { ISdk } from '../engine/types.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
-import { SearchIndex } from '../state/search-index.js'
+import { SearchIndex, type IndexLayer } from '../state/search-index.js'
 import { VectorIndex } from '../state/vector-index.js'
 import type { EmbeddingProvider } from '../types.js'
 import {
@@ -118,7 +118,7 @@ export async function rebuildBm25FromContent(
       // One malformed row must not take the boot down with it: skip it,
       // say which, and keep going. The first few are logged individually.
       try {
-        idx.add(item.doc)
+        idx.add(item.doc, item.kind)
         docs++
       } catch (err) {
         skipped++
@@ -418,7 +418,7 @@ export async function indexRecords(
   for (const memory of memories) {
     if (memory.isLatest === false) continue
     if (!memory.title || !memory.content) continue
-    idx.add(memoryToIndexDoc(memory))
+    idx.add(memoryToIndexDoc(memory), 'memory')
     // One job per chunk when chunking is on, one job total otherwise.
     for (const job of memoryChunkJobs(memory)) {
       await enqueue({
@@ -567,6 +567,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       format?: string
       token_budget?: number
       agentId?: string
+      targetLayer?: string
     }) => {
       const idx = getSearchIndex()
 
@@ -621,6 +622,10 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
             'Pass agentId: "*" to opt in to a wildcard read.',
         );
       }
+      const targetLayer = data.targetLayer ?? 'all'
+      if (!['memory', 'observation', 'all'].includes(targetLayer)) {
+        throw new Error("mem::search: targetLayer must be one of 'memory', 'observation', or 'all'")
+      }
       const format = typeof data.format === 'string' ? data.format : 'full'
       if (!['full', 'compact', 'narrative'].includes(format)) {
         throw new Error("mem::search: format must be one of 'full', 'compact', or 'narrative'")
@@ -674,7 +679,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(effectiveLimit * 10, 100)
         : Math.max(effectiveLimit * 3, 30)
-      const results = idx.search(query, fetchLimit)
+      const results = idx.search(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer as IndexLayer)
 
       const loadSession = createSessionLoader(kv)
       const inProject = projectFilter
@@ -755,33 +760,64 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         })
       }
 
-      void recordAccessBatch(
-        kv,
-        enriched.map((r) => r.observation.id),
-      )
-
       const estimateTokens = (value: unknown): number =>
         Math.max(1, Math.ceil(JSON.stringify(value).length / 3))
 
-      const applyTokenBudget = <T>(items: T[]): {
+      // The top match is shortened to fit rather than dropped, so a long but
+      // relevant Memory still reaches the Agent under a small budget.
+      const applyTokenBudget = <T>(
+        items: T[],
+        shorten: (item: T, room: number) => T | null,
+      ): {
         items: T[]
         used: number
         truncated: boolean
+        contentTruncated: boolean
       } => {
-        if (!tokenBudget) return { items, used: items.reduce((sum, item) => sum + estimateTokens(item), 0), truncated: false }
+        if (!tokenBudget) return { items, used: items.reduce((sum, item) => sum + estimateTokens(item), 0), truncated: false, contentTruncated: false }
         const selected: T[] = []
         let used = 0
         let truncated = false
+        let contentTruncated = false
         for (const item of items) {
-          const itemTokens = estimateTokens(item)
+          let candidate = item
+          let itemTokens = estimateTokens(candidate)
+          if (used + itemTokens > tokenBudget && selected.length === 0) {
+            const shortened = shorten(item, tokenBudget)
+            if (shortened) {
+              candidate = shortened
+              itemTokens = estimateTokens(candidate)
+              contentTruncated = true
+            }
+          }
           if (used + itemTokens > tokenBudget) {
             truncated = true
             continue
           }
-          selected.push(item)
+          selected.push(candidate)
           used += itemTokens
         }
-        return { items: selected, used, truncated }
+        return { items: selected, used, truncated: truncated || contentTruncated, contentTruncated }
+      }
+
+      const clipNarrative = <T>(
+        item: T,
+        room: number,
+        read: (item: T) => string,
+        write: (item: T, narrative: string) => T,
+      ): T | null => {
+        let narrative = read(item)
+        while (narrative.length > 0) {
+          const candidate = write(item, narrative)
+          if (estimateTokens(candidate) <= room) return candidate
+          const overflowChars = (estimateTokens(candidate) - room) * 3
+          narrative = narrative.slice(0, Math.max(0, narrative.length - Math.max(overflowChars, 1)))
+        }
+        return null
+      }
+
+      const touch = (ids: string[]): void => {
+        void recordAccessBatch(kv, ids)
       }
 
       if (format === 'compact') {
@@ -793,13 +829,15 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           score: r.score,
           timestamp: r.observation.timestamp,
         }))
-        const packed = applyTokenBudget(compactResults)
+        const packed = applyTokenBudget(compactResults, () => null)
+        touch(packed.items.map((r) => r.obsId))
         return {
           format,
           results: packed.items,
           tokens_used: packed.used,
           tokens_budget: tokenBudget,
           truncated: packed.truncated,
+          content_truncated: packed.contentTruncated,
         }
       }
 
@@ -812,7 +850,10 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           score: r.score,
           timestamp: r.observation.timestamp,
         }))
-        const packed = applyTokenBudget(narrativeResults)
+        const packed = applyTokenBudget(narrativeResults, (item, room) =>
+          clipNarrative(item, room, (r) => r.narrative, (r, narrative) => ({ ...r, narrative })),
+        )
+        touch(packed.items.map((r) => r.obsId))
         const text = packed.items
           .map((r, index) => `${index + 1}. ${r.title}\n${r.narrative}`)
           .join('\n\n')
@@ -823,10 +864,19 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           tokens_used: packed.used,
           tokens_budget: tokenBudget,
           truncated: packed.truncated,
+          content_truncated: packed.contentTruncated,
         }
       }
 
-      const packed = applyTokenBudget(enriched)
+      const packed = applyTokenBudget(enriched, (item, room) =>
+        clipNarrative(
+          item,
+          room,
+          (r) => r.observation.narrative,
+          (r, narrative) => ({ ...r, observation: { ...r.observation, facts: [], narrative } }),
+        ),
+      )
+      touch(packed.items.map((r) => r.observation.id))
 
       // Avoid logging raw cwd/project (host paths). Log only that filters were active.
       logger.info('Search completed', {
@@ -841,6 +891,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         tokens_used: packed.used,
         tokens_budget: tokenBudget,
         truncated: packed.truncated,
+        content_truncated: packed.contentTruncated,
       }
     }
   )

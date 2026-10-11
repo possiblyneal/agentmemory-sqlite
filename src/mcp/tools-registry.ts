@@ -34,7 +34,7 @@ export const CORE_TOOLS: McpToolDef[] = [
   {
     name: "memory_recall",
     description:
-      "Search past session observations for relevant context. Use when you need to recall what happened in previous sessions, find past decisions, or look up how a file was modified before.",
+      "Search saved Memories for relevant context. Use when you need to recall past decisions or look up how a file was modified before. Searches saved Memories by default; set targetLayer to observation or all to include raw session observations.",
     inputSchema: {
       type: "object",
       properties: {
@@ -55,6 +55,10 @@ export const CORE_TOOLS: McpToolDef[] = [
           description: "Optional token budget to trim returned results",
         },
         project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
+        targetLayer: {
+          type: "string",
+          description: "Layer to search: memory (default), observation, or all",
+        },
       },
       required: ["query"],
     },

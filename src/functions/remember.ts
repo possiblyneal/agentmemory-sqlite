@@ -282,7 +282,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         // an indexing failure doesn't block the save itself — the
         // restart-time rebuild will pick the memory up either way.
         try {
-          getSearchIndex().add(memoryToIndexDoc(memory));
+          getSearchIndex().add(memoryToIndexDoc(memory), "memory");
         } catch (err) {
           logger.warn("Failed to index saved memory into BM25", {
             memId: memory.id,

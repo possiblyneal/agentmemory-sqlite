@@ -150,7 +150,7 @@ describe("mem::search", () => {
     expect(result.truncated).toBe(true);
   });
 
-  it("skips an oversized record and keeps the smaller ones that fit under the budget", async () => {
+  it("shortens an oversized top match to fit the budget instead of dropping it", async () => {
     const oversized: CompressedObservation = {
       id: "obs_big",
       sessionId: "ses_1",
@@ -186,14 +186,17 @@ describe("mem::search", () => {
     })) as {
       results: Array<{ observation: CompressedObservation }>;
       truncated: boolean;
+      content_truncated: boolean;
       tokens_used: number;
     };
 
-    const ids = result.results.map((r) => r.observation.id);
-    expect(ids).not.toContain("obs_big");
-    expect(ids).toEqual(expect.arrayContaining(["obs_a", "obs_small"]));
+    const top = result.results[0].observation;
+    expect(top.id).toBe("obs_big");
+    expect(top.narrative.length).toBeGreaterThan(0);
+    expect(top.narrative.length).toBeLessThan(oversized.narrative.length);
     expect(result.tokens_used).toBeLessThanOrEqual(600);
     expect(result.truncated).toBe(true);
+    expect(result.content_truncated).toBe(true);
   });
 
   it("reports truncated only when a record was skipped", async () => {
