@@ -73,6 +73,12 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
 
+The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start`, none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
+
+```text
+FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
+```
+
 Search is gated on all three metrics. smart-search drops hybrid hits below a relevance floor (BM25 of at least 3.5 and half the best match, or a cosine of at least 0.3 on a hit BM25 also matched), so an off-topic query can return nothing. Search no-answer clean is 0.25, not 1: three of its four no-answer questions still have a lexical match above the floor (best BM25 3.9, 4.9 and 6.4), and gold Sessions score as low as 3.8, so a floor high enough to clear them (4.0 clears only the first) costs search recall.
 
 CI runs it on the ubuntu / Node 22 leg. The gate is BM25-only so CI never downloads the embedding model and needs no network beyond `npm ci`; the on-device embedding stack is still measured by `npm run eval:coding-life`. A PR that changes these numbers on purpose updates the baseline file in the same PR and says why. One question gained or lost on a path moves recall by at least 0.05, so the tolerance only absorbs rounding.
@@ -188,7 +194,7 @@ The key is a proxy and the numbers are not accuracy:
 eval/
 ├── README.md
 ├── baselines/
-│   └── coding-agent-life-v2.json  CI gate: per adapter × path floors and tolerance
+│   └── coding-agent-life-v2.json  CI gate: per adapter × path floors, tolerance and p95 latency ceilings
 ├── runner/
 │   ├── types.ts                   Adapter, Question, QueryResult, ScoreRow
 │   ├── score.ts                   per-question scoring, per adapter × path aggregation, baseline gate
