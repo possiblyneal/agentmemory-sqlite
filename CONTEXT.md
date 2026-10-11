@@ -31,8 +31,8 @@ start on it reopens it.
 ### What is stored
 
 **Observation**:
-A single raw thing that happened during a Session — a tool call, a prompt, a failure. The
-atomic, append-only input to everything else.
+A single raw thing that happened during a Session — a tool call, a prompt, a failure, or the
+Agent's final reply when a turn ends. The atomic, append-only input to everything else.
 _Avoid_: event, log entry
 
 **Harness Message**:
@@ -165,9 +165,15 @@ _Avoid_: dead memory, orphan, unused memory
 
 **Project Time**:
 Time that counts only while a project is being worked on — a week counts when the project had
-at least one Session in it. Decay and grace periods run on Project Time, so a project left
-alone for months comes back as it was left.
+at least one Session in it. Lesson and Insight Decay and grace periods run on Project Time, so
+a project left alone for months comes back as it was left.
 _Avoid_: active time, wall-clock age
+
+**Decay**:
+Lowering the strength of a Lesson, Insight or Semantic Fact once for each decay period it went
+unused. A period is decayed at most once, and use or reinforcement restarts the count. A
+Semantic Fact belongs to no project, so its periods are wall-clock time.
+_Avoid_: aging, fading
 
 **Eviction**:
 Deliberately removing Memories that have aged out or lost relevance, under a policy. Evicting
