@@ -165,6 +165,7 @@ export function registerMcpEndpoints(
               token_budget: tokenBudget,
               agentId: recallAgentId,
               project: asNonEmptyString(args.project),
+              targetLayer: args.targetLayer ?? "memory",
             } });
             const text =
               format === "narrative" &&
