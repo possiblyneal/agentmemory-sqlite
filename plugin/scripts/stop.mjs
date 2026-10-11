@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
 	const vars = {};
@@ -86,6 +88,75 @@ function shouldSkipSession() {
 	return process.env["CLAUDE_CODE_ENTRYPOINT"]?.startsWith("sdk-") ?? false;
 }
 //#endregion
+//#region src/hooks/_project.ts
+function projectNamesPath() {
+	return join(homedir(), ".agentmemory", "project-names.json");
+}
+function remoteUrl(dir) {
+	try {
+		return execSync("git config --get remote.origin.url", {
+			cwd: dir,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			],
+			timeout: 500
+		}).toString().trim().replace(/\.git$/, "");
+	} catch {
+		return "";
+	}
+}
+function disambiguate(name, commonDir, dir) {
+	const identity = remoteUrl(dir) || commonDir;
+	try {
+		const path = projectNamesPath();
+		let claims = {};
+		try {
+			claims = JSON.parse(readFileSync(path, "utf-8"));
+		} catch {}
+		if (!(name in claims)) {
+			mkdirSync(dirname(path), { recursive: true });
+			const staged = `${path}.${process.pid}`;
+			writeFileSync(staged, JSON.stringify({
+				...claims,
+				[name]: identity
+			}));
+			renameSync(staged, path);
+			return name;
+		}
+		if (claims[name] === identity) return name;
+		return `${name}-${createHash("sha1").update(identity).digest("hex").slice(0, 6)}`;
+	} catch {
+		return name;
+	}
+}
+function resolveProject(cwd) {
+	const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
+	if (explicit && explicit.trim()) return explicit.trim();
+	const dir = cwd && cwd.trim() ? cwd : process.cwd();
+	try {
+		const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
+			cwd: dir,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			],
+			timeout: 500
+		}).toString().trim().split("\n");
+		if (commonDir && basename(commonDir) === ".git") return disambiguate(basename(dirname(resolve(dir, commonDir))), resolve(dir, commonDir), dir);
+		if (top) return disambiguate(basename(top), resolve(dir, commonDir || top), dir);
+	} catch {}
+	return basename(dir);
+}
+function hookCwd(data) {
+	if (!data || typeof data !== "object") return void 0;
+	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
+	const projectDir = process.env["CLAUDE_PROJECT_DIR"];
+	if (projectDir && projectDir.trim()) return projectDir;
+}
+//#endregion
 //#region src/hooks/stop.ts
 hydrateHookEnv();
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
@@ -107,6 +178,23 @@ async function main() {
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
 	const sessionId = data.session_id || "unknown";
+	const reply = typeof data.last_assistant_message === "string" ? data.last_assistant_message.slice(0, 4e3) : "";
+	if (reply) {
+		const cwd = hookCwd(data) || process.cwd();
+		fetch(`${REST_URL}/agentmemory/observe`, {
+			method: "POST",
+			headers: authHeaders(),
+			body: JSON.stringify({
+				hookType: "stop",
+				sessionId,
+				project: resolveProject(cwd),
+				cwd,
+				timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+				data: { last_message: reply }
+			}),
+			signal: AbortSignal.timeout(5e3)
+		}).catch(() => {});
+	}
 	fetch(`${REST_URL}/agentmemory/session/end`, {
 		method: "POST",
 		headers: authHeaders(),

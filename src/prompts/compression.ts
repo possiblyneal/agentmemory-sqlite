@@ -49,6 +49,7 @@ export function buildCompressionPrompt(observation: {
   toolInput?: unknown;
   toolOutput?: unknown;
   userPrompt?: string;
+  assistantResponse?: string;
   timestamp: string;
 }, opts?: { neutralize?: boolean }): string {
   const parts = [
@@ -87,6 +88,9 @@ export function buildCompressionPrompt(observation: {
   }
   if (observation.userPrompt) {
     fenced.push(section("User prompt", observation.userPrompt, USER_PROMPT_MAX));
+  }
+  if (observation.assistantResponse) {
+    fenced.push(section("Agent reply", observation.assistantResponse, TOOL_OUTPUT_MAX));
   }
 
   if (fenced.length > 0) {

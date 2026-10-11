@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
+import { resolveProject, hookCwd } from "./_project.js";
 
 hydrateHookEnv();
 
@@ -30,6 +31,27 @@ async function main() {
   if (shouldSkipSession()) return;
 
   const sessionId = (data.session_id as string) || "unknown";
+
+  const reply =
+    typeof data.last_assistant_message === "string"
+      ? data.last_assistant_message.slice(0, 4000)
+      : "";
+  if (reply) {
+    const cwd = hookCwd(data) || process.cwd();
+    fetch(`${REST_URL}/agentmemory/observe`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        hookType: "stop",
+        sessionId,
+        project: resolveProject(cwd),
+        cwd,
+        timestamp: new Date().toISOString(),
+        data: { last_message: reply },
+      }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {});
+  }
 
   // session/end already fans out the summary server-side (#1203). Stop
   // fires after every turn, so the daemon holds the end until the Session
