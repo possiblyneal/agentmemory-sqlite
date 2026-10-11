@@ -1,6 +1,7 @@
-import type { MemoryProvider } from "../types.js";
+import type { MemoryProvider, ProviderUsage } from "../types.js";
 import { getEnvVar } from "../config.js";
 import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
+import { UsageTally, hostOf } from "./_usage.js";
 import {
   DEFAULT_AZURE_API_VERSION,
   buildAuthHeaders,
@@ -59,6 +60,7 @@ export class OpenAIProvider implements MemoryProvider {
   private azureApiVersion: string;
   private tokenizeUnavailable = false;
   private extraBody: Record<string, unknown>;
+  private tally: UsageTally;
   // api.openai.com rejects max_tokens on reasoning models and accepts
   // max_completion_tokens on every model; compatible servers may only know
   // max_tokens (#1219).
@@ -78,6 +80,11 @@ export class OpenAIProvider implements MemoryProvider {
     this.outputTokenParam = /^https:\/\/api\.openai\.com(\/|$)/.test(this.baseUrl)
       ? "max_completion_tokens"
       : "max_tokens";
+    this.tally = new UsageTally("openai", model, hostOf(this.baseUrl));
+  }
+
+  usage(): ProviderUsage[] {
+    return [this.tally.snapshot()];
   }
 
   async compress(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -174,11 +181,13 @@ export class OpenAIProvider implements MemoryProvider {
     }
 
     const data = (await response.json()) as {
+      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
       choices?: Array<{
         finish_reason?: string;
         message?: { content?: string; reasoning?: string; reasoning_content?: string };
       }>;
     };
+    this.tally.add(data.usage?.prompt_tokens, data.usage?.completion_tokens);
     const message = data.choices?.[0]?.message;
     const content = message?.content;
     if (content) {

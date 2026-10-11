@@ -39,6 +39,33 @@ describe("OpenAIProvider reply handling", () => {
   });
 });
 
+describe("OpenAIProvider usage", () => {
+  it("sums reported tokens across calls and names model and endpoint host only", async () => {
+    const provider = new OpenAIProvider("sk-secret", "m", 10, `${baseUrl}/v1?key=hidden`);
+    reply = {
+      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 },
+    };
+    await provider.summarize("s", "u");
+    reply = {
+      choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    };
+    await provider.compress("s", "u");
+    expect(provider.usage()).toEqual([
+      {
+        provider: "openai",
+        model: "m",
+        endpointHost: new URL(baseUrl).host,
+        promptTokens: 15,
+        completionTokens: 5,
+        totalTokens: 20,
+      },
+    ]);
+    expect(JSON.stringify(provider.usage())).not.toContain("sk-secret");
+  });
+});
+
 describe("OPENAI_EXTRA_BODY", () => {
   it("is merged into the request body", async () => {
     vi.stubEnv("OPENAI_EXTRA_BODY", '{"chat_template_kwargs":{"enable_thinking":false}}');

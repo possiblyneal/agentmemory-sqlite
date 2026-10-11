@@ -104,4 +104,14 @@ describe("CircuitBreaker", () => {
     expect(cb.getState().state).toBe("closed");
     expect(cb.getState().failures).toBe(0);
   });
+
+  it("reports half-open once the recovery window has passed, without a probe", () => {
+    const cb = new CircuitBreaker({ failureThreshold: 1, recoveryTimeoutMs: 30_000 });
+    cb.recordFailure();
+    expect(cb.getState().state).toBe("open");
+    vi.advanceTimersByTime(29_999);
+    expect(cb.getState().state).toBe("open");
+    vi.advanceTimersByTime(1);
+    expect(cb.getState().state).toBe("half-open");
+  });
 });

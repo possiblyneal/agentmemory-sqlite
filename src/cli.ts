@@ -514,6 +514,10 @@ async function runStatus() {
     const nodes = Number(graphRes?.totalNodes ?? graphRes?.nodes ?? graphRes?.nodeCount ?? 0);
     const edges = Number(graphRes?.totalEdges ?? graphRes?.edges ?? graphRes?.edgeCount ?? 0);
     const cb = healthRes?.circuitBreaker?.state || "closed";
+    const llmLines = (Array.isArray(healthRes?.llm) ? healthRes.llm : []).map(
+      (u: { provider: string; model: string; endpointHost: string; totalTokens: number }) =>
+        `LLM:          ${u.provider} ${u.model} @ ${u.endpointHost} (${u.totalTokens} tokens)`,
+    );
     const heapMB = h?.memory ? Math.round(h.memory.heapUsed / 1048576) : 0;
     const uptime = h?.uptimeSeconds ? Math.round(h.uptimeSeconds) : 0;
 
@@ -537,6 +541,7 @@ async function runStatus() {
       `Memories:     ${memCount}`,
       `Graph:        ${nodes} nodes, ${edges} edges`,
       `Circuit:      ${cb}`,
+      ...llmLines,
       `Heap:         ${heapMB} MB`,
       `Uptime:       ${uptime}s`,
       `Viewer:       ${c.url(getViewerUrl())}`,

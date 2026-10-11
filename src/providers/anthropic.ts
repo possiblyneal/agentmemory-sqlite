@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { MemoryProvider } from '../types.js'
+import type { MemoryProvider, ProviderUsage } from '../types.js'
 import { getEnvVar } from '../config.js'
+import { UsageTally, hostOf } from './_usage.js'
 
 type Effort = NonNullable<Anthropic.OutputConfig['effort']>
 
@@ -10,11 +11,13 @@ export class AnthropicProvider implements MemoryProvider {
   private model: string
   private maxTokens: number
   private effort?: Effort
+  private tally: UsageTally
 
   constructor(apiKey: string, model: string, maxTokens: number, baseURL?: string) {
     this.client = new Anthropic({ apiKey, ...(baseURL ? { baseURL } : {}) })
     this.model = model
     this.maxTokens = maxTokens
+    this.tally = new UsageTally('anthropic', model, hostOf(baseURL || 'https://api.anthropic.com'))
     // ANTHROPIC_EFFORT -> output_config.effort, mirroring OPENAI_REASONING_EFFORT
     // in openai.ts. Unset leaves the model at its own default, which on Claude
     // Opus 5 means adaptive thinking is on: measured at 18s on a hard
@@ -22,6 +25,10 @@ export class AnthropicProvider implements MemoryProvider {
     // versus 11s at "medium". Levels are model-specific - Haiku 4.5 rejects the
     // parameter outright and only Opus 5 accepts "xhigh".
     this.effort = (getEnvVar('ANTHROPIC_EFFORT') || undefined) as Effort | undefined
+  }
+
+  usage(): ProviderUsage[] {
+    return [this.tally.snapshot()]
   }
 
   private get outputConfig() {
@@ -53,6 +60,7 @@ export class AnthropicProvider implements MemoryProvider {
       }],
     })
 
+    this.tally.add(response.usage?.input_tokens, response.usage?.output_tokens)
     const textBlock = response.content.find((b) => b.type === 'text')
     return textBlock?.text ?? ''
   }
@@ -66,6 +74,7 @@ export class AnthropicProvider implements MemoryProvider {
       messages: [{ role: 'user', content: userPrompt }],
     })
 
+    this.tally.add(response.usage?.input_tokens, response.usage?.output_tokens)
     const textBlock = response.content.find((b) => b.type === 'text')
     return textBlock?.text ?? ''
   }

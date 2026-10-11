@@ -209,7 +209,7 @@ export function registerApiTriggers(
   kv: StateKV,
   secret?: string,
   metricsStore?: MetricsStore,
-  provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown },
+  provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown; usage?: () => unknown },
 ): void {
   sdk.registerFunction(
     "middleware::api-auth",
@@ -315,6 +315,7 @@ export function registerApiTriggers(
           version: VERSION,
           provider: providerKind,
           embeddingProvider,
+          llm: provider && "usage" in provider ? provider.usage?.() ?? [] : [],
           flags,
         },
       };
@@ -339,6 +340,8 @@ export function registerApiTriggers(
       const circuitBreakers =
         provider && "circuitStates" in provider ? provider.circuitStates : null;
 
+      const llm = provider && "usage" in provider ? provider.usage?.() ?? [] : [];
+
       const status = health?.status || "healthy";
       const statusCode = status === "critical" ? 503 : 200;
 
@@ -351,6 +354,7 @@ export function registerApiTriggers(
           functionMetrics,
           circuitBreaker,
           circuitBreakers,
+          llm,
           recall: recallCounts(),
           ...instanceInfo(),
         },
