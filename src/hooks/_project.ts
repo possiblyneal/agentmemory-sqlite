@@ -53,7 +53,18 @@ function disambiguate(name: string, commonDir: string, dir: string): string {
 export function resolveProject(cwd?: string): string {
   const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
   if (explicit && explicit.trim()) return explicit.trim();
-  const dir = cwd && cwd.trim() ? cwd : process.cwd();
+  return resolveGitProject(cwd && cwd.trim() ? cwd : process.cwd());
+}
+
+// A bare repo's common dir is the repo itself ("repo.git") or a ".bare" folder inside a
+// project directory; its worktrees are named after that repo, not their own directory.
+function bareRepoName(commonDir: string): string {
+  const name = basename(commonDir);
+  if (name === ".bare") return basename(dirname(commonDir));
+  return name.replace(/\.git$/, "");
+}
+
+export function resolveGitProject(dir: string): string {
   try {
     const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
       cwd: dir,
@@ -66,6 +77,10 @@ export function resolveProject(cwd?: string): string {
     if (commonDir && basename(commonDir) === ".git") {
       const root = dirname(resolve(dir, commonDir));
       return disambiguate(basename(root), resolve(dir, commonDir), dir);
+    }
+    if (top && commonDir && resolve(dir, commonDir) !== resolve(top, ".git")) {
+      const bare = resolve(dir, commonDir);
+      if (!bare.split(/[\\/]/).includes("modules")) return disambiguate(bareRepoName(bare), bare, dir);
     }
     if (top) return disambiguate(basename(top), resolve(dir, commonDir || top), dir);
   } catch {}

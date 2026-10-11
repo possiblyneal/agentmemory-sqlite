@@ -134,7 +134,14 @@ function disambiguate(name, commonDir, dir) {
 function resolveProject(cwd) {
 	const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
 	if (explicit && explicit.trim()) return explicit.trim();
-	const dir = cwd && cwd.trim() ? cwd : process.cwd();
+	return resolveGitProject(cwd && cwd.trim() ? cwd : process.cwd());
+}
+function bareRepoName(commonDir) {
+	const name = basename(commonDir);
+	if (name === ".bare") return basename(dirname(commonDir));
+	return name.replace(/\.git$/, "");
+}
+function resolveGitProject(dir) {
 	try {
 		const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
 			cwd: dir,
@@ -146,6 +153,10 @@ function resolveProject(cwd) {
 			timeout: 500
 		}).toString().trim().split("\n");
 		if (commonDir && basename(commonDir) === ".git") return disambiguate(basename(dirname(resolve(dir, commonDir))), resolve(dir, commonDir), dir);
+		if (top && commonDir && resolve(dir, commonDir) !== resolve(top, ".git")) {
+			const bare = resolve(dir, commonDir);
+			if (!bare.split(/[\\/]/).includes("modules")) return disambiguate(bareRepoName(bare), bare, dir);
+		}
 		if (top) return disambiguate(basename(top), resolve(dir, commonDir || top), dir);
 	} catch {}
 	return basename(dir);

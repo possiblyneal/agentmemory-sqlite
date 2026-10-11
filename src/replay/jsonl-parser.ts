@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { resolveGitProject } from "../hooks/_project.js";
 import type { HookType, RawObservation } from "../types.js";
 import { generateId } from "../state/schema.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
@@ -35,23 +35,12 @@ function deriveProject(cwd: string): string {
   const cached = projectByCwd.get(cwd);
   if (cached) return cached;
   let name = "";
-  // When the recorded cwd still exists on this machine, resolve the git
-  // toplevel basename so a subdirectory session scopes to the repository
-  // name, matching the hooks' resolveProject. Historical or cross-platform
-  // paths fall back to the basename below. No env override here: a bulk
-  // import spans many projects, so a global name would mislabel them all.
-  if (existsSync(cwd)) {
-    try {
-      const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf8",
-      }).trim();
-      if (top) name = top.split(/[\\/]+/).filter(Boolean).pop() ?? "";
-    } catch {
-      // not a git repo
-    }
-  }
+  // When the recorded cwd still exists on this machine, resolve the hooks'
+  // project (main checkout basename, shared by every worktree) so a subdirectory
+  // or worktree session scopes to the repository. Historical or cross-platform
+  // paths fall back to the basename below. No env override here: a bulk import
+  // spans many projects, so a global name would mislabel them all.
+  if (existsSync(cwd)) name = resolveGitProject(cwd);
   if (!name) {
     // Split on both separators so a Windows-recorded cwd yields its basename
     // instead of the whole raw path becoming the project scope.

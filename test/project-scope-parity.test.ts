@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -165,5 +165,42 @@ describe("fs-watcher configFromEnv project override", () => {
         AGENTMEMORY_PROJECT: "  ",
       }).project,
     ).toBeNull();
+  });
+});
+
+describe("linked worktree parity (#193)", () => {
+  let scratch: string;
+  let prevHome: string | undefined;
+  let worktreeSub: string;
+
+  beforeAll(() => {
+    mkdirSync(join(process.cwd(), "tmp"), { recursive: true });
+    scratch = realpathSync(mkdtempSync(join(process.cwd(), "tmp", "amem-wt-parity-")));
+    prevHome = process.env.HOME;
+    process.env.HOME = join(scratch, "home");
+    const main = join(scratch, "wt-main-repo");
+    mkdirSync(main);
+    const run = (...args: string[]) => execFileSync("git", args, { cwd: main, stdio: "ignore" });
+    run("init", "--quiet");
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "--quiet", "-m", "i");
+    const worktree = join(scratch, "feature-tree");
+    run("worktree", "add", "--quiet", worktree);
+    worktreeSub = join(worktree, "src");
+    mkdirSync(worktreeSub);
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("replay files a worktree transcript under the main checkout's project", () => {
+    expect(parseJsonlText(transcriptLine(worktreeSub)).project).toBe("wt-main-repo");
+  });
+
+  it("watcher files a worktree under the main checkout's project", () => {
+    const w = new FilesystemWatcher({ roots: [worktreeSub], baseUrl: "http://localhost:3111", logger: {} });
+    expect(w.project).toBe("wt-main-repo");
   });
 });
