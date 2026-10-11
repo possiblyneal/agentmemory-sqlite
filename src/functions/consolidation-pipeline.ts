@@ -21,6 +21,7 @@ import {
   isConsolidationEnabled,
 } from "../config.js";
 import { logger } from "../logger.js";
+import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 
 export const DECAY_FLOOR = 0.1;
@@ -286,10 +287,28 @@ export function registerConsolidationPipelineFunction(
           content: m.content,
           frequency: m.sessionIds.length || 1,
         }))
-        .filter((p) => p.frequency >= 2);
+        .filter((p) => p.frequency >= 2)
+        .sort((a, b) => b.frequency - a.frequency);
 
-      if (patterns.length >= 2) {
-        const prompt = buildProceduralExtractionPrompt(patterns);
+      const fitting: typeof patterns = [];
+      for (const pattern of patterns) {
+        const candidate = buildProceduralExtractionPrompt([...fitting, pattern]);
+        if (
+          PROCEDURAL_EXTRACTION_SYSTEM.length + candidate.length <=
+          CONSOLIDATION_PROMPT_CHARS
+        ) {
+          fitting.push(pattern);
+        }
+      }
+      if (fitting.length < patterns.length) {
+        logger.info("Procedural extraction trimmed to its prompt budget", {
+          keptPatterns: fitting.length,
+          droppedPatterns: patterns.length - fitting.length,
+        });
+      }
+
+      if (fitting.length >= 2) {
+        const prompt = buildProceduralExtractionPrompt(fitting);
 
         try {
           const response = await provider.summarize(
@@ -354,7 +373,10 @@ export function registerConsolidationPipelineFunction(
       } else {
         results.procedural = {
           skipped: true,
-          reason: "fewer than 2 recurring patterns",
+          reason:
+            patterns.length >= 2
+              ? "fewer than 2 recurring patterns fit the prompt budget"
+              : "fewer than 2 recurring patterns",
         };
       }
     }
