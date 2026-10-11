@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { assertVariedImportance, attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
 import { randomAdapter } from "../eval/runner/adapters/random.js";
-import { aggregate, compareToBaseline, scoreQuestion } from "../eval/runner/score.js";
+import { aggregate, compareToBaseline, scoreQuestion, summarize } from "../eval/runner/score.js";
 import { questionPath, type Question, type QueryResult, type Session } from "../eval/runner/types.js";
 
 function question(overrides: Partial<Question>): Question {
@@ -87,10 +87,12 @@ describe("compareToBaseline", () => {
     hit: 1,
     meanChars: null,
     latencyP50: 0,
+    latencyP95: 0,
   });
   const baseline = {
     tolerance: 0.05,
     metrics: { x: { search: { recall: 0.9, precision: 0.5, noAnswerClean: 0.5 } } },
+    latencyCeilingMs: {},
   };
 
   it("passes a metric that dropped by no more than the tolerance", () => {
@@ -108,6 +110,58 @@ describe("compareToBaseline", () => {
     const { failed, lines } = compareToBaseline({}, baseline);
     expect(failed).toBe(true);
     expect(lines.join("\n")).toMatch(/x\/search.*missing/);
+  });
+
+  describe("latency ceiling", () => {
+    const withP95 = (latencyP95: number) => ({ ...stats(1, 1, 1), latencyP95 });
+    const gated = { ...baseline, latencyCeilingMs: { x: { "prompt-submit": 500 } } };
+    const run = (p95: number) => ({
+      x: { search: stats(0.9, 0.5, 0.5), "prompt-submit": withP95(p95) },
+    });
+
+    it("fails and prints path, p95, ceiling and margin when p95 is over the ceiling", () => {
+      const { failed, lines } = compareToBaseline(run(620), gated);
+      expect(failed).toBe(true);
+      expect(lines.find((l) => l.includes("p95"))).toMatch(
+        /FAIL.*x\/prompt-submit.*p95 620ms.*ceiling 500ms.*margin -120ms/,
+      );
+    });
+
+    it("passes a p95 at or under the ceiling", () => {
+      expect(compareToBaseline(run(500), gated).failed).toBe(false);
+      const { failed, lines } = compareToBaseline(run(300), gated);
+      expect(failed).toBe(false);
+      expect(lines.find((l) => l.includes("p95"))).toMatch(/ok.*p95 300ms.*margin \+200ms/);
+    });
+
+    it("never fails a path with no ceiling on latency", () => {
+      const slowSearch = { ...run(300), search: { ...stats(0.9, 0.5, 0.5), latencyP95: 99999 } };
+      expect(compareToBaseline(slowSearch, gated).failed).toBe(false);
+    });
+
+    it("fails a gated path missing from the run", () => {
+      const { failed, lines } = compareToBaseline({ x: { search: stats(0.9, 0.5, 0.5) } }, gated);
+      expect(failed).toBe(true);
+      expect(lines.join("\n")).toMatch(/x\/prompt-submit.*missing/);
+    });
+  });
+});
+
+describe("summarize latency", () => {
+  const timed = (ms: number[]) =>
+    summarize(
+      ms.map((m, i) =>
+        scoreQuestion(question({ id: String(i), goldSessionIds: ["a"] }), ranked("a"), 5, "x", m),
+      ),
+    );
+
+  it("takes the slowest question as p95 when n is 3", () => {
+    expect(timed([30, 10, 20]).latencyP95).toBe(30);
+  });
+
+  it("takes the nearest-rank 95th percentile over a larger run", () => {
+    const ms = Array.from({ length: 100 }, (_, i) => i + 1);
+    expect(timed(ms).latencyP95).toBe(95);
   });
 });
 

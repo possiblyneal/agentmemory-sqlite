@@ -46,6 +46,7 @@ export interface PathStats {
   hit: number;
   meanChars: number | null;
   latencyP50: number;
+  latencyP95: number;
 }
 
 export type Summary = Record<string, Record<string, PathStats>>;
@@ -71,6 +72,7 @@ export function summarize(rows: ScoreRow[]): PathStats {
     hit: rows.filter((r) => r.hit).length,
     meanChars: chars.length === 0 ? null : mean(chars),
     latencyP50: latencies[Math.floor(latencies.length / 2)] ?? 0,
+    latencyP95: latencies[Math.ceil(latencies.length * 0.95) - 1] ?? 0,
   };
 }
 
@@ -105,6 +107,8 @@ export type GatedMetric = "recall" | "precision" | "noAnswerClean";
 export interface Baseline {
   tolerance: number;
   metrics: Record<string, Record<string, Partial<Record<GatedMetric, number>>>>;
+  // A maximum, not a floor: tolerance does not apply. A path absent here is not gated on latency.
+  latencyCeilingMs: Record<string, Record<string, number>>;
 }
 
 export function compareToBaseline(
@@ -130,6 +134,22 @@ export function compareToBaseline(
           `${ok ? "ok  " : "FAIL"} ${`${adapter}/${path}`.padEnd(32)} ${metric.padEnd(13)} baseline ${floor.toFixed(3)}  got ${got.toFixed(3)}  ${delta >= 0 ? "+" : ""}${delta.toFixed(3)}`,
         );
       }
+    }
+  }
+  for (const [adapter, byPath] of Object.entries(baseline.latencyCeilingMs)) {
+    for (const [path, ceiling] of Object.entries(byPath)) {
+      const actual = summary[adapter]?.[path];
+      if (!actual) {
+        failed = true;
+        lines.push(`FAIL ${adapter}/${path}: missing from this run`);
+        continue;
+      }
+      const margin = Math.round(ceiling - actual.latencyP95);
+      const ok = actual.latencyP95 <= ceiling;
+      if (!ok) failed = true;
+      lines.push(
+        `${ok ? "ok  " : "FAIL"} ${`${adapter}/${path}`.padEnd(32)} p95 ${Math.round(actual.latencyP95)}ms  ceiling ${ceiling}ms  margin ${margin >= 0 ? "+" : ""}${margin}ms`,
+      );
     }
   }
   return { failed, lines };

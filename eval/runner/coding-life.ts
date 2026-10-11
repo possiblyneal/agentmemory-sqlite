@@ -126,12 +126,12 @@ async function main(): Promise<void> {
   writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2));
   console.log("\n=== Summary ===");
   console.log(
-    `  ${"adapter".padEnd(18)} ${"path".padEnd(14)} ${"n".padStart(3)} ${"recall".padStart(7)} ${"precision".padStart(9)} ${"no-answer".padStart(9)} ${"hit".padStart(7)} ${"chars".padStart(7)} ${"p50".padStart(6)}`,
+    `  ${"adapter".padEnd(18)} ${"path".padEnd(14)} ${"n".padStart(3)} ${"recall".padStart(7)} ${"precision".padStart(9)} ${"no-answer".padStart(9)} ${"hit".padStart(7)} ${"chars".padStart(7)} ${"p50".padStart(6)} ${"p95".padStart(6)}`,
   );
   for (const [adapter, byPath] of Object.entries(summary.byPath)) {
     for (const [path, s] of Object.entries(byPath)) {
       console.log(
-        `  ${adapter.padEnd(18)} ${path.padEnd(14)} ${String(s.n).padStart(3)} ${fmt(s.recall).padStart(7)} ${fmt(s.precision).padStart(9)} ${fmt(s.noAnswerClean).padStart(9)} ${`${s.hit}/${s.n}`.padStart(7)} ${(s.meanChars === null ? "—" : String(Math.round(s.meanChars))).padStart(7)} ${`${Math.round(s.latencyP50)}ms`.padStart(6)}`,
+        `  ${adapter.padEnd(18)} ${path.padEnd(14)} ${String(s.n).padStart(3)} ${fmt(s.recall).padStart(7)} ${fmt(s.precision).padStart(9)} ${fmt(s.noAnswerClean).padStart(9)} ${`${s.hit}/${s.n}`.padStart(7)} ${(s.meanChars === null ? "—" : String(Math.round(s.meanChars))).padStart(7)} ${`${Math.round(s.latencyP50)}ms`.padStart(6)} ${`${Math.round(s.latencyP95)}ms`.padStart(6)}`,
       );
     }
   }

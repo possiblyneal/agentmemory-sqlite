@@ -111,19 +111,6 @@ repro, and upstream's fix targets the iii stream join this tree does not carry.
   or a soak test (viewer open for hours under live capture) shows none, and the triage row
   is closed either way.
 
-## Gate Injection latency in CI
-
-A prompt-submit or session-start Injection that takes longer than `INJECT_TIMEOUT_MS` (1500 ms,
-`src/hooks/_missed-injection.ts:19`) becomes a Missed Injection. `eval:gate` would not catch a
-regression that only makes Recall slower.
-
-- **What exists.** `eval:coding-life` times each question (`eval/runner/coding-life.ts:111`) and
-  reports p50 per path (`eval/runner/score.ts:73`). `eval/baselines/coding-agent-life-v2.json`
-  sets floors on quality metrics only.
-- **Done when.** The scorer reports p95 per path, and `eval:gate` fails when the prompt-submit or
-  session-start p95 exceeds a stated share of `INJECT_TIMEOUT_MS`. The threshold leaves room for
-  variance between CI runners.
-
 ## Measure whether commit, PR and issue text adds Recall value
 
 The GitHub connector (sync issues and PRs as Observations) is built only if a measurement shows
