@@ -119,3 +119,39 @@ repro, and upstream's fix targets the iii stream join this tree does not carry.
 - **Done when.** A disconnect is reproduced against the in-process stream server and fixed,
   or a soak test (viewer open for hours under live capture) shows none, and the triage row
   is closed either way.
+
+## Gate Injection latency in CI
+
+A prompt-submit or session-start Injection that takes longer than `INJECT_TIMEOUT_MS` (1500 ms,
+`src/hooks/_missed-injection.ts:19`) becomes a Missed Injection. `eval:gate` would not catch a
+regression that only makes Recall slower.
+
+- **What exists.** `eval:coding-life` times each question (`eval/runner/coding-life.ts:111`) and
+  reports p50 per path (`eval/runner/score.ts:73`). `eval/baselines/coding-agent-life-v2.json`
+  sets floors on quality metrics only.
+- **Done when.** The scorer reports p95 per path, and `eval:gate` fails when the prompt-submit or
+  session-start p95 exceeds a stated share of `INJECT_TIMEOUT_MS`. The threshold leaves room for
+  variance between CI runners.
+
+## Measure whether commit, PR and issue text adds Recall value
+
+The GitHub connector (sync issues and PRs as Observations) is built only if a measurement shows
+the text earns its storage. Commit text goes into the same measurement, because today it does not
+reach Recall either.
+
+- **What exists.** `POST /agentmemory/commits` stores a `CommitLink` (sha, message, files,
+  `sessionIds`) in `mem:commits` (`src/types.ts:21`, `src/triggers/api.ts:925-963`). It is
+  looked up by sha and never indexed for search, so Injection never returns commit text.
+  `integrations/filesystem-watcher` shows the connector shape: it POSTs to
+  `/agentmemory/observe`. `eval:replay` scores Right content, Right moment and Least record
+  against an answer key derived from the Operator's transcripts (`eval/README.md`, Replay).
+- **Experiment.** Extend `eval:replay` so it can also ingest each repository's commits (from
+  `git log`) and PR and issue text (from `gh`) as Observations. Ingest each item when its
+  timestamp falls before Session k, so no probe sees text written after it. Run all 8 arms
+  (none, each source alone, each pair, all three) with LLM and embedding settings held fixed,
+  on repositories with real PR and issue history.
+- **Done when.** A dated `docs/benchmarks/` scorecard compares the 8 arms on key items
+  delivered, used share of Injected items, Injection chars per used item and store bytes per
+  used item. It names the arm to build: a connector for the sources that pay for themselves,
+  or none. If commit text pays, it should be indexed through the existing commit-link path
+  rather than through a new connector.
