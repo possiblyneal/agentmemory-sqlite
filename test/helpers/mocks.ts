@@ -2,6 +2,29 @@ import { vi } from "vitest";
 
 type Handler = (data: unknown) => Promise<unknown>;
 
+type Store = Map<string, Map<string, unknown>>;
+
+// The StateKV lookups that find rows by key or field instead of listing a scope.
+export function keyedLookups(store: Store) {
+  return {
+    scopesWithKey: async (prefix: string, key: string): Promise<string[]> =>
+      [...store].filter(([scope, rows]) => scope.startsWith(prefix) && rows.has(key)).map(([scope]) => scope),
+    listNewestMatching: async <T>(
+      scope: string,
+      opts: { equals: Record<string, string>; excludeKey?: string; newestBy: string; limit: number },
+    ): Promise<T[]> =>
+      [...(store.get(scope) ?? [])]
+        .filter(
+          ([key, row]) =>
+            key !== opts.excludeKey &&
+            Object.entries(opts.equals).every(([f, v]) => (row as Record<string, unknown>)[f] === v),
+        )
+        .map(([, row]) => row as Record<string, unknown>)
+        .sort((a, b) => (a[opts.newestBy]! < b[opts.newestBy]! ? 1 : a[opts.newestBy]! > b[opts.newestBy]! ? -1 : 0))
+        .slice(0, opts.limit) as T[],
+  };
+}
+
 export function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
@@ -54,6 +77,7 @@ export function mockKV() {
       }
       return [...found];
     },
+    ...keyedLookups(store),
     listScopes: async (prefix: string): Promise<string[]> =>
       [...store.keys()].filter((scope) => scope.startsWith(prefix)),
   };

@@ -231,19 +231,15 @@ export function registerContextFunction(
         });
       }
 
-      const allSessions = await kv.list<Session>(KV.sessions);
-      const sessions = allSessions
-        .filter(
-          (s) =>
-            s.project === data.project &&
-            s.id !== data.sessionId &&
-            (filterAgentId === undefined || s.agentId === filterAgentId),
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
-        )
-        .slice(0, 10);
+      const sessions = await kv.listNewestMatching<Session>(KV.sessions, {
+        equals: {
+          project: data.project,
+          ...(filterAgentId === undefined ? {} : { agentId: filterAgentId }),
+        },
+        excludeKey: data.sessionId,
+        newestBy: "startedAt",
+        limit: 10,
+      });
 
       const summariesPerSession = await Promise.all(
         sessions.map((s) =>
