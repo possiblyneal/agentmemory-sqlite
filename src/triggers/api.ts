@@ -2806,10 +2806,15 @@ export function registerApiTriggers(
     async (req: ApiRequest): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
+      const limit = parseOptionalPositiveInt(req.query_params?.["limit"]);
+      if (limit === null) {
+        return { status_code: 400, body: { error: "invalid numeric parameter: limit" } };
+      }
       const result = await sdk.trigger({ function_id: "mem::action-list", payload: {
         status: req.query_params?.["status"],
         project: req.query_params?.["project"],
         parentId: req.query_params?.["parentId"],
+        limit,
       } });
       return { status_code: 200, body: result };
     },

@@ -1163,7 +1163,7 @@
       audit: { loaded: false, entries: [], opFilter: '' },
       activity: { loaded: false, observations: [], sessions: [], typeFilter: '' },
       lessons: { loaded: false, items: [], search: '', selectedId: null },
-      actions: { loaded: false, items: [], frontier: [], statusFilter: '', search: '' },
+      actions: { loaded: false, items: [], total: 0, frontier: [], statusFilter: '', search: '' },
       crystals: { loaded: false, items: [], search: '', lessonMap: {} },
       profile: { loaded: false, projects: [], selectedProject: '', data: null },
       replay: { loaded: false, sessions: [], selectedId: '', timeline: null, cursor: 0, playing: false, speed: 1, timer: null, startAt: 0, offsetAt: 0 },
@@ -3508,8 +3508,9 @@
     async function loadActions() {
       var el = document.getElementById('view-actions');
       if (!state.actions.loaded) el.innerHTML = '<div class="loading">Loading actions...</div>';
-      var results = await Promise.all([apiGet('actions'), apiGet('frontier')]);
+      var results = await Promise.all([apiGet('actions?limit=200'), apiGet('frontier')]);
       state.actions.items = (results[0] && results[0].actions) || [];
+      state.actions.total = (results[0] && results[0].total) || state.actions.items.length;
       state.actions.frontier = (results[1] && (results[1].frontier || results[1].actions)) || [];
       state.actions.loaded = true;
       renderActions();
@@ -3546,6 +3547,9 @@
       html += '</select>';
       html += '<span style="font-size:12px;color:var(--ink-faint);align-self:center;">' + items.length + ' actions</span>';
       html += '</div>';
+      if (state.actions.total > state.actions.items.length) {
+        html += '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:8px;">Showing the ' + state.actions.items.length + ' most recently updated of ' + state.actions.total + ' actions.</div>';
+      }
 
       if (items.length === 0) {
         html += '<div class="empty-state">' +

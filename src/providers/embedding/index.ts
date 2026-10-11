@@ -35,7 +35,7 @@ export function createEmbeddingProvider(): EmbeddingProvider | null {
     case "gemini":
       return withEmbeddingGuards(new GeminiEmbeddingProvider(getEnvVar("GEMINI_API_KEY")!));
     case "openai":
-      return withEmbeddingGuards(new OpenAIEmbeddingProvider(getEnvVar("OPENAI_API_KEY")!));
+      return withEmbeddingGuards(new OpenAIEmbeddingProvider());
     case "voyage":
       return withEmbeddingGuards(new VoyageEmbeddingProvider(getEnvVar("VOYAGE_API_KEY")!));
     case "cohere":
