@@ -43,6 +43,9 @@ const TOKENIZE_TIMEOUT_MS = 10_000;
  *                              thinking models). Set to "none" to ensure
  *                              message.content is populated instead of only
  *                              message.reasoning.
+ *   OPENAI_EXTRA_BODY        — JSON object merged into every request body, e.g.
+ *                              '{"chat_template_kwargs":{"enable_thinking":false}}'.
+ *                              Invalid JSON fails at construction.
  */
 export class OpenAIProvider implements MemoryProvider {
   name = "openai";
@@ -55,6 +58,7 @@ export class OpenAIProvider implements MemoryProvider {
   private isAzure: boolean;
   private azureApiVersion: string;
   private tokenizeUnavailable = false;
+  private extraBody: Record<string, unknown>;
   // api.openai.com rejects max_tokens on reasoning models and accepts
   // max_completion_tokens on every model; compatible servers may only know
   // max_tokens (#1219).
@@ -67,6 +71,7 @@ export class OpenAIProvider implements MemoryProvider {
     this.baseUrl = normalizeBaseUrl(baseURL || getEnvVar("OPENAI_BASE_URL"));
     this.reasoningEffort = getEnvVar("OPENAI_REASONING_EFFORT") || undefined;
     this.timeoutMs = resolveTimeout();
+    this.extraBody = parseExtraBody(getEnvVar("OPENAI_EXTRA_BODY"));
     this.azureApiVersion =
       getEnvVar("OPENAI_API_VERSION") || DEFAULT_AZURE_API_VERSION;
     this.isAzure = detectAzure(this.baseUrl);
@@ -117,6 +122,7 @@ export class OpenAIProvider implements MemoryProvider {
   private async call(systemPrompt: string, userPrompt: string): Promise<string> {
     const url = buildChatUrl(this.baseUrl, this.isAzure, this.azureApiVersion);
     const body: Record<string, unknown> = {
+      ...this.extraBody,
       model: this.model,
       [this.outputTokenParam]: this.maxTokens,
       // OpenAI API spec defines `stream` as defaulting to false, so omitting
@@ -178,6 +184,11 @@ export class OpenAIProvider implements MemoryProvider {
     if (content) {
       return content;
     }
+    if (data.choices?.[0]?.finish_reason === "length") {
+      throw new Error(
+        `OpenAI finish_reason length: reply was cut off at max_tokens (${this.maxTokens}) with no content — raise MAX_TOKENS or turn thinking off with OPENAI_EXTRA_BODY / OPENAI_REASONING_EFFORT`,
+      );
+    }
     // Fallback: some thinking models return reasoning but no content.
     // DeepSeek V4 / Qwen3 / GLM / Kimi return `reasoning_content`;
     // older OpenAI o-series + some compatibles return `reasoning`. #627
@@ -209,6 +220,20 @@ function resolveTimeout(): number {
   if (globalMs !== undefined) return globalMs;
 
   return DEFAULT_TIMEOUT_MS;
+}
+
+function parseExtraBody(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`OPENAI_EXTRA_BODY is not valid JSON: ${(err as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("OPENAI_EXTRA_BODY must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function parsePositiveInt(raw: string | null | undefined): number | undefined {
