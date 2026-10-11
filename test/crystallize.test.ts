@@ -4,6 +4,8 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { logger } from "../src/logger.js";
+import { CONSOLIDATION_PROMPT_CHARS } from "../src/prompts/budget.js";
 import { registerCrystallizeFunction } from "../src/functions/crystallize.js";
 import type { Action, Crystal, MemoryProvider } from "../src/types.js";
 
@@ -537,6 +539,100 @@ describe("Crystallize Functions", () => {
       expect(result.success).toBe(true);
       expect(result.groupCount).toBe(0);
       expect(result.crystalIds).toEqual([]);
+    });
+  });
+
+  describe("prompt budget", () => {
+    const at = (day: number) =>
+      new Date(Date.UTC(2026, 0, day)).toISOString();
+    const sent = () =>
+      (provider.summarize as ReturnType<typeof vi.fn>).mock.calls.map(
+        ([system, prompt]: [string, string]) => system + prompt,
+      );
+
+    async function seed(id: string, chars: number, day: number) {
+      await kv.set(
+        "mem:actions",
+        id,
+        makeAction({
+          id,
+          description: "x".repeat(chars),
+          createdAt: at(day),
+          project: "proj",
+        }),
+      );
+    }
+
+    it("fills oldest first, skips what does not fit and defers it", async () => {
+      await seed("old", 10_000, 1);
+      await seed("huge", 20_000, 2);
+      await seed("small", 5_000, 3);
+      await kv.set("mem:action-edges", "e1", {
+        id: "e1", type: "requires", sourceActionId: "old", targetActionId: "small",
+      });
+      await kv.set("mem:action-edges", "e2", {
+        id: "e2", type: "requires", sourceActionId: "old", targetActionId: "huge",
+      });
+
+      const result = (await sdk.trigger("mem::crystallize", {
+        actionIds: ["small", "huge", "old"],
+      })) as { success: boolean; crystal: Crystal; deferredActionIds: string[] };
+
+      expect(result.success).toBe(true);
+      expect(result.crystal.sourceActionIds).toEqual(["old", "small"]);
+      expect(result.deferredActionIds).toEqual(["huge"]);
+      expect(sent()).toHaveLength(1);
+      expect(sent()[0].length).toBeLessThanOrEqual(CONSOLIDATION_PROMPT_CHARS);
+      expect(sent()[0]).toContain("old --requires--> small");
+      expect(sent()[0]).not.toContain("huge");
+      const stored = async (id: string) =>
+        (await kv.get<Action>("mem:actions", id))!.crystallizedInto;
+      expect(await stored("old")).toBe(result.crystal.id);
+      expect(await stored("small")).toBe(result.crystal.id);
+      expect(await stored("huge")).toBeUndefined();
+      expect(logger.info).toHaveBeenCalledWith(
+        "Crystallize chain trimmed to its prompt budget",
+        expect.objectContaining({ keptActions: 2, droppedActions: 1 }),
+      );
+    });
+
+    it("makes no LLM call and writes no crystal when nothing fits", async () => {
+      await seed("giant", 30_000, 1);
+
+      const result = (await sdk.trigger("mem::crystallize", {
+        actionIds: ["giant"],
+      })) as { success: boolean; error: string; deferredActionIds: string[] };
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/budget/);
+      expect(result.deferredActionIds).toEqual(["giant"]);
+      expect(provider.summarize).not.toHaveBeenCalled();
+      expect(await kv.list("mem:crystals")).toEqual([]);
+    });
+
+    it("auto-crystallize picks up deferred actions on its next pass", async () => {
+      await seed("a", 10_000, 1);
+      await seed("b", 10_000, 2);
+      await seed("c", 10_000, 3);
+
+      const first = (await sdk.trigger("mem::auto-crystallize", {})) as {
+        crystalIds: string[];
+      };
+      expect(first.crystalIds).toHaveLength(1);
+      expect(
+        (await kv.get<Action>("mem:actions", "c"))!.crystallizedInto,
+      ).toBeUndefined();
+
+      const second = (await sdk.trigger("mem::auto-crystallize", {})) as {
+        crystalIds: string[];
+      };
+      expect(second.crystalIds).toHaveLength(1);
+      expect(
+        (await kv.get<Action>("mem:actions", "c"))!.crystallizedInto,
+      ).toBe(second.crystalIds[0]);
+      for (const prompt of sent()) {
+        expect(prompt.length).toBeLessThanOrEqual(CONSOLIDATION_PROMPT_CHARS);
+      }
     });
   });
 });

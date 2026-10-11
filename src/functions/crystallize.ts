@@ -2,6 +2,8 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Action, ActionEdge, Crystal, MemoryProvider } from "../types.js";
+import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
+import { logger } from "../logger.js";
 import { stripPrivateData } from "./privacy.js";
 
 interface CrystalDigest {
@@ -47,12 +49,23 @@ export function registerCrystallizeFunction(
       }
 
       const allEdges = await kv.list<ActionEdge>(KV.actionEdges);
-      const idSet = new Set(data.actionIds);
-      const relevantEdges = allEdges.filter(
-        (e) => idSet.has(e.sourceActionId) || idSet.has(e.targetActionId),
-      );
+      const { included, deferred, prompt } = fitChainToBudget(actions, allEdges);
+      const deferredActionIds = deferred.map((a) => a.id);
 
-      const prompt = buildChainText(actions, relevantEdges);
+      if (included.length === 0) {
+        return {
+          success: false,
+          error: "no action fits the prompt budget",
+          deferredActionIds,
+        };
+      }
+      if (deferred.length > 0) {
+        logger.info("Crystallize chain trimmed to its prompt budget", {
+          project: data.project,
+          keptActions: included.length,
+          droppedActions: deferred.length,
+        });
+      }
 
       try {
         const response = await provider.summarize(CRYSTALLIZE_SYSTEM, prompt);
@@ -70,7 +83,7 @@ export function registerCrystallizeFunction(
           keyOutcomes: digest.keyOutcomes,
           filesAffected: digest.filesAffected,
           lessons: digest.lessons,
-          sourceActionIds: data.actionIds,
+          sourceActionIds: included.map((a) => a.id),
           sessionId: data.sessionId,
           project: data.project,
           createdAt: new Date().toISOString(),
@@ -97,12 +110,12 @@ export function registerCrystallizeFunction(
           ),
         );
 
-        for (const action of actions) {
+        for (const action of included) {
           const updated = { ...action, crystallizedInto: crystal.id };
           await kv.set(KV.actions, action.id, updated);
         }
 
-        return { success: true, crystal };
+        return { success: true, crystal, deferredActionIds };
       } catch (err) {
         return {
           success: false,
@@ -233,6 +246,37 @@ export function registerCrystallizeFunction(
       };
     },
   );
+}
+
+// Oldest Action first; one too large for what is left is deferred while later,
+// smaller ones keep filling. Each candidate is rendered whole, system prompt
+// and edges included, so the provider never receives more than the budget.
+function fitChainToBudget(
+  actions: Action[],
+  edges: ActionEdge[],
+): { included: Action[]; deferred: Action[]; prompt: string } {
+  const oldestFirst = [...actions].sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+  let included: Action[] = [];
+  let prompt = "";
+  const deferred: Action[] = [];
+  for (const action of oldestFirst) {
+    const candidate = [...included, action];
+    const ids = new Set(candidate.map((a) => a.id));
+    const candidatePrompt = buildChainText(
+      candidate,
+      edges.filter((e) => ids.has(e.sourceActionId) && ids.has(e.targetActionId)),
+    );
+    if (CRYSTALLIZE_SYSTEM.length + candidatePrompt.length > CONSOLIDATION_PROMPT_CHARS) {
+      deferred.push(action);
+      continue;
+    }
+    included = candidate;
+    prompt = candidatePrompt;
+  }
+  return { included, deferred, prompt };
 }
 
 function buildChainText(actions: Action[], edges: ActionEdge[]): string {
