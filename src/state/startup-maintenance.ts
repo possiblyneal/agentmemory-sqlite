@@ -153,8 +153,9 @@ async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
 // confidence (Semantic Facts start at strength = confidence), counting periods
 // as applyDecay does, and stamp lastDecayedAt so the corrected value is not
 // decayed again for the same periods. A fact re-seen inside its current period
-// was floored all the same, so it returns to its confidence. Procedural memories record no initial strength, so they are left
-// alone. Runs once, whatever the maintenance version.
+// was floored all the same, so it returns to its confidence. Procedural
+// memories record no initial strength, so they are left alone. Runs once,
+// whatever the maintenance version.
 async function repairDecay(state: SqliteState): Promise<number> {
   if (state.get(KV.config, DECAY_REPAIR_MARKER) !== null) return 0;
 
