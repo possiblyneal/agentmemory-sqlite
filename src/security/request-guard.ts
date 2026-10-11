@@ -80,11 +80,20 @@ export function guardRequest(input: GuardInput): GuardRejection | null {
   return null;
 }
 
+/** A WebSocket upgrade is a GET, so `guardRequest` lets it through; a browser page's Origin is checked here. */
+export function guardUpgrade(headers: Record<string, HeaderValue>): GuardRejection | null {
+  const origin = headers.origin;
+  if (origin !== undefined && !(typeof origin === "string" && originAllowed(origin))) {
+    return { status: 403, error: "forbidden origin" };
+  }
+  return null;
+}
+
 const MAX_LOGGED_SOURCES = 256;
 const loggedSources = new Set<string>();
 
 export function logRejection(
-  surface: "rest" | "viewer",
+  surface: "rest" | "viewer" | "stream",
   req: { method?: string; socket: { remoteAddress?: string } },
   rejection: GuardRejection,
 ): void {

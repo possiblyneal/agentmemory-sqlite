@@ -32,7 +32,9 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { SqliteState, stateFunctions, type StateEvent } from "./state.js";
 import { logger } from "../../logger.js";
-import { guardRequest, logRejection } from "../../security/request-guard.js";
+import { guardRequest, guardUpgrade, logRejection } from "../../security/request-guard.js";
+import { timingSafeCompare } from "../../auth.js";
+import type { Duplex } from "node:stream";
 
 type Handler = (payload: any) => Promise<unknown>;
 
@@ -83,6 +85,8 @@ export type InprocSdkOptions = {
   streamsPort: number;
   sqlitePath: string;
   host?: string;
+  /** When set, a stream upgrade must present `Authorization: Bearer <secret>`. */
+  secret?: string;
   maxBodyBytes?: number;
   maxSocketBufferBytes?: number;
 };
@@ -558,17 +562,39 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
     res.end();
   });
 
+  function refuseUpgrade(socket: Duplex, status: number, reason: string): void {
+    socket.end(
+      `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+    );
+  }
+
   streamServer.on("upgrade", (req, socket, head) => {
     const url = parseRequestUrl(req);
     if (!url) {
       socket.destroy();
       return;
     }
+    const rejection = guardUpgrade(req.headers);
+    if (rejection) {
+      logRejection("stream", req, rejection);
+      refuseUpgrade(socket, rejection.status, "Forbidden");
+      return;
+    }
+    if (
+      opts.secret &&
+      !(
+        typeof req.headers.authorization === "string" &&
+        timingSafeCompare(req.headers.authorization, `Bearer ${opts.secret}`)
+      )
+    ) {
+      refuseUpgrade(socket, 401, "Unauthorized");
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       const subs: Subscription[] = [];
 
       // Direct form: /stream/<streamName>/<groupId> subscribes on connect,
-      // which is what the viewer tries first (WS_DIRECT_URL).
+      // which is what the viewer's proxy connects with.
       const parts = url.pathname.split("/").filter(Boolean);
       if (parts.length === 3 && parts[0] === "stream") {
         const sub = { ws, streamName: parts[1], groupId: parts[2] };

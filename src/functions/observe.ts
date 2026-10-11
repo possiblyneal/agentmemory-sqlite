@@ -577,16 +577,6 @@ export function registerObserveFunction(
         }
 
         await sdk.trigger({
-          function_id: "stream::set",
-          payload: {
-          stream_name: STREAM.name,
-          group_id: STREAM.group(payload.sessionId),
-          item_id: obsId,
-          data: { type: "raw", observation: raw },
-          },
-        });
-
-        await sdk.trigger({
           function_id: "stream::send",
           payload: {
             stream_name: STREAM.name,
@@ -684,15 +674,6 @@ export function registerObserveFunction(
           });
         } else {
           const synthetic = await storeSyntheticCompression(kv, raw);
-          await sdk.trigger({
-            function_id: "stream::set",
-            payload: {
-              stream_name: STREAM.name,
-              group_id: STREAM.group(payload.sessionId),
-              item_id: obsId,
-              data: { type: "compressed", observation: synthetic },
-            },
-          });
           await sdk.trigger({
             function_id: "stream::set",
             payload: {
