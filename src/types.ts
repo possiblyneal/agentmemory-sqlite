@@ -618,6 +618,7 @@ export interface SemanticMemory {
   sourceMemoryIds: string[];
   accessCount: number;
   lastAccessedAt: string;
+  lastDecayedAt?: string;
   strength: number;
   createdAt: string;
   updatedAt: string;
@@ -635,6 +636,7 @@ export interface ProceduralMemory {
   tags?: string[];
   concepts?: string[];
   strength: number;
+  lastDecayedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
