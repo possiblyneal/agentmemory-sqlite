@@ -62,7 +62,7 @@ describe("/health llm", () => {
       {
         provider: "openai",
         model: "gpt-test",
-        endpointHost: "127.0.0.1",
+        endpointHost: new URL(baseUrl).host,
         promptTokens: 20,
         completionTokens: 6,
         totalTokens: 26,

@@ -41,7 +41,7 @@ describe("AnthropicProvider usage", () => {
       {
         provider: "anthropic",
         model: "claude-test",
-        endpointHost: "127.0.0.1",
+        endpointHost: new URL(baseUrl).host,
         promptTokens: 16,
         completionTokens: 8,
         totalTokens: 24,

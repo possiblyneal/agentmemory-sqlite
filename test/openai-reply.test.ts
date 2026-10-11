@@ -56,7 +56,7 @@ describe("OpenAIProvider usage", () => {
       {
         provider: "openai",
         model: "m",
-        endpointHost: "127.0.0.1",
+        endpointHost: new URL(baseUrl).host,
         promptTokens: 15,
         completionTokens: 5,
         totalTokens: 20,

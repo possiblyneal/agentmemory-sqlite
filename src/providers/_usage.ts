@@ -2,7 +2,7 @@ import type { ProviderUsage } from "../types.js";
 
 export function hostOf(url: string): string {
   try {
-    return new URL(url).hostname;
+    return new URL(url).host;
   } catch {
     return "unknown";
   }
