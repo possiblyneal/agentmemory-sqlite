@@ -32,6 +32,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { SqliteState, stateFunctions, type StateEvent } from "./state.js";
 import { logger } from "../../logger.js";
+import { guardRequest, logRejection } from "../../security/request-guard.js";
 
 type Handler = (payload: any) => Promise<unknown>;
 
@@ -419,6 +420,12 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
     const url = parseRequestUrl(req);
     if (!url) {
       respond(res, 400, { error: "invalid request target" });
+      return;
+    }
+    const rejection = guardRequest({ method, headers: req.headers, checkHost: { bindHost: host } });
+    if (rejection) {
+      logRejection("rest", req, rejection);
+      respond(res, rejection.status, { error: rejection.error });
       return;
     }
     if (url.pathname === READYZ) {
