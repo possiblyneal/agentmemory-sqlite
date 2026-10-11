@@ -153,6 +153,38 @@ describe("End-to-End Multimodal Flow", () => {
     expect(stored!.imageDescription).toBe("TEST_VISION_RESULT: I see a red dot");
     expect(stored!.imageRef).toBe(savedImagePath);
   });
+
+  it("scrubs secrets from the image description before it is prompted or stored", async () => {
+    const secret = "ghp_" + "A".repeat(36);
+    let seenPrompt = "";
+    const provider: MemoryProvider = {
+      name: "mock-vision",
+      compress: async (_s, userPrompt) => {
+        seenPrompt = userPrompt;
+        return VALID_COMPRESS_XML;
+      },
+      summarize: async () => "",
+      describeImage: async () => `terminal shows ${secret}`,
+    };
+    let cb: any = null;
+    registerCompressFunction(
+      { ...mockSdk, registerFunction: vi.fn((id, f) => { if (id === "mem::compress") cb = f; }) } as any,
+      kv,
+      provider,
+    );
+    const raw: RawObservation = {
+      id: "obs_scrub",
+      sessionId: "test-session",
+      timestamp: new Date().toISOString(),
+      hookType: "post_tool_use",
+      modality: "image",
+      imageData: savedImagePath,
+    };
+    const result = await cb({ observationId: raw.id, sessionId: raw.sessionId, raw });
+    const compressed = result.compressed as CompressedObservation;
+    expect(compressed.imageDescription).toBe("terminal shows [REDACTED_SECRET]");
+    expect(seenPrompt).not.toContain(secret);
+  });
 });
 
 describe("Disk Size Manager", () => {

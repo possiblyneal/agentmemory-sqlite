@@ -23,6 +23,7 @@ import { scoreCompression } from "../eval/quality.js";
 import { compressWithRetry } from "../eval/self-correct.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { logger } from "../logger.js";
+import { stripPrivateData } from "./privacy.js";
 
 const VALID_TYPES = new Set<string>([
   "file_read",
@@ -166,7 +167,9 @@ export function registerCompressFunction(
             else if (data.raw.imageData.endsWith(".gif")) mimeType = "image/gif";
           }
 
-          imageDescription = await provider.describeImage(base64Data, mimeType, VISION_DESCRIPTION_PROMPT);
+          imageDescription = stripPrivateData(
+            await provider.describeImage(base64Data, mimeType, VISION_DESCRIPTION_PROMPT),
+          );
           logger.info("Image described by vision model", { obsId: data.observationId });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

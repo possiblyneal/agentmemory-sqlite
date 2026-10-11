@@ -1,6 +1,35 @@
 import { describe, it, expect } from "vitest";
 import { stripPrivateData } from "../src/functions/privacy.js";
 
+describe("stripPrivateData scrubber boundaries", () => {
+  it.each([
+    "possiblyneal/disk-full-retry-queue-impl",
+    "task-runner-that-does-something-long",
+  ])("leaves the compound word %s intact", (word) => {
+    expect(stripPrivateData(`branch ${word} ok`)).toBe(`branch ${word} ok`);
+  });
+
+  it("still redacts a real sk- key", () => {
+    expect(stripPrivateData("key sk-abcdefghijklmnopqrstuv end")).toBe(
+      "key [REDACTED_SECRET] end",
+    );
+  });
+
+  it("redacts a PEM private-key block whole", () => {
+    const pem =
+      "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\nabc123\n-----END RSA PRIVATE KEY-----";
+    expect(stripPrivateData(`before\n${pem}\nafter`)).toBe(
+      "before\n[REDACTED_SECRET]\nafter",
+    );
+  });
+
+  it("redacts only the password in URL credentials", () => {
+    expect(stripPrivateData("curl https://user:hunter2@host/x")).toBe(
+      "curl https://user:[REDACTED_SECRET]@host/x",
+    );
+  });
+});
+
 describe("stripPrivateData", () => {
   it("strips private tags", () => {
     expect(stripPrivateData("hello <private>secret</private> world")).toBe(
