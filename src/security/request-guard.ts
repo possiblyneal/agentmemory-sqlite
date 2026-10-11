@@ -1,3 +1,4 @@
+import type { Duplex } from "node:stream";
 import { logger } from "../logger.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -106,4 +107,8 @@ export function logRejection(
     method: req.method,
     reason: rejection.error,
   });
+}
+
+export function refuseUpgrade(socket: Duplex, status: number, reason: string): void {
+  socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }

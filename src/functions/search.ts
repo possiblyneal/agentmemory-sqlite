@@ -2,7 +2,8 @@ import type { ISdk } from '../engine/types.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
-import { SearchIndex, type IndexLayer } from '../state/search-index.js'
+import { SearchIndex, isSearchLayer } from '../state/search-index.js'
+import { CHARS_PER_TOKEN } from '../utils/tokens.js'
 import { VectorIndex } from '../state/vector-index.js'
 import type { EmbeddingProvider } from '../types.js'
 import {
@@ -623,7 +624,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         );
       }
       const targetLayer = data.targetLayer ?? 'all'
-      if (!['memory', 'observation', 'all'].includes(targetLayer)) {
+      if (!isSearchLayer(targetLayer)) {
         throw new Error("mem::search: targetLayer must be one of 'memory', 'observation', or 'all'")
       }
       const format = typeof data.format === 'string' ? data.format : 'full'
@@ -679,7 +680,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(effectiveLimit * 10, 100)
         : Math.max(effectiveLimit * 3, 30)
-      const results = idx.search(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer as IndexLayer)
+      const results = idx.search(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
 
       const loadSession = createSessionLoader(kv)
       const inProject = projectFilter
@@ -761,7 +762,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       }
 
       const estimateTokens = (value: unknown): number =>
-        Math.max(1, Math.ceil(JSON.stringify(value).length / 3))
+        Math.max(1, Math.ceil(JSON.stringify(value).length / CHARS_PER_TOKEN))
 
       // The top match is shortened to fit rather than dropped, so a long but
       // relevant Memory still reaches the Agent under a small budget.
@@ -810,7 +811,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         while (narrative.length > 0) {
           const candidate = write(item, narrative)
           if (estimateTokens(candidate) <= room) return candidate
-          const overflowChars = (estimateTokens(candidate) - room) * 3
+          const overflowChars = (estimateTokens(candidate) - room) * CHARS_PER_TOKEN
           narrative = narrative.slice(0, Math.max(0, narrative.length - Math.max(overflowChars, 1)))
         }
         return null

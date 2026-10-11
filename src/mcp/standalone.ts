@@ -6,6 +6,7 @@ import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath } from "../config.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
+import { isSearchLayer, type SearchLayer } from "../state/search-index.js";
 import { scrubFields } from "../functions/privacy.js";
 import { resolveProject } from "../hooks/_project.js";
 import { withDefaultProject } from "./default-project.js";
@@ -139,6 +140,7 @@ interface Validated {
   offset?: number;
   format?: string;
   tokenBudget?: number;
+  targetLayer?: SearchLayer;
   memoryIds?: string[];
   expandIds?: string[];
   reason?: string;
@@ -206,6 +208,13 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       if (typeof args["project"] === "string" && args["project"].trim()) {
         v.project = args["project"].trim();
       }
+      if (toolName === "memory_recall") {
+        const layer = args["targetLayer"] ?? "memory";
+        if (!isSearchLayer(layer)) {
+          throw new Error("targetLayer must be one of: memory, observation, all");
+        }
+        v.targetLayer = layer;
+      }
       return v;
     }
     case "memory_sessions": {
@@ -257,6 +266,7 @@ async function handleProxy(
         query: v.query,
         limit: v.limit,
         format: v.format ?? "full",
+        targetLayer: v.targetLayer,
       };
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
       if (v.project != null) body["project"] = v.project;

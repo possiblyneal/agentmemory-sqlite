@@ -3,6 +3,8 @@ import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
 
+const MAX_REPLY_CHARS = 4000;
+
 hydrateHookEnv();
 
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
@@ -34,7 +36,7 @@ async function main() {
 
   const reply =
     typeof data.last_assistant_message === "string"
-      ? data.last_assistant_message.slice(0, 4000)
+      ? data.last_assistant_message.slice(0, MAX_REPLY_CHARS)
       : "";
   if (reply) {
     const cwd = hookCwd(data) || process.cwd();

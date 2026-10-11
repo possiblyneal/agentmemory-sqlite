@@ -20,6 +20,13 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+export type NewestMatchingOpts = {
+  equals: Record<string, string>;
+  excludeKey?: string;
+  newestBy: string;
+  limit: number;
+};
+
 export type StateEventType =
   | "state:created"
   | "state:updated"
@@ -365,7 +372,7 @@ export class SqliteState {
   // by the string field `newestBy` first, ties in insertion order.
   listNewestMatching(
     scope: string,
-    opts: { equals: Record<string, string>; excludeKey?: string; newestBy: string; limit: number },
+    opts: NewestMatchingOpts,
   ): unknown[] {
     const field = (name: string): string => {
       if (!/^\w+$/.test(name)) throw new Error(`state::list-newest-matching: bad field ${JSON.stringify(name)}`);

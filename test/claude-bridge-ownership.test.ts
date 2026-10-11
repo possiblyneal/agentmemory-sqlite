@@ -123,4 +123,13 @@ describe("Claude bridge sync ownership and project scope", () => {
     expect(written).not.toContain("Theirs");
     expect(written).not.toContain("Unscoped");
   });
+
+  it("writes global Memories alongside the project's own", async () => {
+    await kv.set("mem:memories", "m1", memory("m1", "Ours", "proj-a"));
+    await kv.set("mem:memories", "g1", { ...memory("g1", "Everywhere"), global: true });
+
+    await sdk.trigger("mem::claude-bridge-sync", {});
+
+    expect(readFileSync(target, "utf-8")).toContain("Everywhere");
+  });
 });

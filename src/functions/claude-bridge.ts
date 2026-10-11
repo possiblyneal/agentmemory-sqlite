@@ -136,7 +136,7 @@ export function registerClaudeBridgeFunction(
         const project = resolveProject(config.projectPath);
         const memories = await kv.list<Memory>(KV.memories);
         const latestMemories = memories.filter(
-          (m) => m.isLatest && m.project === project,
+          (m) => m.isLatest && (m.project === project || m.global === true),
         );
 
         let projectSummary = "";

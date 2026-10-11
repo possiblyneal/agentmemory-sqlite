@@ -150,9 +150,10 @@ async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
 
 // The decay tier once lowered strength on every run instead of once per idle
 // period, flooring facts idle for far fewer periods. Recompute each from its
-// confidence (Semantic Facts start at strength = confidence) and stamp
-// lastDecayedAt so the corrected value is not decayed again for the same
-// periods. Procedural memories record no initial strength, so they are left
+// confidence (Semantic Facts start at strength = confidence), counting periods
+// as applyDecay does, and stamp lastDecayedAt so the corrected value is not
+// decayed again for the same periods. A fact re-seen inside its current period
+// was floored all the same, so it returns to its confidence. Procedural memories record no initial strength, so they are left
 // alone. Runs once, whatever the maintenance version.
 async function repairDecay(state: SqliteState): Promise<number> {
   if (state.get(KV.config, DECAY_REPAIR_MARKER) !== null) return 0;
@@ -178,15 +179,19 @@ async function repairDecay(state: SqliteState): Promise<number> {
           } catch {
             continue;
           }
-          const reference = new Date(fact.lastAccessedAt || fact.createdAt).getTime();
-          const periods = Math.floor((now - reference) / periodMs);
-          if (!(periods >= 1) || typeof fact.confidence !== "number") continue;
+          const reference = new Date(fact.lastAccessedAt || fact.updatedAt).getTime();
+          const periods = Math.max(0, Math.floor((now - reference) / periodMs));
+          if (!Number.isFinite(periods) || typeof fact.confidence !== "number") continue;
+          const strength = decayedStrength(fact.confidence, periods);
+          if (periods === 0 && strength === fact.strength) continue;
           entries.push({
             key: fact.id,
             value: {
               ...fact,
-              strength: decayedStrength(fact.confidence, periods),
-              lastDecayedAt: new Date(reference + periods * periodMs).toISOString(),
+              strength,
+              ...(periods > 0 && {
+                lastDecayedAt: new Date(reference + periods * periodMs).toISOString(),
+              }),
             },
           });
         }

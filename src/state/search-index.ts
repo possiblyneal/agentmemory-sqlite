@@ -13,6 +13,13 @@ interface IndexEntry {
 
 export type IndexLayer = "memory" | "observation";
 
+export const SEARCH_LAYERS = ["memory", "observation", "all"] as const;
+export type SearchLayer = (typeof SEARCH_LAYERS)[number];
+
+export function isSearchLayer(value: unknown): value is SearchLayer {
+  return SEARCH_LAYERS.includes(value as SearchLayer);
+}
+
 const TITLE_WEIGHT = 3;
 const SUBTITLE_WEIGHT = 2;
 const MAX_QUERY_TERMS = 25;

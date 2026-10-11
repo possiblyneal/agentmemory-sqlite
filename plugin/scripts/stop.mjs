@@ -169,6 +169,7 @@ function hookCwd(data) {
 }
 //#endregion
 //#region src/hooks/stop.ts
+const MAX_REPLY_CHARS = 4e3;
 hydrateHookEnv();
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
 const SECRET = process.env["AGENTMEMORY_SECRET"] || "";
@@ -189,7 +190,7 @@ async function main() {
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
 	const sessionId = data.session_id || "unknown";
-	const reply = typeof data.last_assistant_message === "string" ? data.last_assistant_message.slice(0, 4e3) : "";
+	const reply = typeof data.last_assistant_message === "string" ? data.last_assistant_message.slice(0, MAX_REPLY_CHARS) : "";
 	if (reply) {
 		const cwd = hookCwd(data) || process.cwd();
 		fetch(`${REST_URL}/agentmemory/observe`, {

@@ -1,4 +1,5 @@
 import type { ISdk } from '../engine/types.js'
+import type { NewestMatchingOpts } from '../engine/inproc/state.js'
 
 export const SET_MANY_CHUNK = 100
 
@@ -193,7 +194,7 @@ export class StateKV {
 
   async listNewestMatching<T = unknown>(
     scope: string,
-    opts: { equals: Record<string, string>; excludeKey?: string; newestBy: string; limit: number },
+    opts: NewestMatchingOpts,
   ): Promise<T[]> {
     return this.sdk.trigger<{ scope: string; opts: typeof opts }, T[]>({
       function_id: 'state::list-newest-matching',

@@ -1,6 +1,7 @@
 import type { ISdk, ApiRequest } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
+import { isSearchLayer } from "../state/search-index.js";
 import type {
   SessionSummary,
   Memory,
@@ -150,6 +151,13 @@ export function registerMcpEndpoints(
                 body: { error: "token_budget must be a positive integer" },
               };
             }
+            const targetLayer = args.targetLayer ?? "memory";
+            if (!isSearchLayer(targetLayer)) {
+              return {
+                status_code: 400,
+                body: { error: "targetLayer must be one of: memory, observation, all" },
+              };
+            }
             // #817: forward agentId so mem::search applies the same
             // isolation filter smart-search uses. Default behavior is
             // unchanged (no agentId → falls back to env AGENT_ID when
@@ -165,7 +173,7 @@ export function registerMcpEndpoints(
               token_budget: tokenBudget,
               agentId: recallAgentId,
               project: asNonEmptyString(args.project),
-              targetLayer: args.targetLayer ?? "memory",
+              targetLayer,
             } });
             const text =
               format === "narrative" &&

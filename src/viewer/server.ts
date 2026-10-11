@@ -1,4 +1,4 @@
-import { guardRequest, guardUpgrade, logRejection } from "../security/request-guard.js";
+import { guardRequest, guardUpgrade, logRejection, refuseUpgrade } from "../security/request-guard.js";
 import WebSocket, { WebSocketServer } from "ws";
 import {
   createServer,
@@ -386,11 +386,7 @@ export function startViewerServer(
   const resolvedStreamsPort = streamsPort ?? port - 1;
 
   server.on("upgrade", (req, socket, head) => {
-    const refuse = (status: number, reason: string): void => {
-      socket.end(
-        `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-      );
-    };
+    const refuse = (status: number, reason: string): void => refuseUpgrade(socket, status, reason);
     if (!hostAllowed(req.headers.host)) return refuse(403, "Forbidden");
     const rejection = guardUpgrade(req.headers);
     if (rejection) {

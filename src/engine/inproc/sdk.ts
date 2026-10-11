@@ -32,9 +32,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { SqliteState, stateFunctions, type StateEvent } from "./state.js";
 import { logger } from "../../logger.js";
-import { guardRequest, guardUpgrade, logRejection } from "../../security/request-guard.js";
+import { guardRequest, guardUpgrade, logRejection, refuseUpgrade } from "../../security/request-guard.js";
 import { timingSafeCompare } from "../../auth.js";
-import type { Duplex } from "node:stream";
 
 type Handler = (payload: any) => Promise<unknown>;
 
@@ -561,12 +560,6 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
     res.writeHead(426);
     res.end();
   });
-
-  function refuseUpgrade(socket: Duplex, status: number, reason: string): void {
-    socket.end(
-      `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-    );
-  }
 
   streamServer.on("upgrade", (req, socket, head) => {
     const url = parseRequestUrl(req);

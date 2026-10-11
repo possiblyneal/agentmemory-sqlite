@@ -6,6 +6,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerSearchFunction, rebuildIndex, getSearchIndex } from "../src/functions/search.js";
 import { registerMcpEndpoints } from "../src/mcp/server.js";
+import { registerApiTriggers } from "../src/triggers/api.js";
 import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, Memory, Session } from "../src/types.js";
 
@@ -93,6 +94,7 @@ describe("memory_recall burial (#191)", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let kv: ReturnType<typeof mockKV>;
   let recall: (args: Record<string, unknown>) => Promise<any>;
+  let restSearch: (body: Record<string, unknown>) => Promise<any>;
 
   beforeEach(async () => {
     getSearchIndex().clear();
@@ -116,6 +118,21 @@ describe("memory_recall burial (#191)", () => {
       });
       return JSON.parse(res.body.content[0].text);
     };
+    const restFns = new Map<string, Function>();
+    registerApiTriggers(
+      {
+        registerFunction: (id: string, h: Function) => restFns.set(id, h),
+        registerTrigger: () => {},
+        trigger: sdk.trigger,
+      } as never,
+      kv as never,
+      SECRET,
+    );
+    restSearch = (body) =>
+      restFns.get("api::search")!({
+        headers: { authorization: `Bearer ${SECRET}` },
+        body: { query: TOPIC, project: "alpha", limit: 10, format: "compact", ...body },
+      });
 
     const session: Session = {
       id: "ses_tools",
@@ -147,6 +164,13 @@ describe("memory_recall burial (#191)", () => {
     const ids = result.results.map((r: { obsId: string }) => r.obsId);
     expect(ids).not.toContain("mem_control");
     expect(SAVED_IDS.filter((id) => !ids.includes(id))).toEqual([]);
+  });
+
+  it("REST search forwards targetLayer and rejects an unknown one", async () => {
+    const res = await restSearch({ targetLayer: "memory" });
+    const ids = res.body.results.map((r: { obsId: string }) => r.obsId);
+    expect(SAVED_IDS.filter((id) => !ids.includes(id))).toEqual([]);
+    expect((await restSearch({ targetLayer: "everything" })).status_code).toBe(400);
   });
 
   it("shortens the top match under a token budget instead of dropping it", async () => {

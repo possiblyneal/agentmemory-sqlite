@@ -384,14 +384,25 @@ describe("startup maintenance: decay repair", () => {
     expect((store.get(KV.semantic, "old") as { strength: number }).strength).toBe(0.1);
   });
 
-  it("leaves a fact inside its first period untouched", async () => {
-    const fresh = fact("fresh", 10, 0.77);
+  it("leaves a fact inside its first period at its confidence untouched", async () => {
+    const fresh = fact("fresh", 10, 0.9);
     store.set(KV.semantic, "fresh", fresh);
 
     const result = await runStartupMaintenance(store);
 
     expect(result.decayRepaired).toBe(0);
     expect(store.get(KV.semantic, "fresh")).toEqual(fresh);
+  });
+
+  it("restores a floored fact re-seen inside its current period to its confidence", async () => {
+    store.set(KV.semantic, "reseen", fact("reseen", 10, 0.1));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.decayRepaired).toBe(1);
+    const row = store.get(KV.semantic, "reseen") as { strength: number; lastDecayedAt?: string };
+    expect(row.strength).toBe(0.9);
+    expect(row.lastDecayedAt).toBeUndefined();
   });
 
   it("leaves procedural memories alone, since no initial strength is recorded", async () => {
