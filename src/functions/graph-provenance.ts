@@ -37,3 +37,15 @@ export function capRecordProvenance<T extends { sourceObservationIds?: string[] 
   if (!Array.isArray(ids)) return record;
   return { ...record, sourceObservationIds: capSourceIds(ids) };
 }
+
+// An Entity's obs="1,3" names Observations by their 1-based number in the
+// batch prompt. Returns null when nothing valid is named, so the caller can
+// fall back to the batch.
+export function attributedIds(attr: string | undefined, batchIds: string[]): string[] | null {
+  const named = new Set<string>();
+  for (const n of (attr ?? "").split(",")) {
+    const id = /^\d+$/.test(n.trim()) ? batchIds[Number(n) - 1] : undefined;
+    if (id) named.add(id);
+  }
+  return named.size > 0 ? batchIds.filter((id) => named.has(id)) : null;
+}
