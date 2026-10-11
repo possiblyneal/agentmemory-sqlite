@@ -425,6 +425,36 @@ describe("TemporalGraph", () => {
       return { sdk, kv };
     };
 
+    it("attributes each Entity to the Observations it names (#189)", async () => {
+      const attributed = RESPONSE.replace(
+        '<entity type="person" name="Alice"',
+        '<entity type="person" name="Alice" obs="2"',
+      );
+      const { registerTemporalGraphFunctions } = await import(
+        "../src/functions/temporal-graph.js"
+      );
+      const provider: MemoryProvider = {
+        name: "test",
+        compress: vi.fn().mockResolvedValue(attributed),
+        summarize: vi.fn(),
+      };
+      const sdk = mockSdk();
+      const kv = mockKV();
+      registerTemporalGraphFunctions(sdk as never, kv as never, provider);
+
+      await sdk.trigger("mem::temporal-graph-extract", {
+        observations: ["obs_1", "obs_2", "obs_3"].map(obs),
+      });
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(nodes.find((n) => n.name === "Alice")!.sourceObservationIds).toEqual(["obs_2"]);
+      expect(nodes.find((n) => n.name === "Acme Corp")!.sourceObservationIds).toEqual([
+        "obs_1",
+        "obs_2",
+        "obs_3",
+      ]);
+    });
+
     it("bounds a create whose batch is larger than the cap", async () => {
       process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "2";
       const { sdk, kv } = await setup();

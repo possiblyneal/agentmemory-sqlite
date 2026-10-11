@@ -95,7 +95,7 @@ _Avoid_: edge, link, association
 **Provenance**:
 The set of Observation and Memory identifiers recorded on an Entity or Relation to say where
 it came from. Provenance is evidence of origin, not a complete history: it is capped, and the
-cap is deliberate.
+cap is deliberate. A new Extraction attributes it per Entity, to the Observations the model names for that Entity (a Relation takes its two ends'), and falls back to the whole batch, logged, only when the model names none.
 _Avoid_: sources, history, lineage, backlinks
 
 **Graph Snapshot**:

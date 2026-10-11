@@ -52,6 +52,21 @@ describe("startup maintenance", () => {
     expect(node.name).toBe("auth");
   });
 
+  it("trims edge-history rows over the cap (#189)", async () => {
+    store.set(KV.graphEdgeHistory, "edge-1", {
+      id: "edge-1",
+      sourceObservationIds: ids("obs", 10),
+    });
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.rowsTrimmed).toBe(1);
+    expect(
+      (store.get(KV.graphEdgeHistory, "edge-1") as { sourceObservationIds: string[] })
+        .sourceObservationIds,
+    ).toEqual(["obs-7", "obs-8", "obs-9"]);
+  });
+
   it("leaves rows already within the bound untouched", async () => {
     store.set(KV.graphEdges, "edge-1", {
       id: "edge-1",

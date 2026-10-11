@@ -10,7 +10,7 @@ import type { SemanticMemory, Session, StateScope } from "../types.js";
 
 // Bump when the pass gains a job that has to run against a store an earlier
 // version already marked as done.
-export const STARTUP_MAINTENANCE_VERSION = 2;
+export const STARTUP_MAINTENANCE_VERSION = 3;
 
 const MARKER_KEY: keyof StateScope = "system:startupMaintenanceVersion";
 
@@ -227,7 +227,7 @@ async function sessionCheckoutRoots(state: SqliteState): Promise<string[]> {
 }
 
 /**
- * The one-time repair pass: trims graph provenance, obs-nodes rows, Insight
+ * The one-time repair pass: trims graph provenance (nodes, edges and edge history), obs-nodes rows, Insight
  * and Semantic Fact source lists written before their write-time bounds
  * existed, folds duplicate file nodes, reclaims the dead index scopes, then
  * records the version so later boots skip the scan entirely.
@@ -257,6 +257,7 @@ export async function runStartupMaintenance(
   const trimmed = [
     await trimIdLists(state, KV.graphNodes, max, "sourceObservationIds"),
     await trimIdLists(state, KV.graphEdges, max, "sourceObservationIds"),
+    await trimIdLists(state, KV.graphEdgeHistory, max, "sourceObservationIds"),
     await trimIdLists(state, KV.graphObsNodes, max),
     await trimIdLists(state, KV.insights, MAX_SOURCE_LIST_IDS, "sourceMemoryIds"),
     await trimIdLists(state, KV.semantic, MAX_SOURCE_LIST_IDS, "sourceSessionIds"),

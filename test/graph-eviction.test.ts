@@ -76,7 +76,6 @@ describe("Graph Eviction", () => {
       kv as never,
       [node("a", ["obs_gone"]), node("b", ["obs_gone", "obs_live"]), node("c", ["obs_gone"])],
       [edge("e_ab", "a", "b", ["obs_gone"]), edge("e_bc", "b", "c", ["obs_live"])],
-      [],
     );
 
     const counts = await evictGraphForSources(kv as never, ["obs_gone"], "mem::observe");
@@ -119,7 +118,7 @@ describe("Graph Eviction", () => {
   it("keeps an Entity another stored Observation still names", async () => {
     const kv = mockKV();
     await storeObservation(kv, "obs_live");
-    await persistGraphDelta(kv as never, [node("shared", ["obs_gone", "obs_live"])], [], []);
+    await persistGraphDelta(kv as never, [node("shared", ["obs_gone", "obs_live"])], []);
 
     expect(await evictGraphForSources(kv as never, ["obs_gone"], "mem::evict")).toEqual({
       nodes: 0,
@@ -132,7 +131,7 @@ describe("Graph Eviction", () => {
   it("keeps an Entity named by a stored Memory", async () => {
     const kv = mockKV();
     await kv.set(KV.memories, "mem_1", { id: "mem_1" });
-    await persistGraphDelta(kv as never, [node("remembered", ["obs_gone", "mem_1"])], [], []);
+    await persistGraphDelta(kv as never, [node("remembered", ["obs_gone", "mem_1"])], []);
 
     await evictGraphForSources(kv as never, ["obs_gone"], "mem::evict");
 
@@ -142,7 +141,7 @@ describe("Graph Eviction", () => {
   it("keeps an Entity whose Provenance is at the cap, since it may have dropped a live source", async () => {
     const kv = mockKV();
     const atCap = Array.from({ length: 50 }, (_, i) => `obs_gone_${i}`);
-    await persistGraphDelta(kv as never, [node("busy", atCap)], [], []);
+    await persistGraphDelta(kv as never, [node("busy", atCap)], []);
 
     await evictGraphForSources(kv as never, atCap, "mem::evict");
 
@@ -151,7 +150,7 @@ describe("Graph Eviction", () => {
 
   it("keeps an Entity that gains a live source while eviction waits for the write lock", async () => {
     const kv = mockKV();
-    await persistGraphDelta(kv as never, [node("a", ["obs_gone"])], [], []);
+    await persistGraphDelta(kv as never, [node("a", ["obs_gone"])], []);
 
     let release!: () => void;
     const held = withKeyedLock(
@@ -173,7 +172,7 @@ describe("Graph Eviction", () => {
 
   it("leaves the graph alone but drops obs-node rows when the graph leg is off", async () => {
     const kv = mockKV();
-    await persistGraphDelta(kv as never, [node("a", ["obs_gone"])], [], []);
+    await persistGraphDelta(kv as never, [node("a", ["obs_gone"])], []);
     process.env["AGENTMEMORY_GRAPH_LEG"] = "off";
 
     await evictGraphForSources(kv as never, ["obs_gone"], "mem::evict");
@@ -187,7 +186,7 @@ describe("Graph Eviction", () => {
     const sdk = mockSdk();
     registerGovernanceFunction(sdk as never, kv as never);
     await kv.set(KV.memories, "mem_1", { id: "mem_1" });
-    await persistGraphDelta(kv as never, [node("a", ["mem_1"])], [], []);
+    await persistGraphDelta(kv as never, [node("a", ["mem_1"])], []);
 
     await sdk.trigger("mem::governance-delete", { memoryIds: ["mem_1"] });
 

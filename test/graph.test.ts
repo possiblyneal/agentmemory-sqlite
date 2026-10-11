@@ -1060,6 +1060,55 @@ describe("Graph Functions", () => {
       expect(listCalls).toBe(0);
     });
   });
+  describe("per-entity provenance (#189)", () => {
+    const batch = ["obs_1", "obs_2", "obs_3"].map((id) => ({ ...testObs, id }));
+
+    it("records only the Observations an Entity names, and its Relation the union of its ends", async () => {
+      mockProvider.compress.mockResolvedValueOnce(`<entities>
+<entity type="function" name="alpha" obs="2"/>
+<entity type="function" name="beta" obs="3"/>
+</entities>
+<relationships>
+<relationship type="uses" source="alpha" target="beta" weight="0.9"/>
+</relationships>`);
+      await sdk.trigger("mem::graph-extract", { observations: batch });
+
+      const nodes = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(nodes.find((n) => n.name === "alpha")!.sourceObservationIds).toEqual(["obs_2"]);
+      expect(nodes.find((n) => n.name === "beta")!.sourceObservationIds).toEqual(["obs_3"]);
+      const edges = await kv.list<GraphEdge>("mem:graph:edges");
+      expect(edges[0].sourceObservationIds).toEqual(["obs_2", "obs_3"]);
+    });
+
+    it("does not add the batch to an existing Entity a later Extraction names", async () => {
+      const respond = (obs: string) =>
+        mockProvider.compress.mockResolvedValueOnce(
+          `<entities><entity type="function" name="alpha" obs="${obs}"/></entities>`,
+        );
+      respond("1");
+      await sdk.trigger("mem::graph-extract", { observations: batch });
+      respond("3");
+      await sdk.trigger("mem::graph-extract", { observations: batch });
+
+      const [alpha] = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(alpha.sourceObservationIds).toEqual(["obs_1", "obs_3"]);
+    });
+
+    it("falls back to the batch and logs it when the model attributes nothing", async () => {
+      mockProvider.compress.mockResolvedValueOnce(
+        `<entities><entity type="function" name="alpha"/></entities>`,
+      );
+      await sdk.trigger("mem::graph-extract", { observations: batch });
+
+      const [alpha] = await kv.list<GraphNode>("mem:graph:nodes");
+      expect(alpha.sourceObservationIds).toEqual(["obs_1", "obs_2", "obs_3"]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("no per-entity attribution"),
+        expect.anything(),
+      );
+    });
+  });
+
   // #1168: provenance on a node or edge grew with every mention. It is
   // evidence of origin, not a complete history, so it is capped and the
   // newest ids are the ones worth keeping.
