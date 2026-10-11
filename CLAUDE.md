@@ -74,6 +74,10 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 1. `src/state/schema.ts` — add to the KV object
 2. `src/types.ts` — add the corresponding interface
 
+**When adding a field that Decay reads or writes (strength, lastAccessedAt, lastDecayedAt):**
+1. `src/types.ts` — `SemanticMemory` and `ProceduralMemory`
+2. `applyDecay` in `src/functions/consolidation-pipeline.ts` and `repairDecay` in `src/state/startup-maintenance.ts`, which must agree on the period count
+
 **When adding new audit operations:**
 1. `src/types.ts` — add to AuditEntry.operation union type
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -601,5 +601,87 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(fact.sourceSessionIds).toContain("ses_0");
     expect(fact.sourceSessionIds).not.toContain("old_0");
     expect(fact.sourceSessionIds).toContain("old_149");
+  });
+});
+
+describe("Consolidation Pipeline: decay counts each idle period once", () => {
+  const provider = { name: "test", compress: vi.fn(), summarize: vi.fn() };
+  const day = 86400000;
+  const start = new Date("2026-01-01T00:00:00.000Z").getTime();
+
+  function fact(idleDays: number): SemanticMemory {
+    const at = new Date(start - idleDays * day).toISOString();
+    return {
+      id: "f",
+      fact: "a fact",
+      confidence: 0.8,
+      sourceSessionIds: [],
+      sourceMemoryIds: [],
+      accessCount: 0,
+      lastAccessedAt: at,
+      strength: 0.8,
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  async function decayAt(sdk: ReturnType<typeof mockSdk>, daysAfterStart: number) {
+    vi.setSystemTime(start + daysAfterStart * day);
+    await sdk.trigger("mem::consolidate-pipeline", { tier: "decay" });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(start);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("changes strength once when the decay tier runs twice within a period", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    await kv.set("mem:semantic", "f", fact(65));
+
+    await decayAt(sdk, 0);
+    await decayAt(sdk, 1);
+
+    const row = (await kv.get("mem:semantic", "f")) as SemanticMemory;
+    expect(row.strength).toBeCloseTo(0.8 * 0.9 ** 2, 9);
+  });
+
+  it("ends a fact idle for 3 periods at confidence x 0.9^3 however many runs happen", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    await kv.set("mem:semantic", "f", fact(0));
+
+    for (const d of [10, 31, 45, 61, 62, 80, 91, 95]) await decayAt(sdk, d);
+
+    const row = (await kv.get("mem:semantic", "f")) as SemanticMemory;
+    expect(row.strength).toBeCloseTo(0.8 * 0.9 ** 3, 9);
+  });
+
+  it("restarts the count when the fact is accessed", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
+    await kv.set("mem:semantic", "f", fact(0));
+    await decayAt(sdk, 65);
+    const decayed = (await kv.get("mem:semantic", "f")) as SemanticMemory;
+    expect(decayed.strength).toBeCloseTo(0.8 * 0.9 ** 2, 9);
+
+    await kv.set("mem:semantic", "f", {
+      ...decayed,
+      strength: 0.8,
+      lastAccessedAt: new Date(start + 65 * day).toISOString(),
+    });
+    await decayAt(sdk, 90);
+    expect(((await kv.get("mem:semantic", "f")) as SemanticMemory).strength).toBe(0.8);
+
+    await decayAt(sdk, 96);
+    expect(((await kv.get("mem:semantic", "f")) as SemanticMemory).strength).toBeCloseTo(0.8 * 0.9, 9);
   });
 });

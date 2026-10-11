@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { SqliteState } from "../src/engine/inproc/state.js";
 import { KV } from "../src/state/schema.js";
@@ -120,6 +120,7 @@ describe("startup maintenance", () => {
       fileNodesMerged: 0,
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
+      decayRepaired: 0,
     });
     expect(
       (store.get(KV.graphNodes, "node-2") as { sourceObservationIds: string[] })
@@ -311,5 +312,100 @@ describe("startup maintenance: duplicate file nodes", () => {
     expect(again.fileNodesMerged).toBe(0);
     expect(again.edgesChanged).toBe(0);
     expect(snapshotOfStore()).toBe(once);
+  });
+});
+
+// #182: the decay tier used to compound on every run, flooring Semantic Facts
+// that were idle for far fewer periods. One pass restores each to what Decay
+// of its idle periods gives.
+describe("startup maintenance: decay repair", () => {
+  const day = 86400000;
+  const now = new Date("2026-06-01T00:00:00.000Z").getTime();
+  let store: SqliteState;
+
+  function fact(id: string, idleDays: number, strength: number, confidence = 0.9) {
+    const at = new Date(now - idleDays * day).toISOString();
+    return {
+      id,
+      fact: id,
+      confidence,
+      sourceSessionIds: [],
+      sourceMemoryIds: [],
+      accessCount: 0,
+      lastAccessedAt: at,
+      strength,
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    store = new SqliteState(":memory:");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    store.close();
+  });
+
+  it("restores a floored fact to confidence x 0.9^periods and stamps lastDecayedAt", async () => {
+    store.set(KV.semantic, "a", fact("a", 95, 0.1));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.decayRepaired).toBe(1);
+    const row = store.get(KV.semantic, "a") as { strength: number; lastDecayedAt: string };
+    expect(row.strength).toBeCloseTo(0.9 * 0.9 ** 3, 9);
+    expect(row.lastDecayedAt).toBe(new Date(now - 5 * day).toISOString());
+  });
+
+  it("keeps the floor for a fact idle long enough that the correct value is below it", async () => {
+    store.set(KV.semantic, "old", fact("old", 3000, 0.4));
+
+    await runStartupMaintenance(store);
+
+    expect((store.get(KV.semantic, "old") as { strength: number }).strength).toBe(0.1);
+  });
+
+  it("leaves a fact inside its first period untouched", async () => {
+    const fresh = fact("fresh", 10, 0.77);
+    store.set(KV.semantic, "fresh", fresh);
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.decayRepaired).toBe(0);
+    expect(store.get(KV.semantic, "fresh")).toEqual(fresh);
+  });
+
+  it("leaves procedural memories alone, since no initial strength is recorded", async () => {
+    const at = new Date(now - 300 * day).toISOString();
+    const proc = { id: "p", strength: 0.1, createdAt: at, updatedAt: at };
+    store.set(KV.procedural, "p", proc);
+
+    await runStartupMaintenance(store);
+
+    expect(store.get(KV.procedural, "p")).toEqual(proc);
+  });
+
+  it("runs once, marked in KV.config, with one audit entry carrying the count", async () => {
+    store.set(KV.semantic, "a", fact("a", 95, 0.1));
+    store.set(KV.semantic, "b", fact("b", 65, 0.1));
+
+    await runStartupMaintenance(store);
+
+    expect(store.get(KV.config, "decay-repair:done")).toBeTruthy();
+    const audits = store.list(KV.audit) as Array<{ details: { event: string; count: number } }>;
+    expect(audits).toHaveLength(1);
+    expect(audits[0].details).toMatchObject({ event: "decay.repair", count: 2 });
+
+    store.set(KV.semantic, "c", fact("c", 95, 0.1));
+    store.set(KV.state, "system:startupMaintenanceVersion", 0);
+    const second = await runStartupMaintenance(store);
+
+    expect(second.decayRepaired).toBe(0);
+    expect((store.get(KV.semantic, "c") as { strength: number }).strength).toBe(0.1);
+    expect(store.list(KV.audit)).toHaveLength(1);
   });
 });

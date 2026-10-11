@@ -1,11 +1,12 @@
 import type { SqliteState } from "../engine/inproc/state.js";
-import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, KV } from "./schema.js";
+import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, KV, generateId } from "./schema.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "../functions/graph-provenance.js";
 import { checkoutRootsOf } from "../functions/project-files.js";
 import { mergeDuplicateFileNodes } from "./merge-file-nodes.js";
-import { getMaxSourceObservationIds } from "../config.js";
+import { getConsolidationDecayDays, getMaxSourceObservationIds } from "../config.js";
+import { decayedStrength } from "../functions/consolidation-pipeline.js";
 import { logger } from "../logger.js";
-import type { Session, StateScope } from "../types.js";
+import type { SemanticMemory, Session, StateScope } from "../types.js";
 
 // Bump when the pass gains a job that has to run against a store an earlier
 // version already marked as done.
@@ -34,7 +35,12 @@ export type StartupMaintenanceResult = {
   edgesChanged: number;
   /** Rows deleted from the dead index scopes. */
   deadIndexRowsDeleted: number;
+  /** Semantic Facts whose strength was recomputed from their idle periods. */
+  decayRepaired: number;
 };
+
+const DECAY_REPAIR_MARKER = "decay-repair:done";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function alreadyRan(state: SqliteState): boolean {
   const recorded = state.get(KV.state, MARKER_KEY);
@@ -142,6 +148,72 @@ async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
   return deleted;
 }
 
+// The decay tier once lowered strength on every run instead of once per idle
+// period, flooring facts idle for far fewer periods. Recompute each from its
+// confidence (Semantic Facts start at strength = confidence) and stamp
+// lastDecayedAt so the corrected value is not decayed again for the same
+// periods. Procedural memories record no initial strength, so they are left
+// alone. Runs once, whatever the maintenance version.
+async function repairDecay(state: SqliteState): Promise<number> {
+  if (state.get(KV.config, DECAY_REPAIR_MARKER) !== null) return 0;
+
+  const decayDays = getConsolidationDecayDays();
+  const now = Date.now();
+  const repairedAt = new Date(now).toISOString();
+  const periodMs = decayDays * DAY_MS;
+  const page = state.db.prepare(
+    "SELECT seq, value FROM kv WHERE scope = ? AND seq > ? ORDER BY seq LIMIT ?",
+  );
+  const repairedIds: string[] = [];
+
+  if (decayDays > 0 && Number.isFinite(decayDays)) {
+    await inChunks(
+      (after) => page.all(KV.semantic, after, CHUNK_ROWS) as Array<{ seq: number; value: string }>,
+      (rows) => {
+        const entries: Array<{ key: string; value: SemanticMemory }> = [];
+        for (const row of rows) {
+          let fact: SemanticMemory;
+          try {
+            fact = JSON.parse(row.value) as SemanticMemory;
+          } catch {
+            continue;
+          }
+          const reference = new Date(fact.lastAccessedAt || fact.createdAt).getTime();
+          const periods = Math.floor((now - reference) / periodMs);
+          if (!(periods >= 1) || typeof fact.confidence !== "number") continue;
+          entries.push({
+            key: fact.id,
+            value: {
+              ...fact,
+              strength: decayedStrength(fact.confidence, periods),
+              lastDecayedAt: new Date(reference + periods * periodMs).toISOString(),
+            },
+          });
+        }
+        if (entries.length > 0) {
+          state.setMany(KV.semantic, entries);
+          repairedIds.push(...entries.map((e) => e.key));
+        }
+      },
+    );
+  }
+
+  state.set(KV.config, DECAY_REPAIR_MARKER, { at: repairedAt, count: repairedIds.length });
+  if (repairedIds.length > 0) {
+    const id = generateId("aud");
+    state.set(KV.audit, id, {
+      id,
+      timestamp: repairedAt,
+      operation: "consolidate",
+      functionId: "startup-maintenance",
+      targetIds: [],
+      details: { event: "decay.repair", count: repairedIds.length, decayDays },
+    });
+    logger.info("Decay repaired", { count: repairedIds.length, decayDays });
+  }
+  return repairedIds.length;
+}
+
 async function sessionCheckoutRoots(state: SqliteState): Promise<string[]> {
   const roots = new Set<string>();
   const cwds = new Set(
@@ -167,6 +239,8 @@ async function sessionCheckoutRoots(state: SqliteState): Promise<string[]> {
 export async function runStartupMaintenance(
   state: SqliteState,
 ): Promise<StartupMaintenanceResult> {
+  const decayRepaired = await repairDecay(state);
+
   if (alreadyRan(state)) {
     return {
       skipped: true,
@@ -175,6 +249,7 @@ export async function runStartupMaintenance(
       fileNodesMerged: 0,
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
+      decayRepaired,
     };
   }
 
@@ -198,6 +273,7 @@ export async function runStartupMaintenance(
     fileNodesMerged: merged.nodesMerged,
     edgesChanged: merged.edgesChanged,
     deadIndexRowsDeleted,
+    decayRepaired,
   };
 
   if (
