@@ -84,31 +84,62 @@ describe("observe dedup for hooks without tool_input (#1173)", () => {
     expect(second.deduplicated).toBe(true);
   });
 
-  it("keeps tool_input as the dedup key for tool hooks (response changes still dedup)", async () => {
+  async function setup() {
     const { registerObserveFunction } = await import("../src/functions/observe.js");
     const { DedupMap } = await import("../src/functions/dedup.js");
     const sdk = mockSdk({ looseTrigger: true });
-    const kv = mockKV();
-    registerObserveFunction(sdk as never, kv as never, new DedupMap());
+    registerObserveFunction(sdk as never, mockKV() as never, new DedupMap());
+    return (hookType: string, data: unknown) =>
+      sdk.trigger("mem::observe", observePayload(hookType, data)) as Promise<{
+        observationId?: string;
+        deduplicated?: boolean;
+      }>;
+  }
 
-    const first = (await sdk.trigger(
-      "mem::observe",
-      observePayload("post_tool_use", {
+  it("stores a rerun of the same tool input whose output changed", async () => {
+    const observe = await setup();
+    const call = (out: string) =>
+      observe("post_tool_use", {
         tool_name: "Bash",
-        tool_input: { command: "ls" },
-        tool_response: "a.txt",
-      }),
-    )) as { observationId?: string };
-    const second = (await sdk.trigger(
-      "mem::observe",
-      observePayload("post_tool_use", {
-        tool_name: "Bash",
-        tool_input: { command: "ls" },
-        tool_response: "b.txt",
-      }),
-    )) as { deduplicated?: boolean };
+        tool_input: { command: "npm test" },
+        tool_output: out,
+      });
+    const first = await call("1 failed");
+    const second = await call("all passed");
+
+    expect(first.observationId).toBeTruthy();
+    expect(second.deduplicated).toBeUndefined();
+    expect(second.observationId).toBeTruthy();
+  });
+
+  it("dedups a rerun with the same input and the same output", async () => {
+    const observe = await setup();
+    const data = {
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+      tool_output: "a.txt",
+    };
+    const first = await observe("post_tool_use", data);
+    const second = await observe("post_tool_use", data);
 
     expect(first.observationId).toBeTruthy();
     expect(second.deduplicated).toBe(true);
+  });
+
+  it("keeps a post_tool_use and a post_tool_failure with the same input", async () => {
+    const observe = await setup();
+    const input = { command: "npm test" };
+    const first = await observe("post_tool_use", {
+      tool_name: "Bash",
+      tool_input: input,
+    });
+    const second = await observe("post_tool_failure", {
+      tool_name: "Bash",
+      tool_input: input,
+    });
+
+    expect(first.observationId).toBeTruthy();
+    expect(second.deduplicated).toBeUndefined();
+    expect(second.observationId).toBeTruthy();
   });
 });

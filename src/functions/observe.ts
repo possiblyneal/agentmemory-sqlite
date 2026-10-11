@@ -395,8 +395,10 @@ export function registerObserveFunction(
               : payload.data;
         dedupHash = dedupMap.computeHash(
           payload.sessionId,
+          payload.hookType,
           toolName,
           dedupInput,
+          d["tool_output"] ?? d["tool_response"] ?? d["error"],
         );
         if (dedupMap.isDuplicate(dedupHash)) {
           return { deduplicated: true, sessionId: payload.sessionId };
