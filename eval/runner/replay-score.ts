@@ -148,9 +148,16 @@ function percentile(sorted: number[], p: number): number | null {
 
 const DAY_MS = 86_400_000;
 
+// Terse-turn needs are kept out of the headline and the worst cases.
+function isTerse(o: KeyOutcome): boolean {
+  return o.key.kind === "file" && o.key.terse === true;
+}
+
 export function summarizeReplay(scores: SessionScore[], meta: RunMeta) {
   const items = scores.flatMap((s) => s.items);
-  const outcomes = scores.flatMap((s) => s.outcomes);
+  const all = scores.flatMap((s) => s.outcomes);
+  const outcomes = all.filter((o) => !isTerse(o));
+  const terse = all.filter(isTerse);
   const kinds = ["file", "correction", "decision"] as const;
   const byKind = Object.fromEntries(
     kinds.map((kind) => {
@@ -190,6 +197,11 @@ export function summarizeReplay(scores: SessionScore[], meta: RunMeta) {
       search: share(outcomes.filter((o) => o.searched).length, outcomes.length),
       either: share(outcomes.filter((o) => o.injected || o.searched).length, outcomes.length),
       byKind,
+      terse: {
+        injection: share(terse.filter((o) => o.injected).length, terse.length),
+        search: share(terse.filter((o) => o.searched).length, terse.length),
+        either: share(terse.filter((o) => o.injected || o.searched).length, terse.length),
+      },
     },
     rightScope: {
       injectedItems: items.length,
@@ -248,7 +260,7 @@ const WORST_PER_CATEGORY = 20;
 
 export function worstCases(scores: SessionScore[]): WorstCase[] {
   const misses = scores
-    .flatMap((s) => s.outcomes.filter((o) => !o.injected).map((o) => ({ s, o })))
+    .flatMap((s) => s.outcomes.filter((o) => !o.injected && !isTerse(o)).map((o) => ({ s, o })))
     .sort(
       (a, b) =>
         MISS_SEVERITY[b.o.key.kind] - MISS_SEVERITY[a.o.key.kind] ||

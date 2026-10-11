@@ -13,6 +13,7 @@ import {
   type Probe,
   type ProbeItem,
 } from "../eval/runner/replay-score.js";
+import { hookPayloads } from "../eval/runner/replay-hooks.js";
 import {
   isMainTranscriptName,
   parseTranscript,
@@ -98,6 +99,25 @@ describe("parseTranscript", () => {
     expect(s.fileUses).toEqual([]);
   });
 
+  it("drops turns the Operator did not type: skill bodies, summaries, teammate relays, shell escapes, reminders", () => {
+    const s = session("s5", "2026-09-01T10:00:00Z", [
+      { user: "Base directory for this skill: /home/x/.claude/skills/tdd\n\n# TDD" },
+      { user: "This session is being continued from a previous conversation that ran out of context." },
+      {
+        user:
+          'Another Claude session sent a message:\n<teammate-message from="peer">finished the import</teammate-message>\n\nThis came from another Claude session.',
+      },
+      { user: "<teammate-message>done</teammate-message>" },
+      { user: "<task-notification>job finished</task-notification>" },
+      { user: "<bash-input>git status</bash-input>" },
+      { user: "<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>" },
+      { user: "<system-reminder>todo list is empty</system-reminder>" },
+      { user: "<command-message>implement</command-message>\n<command-name>/implement</command-name>" },
+      { user: "<system-reminder>context</system-reminder>\nfix the cart total" },
+    ]);
+    expect(s.userTurns.map((t) => t.text)).toEqual(["<system-reminder>context</system-reminder>\nfix the cart total"]);
+  });
+
   it("takes the start time from the first human turn, not an untimestamped leading line", () => {
     const lines = [
       JSON.stringify({ type: "file-history-snapshot", sessionId: "s4", cwd: CWD }),
@@ -134,6 +154,38 @@ describe("answer key: files needed", () => {
     ]);
     expect(filesNeeded(current, [earlier])).toEqual([
       { kind: "file", file: "src/money.ts", turn: 2, earlierSessionIds: ["e1"] },
+    ]);
+  });
+
+  it("leaves out instruction files the Agent reads by convention, in any directory", () => {
+    const first = session("e2", "2026-09-01T10:00:00Z", [
+      { user: "set up the docs" },
+      ...["CLAUDE.md", "src/AGENTS.md", "CONTEXT.md", "docs/GLOSSARY.md", "docs/LESSONS.md", "README.md"].map((f) => ({
+        tool: "Read",
+        file: `${CWD}/${f}`,
+      })),
+    ]);
+    const current = session("c3", "2026-09-02T10:00:00Z", [
+      { user: "update the docs" },
+      ...["CLAUDE.md", "src/AGENTS.md", "CONTEXT.md", "docs/GLOSSARY.md", "docs/LESSONS.md", "README.md"].map((f) => ({
+        tool: "Read",
+        file: `${CWD}/${f}`,
+      })),
+    ]);
+    expect(filesNeeded(current, [first]).map((n) => n.file)).toEqual(["README.md"]);
+  });
+
+  it("flags a need first used after a terse reply that follows a substantive prompt", () => {
+    const current = session("c4", "2026-09-02T10:00:00Z", [
+      { user: "go ahead" },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { user: "plan how the money rounding should change" },
+      { user: "yes, 2" },
+      { tool: "Edit", file: `${CWD}/src/money.ts` },
+    ]);
+    expect(filesNeeded(current, [earlier])).toEqual([
+      { kind: "file", file: "src/cart.ts", turn: 1, earlierSessionIds: ["e1"] },
+      { kind: "file", file: "src/money.ts", turn: 3, earlierSessionIds: ["e1"], terse: true },
     ]);
   });
 
@@ -321,10 +373,68 @@ describe("summarizeReplay", () => {
     expect(summary.operatorAttention.growthBytesPerWeek).toBeCloseTo(2000, 3);
   });
 
+  it("keeps terse-turn needs out of the headline and the worst cases", () => {
+    const terse = session("c3", "2026-09-20T10:00:00Z", [
+      { user: "plan how the cart total should round" },
+      { user: "go ahead" },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+    ]);
+    const withTerse = [...scores, scoreSession(terse, deriveAnswerKey(terse, [earlier]), [])];
+    const s = summarizeReplay(withTerse, { storeBytesStart: 1000, storeBytesEnd: 3000 });
+    expect(s.rightMoment.keyItems).toBe(2);
+    expect(s.rightMoment.byKind.file.injection.n).toBe(2);
+    expect(s.rightMoment.terse.injection).toEqual({ n: 1, hit: 0, share: 0 });
+    expect(worstCases(withTerse).filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
+  });
+
   it("lists misses, noise and leaks with Session and turn", () => {
     const cases = worstCases(scores);
     expect(cases.filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
     expect(cases.filter((c) => c.category === "leak")).toHaveLength(1);
     expect(cases.every((c) => typeof c.turn === "number")).toBe(true);
+  });
+});
+
+describe("hookPayloads", () => {
+  const at = (n: number) => new Date(Date.parse("2026-09-01T10:00:00Z") + n * 1000).toISOString();
+  const line = (n: number, e: Record<string, unknown>) => JSON.stringify({ sessionId: "h1", cwd: CWD, timestamp: at(n), ...e });
+  const text = [
+    line(0, { type: "user", message: { role: "user", content: "fix the cart total" } }),
+    line(1, { type: "user", isMeta: true, message: { role: "user", content: "Base directory for this skill: /x" } }),
+    line(2, {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Reading it." },
+          { type: "tool_use", id: "u1", name: "Read", input: { file_path: `${CWD}/src/cart.ts` } },
+          { type: "tool_use", id: "u2", name: "Bash", input: { command: "npm test" } },
+        ],
+      },
+    }),
+    line(3, {
+      type: "user",
+      toolUseResult: { file: { content: "export const total = 1;" } },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "u1", content: "1 export const total = 1;" }] },
+    }),
+    line(4, {
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "u2", content: "x".repeat(5000), is_error: true }] },
+    }),
+    line(5, { type: "user", isSidechain: true, message: { role: "user", content: "subagent prompt" } }),
+  ].join("\n");
+  const s = parseTranscript(text)!;
+
+  it("sends what the hooks would: prompts and finished tool calls, not assistant text or meta turns", () => {
+    const payloads = hookPayloads(text, s);
+    expect(payloads.map((p) => p.hookType)).toEqual(["prompt_submit", "post_tool_use", "post_tool_failure"]);
+    expect(payloads[0]).toMatchObject({ sessionId: "h1", project: "shop", cwd: CWD, timestamp: at(0), data: { prompt: "fix the cart total" } });
+    expect(payloads[1].data).toEqual({
+      tool_name: "Read",
+      tool_input: { file_path: `${CWD}/src/cart.ts` },
+      tool_output: { file: { content: "export const total = 1;" } },
+    });
+    expect(payloads[2].data).toMatchObject({ tool_name: "Bash", tool_input: JSON.stringify({ command: "npm test" }) });
+    expect((payloads[2].data.error as string).length).toBe(4000);
   });
 });

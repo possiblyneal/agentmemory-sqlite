@@ -1,10 +1,14 @@
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
 
+// `terse` marks a need first used after a reply like "go ahead" or "2": the
+// need came from an earlier prompt of the same Session, so it is reported
+// apart from the headline.
 export interface FileNeed {
   kind: "file";
   file: string;
   turn: number;
   earlierSessionIds: string[];
+  terse?: true;
 }
 
 // A user turn that echoes an earlier Session's turn: a correction the Operator
@@ -36,6 +40,8 @@ const STOPWORDS = new Set(
 );
 
 export const MIN_SHARED_TOKENS = 3;
+// Claude Code loads these by convention, whether or not anything recalled them.
+const INSTRUCTION_FILES = new Set(["CLAUDE.md", "AGENTS.md", "CONTEXT.md", "GLOSSARY.md", "LESSONS.md"]);
 export const MIN_OVERLAP = 0.5;
 const MAX_CORRECTION_CHARS = 500;
 
@@ -117,16 +123,44 @@ function bestMatch(text: string, pool: EarlierTurn[]): EarlierTurn | null {
   return best;
 }
 
+export function isInstructionFile(file: string): boolean {
+  return INSTRUCTION_FILES.has(file.slice(file.lastIndexOf("/") + 1));
+}
+
+// Too few content words to bear on anything: "yes", "go ahead", "2".
+export function isTerse(text: string): boolean {
+  return contentTokens(text).size < MIN_SHARED_TOKENS;
+}
+
+// A terse turn counts only when a substantive prompt came before it in the
+// Session; a terse first prompt carries the need itself.
+function terseTurns(session: ReplaySession): Set<number> {
+  const terse = new Set<number>();
+  let substantiveBefore = false;
+  for (const t of session.userTurns) {
+    if (!isTerse(t.text)) substantiveBefore = true;
+    else if (substantiveBefore) terse.add(t.turn);
+  }
+  return terse;
+}
+
 export function filesNeeded(session: ReplaySession, earlier: ReplaySession[]): FileNeed[] {
   const touchedBy = new Map<string, string[]>();
   for (const s of earlier) {
     for (const file of touchedFiles(s)) touchedBy.set(file, [...(touchedBy.get(file) ?? []), s.id]);
   }
+  const terse = terseTurns(session);
   const needs = new Map<string, FileNeed>();
   for (const use of session.fileUses) {
     const sessions = touchedBy.get(use.file);
-    if (!sessions || needs.has(use.file)) continue;
-    needs.set(use.file, { kind: "file", file: use.file, turn: use.turn, earlierSessionIds: sessions });
+    if (!sessions || needs.has(use.file) || isInstructionFile(use.file)) continue;
+    needs.set(use.file, {
+      kind: "file",
+      file: use.file,
+      turn: use.turn,
+      earlierSessionIds: sessions,
+      ...(terse.has(use.turn) && { terse: true as const }),
+    });
   }
   return [...needs.values()];
 }
