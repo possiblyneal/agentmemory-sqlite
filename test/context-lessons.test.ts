@@ -2,10 +2,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { registerContextFunction } from "../src/functions/context.js";
 import { KV } from "../src/state/schema.js";
 import type { Lesson } from "../src/types.js";
+import { keyedLookups } from "./helpers/mocks.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
+    ...keyedLookups(store),
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },

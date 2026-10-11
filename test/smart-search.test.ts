@@ -11,10 +11,12 @@ import type {
   CompactSearchResult,
   Session,
 } from "../src/types.js";
+import { keyedLookups } from "./helpers/mocks.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
+    ...keyedLookups(store),
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
@@ -547,6 +549,7 @@ describe("Smart Search expandIds — findObservation regressions", () => {
   function engineLikeKV() {
     const store = new Map<string, Map<string, unknown>>();
     return {
+      ...keyedLookups(store),
       get: async <T>(scope: string, key: string): Promise<T | null> =>
         store.get(scope)?.get(key) as T,
       set: async <T>(scope: string, key: string, data: T): Promise<T> => {

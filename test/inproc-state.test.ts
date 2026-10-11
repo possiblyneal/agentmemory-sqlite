@@ -74,6 +74,37 @@ describe("inproc state store", () => {
     ).toEqual(["o1", "o2"]);
   });
 
+  it("finds which scopes under a prefix hold a key", async () => {
+    const fns = stateFunctions(store);
+    await fns["state::set"]({ scope: "mem:obs:a", key: "o1", value: 1 });
+    await fns["state::set"]({ scope: "mem:obs:b", key: "o2", value: 1 });
+    await fns["state::set"]({ scope: "mem:obs;x", key: "o1", value: 1 });
+    await fns["state::set"]({ scope: "mem:memories", key: "o1", value: 1 });
+
+    expect(await fns["state::scopes-with-key"]({ prefix: "mem:obs:", key: "o1" })).toEqual(["mem:obs:a"]);
+    expect(await fns["state::scopes-with-key"]({ prefix: "mem:obs:", key: "nope" })).toEqual([]);
+  });
+
+  it("lists the newest rows matching field values, excluding a key, limited in SQL", async () => {
+    const fns = stateFunctions(store);
+    const rows: Array<[string, string, string, string]> = [
+      ["a", "p1", "2026-01-01T00:00:00.000Z", "x"],
+      ["b", "p1", "2026-01-03T00:00:00.000Z", "x"],
+      ["c", "p2", "2026-01-05T00:00:00.000Z", "x"],
+      ["d", "p1", "2026-01-02T00:00:00.000Z", "y"],
+      ["e", "p1", "2026-01-04T00:00:00.000Z", "x"],
+    ];
+    for (const [id, project, startedAt, agentId] of rows) {
+      await fns["state::set"]({ scope: "s", key: id, value: { id, project, startedAt, agentId } });
+    }
+    const ids = async (opts: object) =>
+      ((await fns["state::list-newest-matching"]({ scope: "s", opts })) as Array<{ id: string }>).map((r) => r.id);
+
+    expect(await ids({ equals: { project: "p1" }, newestBy: "startedAt", limit: 3 })).toEqual(["e", "b", "d"]);
+    expect(await ids({ equals: { project: "p1", agentId: "x" }, excludeKey: "e", newestBy: "startedAt", limit: 10 })).toEqual(["b", "a"]);
+    expect(await ids({ equals: { project: "p1" }, newestBy: "startedAt; DROP TABLE kv", limit: 1 }).catch(() => "rejected")).toBe("rejected");
+  });
+
   it("pages a scope in key order after a cursor", async () => {
     const fns = stateFunctions(store);
     for (const key of ["c", "a", "b", "d"]) {
