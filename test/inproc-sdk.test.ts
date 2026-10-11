@@ -259,7 +259,7 @@ describe("inproc sdk shim", () => {
     expect(await res.text()).toBe('"<h1>hi</h1>"');
   });
 
-  it("parses a body only for application/json", async () => {
+  it("hands a handler a null body when the JSON does not parse", async () => {
     let seen: any;
     route(
       "api::body",
@@ -269,13 +269,6 @@ describe("inproc sdk shim", () => {
       },
       { api_path: "/agentmemory/body", http_method: "POST" },
     );
-
-    await fetch(`${base}/agentmemory/body`, {
-      method: "POST",
-      headers: { "content-type": "text/plain" },
-      body: '{"a":1}',
-    });
-    expect(seen.body).toBeNull();
 
     await fetch(`${base}/agentmemory/body`, {
       method: "POST",

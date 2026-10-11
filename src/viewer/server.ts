@@ -1,3 +1,4 @@
+import { guardRequest, logRejection } from "../security/request-guard.js";
 import {
   createServer,
   type Server,
@@ -253,6 +254,13 @@ export function startViewerServer(
     const pathname = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
     const qs = qIdx >= 0 ? raw.slice(qIdx + 1) : "";
     const method = req.method || "GET";
+
+    const rejection = guardRequest({ method, headers: req.headers });
+    if (rejection) {
+      logRejection("viewer", req, rejection);
+      json(res, rejection.status, { error: rejection.error }, req);
+      return;
+    }
 
     if (method === "OPTIONS") {
       res.writeHead(204, {

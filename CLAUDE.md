@@ -127,6 +127,16 @@ Auth is the inline `checkAuth(req, secret)` above, which is what nearly every en
 trigger is the minority form — follow whichever the endpoints around yours use, and do not
 put both on one endpoint.
 
+### Request guard
+`guardRequest()` (`src/security/request-guard.ts`) runs first in both the REST server
+(`src/engine/inproc/sdk.ts`) and the viewer proxy (`src/viewer/server.ts`). A request other than
+GET/HEAD/OPTIONS is rejected 403 when it carries an `Origin` that is neither loopback nor a
+`VIEWER_ALLOWED_HOSTS` entry, and 415 when its `Content-Type` is not `application/json`; no
+`Origin` passes, so hooks, the CLI and the MCP shim are unaffected. REST alone also answers 403
+to a `Host` that is not `localhost`, `127.0.0.1`, `[::1]`, the bind host or a
+`VIEWER_ALLOWED_HOSTS` entry (DNS rebinding). Every client that POSTs must send
+`Content-Type: application/json`. No secret is generated: a fresh install works unchanged.
+
 ### Observations on a full disk
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
 (or its image file) hits a full disk, `api::observe` answers 202 `{queued: true}` and holds it
