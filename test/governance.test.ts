@@ -173,6 +173,63 @@ describe("Governance Functions", () => {
     expect(remaining.length).toBe(3);
   });
 
+  describe("project scope", () => {
+    beforeEach(async () => {
+      await kv.set("mem:memories", "fact_a", { ...makeMemory("fact_a", "fact"), project: "A" });
+      await kv.set("mem:memories", "fact_b", { ...makeMemory("fact_b", "fact"), project: "B" });
+      await kv.set("mem:memories", "bug_a", { ...makeMemory("bug_a", "bug"), project: "A" });
+    });
+
+    it("deletes only the named project's memories of the given type", async () => {
+      const result = (await sdk.trigger("mem::governance-bulk", {
+        project: "A",
+        type: ["fact"],
+      })) as { deleted: number };
+
+      expect(result.deleted).toBe(1);
+      const ids = (await kv.list<Memory>("mem:memories")).map((m) => m.id);
+      expect(ids).not.toContain("fact_a");
+      expect(ids).toContain("fact_b");
+      expect(ids).toContain("bug_a");
+    });
+
+    it("dry run lists exactly the ids the live call deletes", async () => {
+      const filter = { project: "A", type: ["fact"] };
+      const dry = (await sdk.trigger("mem::governance-bulk", {
+        ...filter,
+        dryRun: true,
+      })) as { ids: string[] };
+      const live = (await sdk.trigger("mem::governance-bulk", filter)) as { deleted: number };
+
+      expect(dry.ids).toEqual(["fact_a"]);
+      expect(live.deleted).toBe(dry.ids.length);
+    });
+
+    it("dry run with no filter is refused like the live call", async () => {
+      const dry = (await sdk.trigger("mem::governance-bulk", { dryRun: true })) as {
+        success: boolean;
+        error: string;
+      };
+      const live = (await sdk.trigger("mem::governance-bulk", {})) as {
+        success: boolean;
+        error: string;
+      };
+
+      expect(dry.success).toBe(false);
+      expect(dry.error).toBe(live.error);
+    });
+
+    it("project alone counts as a filter", async () => {
+      const result = (await sdk.trigger("mem::governance-bulk", { project: "A" })) as {
+        success: boolean;
+        deleted: number;
+      };
+
+      expect(result.success).toBe(true);
+      expect(result.deleted).toBe(2);
+    });
+  });
+
   // Delete paths must tear down the BM25 index entry and trigger an
   // IndexPersistence save so a hard process exit can't restore a stale
   // snapshot at next boot.

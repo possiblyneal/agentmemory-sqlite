@@ -71,17 +71,21 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
         (data.type && data.type.length > 0) ||
         data.dateFrom ||
         data.dateTo ||
+        data.project ||
         data.qualityBelow !== undefined;
-      if (!hasFilter && !data.dryRun) {
+      if (!hasFilter) {
         return {
           success: false,
-          error: "At least one filter is required for non-dryRun bulk delete",
+          error: "At least one filter is required for bulk delete",
         };
       }
 
       const memories = await kv.list<Memory>(KV.memories);
       let candidates = memories;
 
+      if (data.project) {
+        candidates = candidates.filter((m) => m.project === data.project);
+      }
       if (data.type && data.type.length > 0) {
         candidates = candidates.filter((m) => data.type!.includes(m.type));
       }
