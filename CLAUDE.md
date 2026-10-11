@@ -41,7 +41,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
-- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**`, where scratch worktrees live)
+- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
