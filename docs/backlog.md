@@ -14,25 +14,30 @@ also asked for `eval:replay` aggregates with the gate on.
 - **Done when.** A dated `docs/benchmarks/` replay scorecard compares gate off vs on on an
   answer-keyed subset, with LLM settings held fixed.
 
-## Keep a stale-Session recovery sweep from starving graph extraction
+## Keep a stale-Session recovery sweep from losing graph batches
 
-While eviction's stale-Session recovery runs, its Summarize chunks crowd out graph
-extraction on the broker. Give background recovery a smaller share of LLM capacity than
-work for live Sessions.
+A recovery sweep still lost a graph batch to the 300 s timeout (2026-10-11), but the daemon
+had no competing call in flight, so the cause is not recovery crowding out live work.
 
-- **What exists.** `ResilientProvider` (`src/providers/resilient.ts`) already caps every
-  generating call at one shared `AGENTMEMORY_LLM_MAX_CONCURRENCY` (2 on dev). The cap
-  bounds how many calls run at once, not who gets them: a recovery sweep can hold both
-  slots. Summarize chunk and merge prompts are capped at `SUMMARIZE_CHUNK_TOKENS` (16k
-  default), which shortens each prefill but does not limit how many slots recovery holds.
-- **Evidence (2026-09-28).** A graph batch sharing the GPU with a 50k-token Summarize chunk
-  (the default then) slowed to under 1 token/s. During the recovery sweep of 43 stale
-  Sessions, the broker mostly served ~50k-token prompts (2 chunks at a time). A
-  10-Observation graph batch timed out at 300 s at 16:46, while one slot was generating
-  6.6k tokens and another was prefilling a 45k-token prompt.
-- **Done when.** A recovery sweep leaves at least one slot for Session-stop work (Summarize
-  and graph extraction), for example by capping background callers at one slot, and no
-  graph batch times out during a sweep.
+- **What exists.** #91 holds recovery to one LLM slot: one stale Session at a time, Summarize
+  chunks at concurrency 1, reflect and graph extraction awaited, one sweep at a time.
+  `ResilientProvider` (`src/providers/resilient.ts`) caps every generating call at
+  `AGENTMEMORY_LLM_MAX_CONCURRENCY` (3 on dev).
+- **Evidence (2026-10-11).** Throwaway daemon under `tmp/` on the dev broker, dev cap 3 and
+  300 s timeout, 26 stale Sessions (45 days old, no summary, 1,819 Observations). Two live
+  Sessions of 12 Observations each stopped mid-sweep (at +2 and +14 min). The sweep was stopped
+  after 96 min with 16 Sessions recovered.
+  - Peak concurrent LLM calls was 3 (the cap), only while a live Session was stopping; with no
+    live Session the peak was 1, so recovery held one slot.
+  - Every call in the two live-Session windows finished with status 200 (compress, Summarize
+    and graph extraction; slowest 107 s), so live stop work was not starved.
+  - One recovery graph batch (10 Observations, 5.9k characters) timed out at 300 s with that
+    call the only one the daemon had in flight. The broker logged it as 499 with no first
+    token and no queue wait, while serving a request every few seconds to other clients,
+    including 16k-token prompts. Extraction fell back to the non-LLM path for that batch.
+- **Done when.** Open decision: caller-aware priority inside the daemon would not have saved that
+  batch. Either a graph batch that times out is retried, or the timeout is accepted as broker
+  contention outside agentmemory's control.
 
 ## Cap the crystallize and procedural-extraction prompts
 
