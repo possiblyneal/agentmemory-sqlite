@@ -212,7 +212,7 @@ describe("Reflect", () => {
       await unarmed.set("mem:graph:nodes", "node_b", makeConceptNode("b"));
       await unarmed.set("mem:graph:edges", "e", makeEdge("a", "b"));
 
-      const result = (await unarmedSdk.trigger("mem::reflect", {})) as { usedFallback?: boolean; clustersProcessed: number };
+      const result = (await unarmedSdk.trigger("mem::reflect", {})) as { clusterStrategy?: string; clustersProcessed: number };
 
       expect(provider.summarize).not.toHaveBeenCalled();
       expect(result.clustersProcessed).toBe(0);
@@ -424,11 +424,22 @@ describe("Reflect", () => {
 
       const result = (await sdk.trigger("mem::reflect", {})) as {
         success: boolean;
-        usedFallback: boolean;
+        clusterStrategy: string;
       };
 
       expect(result.success).toBe(true);
-      expect(result.usedFallback).toBe(true);
+      expect(result.clusterStrategy).toBe("jaccard");
+    });
+
+    it("reports graph clustering when the concept graph forms a cluster", async () => {
+      await seedNode(kv, makeConceptNode("security"));
+      await seedNode(kv, makeConceptNode("validation"));
+      await seedEdge(kv, makeEdge("security", "validation"));
+      await kv.set("mem:semantic", "sem_1", makeSemantic("Always validate security inputs"));
+
+      const result = (await sdk.trigger("mem::reflect", {})) as { clusterStrategy: string };
+
+      expect(result.clusterStrategy).toBe("graph");
     });
 
     it("handles LLM failure gracefully", async () => {

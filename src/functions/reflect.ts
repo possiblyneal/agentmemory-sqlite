@@ -287,8 +287,8 @@ export function registerReflectFunctions(
         maxClusters,
       );
 
-      const usedFallback = conceptClusters.length === 0;
-      if (usedFallback) {
+      const clusterStrategy = conceptClusters.length === 0 ? "jaccard" : "graph";
+      if (clusterStrategy === "jaccard") {
         conceptClusters = buildJaccardClusters(
           scopedSemantic,
           activeLessons,
@@ -436,7 +436,7 @@ export function registerReflectFunctions(
           reinforced,
           clustersProcessed: conceptClusters.length - clustersSkipped,
           clustersSkipped,
-          usedFallback,
+          clusterStrategy,
         });
       } catch {}
 
@@ -446,7 +446,7 @@ export function registerReflectFunctions(
         reinforced,
         clustersProcessed: conceptClusters.length - clustersSkipped,
         clustersSkipped,
-        usedFallback,
+        clusterStrategy,
       };
     },
   );

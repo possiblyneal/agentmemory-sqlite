@@ -235,7 +235,7 @@ export function registerActionsFunction(sdk: ISdk, kv: StateKV): void {
       );
 
       const limit = data.limit || 50;
-      return { success: true, actions: actions.slice(0, limit) };
+      return { success: true, actions: actions.slice(0, limit), total: actions.length };
     },
   );
 
