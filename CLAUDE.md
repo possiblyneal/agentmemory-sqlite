@@ -141,6 +141,16 @@ to a `Host` that is not `localhost`, `127.0.0.1`, `[::1]`, the bind host or a
 `VIEWER_ALLOWED_HOSTS` entry (DNS rebinding). Every client that POSTs must send
 `Content-Type: application/json`. No secret is generated: a fresh install works unchanged.
 
+The live stream follows the same rules. The streams port (3112) refuses a WebSocket upgrade
+whose `Origin` fails `guardUpgrade()` (403, a GET the method-gated guard would pass) and, when
+`AGENTMEMORY_SECRET` is set, one without `Authorization: Bearer <secret>` (401). No web page
+connects to it: the viewer page opens `/agentmemory/live` on its own origin, and the viewer
+server (`relayLiveStream` in `src/viewer/server.ts`) applies the Host and Origin checks, requires
+the inbound bearer on a non-loopback bind (a browser carries it as the second subprotocol,
+`["agentmemory-bearer", base64url(token)]`), and relays `mem-live`/`viewer` only, adding the secret
+upstream. Observe and compress publish to the `viewer` group alone; there are no per-Session
+stream groups.
+
 ### Observations on a full disk
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
 (or its image file) hits a full disk, `api::observe` answers 202 `{queued: true}` and holds it
