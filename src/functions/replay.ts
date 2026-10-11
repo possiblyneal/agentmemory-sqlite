@@ -438,30 +438,30 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
         await withKeyedLock(`obs:${parsed.sessionId}`, async () => {
           const existing = await kv.get<Session>(KV.sessions, parsed.sessionId);
           if (existing) {
-            existing.observationCount =
-              (existing.observationCount || 0) + parsed.observations.length;
-            if (parsed.endedAt > (existing.endedAt || "")) {
-              existing.endedAt = parsed.endedAt;
-            }
-            if (existing.status === "active") existing.status = "completed";
+            // Field ops, not a whole-row write: graph extraction, finishSession and
+            // the idle sweep write single Session fields without this lock.
             const existingTags = existing.tags || [];
-            if (!existingTags.includes("jsonl-import")) {
-              existing.tags = [...existingTags, "jsonl-import"];
-            }
-            if (!existing.firstPrompt && firstPrompt) {
-              existing.firstPrompt = firstPrompt;
-            }
-            // #775: re-key on parsed.sessionId, not existing.id. Older
-            // session rows may be missing the `id` field; existing.id
-            // would then be undefined, JSON.stringify would drop the
-            // `key` from the state::set payload, and the engine would
-            // reject the call with `missing field \`key\``. Because the
-            // rejection aborts the whole import handler, a single
-            // legacy row killed the entire batch. parsed.sessionId is
-            // always populated (parseJsonlText has a three-level
-            // fallback) and is what we just used to read the row.
-            if (!existing.id) existing.id = parsed.sessionId;
-            await kv.set(KV.sessions, parsed.sessionId, existing);
+            await kv.update(KV.sessions, parsed.sessionId, [
+              {
+                type: "set",
+                path: "observationCount",
+                value: (existing.observationCount || 0) + parsed.observations.length,
+              },
+              ...(parsed.endedAt > (existing.endedAt || "")
+                ? [{ type: "set", path: "endedAt", value: parsed.endedAt }]
+                : []),
+              ...(existing.status === "active"
+                ? [{ type: "set", path: "status", value: "completed" }]
+                : []),
+              ...(existingTags.includes("jsonl-import")
+                ? []
+                : [{ type: "set", path: "tags", value: [...existingTags, "jsonl-import"] }]),
+              ...(!existing.firstPrompt && firstPrompt
+                ? [{ type: "set", path: "firstPrompt", value: firstPrompt }]
+                : []),
+              // #775: older Session rows may be missing the `id` field.
+              ...(existing.id ? [] : [{ type: "set", path: "id", value: parsed.sessionId }]),
+            ]);
           } else {
             const session: Session = {
               id: parsed.sessionId,

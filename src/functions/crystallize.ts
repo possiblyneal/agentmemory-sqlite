@@ -52,19 +52,19 @@ export function registerCrystallizeFunction(
       const { included, deferred, prompt } = fitChainToBudget(actions, allEdges);
       const deferredActionIds = deferred.map((a) => a.id);
 
-      if (included.length === 0) {
-        return {
-          success: false,
-          error: "no action fits the prompt budget",
-          deferredActionIds,
-        };
-      }
       if (deferred.length > 0) {
         logger.info("Crystallize chain trimmed to its prompt budget", {
           project: data.project,
           keptActions: included.length,
           droppedActions: deferred.length,
         });
+      }
+      if (included.length === 0) {
+        return {
+          success: false,
+          error: "no action fits the prompt budget",
+          deferredActionIds,
+        };
       }
 
       try {
@@ -248,9 +248,8 @@ export function registerCrystallizeFunction(
   );
 }
 
-// Oldest Action first; one too large for what is left is deferred while later,
-// smaller ones keep filling. Each candidate is rendered whole, system prompt
-// and edges included, so the provider never receives more than the budget.
+// Each candidate is rendered whole, system prompt and edges included, so the
+// provider never receives more than the budget.
 function fitChainToBudget(
   actions: Action[],
   edges: ActionEdge[],

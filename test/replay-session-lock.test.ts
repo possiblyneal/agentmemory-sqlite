@@ -148,6 +148,24 @@ describe("import-jsonl holds the Session lock for its Session write", () => {
     expect(stored?.observationCount).toBe(4);
   });
 
+  it("keeps a field an unlocked writer sets while an import updates the Session", async () => {
+    const kv = mockKV();
+    await kv.set(KV.sessions, sessionId, seed(2));
+    let watermark: Promise<void> = Promise.resolve();
+    kv.armSessionGet(() => {
+      watermark = kv.update(KV.sessions, sessionId, [
+        { type: "set", path: "graphExtractedThrough", value: "2026-04-17T09:30:00Z" },
+      ]);
+    });
+
+    await runImport(kv);
+    await watermark;
+
+    const stored = await kv.get<Session>(KV.sessions, sessionId);
+    expect(stored?.graphExtractedThrough).toBe("2026-04-17T09:30:00Z");
+    expect(stored?.observationCount).toBe(4);
+  });
+
   it("keeps the count of an observe that creates the Session an import is also creating", async () => {
     const kv = mockKV();
     let observe: Promise<void> = Promise.resolve();

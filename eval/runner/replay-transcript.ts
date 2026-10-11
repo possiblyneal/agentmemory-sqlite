@@ -1,4 +1,4 @@
-import { parseJsonlText } from "../../src/replay/jsonl-parser.js";
+import { CONTINUATION_SUMMARY, parseJsonlText } from "../../src/replay/jsonl-parser.js";
 
 export interface UserTurn {
   turn: number;
@@ -37,7 +37,7 @@ const NOT_A_HUMAN_TURN = [
   /^\[Request interrupted/,
   /^Caveat:/,
   /^Base directory for this skill:/,
-  /^This session is being continued from a previous conversation/,
+  CONTINUATION_SUMMARY,
   /^Another Claude session sent a message:\s*<teammate-message[\s>]/,
 ];
 const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;

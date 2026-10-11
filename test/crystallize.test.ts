@@ -608,6 +608,10 @@ describe("Crystallize Functions", () => {
       expect(result.deferredActionIds).toEqual(["giant"]);
       expect(provider.summarize).not.toHaveBeenCalled();
       expect(await kv.list("mem:crystals")).toEqual([]);
+      expect(logger.info).toHaveBeenCalledWith(
+        "Crystallize chain trimmed to its prompt budget",
+        expect.objectContaining({ keptActions: 0, droppedActions: 1 }),
+      );
     });
 
     it("auto-crystallize picks up deferred actions on its next pass", async () => {

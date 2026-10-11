@@ -363,7 +363,7 @@ export function registerConsolidationPipelineFunction(
           }
           results.procedural = {
             newProcedures: newProcs,
-            patternsAnalyzed: patterns.length,
+            patternsAnalyzed: fitting.length,
           };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

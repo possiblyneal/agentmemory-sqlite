@@ -143,7 +143,7 @@ async function main(): Promise<void> {
     for (const line of lines) console.log(`  ${line}`);
     if (failed) {
       console.error(
-        `\nA metric fell below baseline minus tolerance. If the drop is intended, update ${opts.gate} in the same PR and say why.`,
+        `\nA metric fell below baseline minus tolerance, or an Injection p95 exceeded its ceiling. If the change is intended, update ${opts.gate} in the same PR and say why.`,
       );
       process.exit(1);
     }

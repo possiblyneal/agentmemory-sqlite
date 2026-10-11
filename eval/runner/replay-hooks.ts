@@ -1,5 +1,5 @@
 import { parseJsonlText } from "../../src/replay/jsonl-parser.js";
-import type { ReplaySession } from "./replay-transcript.js";
+import { isOperatorTurn, type ReplaySession } from "./replay-transcript.js";
 
 export interface HookPayload {
   hookType: "prompt_submit" | "post_tool_use" | "post_tool_failure";
@@ -42,7 +42,7 @@ export function hookPayloads(text: string, session: ReplaySession): HookPayload[
     const entry = rawEntry(obs.raw);
     if (entry.isSidechain === true) continue;
     if (obs.hookType === "prompt_submit") {
-      if (entry.isMeta === true) continue;
+      if (entry.isMeta === true || !isOperatorTurn(obs.userPrompt ?? "")) continue;
       out.push({ ...base, hookType: "prompt_submit", timestamp: obs.timestamp, data: { prompt: obs.userPrompt } });
     } else if (obs.hookType === "pre_tool_use") {
       const id = (obs.raw as { toolUseId?: string }).toolUseId;

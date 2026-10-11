@@ -21,6 +21,16 @@ function mockKV() {
       store.get(scope)!.set(key, value);
       return value;
     },
+    update: async (
+      scope: string,
+      key: string,
+      ops: Array<{ type: string; path: string; value?: unknown }>,
+    ) => {
+      const row = { ...(store.get(scope)?.get(key) as Record<string, unknown>) };
+      for (const op of ops) if (op.type === "set") row[op.path] = op.value;
+      store.get(scope)!.set(key, row);
+      return { new_value: row };
+    },
     delete: async (scope: string, key: string) => {
       store.get(scope)?.delete(key);
     },

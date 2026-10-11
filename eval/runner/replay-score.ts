@@ -149,15 +149,15 @@ function percentile(sorted: number[], p: number): number | null {
 const DAY_MS = 86_400_000;
 
 // Terse-turn needs are kept out of the headline and the worst cases.
-function isTerse(o: KeyOutcome): boolean {
+function isTerseNeed(o: KeyOutcome): boolean {
   return o.key.kind === "file" && o.key.terse === true;
 }
 
 export function summarizeReplay(scores: SessionScore[], meta: RunMeta) {
   const items = scores.flatMap((s) => s.items);
   const all = scores.flatMap((s) => s.outcomes);
-  const outcomes = all.filter((o) => !isTerse(o));
-  const terse = all.filter(isTerse);
+  const outcomes = all.filter((o) => !isTerseNeed(o));
+  const terse = all.filter(isTerseNeed);
   const kinds = ["file", "correction", "decision"] as const;
   const byKind = Object.fromEntries(
     kinds.map((kind) => {
@@ -260,7 +260,7 @@ const WORST_PER_CATEGORY = 20;
 
 export function worstCases(scores: SessionScore[]): WorstCase[] {
   const misses = scores
-    .flatMap((s) => s.outcomes.filter((o) => !o.injected && !isTerse(o)).map((o) => ({ s, o })))
+    .flatMap((s) => s.outcomes.filter((o) => !o.injected && !isTerseNeed(o)).map((o) => ({ s, o })))
     .sort(
       (a, b) =>
         MISS_SEVERITY[b.o.key.kind] - MISS_SEVERITY[a.o.key.kind] ||

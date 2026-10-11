@@ -54,10 +54,10 @@ function deriveProject(cwd: string): string {
 // After a compaction Claude Code opens the next context with its own summary
 // of the conversation so far, written as a user turn. The Operator never
 // typed it, and it restates the whole Session, so it is not stored.
-const CONTINUATION = /^This session is being continued from a previous conversation/;
+export const CONTINUATION_SUMMARY = /^This session is being continued from a previous conversation/;
 
 function isContinuationSummary(entry: JsonlEntry, text: string): boolean {
-  return entry.isCompactSummary === true || CONTINUATION.test(text.trimStart());
+  return entry.isCompactSummary === true || CONTINUATION_SUMMARY.test(text.trimStart());
 }
 
 function toText(content: unknown): string {

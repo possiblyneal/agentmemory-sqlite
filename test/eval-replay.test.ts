@@ -422,10 +422,14 @@ describe("hookPayloads", () => {
       message: { role: "user", content: [{ type: "tool_result", tool_use_id: "u2", content: "x".repeat(5000), is_error: true }] },
     }),
     line(5, { type: "user", isSidechain: true, message: { role: "user", content: "subagent prompt" } }),
+    line(6, {
+      type: "user",
+      message: { role: "user", content: 'Another Claude session sent a message:\n<teammate-message from="peer">done</teammate-message>' },
+    }),
   ].join("\n");
   const s = parseTranscript(text)!;
 
-  it("sends what the hooks would: prompts and finished tool calls, not assistant text or meta turns", () => {
+  it("sends what the hooks would: Operator prompts and finished tool calls, not assistant text, meta turns or teammate relays", () => {
     const payloads = hookPayloads(text, s);
     expect(payloads.map((p) => p.hookType)).toEqual(["prompt_submit", "post_tool_use", "post_tool_failure"]);
     expect(payloads[0]).toMatchObject({ sessionId: "h1", project: "shop", cwd: CWD, timestamp: at(0), data: { prompt: "fix the cart total" } });

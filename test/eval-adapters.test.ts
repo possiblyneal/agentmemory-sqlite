@@ -144,6 +144,16 @@ describe("compareToBaseline", () => {
       expect(failed).toBe(true);
       expect(lines.join("\n")).toMatch(/x\/prompt-submit.*missing/);
     });
+
+    it("fails as missing a gated path whose summary has no p95", () => {
+      const { latencyP95: _, ...noP95 } = withP95(0);
+      const { failed, lines } = compareToBaseline(
+        { x: { "prompt-submit": noP95 as ReturnType<typeof withP95> } },
+        gated,
+      );
+      expect(failed).toBe(true);
+      expect(lines.join("\n")).toMatch(/x\/prompt-submit: p95 missing/);
+    });
   });
 });
 

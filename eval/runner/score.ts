@@ -120,9 +120,9 @@ export function compareToBaseline(
   for (const [adapter, byPath] of Object.entries(baseline.metrics)) {
     for (const [path, expected] of Object.entries(byPath)) {
       const actual = summary[adapter]?.[path];
-      if (!actual) {
+      if (!actual || !Number.isFinite(actual.latencyP95)) {
         failed = true;
-        lines.push(`FAIL ${adapter}/${path}: missing from this run`);
+        lines.push(`FAIL ${adapter}/${path}: p95 missing from this run`);
         continue;
       }
       for (const [metric, floor] of Object.entries(expected) as Array<[GatedMetric, number]>) {
@@ -139,9 +139,9 @@ export function compareToBaseline(
   for (const [adapter, byPath] of Object.entries(baseline.latencyCeilingMs)) {
     for (const [path, ceiling] of Object.entries(byPath)) {
       const actual = summary[adapter]?.[path];
-      if (!actual) {
+      if (!actual || !Number.isFinite(actual.latencyP95)) {
         failed = true;
-        lines.push(`FAIL ${adapter}/${path}: missing from this run`);
+        lines.push(`FAIL ${adapter}/${path}: p95 missing from this run`);
         continue;
       }
       const margin = Math.round(ceiling - actual.latencyP95);
