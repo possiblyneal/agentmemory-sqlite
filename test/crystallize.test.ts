@@ -85,6 +85,26 @@ describe("Crystallize Functions", () => {
   });
 
   describe("mem::crystallize", () => {
+    it("scrubs secrets from the stored crystal digest", async () => {
+      const secret = "ghp_" + "A".repeat(36);
+      (provider.summarize as ReturnType<typeof vi.fn>).mockResolvedValue(
+        JSON.stringify({
+          narrative: `used ${secret}`,
+          keyOutcomes: [`rotated ${secret}`],
+          filesAffected: ["a.ts"],
+          lessons: [`never paste ${secret}`],
+        }),
+      );
+      await kv.set("mem:actions", "act_s", makeAction({ id: "act_s" }));
+
+      const result = (await sdk.trigger("mem::crystallize", {
+        actionIds: ["act_s"],
+      })) as { crystal: Crystal };
+
+      expect(result.crystal.narrative).toBe("used [REDACTED_SECRET]");
+      expect(JSON.stringify(await kv.list("mem:crystals"))).not.toContain(secret);
+    });
+
     it("crystallizes completed actions with valid JSON response", async () => {
       const action = makeAction({ id: "act_1", title: "Fix bug", status: "done" });
       await kv.set("mem:actions", action.id, action);

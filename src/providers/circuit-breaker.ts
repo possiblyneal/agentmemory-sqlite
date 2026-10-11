@@ -72,8 +72,12 @@ export class CircuitBreaker {
   }
 
   getState(): CircuitBreakerState {
+    const recoveryDue =
+      this.state === "open" &&
+      this.openedAt !== null &&
+      Date.now() - this.openedAt >= this.recoveryTimeoutMs;
     return {
-      state: this.state,
+      state: recoveryDue ? "half-open" : this.state,
       failures: this.failures,
       lastFailureAt: this.lastFailureAt,
       openedAt: this.openedAt,

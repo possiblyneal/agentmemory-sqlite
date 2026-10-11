@@ -15,6 +15,7 @@ describe("createEmbeddingProvider", () => {
     process.env = { ...originalEnv };
     delete process.env["GEMINI_API_KEY"];
     delete process.env["OPENAI_API_KEY"];
+    delete process.env["OPENAI_EMBEDDING_API_KEY"];
     delete process.env["VOYAGE_API_KEY"];
     delete process.env["COHERE_API_KEY"];
     delete process.env["OPENROUTER_API_KEY"];
@@ -35,6 +36,26 @@ describe("createEmbeddingProvider", () => {
     const provider = createEmbeddingProvider();
     expect(provider).toBeInstanceOf(GeminiEmbeddingProvider);
     expect(provider!.name).toBe("gemini");
+  });
+
+  it("enables OpenAI embeddings when only OPENAI_EMBEDDING_API_KEY is set", () => {
+    process.env["OPENAI_EMBEDDING_API_KEY"] = "embed-only-key";
+    delete process.env["OPENAI_API_KEY"];
+    const provider = createEmbeddingProvider();
+    expect(provider).toBeInstanceOf(OpenAIEmbeddingProvider);
+  });
+
+  it("sends OPENAI_EMBEDDING_API_KEY, not OPENAI_API_KEY, when both are set", async () => {
+    process.env["OPENAI_API_KEY"] = "chat-key";
+    process.env["OPENAI_EMBEDDING_API_KEY"] = "embed-key";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ embedding: new Array(1536).fill(0.1) }] }), { status: 200 }),
+    );
+    await createEmbeddingProvider()!.embed("hello");
+    const headers = (fetchSpy.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(JSON.stringify(headers)).toContain("embed-key");
+    expect(JSON.stringify(headers)).not.toContain("chat-key");
+    fetchSpy.mockRestore();
   });
 
   it("returns OpenAIEmbeddingProvider when OPENAI_API_KEY is set", () => {

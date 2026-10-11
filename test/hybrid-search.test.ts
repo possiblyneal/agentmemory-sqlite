@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
 import type { CompressedObservation, EmbeddingProvider } from "../src/types.js";
@@ -179,5 +179,28 @@ describe("HybridSearch", () => {
     expect(results[0].observation.id).toBe("mem_abc");
     expect(results[0].observation.narrative).toBe("Test memory for search");
     expect(results[0].observation.concepts).toEqual(["test", "search"]);
+  });
+});
+
+describe("HybridSearch graph weight 0", () => {
+  it("runs no graph traversal when the graph weight is 0", async () => {
+    const { GraphRetrieval } = await import("../src/functions/graph-retrieval.js");
+    const byEntities = vi.spyOn(GraphRetrieval.prototype, "searchByEntities");
+    const expand = vi.spyOn(GraphRetrieval.prototype, "expandFromChunks");
+    const bm25 = new SearchIndex();
+    const kv = mockKV();
+    const obs = makeObs();
+    bm25.add(obs);
+    await kv.set("mem:obs:ses_1", "obs_1", obs);
+
+    const off = new HybridSearch(bm25, null, null, kv as never, 0.4, 0.6, 0);
+    await off.search("React auth middleware", 5);
+    expect(byEntities).not.toHaveBeenCalled();
+    expect(expand).not.toHaveBeenCalled();
+
+    const on = new HybridSearch(bm25, null, null, kv as never, 0.4, 0.6, 0.3);
+    await on.search("React auth middleware", 5);
+    expect(byEntities).toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });

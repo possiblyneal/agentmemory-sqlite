@@ -32,6 +32,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { SqliteState, stateFunctions, type StateEvent } from "./state.js";
 import { logger } from "../../logger.js";
+import { guardRequest, guardUpgrade, logRejection, refuseUpgrade } from "../../security/request-guard.js";
+import { timingSafeCompare } from "../../auth.js";
 
 type Handler = (payload: any) => Promise<unknown>;
 
@@ -82,6 +84,8 @@ export type InprocSdkOptions = {
   streamsPort: number;
   sqlitePath: string;
   host?: string;
+  /** When set, a stream upgrade must present `Authorization: Bearer <secret>`. */
+  secret?: string;
   maxBodyBytes?: number;
   maxSocketBufferBytes?: number;
 };
@@ -421,6 +425,12 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
       respond(res, 400, { error: "invalid request target" });
       return;
     }
+    const rejection = guardRequest({ method, headers: req.headers, checkHost: { bindHost: host } });
+    if (rejection) {
+      logRejection("rest", req, rejection);
+      respond(res, rejection.status, { error: rejection.error });
+      return;
+    }
     if (url.pathname === READYZ) {
       respond(res, ready ? 200 : 503, { status: ready ? "ready" : "starting" });
       return;
@@ -557,11 +567,27 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
       socket.destroy();
       return;
     }
+    const rejection = guardUpgrade(req.headers);
+    if (rejection) {
+      logRejection("stream", req, rejection);
+      refuseUpgrade(socket, rejection.status, "Forbidden");
+      return;
+    }
+    if (
+      opts.secret &&
+      !(
+        typeof req.headers.authorization === "string" &&
+        timingSafeCompare(req.headers.authorization, `Bearer ${opts.secret}`)
+      )
+    ) {
+      refuseUpgrade(socket, 401, "Unauthorized");
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       const subs: Subscription[] = [];
 
       // Direct form: /stream/<streamName>/<groupId> subscribes on connect,
-      // which is what the viewer tries first (WS_DIRECT_URL).
+      // which is what the viewer's proxy connects with.
       const parts = url.pathname.split("/").filter(Boolean);
       if (parts.length === 3 && parts[0] === "stream") {
         const sub = { ws, streamName: parts[1], groupId: parts[2] };

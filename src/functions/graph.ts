@@ -32,7 +32,7 @@ import {
 } from "../prompts/graph-extraction.js";
 import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
 import { isNoopProvider } from "../providers/noop.js";
-import { capSourceIds } from "./graph-provenance.js";
+import { attributedIds, capSourceIds } from "./graph-provenance.js";
 import { withProjectRelativeFiles } from "./project-files.js";
 import { recordAudit } from "./audit.js";
 import { getSearchIndex } from "./search.js";
@@ -416,7 +416,6 @@ function snapshotPushEdgeIfBothInTop(
 function mergeNode(
   existing: GraphNode,
   incoming: GraphNode,
-  obsIds: string[],
   capturedAt: string,
 ): GraphNode {
   return {
@@ -424,7 +423,6 @@ function mergeNode(
     sourceObservationIds: capSourceIds([
       ...existing.sourceObservationIds,
       ...incoming.sourceObservationIds,
-      ...obsIds,
     ]),
     properties: { ...existing.properties, ...incoming.properties },
     // Refresh to the newest source's session (#656). The incoming node
@@ -439,11 +437,14 @@ function mergeNode(
 
 function mergeEdge(
   existing: GraphEdge,
-  obsIds: string[],
+  incoming: GraphEdge,
 ): GraphEdge {
   return {
     ...existing,
-    sourceObservationIds: capSourceIds([...existing.sourceObservationIds, ...obsIds]),
+    sourceObservationIds: capSourceIds([
+      ...existing.sourceObservationIds,
+      ...incoming.sourceObservationIds,
+    ]),
   };
 }
 
@@ -543,6 +544,7 @@ function parseGraphXml(
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const now = new Date().toISOString();
+  let unattributed = 0;
 
   // Two passes because <entity> can be self-closing or have a body
   // (<property> children). The self-closing form needs `[^>]*[^/]` on
@@ -563,13 +565,14 @@ function parseGraphXml(
     while ((propMatch = propRegex.exec(propsBlock)) !== null) {
       properties[propMatch[1]] = propMatch[2];
     }
-    // Resolve the node's sessionId from its source observations. All
-    // observationIds in one extract call share the batch, so the first
-    // resolvable session is representative; merges later refresh it to
-    // the newest source (see mergeNode).
+    const attributed = attributedIds(attrs["obs"], observationIds);
+    if (!attributed) unattributed += 1;
+    const sources = attributed ?? observationIds;
+    // Resolve the node's sessionId from its source observations; merges
+    // later refresh it to the newest source (see mergeNode).
     let sessionId: string | undefined;
     if (sessionByObsId) {
-      for (const obsId of observationIds) {
+      for (const obsId of sources) {
         const sid = sessionByObsId.get(obsId);
         if (sid) {
           sessionId = sid;
@@ -582,7 +585,7 @@ function parseGraphXml(
       type,
       name,
       properties,
-      sourceObservationIds: capSourceIds(observationIds),
+      sourceObservationIds: capSourceIds(sources),
       ...(sessionId !== undefined && { sessionId }),
       createdAt: now,
     });
@@ -615,11 +618,20 @@ function parseGraphXml(
       sourceNodeId: sourceNode.id,
       targetNodeId: targetNode.id,
       weight: Math.max(0, Math.min(1, weight)),
-      sourceObservationIds: capSourceIds(observationIds),
+      sourceObservationIds: capSourceIds([
+        ...sourceNode.sourceObservationIds,
+        ...targetNode.sourceObservationIds,
+      ]),
       createdAt: now,
     });
   }
 
+  if (unattributed > 0) {
+    logger.warn("Graph extraction: no per-entity attribution, using the whole batch", {
+      entities: unattributed,
+      batchSize: observationIds.length,
+    });
+  }
   return { nodes, edges };
 }
 
@@ -831,10 +843,9 @@ export function persistGraphDelta(
   kv: StateKV,
   nodes: GraphNode[],
   edges: GraphEdge[],
-  obsIds: string[],
 ): Promise<{ newNodeCount: number; newEdgeCount: number }> {
   return withKeyedLock(GRAPH_WRITE_LOCK, () =>
-    persistGraphDeltaUnlocked(kv, nodes, edges, obsIds),
+    persistGraphDeltaUnlocked(kv, nodes, edges),
   );
 }
 
@@ -842,7 +853,6 @@ async function persistGraphDeltaUnlocked(
   kv: StateKV,
   nodes: GraphNode[],
   edges: GraphEdge[],
-  obsIds: string[],
 ): Promise<{ newNodeCount: number; newEdgeCount: number }> {
   if (graphWritesDisabled()) return { newNodeCount: 0, newEdgeCount: 0 };
   // A snapshot we cannot read is not an empty graph. Writing on top of that
@@ -896,9 +906,9 @@ async function persistGraphDeltaUnlocked(
 
     if (existing) {
       idRemap.set(node.id, existing.id);
-      const merged = mergeNode(existing, node, obsIds, capturedAt);
+      const merged = mergeNode(existing, node, capturedAt);
       await kv.set(KV.graphNodes, existing.id, merged);
-      await linkObservationsToNode(kv, existing.id, obsIds);
+      await linkObservationsToNode(kv, existing.id, node.sourceObservationIds);
       // Update topNodes entry if present so a stale clone isn't
       // returned from the snapshot fast path.
       const topIdx = snap.topNodes.findIndex((n) => n.id === existing!.id);
@@ -948,7 +958,7 @@ async function persistGraphDeltaUnlocked(
     }
 
     if (existing) {
-      const merged = mergeEdge(existing, obsIds);
+      const merged = mergeEdge(existing, edge);
       await kv.set(KV.graphEdges, existing.id, merged);
       // Replace cached topEdges entry too if present.
       const topIdx = snap.topEdges.findIndex((e) => e.id === existing!.id);
@@ -1119,7 +1129,6 @@ async function extractGraph(
       kv,
       nodes,
       edges,
-      obsIds,
     );
 
     await writeObservationAnnotations(kv, observations, annotations);

@@ -18,7 +18,7 @@ import {
   GRAPH_INDEX_NOT_READY,
 } from "../state/graph-indexes.js";
 import { logger } from "../logger.js";
-import { capSourceIds } from "./graph-provenance.js";
+import { attributedIds, capSourceIds } from "./graph-provenance.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { GRAPH_WRITE_LOCK } from "./graph.js";
 
@@ -32,7 +32,7 @@ For each relationship, you MUST provide:
 Output EXACTLY this XML:
 <temporal_graph>
   <entities>
-    <entity type="file|function|concept|error|decision|pattern|library|person|project|preference|location|organization|event" name="exact name">
+    <entity type="file|function|concept|error|decision|pattern|library|person|project|preference|location|organization|event" name="exact name" obs="comma-separated observation numbers">
       <property key="key">value</property>
       <alias>alternate name</alias>
     </entity>
@@ -67,14 +67,21 @@ function parseTemporalGraphXml(
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const now = new Date().toISOString();
+  let unattributed = 0;
 
   const entityRegex =
-    /<entity\s+type="([^"]+)"\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/entity>/g;
+    /<entity\s+type="([^"]+)"\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/entity>/g;
   let match;
   while ((match = entityRegex.exec(xml)) !== null) {
     const type = match[1] as GraphNode["type"];
     const name = match[2];
-    const propsBlock = match[3];
+    const attributed = attributedIds(
+      match[3].match(/\bobs="([^"]*)"/)?.[1],
+      observationIds,
+    );
+    if (!attributed) unattributed += 1;
+    const sources = attributed ?? observationIds;
+    const propsBlock = match[4];
     const properties: Record<string, string> = {};
     const aliases: string[] = [];
 
@@ -91,7 +98,7 @@ function parseTemporalGraphXml(
 
     let sessionId: string | undefined;
     if (sessionByObsId) {
-      for (const obsId of observationIds) {
+      for (const obsId of sources) {
         const sid = sessionByObsId.get(obsId);
         if (sid) {
           sessionId = sid;
@@ -104,7 +111,7 @@ function parseTemporalGraphXml(
       type,
       name,
       properties,
-      sourceObservationIds: capSourceIds(observationIds),
+      sourceObservationIds: capSourceIds(sources),
       ...(sessionId !== undefined && { sessionId }),
       createdAt: now,
       aliases: aliases.length > 0 ? aliases : undefined,
@@ -158,7 +165,10 @@ function parseTemporalGraphXml(
         sourceNodeId: sourceNode.id,
         targetNodeId: targetNode.id,
         weight: Math.max(0, Math.min(1, weight)),
-        sourceObservationIds: capSourceIds(observationIds),
+        sourceObservationIds: capSourceIds([
+          ...sourceNode.sourceObservationIds,
+          ...targetNode.sourceObservationIds,
+        ]),
         createdAt: now,
         tcommit: now,
         tvalid:
@@ -172,6 +182,12 @@ function parseTemporalGraphXml(
     }
   }
 
+  if (unattributed > 0) {
+    logger.warn("Temporal graph extraction: no per-entity attribution, using the whole batch", {
+      entities: unattributed,
+      batchSize: observationIds.length,
+    });
+  }
   return { nodes, edges };
 }
 
@@ -253,7 +269,7 @@ export function registerTemporalGraphFunctions(
                 ...existing,
                 sourceObservationIds: capSourceIds([
                   ...existing.sourceObservationIds,
-                  ...obsIds,
+                  ...node.sourceObservationIds,
                 ]),
                 properties: { ...existing.properties, ...node.properties },
                 // Refresh to the newest source's session (#656); keep the
@@ -269,7 +285,7 @@ export function registerTemporalGraphFunctions(
               };
               if (merged.aliases.length === 0) delete (merged as any).aliases;
               await kv.set(KV.graphNodes, existing.id, merged);
-              await linkObservationsToNode(kv, existing.id, obsIds);
+              await linkObservationsToNode(kv, existing.id, node.sourceObservationIds);
               node.id = existing.id;
               idRemap.set(oldId, existing.id);
             } else {

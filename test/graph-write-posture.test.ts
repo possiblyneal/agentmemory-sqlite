@@ -155,7 +155,7 @@ describe("graph write posture (graph-off fork)", () => {
 
     // The chokepoint every writer funnels through must refuse on its own too.
     const node = { id: "gn_1", type: "file", name: "src/functions/graph.ts", properties: {}, sourceObservationIds: [OBS.id], createdAt: OBS.timestamp };
-    expect(await persistGraphDelta(kv as never, [node as never], [], [OBS.id])).toEqual({ newNodeCount: 0, newEdgeCount: 0 });
+    expect(await persistGraphDelta(kv as never, [node as never], [])).toEqual({ newNodeCount: 0, newEdgeCount: 0 });
     expect(graphWrites(kv)).toEqual([]);
   });
 

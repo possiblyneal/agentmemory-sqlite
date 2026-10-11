@@ -1,3 +1,5 @@
+import { guardRequest, guardUpgrade, logRejection, refuseUpgrade } from "../security/request-guard.js";
+import WebSocket, { WebSocketServer } from "ws";
 import {
   createServer,
   type Server,
@@ -129,6 +131,46 @@ export function requireInboundBearer(
   return timingSafeCompare(match[1], secret);
 }
 
+// A browser WebSocket cannot set Authorization, so the page carries the
+// viewer bearer as a second subprotocol, base64url-encoded to stay a valid
+// token: `new WebSocket(url, ["agentmemory-bearer", base64url(token)])`.
+export const LIVE_PATH = "/agentmemory/live";
+const LIVE_BEARER_PROTOCOL = "agentmemory-bearer";
+
+function requireSubprotocolBearer(
+  header: string | string[] | undefined,
+  secret: string,
+): boolean {
+  if (typeof header !== "string") return false;
+  const [proto, token] = header.split(",").map((p) => p.trim());
+  if (proto !== LIVE_BEARER_PROTOCOL || !token) return false;
+  return timingSafeCompare(Buffer.from(token, "base64url").toString("utf8"), secret);
+}
+
+// Only the viewer's own stream is reachable, and the secret is attached here
+// so the page never holds a credential the streams port would accept.
+function relayLiveStream(
+  client: WebSocket,
+  streamsPort: number,
+  secret: string | undefined,
+): void {
+  const upstream = new WebSocket(
+    `ws://127.0.0.1:${streamsPort}/stream/mem-live/viewer`,
+    { headers: secret ? { Authorization: `Bearer ${secret}` } : {} },
+  );
+  upstream.on("message", (data, isBinary) => {
+    if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
+  });
+  const closeBoth = (): void => {
+    client.terminate();
+    upstream.terminate();
+  };
+  upstream.on("close", closeBoth);
+  upstream.on("error", closeBoth);
+  client.on("close", closeBoth);
+  client.on("error", closeBoth);
+}
+
 function corsHeaders(req: IncomingMessage): Record<string, string> {
   const origin = req.headers.origin || "";
   const allowed = ALLOWED_ORIGINS.includes(origin)
@@ -199,6 +241,7 @@ export function startViewerServer(
   _sdk: unknown,
   secret?: string,
   restPort?: number,
+  streamsPort?: number,
 ): Server {
   // Reset exported runtime state for each start attempt.
   boundViewerPort = null;
@@ -233,7 +276,7 @@ export function startViewerServer(
   // so we read the actual bound port from server.address() on first hit.
   let allowedHosts: Set<string> | null = null;
 
-  const server = createServer(async (req, res) => {
+  const hostAllowed = (headerHost: string | string[] | undefined): boolean => {
     if (!allowedHosts) {
       const addr = server.address();
       const actualPort =
@@ -242,7 +285,11 @@ export function startViewerServer(
           : port;
       allowedHosts = buildAllowedHosts(ALLOWED_ORIGINS, actualPort, host);
     }
-    if (!isHostAllowed(req.headers.host, allowedHosts)) {
+    return isHostAllowed(headerHost, allowedHosts);
+  };
+
+  const server = createServer(async (req, res) => {
+    if (!hostAllowed(req.headers.host)) {
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("forbidden host");
       return;
@@ -253,6 +300,13 @@ export function startViewerServer(
     const pathname = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
     const qs = qIdx >= 0 ? raw.slice(qIdx + 1) : "";
     const method = req.method || "GET";
+
+    const rejection = guardRequest({ method, headers: req.headers });
+    if (rejection) {
+      logRejection("viewer", req, rejection);
+      json(res, rejection.status, { error: rejection.error }, req);
+      return;
+    }
 
     if (method === "OPTIONS") {
       res.writeHead(204, {
@@ -322,6 +376,37 @@ export function startViewerServer(
       console.error(`[viewer] proxy error on ${method} ${pathname}:`, err);
       json(res, 502, { error: "upstream error" }, req);
     }
+  });
+
+  const liveClients = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) =>
+      protocols.has(LIVE_BEARER_PROTOCOL) ? LIVE_BEARER_PROTOCOL : false,
+  });
+  const resolvedStreamsPort = streamsPort ?? port - 1;
+
+  server.on("upgrade", (req, socket, head) => {
+    const refuse = (status: number, reason: string): void => refuseUpgrade(socket, status, reason);
+    if (!hostAllowed(req.headers.host)) return refuse(403, "Forbidden");
+    const rejection = guardUpgrade(req.headers);
+    if (rejection) {
+      logRejection("viewer", req, rejection);
+      return refuse(rejection.status, "Forbidden");
+    }
+    const pathname = (req.url || "/").split("?")[0];
+    if (pathname !== LIVE_PATH) return refuse(404, "Not Found");
+    if (
+      inboundSecret !== null &&
+      !(
+        requireInboundBearer(req.headers.authorization, inboundSecret) ||
+        requireSubprotocolBearer(req.headers["sec-websocket-protocol"], inboundSecret)
+      )
+    ) {
+      return refuse(401, "Unauthorized");
+    }
+    liveClients.handleUpgrade(req, socket, head, (client) => {
+      relayLiveStream(client, resolvedStreamsPort, secret);
+    });
   });
 
   let attempt = 0;

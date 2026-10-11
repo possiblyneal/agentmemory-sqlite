@@ -211,9 +211,11 @@ async function main() {
   // The only runtime: no engine process, no worker bus. The shim binds the
   // REST and stream ports itself, so a bind failure has to be fatal here
   // rather than leaving a daemon up with no listeners.
+  const secret = getEnvVar("AGENTMEMORY_SECRET");
   const sdk = createInprocSdk({
     restPort: config.restPort,
     streamsPort: config.streamsPort,
+    secret,
     sqlitePath,
     maxBodyBytes: parseInt(getEnvVar("AGENTMEMORY_MAX_BODY_BYTES") || "", 10) || undefined,
   });
@@ -222,7 +224,6 @@ async function main() {
   writeWorkerPidfile();
 
   const kv = new StateKV(sdk);
-  const secret = getEnvVar("AGENTMEMORY_SECRET");
   const metricsStore = new MetricsStore(kv);
   const dedupMap = new DedupMap();
 
@@ -558,6 +559,7 @@ async function main() {
     sdk,
     secret,
     config.restPort,
+    config.streamsPort,
   );
 
   const autoForgetIntervalMs = parseInt(process.env.AUTO_FORGET_INTERVAL_MS || "3600000", 10);

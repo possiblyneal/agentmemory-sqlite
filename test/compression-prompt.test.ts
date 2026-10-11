@@ -39,6 +39,16 @@ describe("compression prompt budgets and fence", () => {
     expect(p).toContain("please do the thing");
   });
 
+  it("a stop reply is fenced as data in the built prompt", () => {
+    const p = buildCompressionPrompt({
+      hookType: "stop",
+      timestamp: "2026-08-18T20:00:00Z",
+      assistantResponse: "Chose WAL mode for concurrent readers.",
+    });
+    const fence = p.slice(p.indexOf("<<<OBSERVATION_DATA"));
+    expect(fence).toContain("Agent reply:\nChose WAL mode for concurrent readers.");
+  });
+
   it("a 35K prompt survives whole (old 2K cap cut 91% of real prompts)", () => {
     const prompt = "x".repeat(35000) + " THE_ACTUAL_ASK_AT_THE_END";
     const p = buildCompressionPrompt({

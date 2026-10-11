@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { resolveProject } from "../src/hooks/_project.js";
 
@@ -81,6 +80,25 @@ describe("resolveProject — hook project basename resolver", () => {
     mkdirSync(join(worktree, "src"), { recursive: true });
     expect(resolveProject(worktree)).toBe(REPO_NAME);
     expect(resolveProject(join(worktree, "src"))).toBe(REPO_NAME);
+  });
+
+  it("names a worktree of a bare repo after the repo, not the worktree (#193)", () => {
+    mkdirSync(join(process.cwd(), "tmp"), { recursive: true });
+    const scratch = realpathSync(mkdtempSync(join(process.cwd(), "tmp", "amem-bare-")));
+    try {
+      const seed = join(scratch, "seed");
+      mkdirSync(seed);
+      const run = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+      run(seed, "init", "--quiet");
+      run(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "--quiet", "-m", "i");
+      const bare = join(scratch, "bare-fixture.git");
+      run(scratch, "clone", "--bare", "--quiet", seed, bare);
+      const worktree = join(scratch, "checkout-x");
+      run(bare, "worktree", "add", "--quiet", worktree, "HEAD");
+      expect(resolveProject(worktree)).toBe("bare-fixture");
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   it("falls back to basename(cwd) when not in a git repo", () => {

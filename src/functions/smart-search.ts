@@ -494,6 +494,8 @@ async function detectFollowup(
   });
 }
 
+const OBSERVATIONS_PREFIX = KV.observations("");
+
 async function findObservation(
   kv: StateKV,
   obsId: string,
@@ -512,18 +514,8 @@ async function findObservation(
   const mem = (await kv.get<Memory>(KV.memories, obsId).catch(() => null)) ?? null;
   if (mem) return memoryToObservation(mem);
 
-  const sessions = await kv.list<{ id: string }>(KV.sessions);
-  for (let i = 0; i < sessions.length; i += 5) {
-    const batch = sessions.slice(i, i + 5);
-    const results = await Promise.all(
-      batch.map((s) =>
-        kv.get<CompressedObservation>(KV.observations(s.id), obsId).catch(() => null),
-      ),
-    );
-    // `!= null` not `!== null`: the engine returns `undefined` on a miss, so a
-    // strict null test matches element 0 of every batch and a real hit is only
-    // returned when it lands at batch index 0 (~1 in 5, deterministic).
-    const found = results.find((r) => r != null);
+  for (const scope of await kv.scopesWithKey(OBSERVATIONS_PREFIX, obsId)) {
+    const found = await kv.get<CompressedObservation>(scope, obsId).catch(() => null);
     if (found) return found;
   }
   return null;

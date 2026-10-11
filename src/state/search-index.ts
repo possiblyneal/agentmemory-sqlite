@@ -8,6 +8,16 @@ interface IndexEntry {
   sessionId: string;
   termCount: number;
   files: string[];
+  layer?: IndexLayer;
+}
+
+export type IndexLayer = "memory" | "observation";
+
+export const SEARCH_LAYERS = ["memory", "observation", "all"] as const;
+export type SearchLayer = (typeof SEARCH_LAYERS)[number];
+
+export function isSearchLayer(value: unknown): value is SearchLayer {
+  return SEARCH_LAYERS.includes(value as SearchLayer);
 }
 
 const TITLE_WEIGHT = 3;
@@ -24,7 +34,7 @@ export class SearchIndex {
   private readonly k1 = 1.2;
   private readonly b = 0.75;
 
-  add(obs: CompressedObservation): void {
+  add(obs: CompressedObservation, layer: IndexLayer = "observation"): void {
     // Re-adding an existing id must not double-count its length.
     // `entries.set` below overwrites the entry, but `totalDocLength +=`
     // is unconditional — so a re-add inflates avgDocLen for EVERY
@@ -47,6 +57,7 @@ export class SearchIndex {
       sessionId: obs.sessionId,
       termCount,
       files: obs.files ?? [],
+      layer,
     });
     this.docTermCounts.set(obs.id, termFreq);
     this.totalDocLength += termCount;
@@ -110,6 +121,7 @@ export class SearchIndex {
   search(
     query: string,
     limit = 20,
+    layer?: IndexLayer,
   ): Array<{ obsId: string; sessionId: string; score: number }> {
     const rawTerms = this.tokenize(query.toLowerCase());
     if (rawTerms.length === 0) return [];
@@ -206,6 +218,7 @@ export class SearchIndex {
     }
 
     return Array.from(scores.entries())
+      .filter(([obsId]) => !layer || (this.entries.get(obsId)!.layer ?? "observation") === layer)
       .map(([obsId, score]) => {
         const entry = this.entries.get(obsId)!;
         return { obsId, sessionId: entry.sessionId, score };

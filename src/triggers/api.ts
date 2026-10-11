@@ -3,6 +3,7 @@ import { parsePage, takePage, listSessionsPage } from "../functions/sessions-pag
 import type { Session, CompressedObservation, HookPayload, CommitLink, InjectedRef, InjectionSource } from "../types.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
+import { isSearchLayer } from "../state/search-index.js";
 import { StateKV } from "../state/kv.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { checkPayloadSize, isOversizedPayload } from "../state/payload-bound.js";
@@ -209,8 +210,10 @@ export function registerApiTriggers(
   kv: StateKV,
   secret?: string,
   metricsStore?: MetricsStore,
-  provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown },
+  provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown; usage?: () => unknown },
 ): void {
+  const providerUsage = () => (provider && "usage" in provider ? provider.usage?.() ?? [] : []);
+
   sdk.registerFunction(
     "middleware::api-auth",
     async (input: {
@@ -315,6 +318,7 @@ export function registerApiTriggers(
           version: VERSION,
           provider: providerKind,
           embeddingProvider,
+          llm: providerUsage(),
           flags,
         },
       };
@@ -339,6 +343,8 @@ export function registerApiTriggers(
       const circuitBreakers =
         provider && "circuitStates" in provider ? provider.circuitStates : null;
 
+      const llm = providerUsage();
+
       const status = health?.status || "healthy";
       const statusCode = status === "critical" ? 503 : 200;
 
@@ -351,6 +357,7 @@ export function registerApiTriggers(
           functionMetrics,
           circuitBreaker,
           circuitBreakers,
+          llm,
           recall: recallCounts(),
           ...instanceInfo(),
         },
@@ -489,6 +496,7 @@ export function registerApiTriggers(
         format?: string;
         token_budget?: number;
         agentId?: string;
+        targetLayer?: string;
       }>,
     ): Promise<Response> => {
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -532,6 +540,12 @@ export function registerApiTriggers(
           body: { error: "token_budget must be a positive integer" },
         };
       }
+      if (body.targetLayer !== undefined && !isSearchLayer(body.targetLayer)) {
+        return {
+          status_code: 400,
+          body: { error: "targetLayer must be one of: memory, observation, all" },
+        };
+      }
       // #817: propagate agentId so the upstream isolation filter
       // applies. Honors body.agentId (POST body), ?agentId=... query
       // param, or implicit fallback to the worker's AGENT_ID when
@@ -551,6 +565,7 @@ export function registerApiTriggers(
             : undefined,
         token_budget: body.token_budget as number | undefined,
         agentId: bodyAgentId ?? queryAgentId,
+        targetLayer: body.targetLayer,
       };
       const result = await sdk.trigger({ function_id: "mem::search", payload: payload });
       return { status_code: 200, body: result };
@@ -2802,10 +2817,15 @@ export function registerApiTriggers(
     async (req: ApiRequest): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
+      const limit = parseOptionalPositiveInt(req.query_params?.["limit"]);
+      if (limit === null) {
+        return { status_code: 400, body: { error: "invalid numeric parameter: limit" } };
+      }
       const result = await sdk.trigger({ function_id: "mem::action-list", payload: {
         status: req.query_params?.["status"],
         project: req.query_params?.["project"],
         parentId: req.query_params?.["parentId"],
+        limit,
       } });
       return { status_code: 200, body: result };
     },

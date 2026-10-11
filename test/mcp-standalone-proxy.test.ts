@@ -160,6 +160,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       format: "full",
       token_budget: 800,
       project: "cwd-project",
+      targetLayer: "memory",
     });
     expect(calls.find((c) => c.url.endsWith("/agentmemory/smart-search"))).toBeUndefined();
   });
@@ -190,6 +191,21 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     await handleToolCall("memory_recall", { query: "x" });
     expect(recallBody?.["format"]).toBe("full");
     expect(recallBody).not.toHaveProperty("token_budget");
+  });
+
+  it("memory_recall searches Memories by default and forwards an explicit targetLayer (#191)", async () => {
+    const layers: unknown[] = [];
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      layers.push(JSON.parse(init?.body as string)["targetLayer"]);
+      return new Response(JSON.stringify({ mode: "full", facts: [] }), { status: 200 });
+    });
+    await handleToolCall("memory_recall", { query: "x" });
+    await handleToolCall("memory_recall", { query: "x", targetLayer: "all" });
+    await expect(
+      handleToolCall("memory_recall", { query: "x", targetLayer: "everything" }),
+    ).rejects.toThrow(/targetLayer/);
+    expect(layers).toEqual(["memory", "all"]);
   });
 
   it("proxies memory_governance_delete to the DELETE REST endpoint", async () => {

@@ -192,8 +192,18 @@ export interface ProviderConfig {
 
 export type ProviderType = "agent-sdk" | "anthropic" | "gemini" | "openrouter" | "minimax" | "openai" | "noop";
 
+export interface ProviderUsage {
+  provider: string;
+  model: string;
+  endpointHost: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface MemoryProvider {
   name: string;
+  usage?(): ProviderUsage[];
   compress(systemPrompt: string, userPrompt: string): Promise<string>;
   summarize(systemPrompt: string, userPrompt: string): Promise<string>;
   describeImage?(imageData: string, mimeType: string, prompt: string): Promise<string>;
@@ -618,6 +628,7 @@ export interface SemanticMemory {
   sourceMemoryIds: string[];
   accessCount: number;
   lastAccessedAt: string;
+  lastDecayedAt?: string;
   strength: number;
   createdAt: string;
   updatedAt: string;
@@ -635,6 +646,7 @@ export interface ProceduralMemory {
   tags?: string[];
   concepts?: string[];
   strength: number;
+  lastDecayedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

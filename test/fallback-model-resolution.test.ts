@@ -188,3 +188,29 @@ describe("Fallback provider model resolution (#778)", () => {
     expect(openaiCalls.length).toBe(1);
   });
 });
+
+describe("premium model cost warning", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.restoreAllMocks();
+  });
+
+  it("warns once when OPENAI_MODEL is a premium model", async () => {
+    vi.resetModules();
+    const { loadConfig } = await import("../src/config.js");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    for (const k of Object.keys(process.env)) {
+      if (/_API_KEY$|^AGENTMEMORY_(PROVIDER|SUPPRESS_COST_WARNING)$/.test(k)) delete process.env[k];
+    }
+    process.env["OPENAI_API_KEY"] = "sk-test";
+    process.env["OPENAI_MODEL"] = "gpt-5.6-sol";
+
+    loadConfig();
+    loadConfig();
+
+    const warnings = write.mock.calls.filter((c) => String(c[0]).includes("OPENAI_MODEL=gpt-5.6-sol"));
+    expect(warnings).toHaveLength(1);
+  });
+});

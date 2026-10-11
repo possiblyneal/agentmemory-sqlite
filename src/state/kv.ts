@@ -1,4 +1,5 @@
 import type { ISdk } from '../engine/types.js'
+import type { NewestMatchingOpts } from '../engine/inproc/state.js'
 
 export const SET_MANY_CHUNK = 100
 
@@ -181,6 +182,23 @@ export class StateKV {
     return this.sdk.trigger<{ prefix: string }, string[]>({
       function_id: 'state::list-scopes',
       payload: { prefix },
+    })
+  }
+
+  async scopesWithKey(prefix: string, key: string): Promise<string[]> {
+    return this.sdk.trigger<{ prefix: string; key: string }, string[]>({
+      function_id: 'state::scopes-with-key',
+      payload: { prefix, key },
+    })
+  }
+
+  async listNewestMatching<T = unknown>(
+    scope: string,
+    opts: NewestMatchingOpts,
+  ): Promise<T[]> {
+    return this.sdk.trigger<{ scope: string; opts: typeof opts }, T[]>({
+      function_id: 'state::list-newest-matching',
+      payload: { scope, opts },
     })
   }
 }

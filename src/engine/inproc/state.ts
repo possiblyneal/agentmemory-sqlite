@@ -20,6 +20,13 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+export type NewestMatchingOpts = {
+  equals: Record<string, string>;
+  excludeKey?: string;
+  newestBy: string;
+  limit: number;
+};
+
 export type StateEventType =
   | "state:created"
   | "state:updated"
@@ -352,6 +359,43 @@ export class SqliteState {
     return [...found];
   }
 
+  // The scopes under the prefix that hold `key` - an id's Session when only
+  // the id is known. One range scan of the (scope, key) index.
+  scopesWithKey(prefix: string, key: string): string[] {
+    const rows = this.db
+      .prepare("SELECT scope FROM kv WHERE scope >= ? AND scope < ? AND key = ?")
+      .all(prefix, prefixUpperBound(prefix), key) as Array<{ scope: string }>;
+    return rows.map((r) => r.scope);
+  }
+
+  // The `limit` rows of `scope` whose top-level fields equal `equals`, newest
+  // by the string field `newestBy` first, ties in insertion order.
+  listNewestMatching(
+    scope: string,
+    opts: NewestMatchingOpts,
+  ): unknown[] {
+    const field = (name: string): string => {
+      if (!/^\w+$/.test(name)) throw new Error(`state::list-newest-matching: bad field ${JSON.stringify(name)}`);
+      return `json_extract(value, '$.${name}')`;
+    };
+    const where = ["scope = ?"];
+    const args: Array<string | number> = [scope];
+    for (const [name, want] of Object.entries(opts.equals)) {
+      where.push(`${field(name)} = ?`);
+      args.push(want);
+    }
+    if (opts.excludeKey !== undefined) {
+      where.push("key != ?");
+      args.push(opts.excludeKey);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT value FROM kv WHERE ${where.join(" AND ")} ORDER BY ${field(opts.newestBy)} DESC, seq LIMIT ?`,
+      )
+      .all(...args, opts.limit) as Array<{ value: string }>;
+    return rows.map((r) => JSON.parse(r.value));
+  }
+
   // Raw upsert used by set/update. Keeps the existing row's `seq`. Returns the
   // stored encoding so callers can hand back exactly what landed in the row
   // instead of the caller's own object.
@@ -539,6 +583,9 @@ export function stateFunctions(
     "state::list-newest": async (p) => cooperate(store.listNewest(p.scope, p.opts)),
     "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),
     "state::existing-keys": async (p) => cooperate(store.existingKeys(p.prefix, p.keys ?? [])),
+    "state::scopes-with-key": async (p) => cooperate(store.scopesWithKey(p.prefix, p.key)),
+    "state::list-newest-matching": async (p) =>
+      cooperate(store.listNewestMatching(p.scope, p.opts)),
     "state::set-many": async (p) => cooperate(store.setMany(p.scope, p.entries ?? [])),
     "state::set-many-if-unchanged": async (p) =>
       cooperate(store.setManyIfUnchanged(p.scope, p.entries ?? [])),

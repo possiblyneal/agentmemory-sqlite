@@ -155,6 +155,58 @@ describe("mem::observe auto-compress gate (#138)", () => {
     expect(compressCalls).toHaveLength(1);
   });
 
+  it("a stop reply is stored as the Observation's assistantResponse, synthetic by default", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    const { observationId } = (await sdk.trigger(
+      "mem::observe",
+      validPayload({ hookType: "stop", data: { last_message: "Fixed the retry bug in sync.ts." } }),
+    )) as { observationId: string };
+
+    expect(sdk.triggered.filter((t) => t.id === "mem::compress")).toHaveLength(0);
+    const obs = await kv.get<{ title: string; narrative: string; assistantResponse?: string }>(
+      "mem:obs:ses_test",
+      observationId,
+    );
+    expect(obs?.assistantResponse).toBe("Fixed the retry bug in sync.ts.");
+    expect(obs?.title).toBe("Agent replied: Fixed the retry bug in sync.ts.");
+    expect(obs?.narrative).toContain("Fixed the retry bug in sync.ts.");
+  });
+
+  it("AGENTMEMORY_AUTO_COMPRESS=true: a stop reply goes to LLM Compression with the reply", async () => {
+    process.env["AGENTMEMORY_AUTO_COMPRESS"] = "true";
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    await sdk.trigger(
+      "mem::observe",
+      validPayload({ hookType: "stop", data: { last_message: "Chose WAL mode because of concurrent readers." } }),
+    );
+
+    const compressCalls = sdk.triggered.filter((t) => t.id === "mem::compress");
+    expect(compressCalls).toHaveLength(1);
+    expect((compressCalls[0]!.data as { raw: RawObservation }).raw.assistantResponse).toBe(
+      "Chose WAL mode because of concurrent readers.",
+    );
+  });
+
+  it("AGENTMEMORY_AUTO_COMPRESS=true: a stop with no reply stays synthetic", async () => {
+    process.env["AGENTMEMORY_AUTO_COMPRESS"] = "true";
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+
+    await sdk.trigger("mem::observe", validPayload({ hookType: "stop", data: {} }));
+
+    expect(sdk.triggered.filter((t) => t.id === "mem::compress")).toHaveLength(0);
+  });
+
   it("AGENTMEMORY_AUTO_COMPRESS=true: a read-only call stays synthetic", async () => {
     process.env["AGENTMEMORY_AUTO_COMPRESS"] = "true";
     const { registerObserveFunction } = await import(

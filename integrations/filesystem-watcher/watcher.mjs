@@ -1,19 +1,29 @@
 import { watch, promises as fsp, statSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, relative, join, extname, sep, basename } from "node:path";
+import { resolve, relative, join, extname, sep, basename, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-// Same resolution order as the hooks' resolveProject (git toplevel basename,
-// then directory basename) so a watched subdirectory scopes to the repository
-// name instead of the subdirectory name.
+// Same rule as the hooks' resolveProject (src/hooks/_project.ts), minus its
+// same-name disambiguation: the main checkout's basename, so every worktree of a
+// repo shares one project, then the toplevel basename, then the directory basename.
 function deriveProjectName(dir) {
   try {
-    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      cwd: dir,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8",
-    }).trim();
+    const [commonDir, top] = execFileSync(
+      "git",
+      ["rev-parse", "--git-common-dir", "--show-toplevel"],
+      { cwd: dir, stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" },
+    )
+      .trim()
+      .split("\n");
+    if (commonDir) {
+      const common = resolve(dir, commonDir);
+      if (basename(common) === ".git") return basename(dirname(common));
+      if (top && common !== resolve(top, ".git") && !common.split(/[\\/]/).includes("modules")) {
+        const name = basename(common);
+        return name === ".bare" ? basename(dirname(common)) : name.replace(/\.git$/, "");
+      }
+    }
     if (top) return basename(top);
   } catch {
     // not a git repo

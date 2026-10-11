@@ -23,6 +23,7 @@ import { scoreCompression } from "../eval/quality.js";
 import { compressWithRetry } from "../eval/self-correct.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { logger } from "../logger.js";
+import { stripPrivateData } from "./privacy.js";
 
 const VALID_TYPES = new Set<string>([
   "file_read",
@@ -166,7 +167,9 @@ export function registerCompressFunction(
             else if (data.raw.imageData.endsWith(".gif")) mimeType = "image/gif";
           }
 
-          imageDescription = await provider.describeImage(base64Data, mimeType, VISION_DESCRIPTION_PROMPT);
+          imageDescription = stripPrivateData(
+            await provider.describeImage(base64Data, mimeType, VISION_DESCRIPTION_PROMPT),
+          );
           logger.info("Image described by vision model", { obsId: data.observationId });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -185,6 +188,7 @@ export function registerCompressFunction(
           ? `[Image Description]: ${imageDescription}\n\n${data.raw.toolOutput ?? ""}`
           : data.raw.toolOutput,
         userPrompt: data.raw.userPrompt,
+        assistantResponse: data.raw.assistantResponse,
         timestamp: data.raw.timestamp,
       };
       const prompt = buildCompressionPrompt(promptArgs);
@@ -288,15 +292,6 @@ export function registerCompressFunction(
         }
 
         const streamResults = await Promise.allSettled([
-          sdk.trigger({
-            function_id: "stream::set",
-            payload: {
-              stream_name: STREAM.name,
-              group_id: STREAM.group(data.sessionId),
-              item_id: data.observationId,
-              data: { type: "compressed", observation: compressed },
-            },
-          }),
           sdk.trigger({
             function_id: "stream::send",
             payload: {

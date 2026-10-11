@@ -129,7 +129,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "a Memory cannot have both a project and global" };
       }
 
-      return withKeyedLock("mem:remember", async () => {
+      const saved = await withKeyedLock("mem:remember", async () => {
         // Candidate generation: query the BM25 index with the new content
         // and Jaccard-compare only the top hits, instead of walking the
         // full memory corpus on every save. The index receives every
@@ -282,25 +282,13 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         // an indexing failure doesn't block the save itself — the
         // restart-time rebuild will pick the memory up either way.
         try {
-          getSearchIndex().add(memoryToIndexDoc(memory));
+          getSearchIndex().add(memoryToIndexDoc(memory), "memory");
         } catch (err) {
           logger.warn("Failed to index saved memory into BM25", {
             memId: memory.id,
             error: err instanceof Error ? err.message : String(err),
           });
         }
-        // Batched so a chunked save costs ONE embed round-trip rather
-        // than one per chunk. Yields a single job when chunking is off.
-        const vectorSessionId = memory.sessionIds?.[0] ?? MEMORY_SESSION;
-        await vectorIndexAddBatchGuarded(
-          memoryChunkJobs(memory).map((job) => ({
-            id: job.id,
-            sessionId: vectorSessionId,
-            text: job.text,
-            context: { kind: "memory" as const, logId: job.id },
-          })),
-        );
-
         await recordAudit(kv, "remember", "mem::remember", [memory.id], {
           type: memory.type,
           sessionIds: memory.sessionIds,
@@ -354,6 +342,20 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             : {}),
         };
       });
+
+      // Outside the lock: a slow embedder must not queue other saves. A
+      // Memory rewritten meanwhile has its stale completion dropped by the
+      // content check in commitEmbedding, and the index fill backfills it.
+      const vectorSessionId = saved.memory.sessionIds?.[0] ?? MEMORY_SESSION;
+      await vectorIndexAddBatchGuarded(
+        memoryChunkJobs(saved.memory).map((job) => ({
+          id: job.id,
+          sessionId: vectorSessionId,
+          text: job.text,
+          context: { kind: "memory" as const, logId: job.id },
+        })),
+      );
+      return saved;
     },
   );
 

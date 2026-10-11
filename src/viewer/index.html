@@ -1090,27 +1090,19 @@
     var paramPort = params.get('port');
     var locPort = window.location.port;
     var wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var REST, WS_URL, WS_DIRECT_URL, wsPort;
+    var REST;
     if (paramPort) {
       var resolvedPort = parseInt(paramPort) === 3111 ? '3113' : paramPort;
       REST = window.location.protocol + '//' + window.location.hostname + ':' + resolvedPort;
-      wsPort = params.get('wsPort') || String(parseInt(resolvedPort) - 1);
-      WS_URL = wsProto + '//' + window.location.hostname + ':' + wsPort;
-      WS_DIRECT_URL = WS_URL + '/stream/mem-live/viewer';
     } else if (locPort) {
       var resolvedPort = parseInt(locPort) === 3111 ? '3113' : locPort;
       REST = window.location.protocol + '//' + window.location.hostname + ':' + resolvedPort;
-      wsPort = params.get('wsPort') || String(parseInt(resolvedPort) - 1);
-      WS_URL = wsProto + '//' + window.location.hostname + ':' + wsPort;
-      WS_DIRECT_URL = WS_URL + '/stream/mem-live/viewer';
     } else {
       REST = window.location.origin;
-      wsPort = params.get('wsPort');
-      WS_URL = wsPort
-        ? wsProto + '//' + window.location.hostname + ':' + wsPort
-        : wsProto + '//' + window.location.host;
-      WS_DIRECT_URL = WS_URL + '/stream/mem-live/viewer';
     }
+    // The live stream rides the viewer's own origin; the viewer server proxies
+    // it to the streams port and attaches the secret there.
+    var WS_URL = REST.replace(/^http/, 'ws') + '/agentmemory/live';
 
     var dateEl = document.getElementById('dateline');
     if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
@@ -1171,7 +1163,7 @@
       audit: { loaded: false, entries: [], opFilter: '' },
       activity: { loaded: false, observations: [], sessions: [], typeFilter: '' },
       lessons: { loaded: false, items: [], search: '', selectedId: null },
-      actions: { loaded: false, items: [], frontier: [], statusFilter: '', search: '' },
+      actions: { loaded: false, items: [], total: 0, frontier: [], statusFilter: '', search: '' },
       crystals: { loaded: false, items: [], search: '', lessonMap: {} },
       profile: { loaded: false, projects: [], selectedProject: '', data: null },
       replay: { loaded: false, sessions: [], selectedId: '', timeline: null, cursor: 0, playing: false, speed: 1, timer: null, startAt: 0, offsetAt: 0 },
@@ -3516,8 +3508,9 @@
     async function loadActions() {
       var el = document.getElementById('view-actions');
       if (!state.actions.loaded) el.innerHTML = '<div class="loading">Loading actions...</div>';
-      var results = await Promise.all([apiGet('actions'), apiGet('frontier')]);
+      var results = await Promise.all([apiGet('actions?limit=200'), apiGet('frontier')]);
       state.actions.items = (results[0] && results[0].actions) || [];
+      state.actions.total = (results[0] && results[0].total) || state.actions.items.length;
       state.actions.frontier = (results[1] && (results[1].frontier || results[1].actions)) || [];
       state.actions.loaded = true;
       renderActions();
@@ -3554,6 +3547,9 @@
       html += '</select>';
       html += '<span style="font-size:12px;color:var(--ink-faint);align-self:center;">' + items.length + ' actions</span>';
       html += '</div>';
+      if (state.actions.total > state.actions.items.length) {
+        html += '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:8px;">Showing the ' + state.actions.items.length + ' most recently updated of ' + state.actions.total + ' actions.</div>';
+      }
 
       if (items.length === 0) {
         html += '<div class="empty-state">' +
@@ -3889,9 +3885,6 @@
     var wsReconnectTimer = null;
     var wsRetries = 0;
     var WS_MAX_RETRIES = 4;
-    var directFailed = false;
-    var directFailures = 0;
-    var DIRECT_FAILURE_THRESHOLD = 2;
     var pollTimer = null;
     var POLL_INTERVAL_MS = 10000;
 
@@ -3927,8 +3920,6 @@
           var ws = state.ws;
           if (!ws || ws.readyState !== WebSocket.OPEN) {
             wsRetries = 0;
-            directFailures = 0;
-            directFailed = false;
             connectWs();
           }
         }
@@ -3948,14 +3939,15 @@
         startPolling();
         return;
       }
-      var useDirect = !directFailed;
       var ws;
       try {
-        ws = new WebSocket(useDirect ? WS_DIRECT_URL : WS_URL);
-        ws.__direct = useDirect;
+        var viewerToken = getViewerToken();
+        ws = viewerToken
+          ? new WebSocket(WS_URL, ['agentmemory-bearer', btoa(viewerToken).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')])
+          : new WebSocket(WS_URL);
       } catch (_) {
-        ws = new WebSocket(WS_URL);
-        ws.__direct = false;
+        startPolling();
+        return;
       }
       var connectTimer = setTimeout(function() {
         if (ws.readyState === WebSocket.CONNECTING) {
@@ -3968,20 +3960,6 @@
           if (state.ws !== ws) return;
           wsRetries = 0;
           stopPolling();
-          if (ws.__direct) {
-            directFailures = 0;
-            directFailed = false;
-          }
-          if (!ws.__direct) {
-            ws.send(JSON.stringify({
-              type: 'join',
-              data: {
-                subscriptionId: 'viewer-' + Date.now(),
-                streamName: 'mem-live',
-                groupId: 'viewer'
-              }
-            }));
-          }
           setWsStatus('live', 'connected');
         };
         ws.onmessage = function(e) {
@@ -3998,12 +3976,6 @@
         ws.onclose = function() {
           clearTimeout(connectTimer);
           if (state.ws !== ws) return;
-          if (ws.__direct) {
-            directFailures += 1;
-            if (directFailures >= DIRECT_FAILURE_THRESHOLD) {
-              directFailed = true;
-            }
-          }
           wsRetries++;
           if (wsRetries < WS_MAX_RETRIES) {
             setWsStatus('connecting...', 'disconnected');
@@ -4038,8 +4010,8 @@
       if (evt.event_type && evt.event_type !== 'observation' && evt.event_type !== 'create' && evt.event_type !== 'update') {
         return;
       }
-      if (evt.type === 'event' && evt.data) {
-        observation = evt.data.observation || evt.data;
+      if (evt.type === 'event' && evt.event && evt.event.data) {
+        observation = evt.event.data.observation || evt.event.data;
         if (looksLikeObservation(observation)) {
           routeWsMessage({ observation: observation });
         }
@@ -4599,21 +4571,7 @@
     });
 
     switchTab(tabFromRoute(), { replaceRoute: true });
-    // Resolve the stream WebSocket target from the server before the first
-    // connect. The old viewerPort-1 arithmetic breaks whenever the viewer
-    // binds a fallback port (3113 taken → viewer on 3114 → 3113 is another
-    // HTTP server, not the streams endpoint) — every retry then fails and
-    // the viewer silently degrades to 10s polling.
-    (async function initWs() {
-      try {
-        var live = await api('livez', { signal: AbortSignal.timeout(5000) });
-        if (live && typeof live.streamsPort === 'number' && live.streamsPort > 0) {
-          WS_URL = wsProto + '//' + window.location.hostname + ':' + live.streamsPort;
-          WS_DIRECT_URL = WS_URL + '/stream/mem-live/viewer';
-        }
-      } catch (_) {}
-      connectWs();
-    })();
+    connectWs();
     startDashboardAutoRefresh();
 
     // Ambient background: an ordered-dither dot field that drifts very

@@ -23,32 +23,47 @@ import {
 import { logger } from "../logger.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 
+export const DECAY_FLOOR = 0.1;
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+export function decayedStrength(base: number, periods: number): number {
+  return Math.max(DECAY_FLOOR, base * Math.pow(0.9, periods));
+}
+
 // Returns the rows whose strength changed, so the caller writes only those. A
 // row inside its decay window or already at the 0.1 floor is left alone: the
 // old "rewrite every row" tier was 45k fsyncs per run (day-0 soak finding).
+// Periods count from the later of the last access and the last decay, and
+// lastDecayedAt advances by the whole periods applied, so each idle period
+// lowers strength once however often the tier runs.
 function applyDecay<
-  T extends { strength: number; lastAccessedAt?: string; updatedAt: string },
+  T extends {
+    strength: number;
+    lastAccessedAt?: string;
+    lastDecayedAt?: string;
+    updatedAt: string;
+  },
 >(items: T[], decayDays: number): T[] {
   if (decayDays <= 0 || !Number.isFinite(decayDays)) return [];
   const changed: T[] = [];
   const now = Date.now();
+  const periodMs = decayDays * DAY_MS;
   for (const item of items) {
-    const lastAccess = item.lastAccessedAt || item.updatedAt;
-    const daysSince =
-      (now - new Date(lastAccess).getTime()) / (1000 * 60 * 60 * 24);
-    if (daysSince > decayDays) {
-      const decayPeriods = Math.floor(daysSince / decayDays);
-      const next = Math.max(DECAY_FLOOR, item.strength * Math.pow(0.9, decayPeriods));
-      if (next !== item.strength) {
-        item.strength = next;
-        changed.push(item);
-      }
+    const reference = Math.max(
+      new Date(item.lastAccessedAt || item.updatedAt).getTime(),
+      item.lastDecayedAt ? new Date(item.lastDecayedAt).getTime() : -Infinity,
+    );
+    const periods = Math.floor((now - reference) / periodMs);
+    if (periods < 1) continue;
+    const next = decayedStrength(item.strength, periods);
+    if (next !== item.strength) {
+      item.strength = next;
+      item.lastDecayedAt = new Date(reference + periods * periodMs).toISOString();
+      changed.push(item);
     }
   }
   return changed;
 }
-
-const DECAY_FLOOR = 0.1;
 
 const UNSCOPED_CURSOR_KEY = "consolidation:unscopedCursor";
 

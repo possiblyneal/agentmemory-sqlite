@@ -175,7 +175,8 @@ export async function lowerObservationCounts(
 }
 
 function hasCompressibleContent(raw: RawObservation): boolean {
-  return [raw.toolInput, raw.toolOutput, raw.userPrompt, raw.imageData].some(
+  const stopReply = raw.hookType === "stop" ? raw.assistantResponse : undefined;
+  return [raw.toolInput, raw.toolOutput, raw.userPrompt, raw.imageData, stopReply].some(
     (v) =>
       v !== undefined &&
       v !== null &&
@@ -394,8 +395,10 @@ export function registerObserveFunction(
               : payload.data;
         dedupHash = dedupMap.computeHash(
           payload.sessionId,
+          payload.hookType,
           toolName,
           dedupInput,
+          d["tool_output"] ?? d["tool_response"] ?? d["error"],
         );
         if (dedupMap.isDuplicate(dedupHash)) {
           return { deduplicated: true, sessionId: payload.sessionId };
@@ -442,7 +445,7 @@ export function registerObserveFunction(
         if (payload.hookType === "prompt_submit") {
           raw.userPrompt = d["prompt"] as string | undefined;
         }
-        if (payload.hookType === "subagent_stop" && typeof d["last_message"] === "string") {
+        if ((payload.hookType === "subagent_stop" || payload.hookType === "stop") && typeof d["last_message"] === "string") {
           raw.assistantResponse = d["last_message"];
         }
 
@@ -574,16 +577,6 @@ export function registerObserveFunction(
         }
 
         await sdk.trigger({
-          function_id: "stream::set",
-          payload: {
-          stream_name: STREAM.name,
-          group_id: STREAM.group(payload.sessionId),
-          item_id: obsId,
-          data: { type: "raw", observation: raw },
-          },
-        });
-
-        await sdk.trigger({
           function_id: "stream::send",
           payload: {
             stream_name: STREAM.name,
@@ -681,15 +674,6 @@ export function registerObserveFunction(
           });
         } else {
           const synthetic = await storeSyntheticCompression(kv, raw);
-          await sdk.trigger({
-            function_id: "stream::set",
-            payload: {
-              stream_name: STREAM.name,
-              group_id: STREAM.group(payload.sessionId),
-              item_id: obsId,
-              data: { type: "compressed", observation: synthetic },
-            },
-          });
           await sdk.trigger({
             function_id: "stream::set",
             payload: {

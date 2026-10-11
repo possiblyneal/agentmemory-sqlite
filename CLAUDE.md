@@ -41,7 +41,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
-- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**`, where scratch worktrees live)
+- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
@@ -73,6 +73,10 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 **When adding new KV scopes:**
 1. `src/state/schema.ts` — add to the KV object
 2. `src/types.ts` — add the corresponding interface
+
+**When adding a field that Decay reads or writes (strength, lastAccessedAt, lastDecayedAt):**
+1. `src/types.ts` — `SemanticMemory` and `ProceduralMemory`
+2. `applyDecay` in `src/functions/consolidation-pipeline.ts` and `repairDecay` in `src/state/startup-maintenance.ts`, which must agree on the period count
 
 **When adding new audit operations:**
 1. `src/types.ts` — add to AuditEntry.operation union type
@@ -126,6 +130,26 @@ Auth is the inline `checkAuth(req, secret)` above, which is what nearly every en
 `src/triggers/api.ts` does. A `middleware_function_ids: ["middleware::api-auth"]` on the
 trigger is the minority form — follow whichever the endpoints around yours use, and do not
 put both on one endpoint.
+
+### Request guard
+`guardRequest()` (`src/security/request-guard.ts`) runs first in both the REST server
+(`src/engine/inproc/sdk.ts`) and the viewer proxy (`src/viewer/server.ts`). A request other than
+GET/HEAD/OPTIONS is rejected 403 when it carries an `Origin` that is neither loopback nor a
+`VIEWER_ALLOWED_HOSTS` entry, and 415 when its `Content-Type` is not `application/json`; no
+`Origin` passes, so hooks, the CLI and the MCP shim are unaffected. REST alone also answers 403
+to a `Host` that is not `localhost`, `127.0.0.1`, `[::1]`, the bind host or a
+`VIEWER_ALLOWED_HOSTS` entry (DNS rebinding). Every client that POSTs must send
+`Content-Type: application/json`. No secret is generated: a fresh install works unchanged.
+
+The live stream follows the same rules. The streams port (3112) refuses a WebSocket upgrade
+whose `Origin` fails `guardUpgrade()` (403, a GET the method-gated guard would pass) and, when
+`AGENTMEMORY_SECRET` is set, one without `Authorization: Bearer <secret>` (401). No web page
+connects to it: the viewer page opens `/agentmemory/live` on its own origin, and the viewer
+server (`relayLiveStream` in `src/viewer/server.ts`) applies the Host and Origin checks, requires
+the inbound bearer on a non-loopback bind (a browser carries it as the second subprotocol,
+`["agentmemory-bearer", base64url(token)]`), and relays `mem-live`/`viewer` only, adding the secret
+upstream. Observe and compress publish to the `viewer` group alone; there are no per-Session
+stream groups.
 
 ### Observations on a full disk
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write

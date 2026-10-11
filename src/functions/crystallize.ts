@@ -2,6 +2,7 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Action, ActionEdge, Crystal, MemoryProvider } from "../types.js";
+import { stripPrivateData } from "./privacy.js";
 
 interface CrystalDigest {
   narrative: string;
@@ -55,7 +56,13 @@ export function registerCrystallizeFunction(
 
       try {
         const response = await provider.summarize(CRYSTALLIZE_SYSTEM, prompt);
-        const digest = parseDigest(response);
+        const parsedDigest = parseDigest(response);
+        const digest = {
+          narrative: stripPrivateData(parsedDigest.narrative),
+          keyOutcomes: parsedDigest.keyOutcomes.map((s) => stripPrivateData(String(s))),
+          filesAffected: parsedDigest.filesAffected.map((s) => stripPrivateData(String(s))),
+          lessons: parsedDigest.lessons.map((s) => stripPrivateData(String(s))),
+        };
 
         const crystal: Crystal = {
           id: generateId("crys"),

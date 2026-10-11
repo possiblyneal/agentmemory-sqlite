@@ -109,7 +109,7 @@ function oneLine(s: string): string {
 }
 
 // Titles and narrative for hooks whose payload carries no tool fields. The
-// payload shapes are what src/hooks/{subagent-start,subagent-stop,
+// payload shapes are what src/hooks/{stop,subagent-start,subagent-stop,
 // task-completed,notification}.ts send.
 function describeHook(
   raw: RawObservation,
@@ -137,6 +137,14 @@ function describeHook(
       return {
         title: `Subagent finished: ${kind || id || oneLine(last)}`,
         narrative: join([last, id && `id ${id}`]),
+      };
+    }
+    case "stop": {
+      const reply = str(d["last_message"]);
+      if (!reply) return undefined;
+      return {
+        title: `Agent replied: ${oneLine(reply)}`,
+        narrative: reply,
       };
     }
     case "task_completed": {
