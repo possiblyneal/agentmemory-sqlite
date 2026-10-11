@@ -7,6 +7,9 @@ import type { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { logger } from "../logger.js";
 import { writeFileAtomicNoSymlink } from "../utils/atomic-write.js";
+import { resolveProject } from "../hooks/_project.js";
+
+const BRIDGE_HEADER = "# Agent Memory (auto-synced by agentmemory)";
 
 function parseMemoryMd(content: string): {
   sections: Map<string, string>;
@@ -40,7 +43,7 @@ function serializeToMemoryMd(
   lineBudget: number,
 ): string {
   const lines: string[] = [];
-  lines.push("# Agent Memory (auto-synced by agentmemory)");
+  lines.push(BRIDGE_HEADER);
   lines.push("");
 
   if (projectSummary) {
@@ -119,8 +122,22 @@ export function registerClaudeBridgeFunction(
       }
 
       try {
+        if (existsSync(config.memoryFilePath)) {
+          const firstLine = readFileSync(config.memoryFilePath, "utf-8").split("\n")[0];
+          if (firstLine.trim() !== BRIDGE_HEADER) {
+            const error = `${config.memoryFilePath} was not written by agentmemory (first line is not the auto-sync header); refusing to overwrite it`;
+            logger.warn("Claude bridge: refused to overwrite hand-written MEMORY.md", {
+              path: config.memoryFilePath,
+            });
+            return { success: false, error };
+          }
+        }
+
+        const project = resolveProject(config.projectPath);
         const memories = await kv.list<Memory>(KV.memories);
-        const latestMemories = memories.filter((m) => m.isLatest);
+        const latestMemories = memories.filter(
+          (m) => m.isLatest && m.project === project,
+        );
 
         let projectSummary = "";
         if (config.projectPath) {
