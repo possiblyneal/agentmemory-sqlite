@@ -20,14 +20,11 @@ import {
 } from "../prompts/reflect.js";
 import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
+import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { logger } from "../logger.js";
 import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 import { getInsightMaxIdleWeeks } from "../config.js";
 
-// A cluster takes every fact sharing a word with its concepts, which on the
-// Operator's broker reached 100k+ tokens and starved sibling slots during
-// prefill. ~8k tokens at the tree's chars/3 estimate.
-const CLUSTER_PROMPT_CHARS = 24_000;
 const MIN_CLUSTER_ITEMS = 3;
 // Nodes one reflect pass reads from the graph indexes.
 const REFLECT_GRAPH_NODE_LIMIT = 5000;
@@ -59,7 +56,7 @@ function fitClusterToBudget(
     lessons: [{ content: "", confidence: 0 }],
     crystalNarratives: [""],
   });
-  let remaining = CLUSTER_PROMPT_CHARS - header.length;
+  let remaining = CONSOLIDATION_PROMPT_CHARS - header.length;
   const take = <T>(items: T[], line: (item: T) => string): T[] =>
     items.filter((item) => {
       const chars = line(item).length + 1;
