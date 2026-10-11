@@ -31,12 +31,15 @@ import {
   type ReplaySession,
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
+import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
 const SEARCH_LIMIT = 5;
 const MAX_TRANSCRIPT_BYTES = 20_000_000;
+const DRAIN_POLL_MS = 500;
+const DRAIN_STALL_MS = 15 * 60_000;
 
 interface Options {
   projects: string[];
@@ -45,6 +48,7 @@ interface Options {
   maxPrompts: number;
   instance: number;
   embeddings: EmbeddingMode;
+  llm: boolean;
   root: string;
   out: string;
   split: Split;
@@ -59,6 +63,7 @@ function parseOptions(): Options {
       "max-prompts": { type: "string", default: "40" },
       instance: { type: "string", default: "9" },
       embeddings: { type: "string", default: "local" },
+      llm: { type: "boolean", default: false },
       root: { type: "string", default: join(homedir(), ".claude/projects") },
       out: { type: "string", default: join(REPO_TMP, "eval-replay") },
       split: { type: "string" },
@@ -87,6 +92,10 @@ function parseOptions(): Options {
     console.error(`--embeddings must be local or none, got: ${values.embeddings}`);
     process.exit(2);
   }
+  if (values.llm && !process.env.OPENAI_API_KEY) {
+    console.error("--llm needs the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
+    process.exit(2);
+  }
   return {
     projects,
     cap: positive("cap", values.cap as string),
@@ -94,6 +103,7 @@ function parseOptions(): Options {
     maxPrompts: positive("max-prompts", values["max-prompts"] as string),
     instance: positive("instance", values.instance as string),
     embeddings: values.embeddings,
+    llm: values.llm === true,
     root: resolve(values.root as string),
     out,
     split: openSplit(values.split, "replay"),
@@ -303,6 +313,77 @@ async function probeSession(
   return probes;
 }
 
+// Compression runs after /observe has answered, so an Observation is stored
+// raw first and gains its narrative when its compression lands (a failed one
+// degrades to the synthetic record, which has one too).
+async function compressionDrained(baseUrl: string, sessionId: string): Promise<void> {
+  let pending = Infinity;
+  let progressAt = Date.now();
+  for (;;) {
+    const { body } = await get<{ observations?: Array<{ narrative?: unknown }> }>(
+      baseUrl,
+      `observations?sessionId=${encodeURIComponent(sessionId)}`,
+    );
+    const now = (body.observations ?? []).filter((o) => typeof o.narrative !== "string").length;
+    if (now === 0) return;
+    if (now < pending) progressAt = Date.now();
+    pending = now;
+    if (Date.now() - progressAt > DRAIN_STALL_MS) {
+      console.warn(`  ${pending} Observations still uncompressed after ${DRAIN_STALL_MS / 60_000} min without progress`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, DRAIN_POLL_MS));
+  }
+}
+
+// The live path: the hooks' Observations through /observe, then the Session
+// Summary and the end of the Session, as Stop does once the Session idles.
+// Summarize is awaited first, so the stop handler finds the Summary current
+// and reuses it; the consolidation the stop fans out is not waited for.
+async function ingestThroughHooks(baseUrl: string, session: ReplaySession): Promise<{ drainMs: number; summarized: boolean }> {
+  for (const payload of hookPayloads(readFileSync(session.sourcePath!, "utf8"), session)) {
+    await post(baseUrl, "observe", payload);
+  }
+  const t0 = Date.now();
+  await compressionDrained(baseUrl, session.id);
+  const drainMs = Date.now() - t0;
+  const { body } = await post<{ success?: boolean }>(baseUrl, "summarize", { sessionId: session.id });
+  await post(baseUrl, "session/end", { sessionId: session.id });
+  return { drainMs, summarized: body.success === true };
+}
+
+function llmProvider() {
+  const base = process.env.OPENAI_BASE_URL;
+  return {
+    provider: "openai-compatible",
+    model: process.env.OPENAI_MODEL ?? "provider default",
+    baseUrlHost: base ? new URL(base).host : "api.openai.com",
+    reasoningEffort: process.env.OPENAI_REASONING_EFFORT ?? null,
+    maxConcurrency: process.env.AGENTMEMORY_LLM_MAX_CONCURRENCY ?? null,
+    autoCompress: process.env.AGENTMEMORY_AUTO_COMPRESS === "true",
+  };
+}
+
+interface FunctionMetric {
+  functionId: string;
+  totalCalls: number;
+  successCount: number;
+  failureCount: number;
+  avgLatencyMs: number;
+}
+
+async function llmMetrics(baseUrl: string): Promise<Record<string, Omit<FunctionMetric, "functionId">>> {
+  const { body } = await get<{ functionMetrics?: FunctionMetric[] }>(baseUrl, "health");
+  return Object.fromEntries(
+    (body.functionMetrics ?? [])
+      .filter((m) => m.functionId === "mem::compress" || m.functionId === "mem::summarize")
+      .map(({ functionId, totalCalls, successCount, failureCount, avgLatencyMs }) => [
+        functionId,
+        { totalCalls, successCount, failureCount, avgLatencyMs: Math.round(avgLatencyMs) },
+      ]),
+  );
+}
+
 function worstCasesMarkdown(scores: SessionScore[]): string {
   const cases = worstCases(scores);
   const lines = [
@@ -332,7 +413,8 @@ async function main(): Promise<void> {
   // The Operator's live daemon injects; without this the sandbox's session
   // start writes no Injection record and delivers nothing to score.
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
-  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings });
+  if (opts.llm) process.env.AGENTMEMORY_AUTO_COMPRESS ??= "true";
+  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
   // Every Session is imported whichever split runs, but only the split's
   // Sessions are probed, and probing writes Session and Injection rows, so the
@@ -342,6 +424,8 @@ async function main(): Promise<void> {
   const scores: SessionScore[] = [];
   const bytesStart = storeBytes(sandbox.sqlitePath);
   const t0 = Date.now();
+  let drainMsTotal = 0;
+  let summarizedSessions = 0;
   try {
     for (const [i, session] of sessions.entries()) {
       const probeStart = Date.now();
@@ -354,8 +438,16 @@ async function main(): Promise<void> {
       }
 
       const importStart = Date.now();
+      let drain = "";
       try {
-        await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath, project: session.project });
+        if (opts.llm) {
+          const { drainMs, summarized } = await ingestThroughHooks(sandbox.baseUrl, session);
+          drainMsTotal += drainMs;
+          if (summarized) summarizedSessions++;
+          drain = ` drain=${Math.round(drainMs / 1000)}s summary=${summarized}`;
+        } else {
+          await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath, project: session.project });
+        }
         const { body } = await get<{ observations?: ObsRow[] }>(sandbox.baseUrl, `observations?sessionId=${encodeURIComponent(session.id)}`);
         for (const row of body.observations ?? []) resolver.observations.set(row.id, { session, row });
         resolver.sessions.set(session.id, session);
@@ -369,7 +461,7 @@ async function main(): Promise<void> {
         : "unscored ";
       console.log(
         `[${i + 1}/${sessions.length}] ${session.id.slice(0, 8)} ${scoredLine}probe=${Math.round((importStart - probeStart) / 1000)}s ` +
-          `import=${Math.round((Date.now() - importStart) / 1000)}s total=${Math.round((Date.now() - t0) / 1000)}s`,
+          `import=${Math.round((Date.now() - importStart) / 1000)}s${drain} total=${Math.round((Date.now() - t0) / 1000)}s`,
       );
     }
     const meta = { storeBytesStart: bytesStart, storeBytesEnd: storeBytes(sandbox.sqlitePath) };
@@ -382,8 +474,11 @@ async function main(): Promise<void> {
         embeddingModel: opts.embeddings === "none" ? null : (process.env.OPENAI_EMBEDDING_MODEL ?? null),
         embeddingDimensions: process.env.OPENAI_EMBEDDING_DIMENSIONS ?? null,
         rerank: process.env.RERANK_ENABLED ?? "off",
-        llm: "none",
+        llm: opts.llm ? llmProvider() : "none",
       },
+      ...(opts.llm && {
+        llm: { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions },
+      }),
       directories: perDirectory,
       projects: perProject,
       minutes: (Date.now() - t0) / 60_000,

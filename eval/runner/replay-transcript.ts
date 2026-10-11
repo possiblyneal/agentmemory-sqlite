@@ -1,4 +1,4 @@
-import { parseJsonlText } from "../../src/replay/jsonl-parser.js";
+import { CONTINUATION_SUMMARY, parseJsonlText } from "../../src/replay/jsonl-parser.js";
 
 export interface UserTurn {
   turn: number;
@@ -27,13 +27,24 @@ export interface ReplaySession {
 
 const READ_TOOLS = new Set(["Read"]);
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+// Turns the Operator did not type as a request: slash-command wrappers, shell
+// escapes and their output, interrupts, a loaded skill's body, a compaction
+// summary, and a message relayed from another Session.
 const NOT_A_HUMAN_TURN = [
   /^<command-(name|message|args)>/,
   /^<local-command-/,
+  /^<bash-(input|stdout|stderr)>/,
   /^\[Request interrupted/,
   /^Caveat:/,
-  /^This session is being continued from a previous conversation/,
+  /^Base directory for this skill:/,
+  CONTINUATION_SUMMARY,
+  /^Another Claude session sent a message:\s*<teammate-message[\s>]/,
 ];
+const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+
+export function isOperatorTurn(prompt: string): boolean {
+  return !NOT_A_HUMAN_TURN.some((re) => re.test(prompt)) && prompt.replace(SYSTEM_REMINDER, "").trim() !== "";
+}
 
 export function relativeToCwd(file: string, cwd: string): string | null {
   if (!file.startsWith("/")) return file.replace(/^\.\//, "");
@@ -66,7 +77,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
     if (obs.userPrompt !== undefined) {
       const prompt = obs.userPrompt.trim();
       if (entry.isMeta === true || entry.isCompactSummary === true) continue;
-      if (NOT_A_HUMAN_TURN.some((re) => re.test(prompt))) continue;
+      if (!isOperatorTurn(prompt)) continue;
       userTurns.push({ turn: userTurns.length + 1, text: prompt, timestamp: obs.timestamp });
     } else if (obs.hookType === "pre_tool_use" && obs.toolName) {
       const mode = READ_TOOLS.has(obs.toolName) ? "read" : EDIT_TOOLS.has(obs.toolName) ? "edit" : null;

@@ -6,5 +6,8 @@
       "session-start": { "recall": 0.813, "precision": 1, "noAnswerClean": 1 },
       "prompt-submit": { "recall": 0.907, "precision": 0.822, "noAnswerClean": 0.833 }
     }
+  },
+  "latencyCeilingMs": {
+    "agentmemory-bm25": { "session-start": 500, "prompt-submit": 500 }
   }
 }

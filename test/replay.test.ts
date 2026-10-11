@@ -166,3 +166,29 @@ describe("replay::load of compressed observations (#1023)", () => {
     expect(err.toolOutput).toContain("tsc error");
   });
 });
+
+describe("parseJsonlText: continuation summaries", () => {
+  const user = (text: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      type: "user",
+      sessionId: "s",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message: { role: "user", content: text },
+      ...extra,
+    });
+
+  it("does not store a compaction summary as a user prompt", () => {
+    const text = [
+      user("Fix the login bug"),
+      user("This session is being continued from a previous conversation that ran out of context.", {
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+      }),
+      user("Summary written without the flag", { isCompactSummary: true }),
+      user("This session is being continued from a previous conversation. Older shape, no flag."),
+      user("Now add a test"),
+    ].join("\n");
+    const prompts = parseJsonlText(text).observations.map((o) => o.userPrompt);
+    expect(prompts).toEqual(["Fix the login bug", "Now add a test"]);
+  });
+});
