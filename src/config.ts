@@ -334,8 +334,7 @@ export function loadTeamConfig(): TeamConfig | null {
   const teamId = env["TEAM_ID"];
   const userId = env["USER_ID"];
   if (!teamId || !userId) return null;
-  const mode = env["TEAM_MODE"] === "shared" ? "shared" : "private";
-  return { teamId, userId, mode };
+  return { teamId, userId };
 }
 
 // optional AGENT_ID env for multi-agent memory isolation.

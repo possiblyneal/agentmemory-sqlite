@@ -654,7 +654,6 @@ export interface ProceduralMemory {
 export interface TeamConfig {
   teamId: string;
   userId: string;
-  mode: "shared" | "private";
 }
 
 export type AgentScopeMode = "shared" | "isolated";

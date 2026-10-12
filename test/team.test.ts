@@ -49,7 +49,6 @@ function mockSdk() {
 const teamConfig: TeamConfig = {
   teamId: "test-team",
   userId: "user-1",
-  mode: "shared" as const,
 };
 
 const testMemory: Memory = {

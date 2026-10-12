@@ -314,9 +314,7 @@ async function main() {
   const teamConfig = loadTeamConfig();
   if (teamConfig) {
     registerTeamFunction(sdk, kv, teamConfig);
-    bootLog(
-      `Team memory: ${teamConfig.teamId} (${teamConfig.mode})`,
-    );
+    bootLog(`Team memory: ${teamConfig.teamId}`);
   }
 
   registerGovernanceFunction(sdk, kv);
