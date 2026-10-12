@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,11 @@ describe("inproc state store", () => {
   afterEach(() => {
     store.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("opens with synchronous=NORMAL so a WAL commit does not fsync", () => {
+    const row = store.db.prepare("PRAGMA synchronous").get() as { synchronous: number };
+    expect(row.synchronous).toBe(1);
   });
 
   it("list-newest returns the newest matching rows first, filtered and limited in SQL", async () => {
@@ -490,19 +495,5 @@ describe("inproc state store: batched writes and event-loop cooperation", () => 
     }
     expect(firedAt).toBeGreaterThanOrEqual(0);
     expect(firedAt).toBeLessThan(rounds);
-  });
-
-  it("opens with synchronous=NORMAL so a WAL commit does not fsync", () => {
-    const scratch = join(process.cwd(), "tmp");
-    mkdirSync(scratch, { recursive: true });
-    const scratchDir = mkdtempSync(join(scratch, "am-inproc-sync-"));
-    const scratchStore = new SqliteState(join(scratchDir, "state.sqlite"));
-    try {
-      const row = scratchStore.db.prepare("PRAGMA synchronous").get() as { synchronous: number };
-      expect(row.synchronous).toBe(1);
-    } finally {
-      scratchStore.close();
-      rmSync(scratchDir, { recursive: true, force: true });
-    }
   });
 });
