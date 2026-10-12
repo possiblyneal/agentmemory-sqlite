@@ -867,7 +867,7 @@ prs:
       - test/team.test.ts
     note: "TEAM_MODE=private was read but never enforced, and team-share accepted any sharedBy value."
     disposition: wont-fix
-    status: "partly-present-here — team-share always stamps config.userId (src/functions/team.ts:55), so impersonation is closed; TEAM_MODE=private still filters nothing in team-feed/team-profile."
+    status: "fixed-here — team-share always stamps config.userId (src/functions/team.ts:55), so impersonation is closed; TEAM_MODE was removed by #210, so no setting promises private team items."
     wont_fix_reason: "single Operator — one person uses the daemon, so per-user team privacy has no reader"
     url: https://github.com/rohitg00/agentmemory/pull/689
   - number: 742
