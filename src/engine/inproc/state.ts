@@ -170,9 +170,10 @@ export class SqliteState {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL");
-    // Authoritative store, tiny write rate: durability of an acknowledged
-    // write beats the fsync it costs.
-    this.db.exec("PRAGMA synchronous = FULL");
+    // WAL + NORMAL: a crash or power loss cannot corrupt the store, and a
+    // process crash loses nothing. Only the last commits before an OS crash
+    // or power loss can be lost. FULL fsynced every COMMIT.
+    this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(SCHEMA);
   }
