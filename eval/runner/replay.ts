@@ -33,6 +33,7 @@ import {
 import { daemonCall } from "./daemon-http.js";
 import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
+import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
@@ -41,7 +42,11 @@ const MAX_TRANSCRIPT_BYTES = 20_000_000;
 const DRAIN_POLL_MS = 500;
 const DRAIN_STALL_MS = 15 * 60_000;
 
+type BackendName = "agentmemory" | "hindsight";
+
 interface Options {
+  backend: BackendName;
+  hindsightPort: number;
   projects: string[];
   cap: number;
   minTurns: number;
@@ -57,6 +62,8 @@ interface Options {
 function parseOptions(): Options {
   const { values } = parseArgs({
     options: {
+      backend: { type: "string", default: "agentmemory" },
+      "hindsight-port": { type: "string", default: "18888" },
       projects: { type: "string" },
       cap: { type: "string", default: "40" },
       "min-turns": { type: "string", default: "2" },
@@ -92,18 +99,30 @@ function parseOptions(): Options {
     console.error(`--embeddings must be local or none, got: ${values.embeddings}`);
     process.exit(2);
   }
-  if (values.llm && !process.env.OPENAI_API_KEY) {
-    console.error("--llm needs the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
+  if (values.backend !== "agentmemory" && values.backend !== "hindsight") {
+    console.error(`--backend must be agentmemory or hindsight, got: ${values.backend}`);
+    process.exit(2);
+  }
+  // Hindsight extracts its memories with the LLM, so it always runs with one.
+  const llm = values.llm === true || values.backend === "hindsight";
+  if (values.backend === "hindsight" && values.embeddings === "none") {
+    console.error("--backend hindsight always embeds locally; drop --embeddings none");
+    process.exit(2);
+  }
+  if (llm && !process.env.OPENAI_API_KEY) {
+    console.error("--llm and --backend hindsight need the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
     process.exit(2);
   }
   return {
+    backend: values.backend,
+    hindsightPort: positive("hindsight-port", values["hindsight-port"] as string),
     projects,
     cap: positive("cap", values.cap as string),
     minTurns: positive("min-turns", values["min-turns"] as string),
     maxPrompts: positive("max-prompts", values["max-prompts"] as string),
     instance: positive("instance", values.instance as string),
     embeddings: values.embeddings,
-    llm: values.llm === true,
+    llm,
     root: resolve(values.root as string),
     out,
     split: openSplit(values.split, "replay"),
@@ -402,55 +421,91 @@ function worstCasesMarkdown(scores: SessionScore[]): string {
   return lines.join("\n");
 }
 
-async function main(): Promise<void> {
-  const opts = parseOptions();
-  const { sessions, perDirectory, perProject } = loadSessions(opts);
-  console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories), instance ${opts.instance}`);
-  mkdirSync(opts.out, { recursive: true });
-  const ndjson = join(opts.out, "scores.ndjson");
-  writeFileSync(ndjson, "");
+// What the replay needs from a memory system: probe a Session against what
+// it holds, then ingest that Session.
+interface Backend {
+  probe(session: ReplaySession, maxPrompts: number): Promise<Probe[]>;
+  ingest(session: ReplaySession): Promise<string>;
+  storeBytes(): Promise<number>;
+  metrics(): Promise<Record<string, unknown> | undefined>;
+  providers(): Record<string, unknown>;
+  stop(): Promise<void>;
+}
 
+async function startAgentmemory(opts: Options): Promise<Backend> {
   // The Operator's live daemon injects; without this the sandbox's session
   // start writes no Injection record and delivers nothing to score.
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   if (opts.llm) process.env.AGENTMEMORY_AUTO_COMPRESS ??= "true";
   const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
-  // Every Session is imported whichever split runs, but only the split's
-  // Sessions are probed, and probing writes Session and Injection rows, so the
-  // dev and holdout stores differ. Compare a run only with one of its own split.
-  const scored = new Set(selectSplit("replay", sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
-  const ingested: ReplaySession[] = [];
-  const scores: SessionScore[] = [];
-  const bytesStart = storeBytes(sandbox.sqlitePath);
-  const t0 = Date.now();
   let drainMsTotal = 0;
   let summarizedSessions = 0;
+  return {
+    probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver),
+    async ingest(session) {
+      let drain = "";
+      if (opts.llm) {
+        const { drainMs, summarized } = await ingestThroughHooks(sandbox.baseUrl, session);
+        drainMsTotal += drainMs;
+        if (summarized) summarizedSessions++;
+        drain = ` drain=${Math.round(drainMs / 1000)}s summary=${summarized}`;
+      } else {
+        await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath, project: session.project });
+      }
+      const { body } = await get<{ observations?: ObsRow[] }>(sandbox.baseUrl, `observations?sessionId=${encodeURIComponent(session.id)}`);
+      for (const row of body.observations ?? []) resolver.observations.set(row.id, { session, row });
+      resolver.sessions.set(session.id, session);
+      return drain;
+    },
+    storeBytes: async () => storeBytes(sandbox.sqlitePath),
+    metrics: async () =>
+      opts.llm ? { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions } : undefined,
+    providers: () => ({
+      backend: "agentmemory",
+      embeddings: opts.embeddings === "none" ? "none" : (process.env.EMBEDDING_PROVIDER ?? "local"),
+      embeddingModel: opts.embeddings === "none" ? null : (process.env.OPENAI_EMBEDDING_MODEL ?? null),
+      embeddingDimensions: process.env.OPENAI_EMBEDDING_DIMENSIONS ?? null,
+      rerank: process.env.RERANK_ENABLED ?? "off",
+      llm: opts.llm ? llmProvider() : "none",
+    }),
+    stop: () => sandbox.stop(),
+  };
+}
+
+async function main(): Promise<void> {
+  const opts = parseOptions();
+  const { sessions, perDirectory, perProject } = loadSessions(opts);
+  console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
+  mkdirSync(opts.out, { recursive: true });
+  const ndjson = join(opts.out, "scores.ndjson");
+  writeFileSync(ndjson, "");
+
+  // Every Session is imported whichever split runs, but only the split's
+  // Sessions are probed, and probing agentmemory writes Session and Injection
+  // rows, so its dev and holdout stores differ. Compare a run only with one of
+  // its own split.
+  const scored = new Set(selectSplit("replay", sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
+  const backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
+  const ingested: ReplaySession[] = [];
+  const scores: SessionScore[] = [];
+  const t0 = Date.now();
   try {
+    const bytesStart = await backend.storeBytes();
     for (const [i, session] of sessions.entries()) {
       const probeStart = Date.now();
       let score: SessionScore | undefined;
       if (scored.has(session.id)) {
-        const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
+        const probes = await backend.probe(session, opts.maxPrompts);
         score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
         scores.push(score);
         appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       }
 
       const importStart = Date.now();
-      let drain = "";
+      let detail = "";
       try {
-        if (opts.llm) {
-          const { drainMs, summarized } = await ingestThroughHooks(sandbox.baseUrl, session);
-          drainMsTotal += drainMs;
-          if (summarized) summarizedSessions++;
-          drain = ` drain=${Math.round(drainMs / 1000)}s summary=${summarized}`;
-        } else {
-          await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath, project: session.project });
-        }
-        const { body } = await get<{ observations?: ObsRow[] }>(sandbox.baseUrl, `observations?sessionId=${encodeURIComponent(session.id)}`);
-        for (const row of body.observations ?? []) resolver.observations.set(row.id, { session, row });
-        resolver.sessions.set(session.id, session);
+        detail = await backend.ingest(session);
         ingested.push(session);
       } catch (err) {
         console.warn(`  import failed: ${errorMessage(err)}`);
@@ -461,24 +516,17 @@ async function main(): Promise<void> {
         : "unscored ";
       console.log(
         `[${i + 1}/${sessions.length}] ${session.id.slice(0, 8)} ${scoredLine}probe=${Math.round((importStart - probeStart) / 1000)}s ` +
-          `import=${Math.round((Date.now() - importStart) / 1000)}s${drain} total=${Math.round((Date.now() - t0) / 1000)}s`,
+          `import=${Math.round((Date.now() - importStart) / 1000)}s${detail} total=${Math.round((Date.now() - t0) / 1000)}s`,
       );
     }
-    const meta = { storeBytesStart: bytesStart, storeBytesEnd: storeBytes(sandbox.sqlitePath) };
+    const meta = { storeBytesStart: bytesStart, storeBytesEnd: await backend.storeBytes() };
     const summary = summarizeReplay(scores, meta);
+    const metrics = await backend.metrics();
     const run = {
       date: new Date().toISOString(),
       options: { ...opts, root: undefined, out: undefined },
-      providers: {
-        embeddings: opts.embeddings === "none" ? "none" : (process.env.EMBEDDING_PROVIDER ?? "local"),
-        embeddingModel: opts.embeddings === "none" ? null : (process.env.OPENAI_EMBEDDING_MODEL ?? null),
-        embeddingDimensions: process.env.OPENAI_EMBEDDING_DIMENSIONS ?? null,
-        rerank: process.env.RERANK_ENABLED ?? "off",
-        llm: opts.llm ? llmProvider() : "none",
-      },
-      ...(opts.llm && {
-        llm: { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions },
-      }),
+      providers: backend.providers(),
+      ...(metrics && { llm: metrics }),
       directories: perDirectory,
       projects: perProject,
       minutes: (Date.now() - t0) / 60_000,
@@ -488,7 +536,7 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary }, null, 2));
     console.log(`\nwrote ${opts.out}/{summary.json,scores.ndjson,worst-cases.md}`);
   } finally {
-    await sandbox.stop();
+    await backend.stop();
   }
 }
 

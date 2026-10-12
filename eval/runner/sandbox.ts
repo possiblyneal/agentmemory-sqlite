@@ -23,7 +23,7 @@ function instancePorts(instance: number): number[] {
   return [rest, rest + 1, rest + 2];
 }
 
-function isListening(port: number): Promise<boolean> {
+export function isListening(port: number): Promise<boolean> {
   return new Promise((done) => {
     const socket = connect({ port, host: "localhost" });
     socket.setTimeout(500);
