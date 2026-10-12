@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { EMBED_TIMEOUT_MS, fetchWithTimeout } from "../src/providers/_fetch.js";
+import { EMBED_TIMEOUT_MS, fetchWithTimeout, ProviderTimeoutError } from "../src/providers/_fetch.js";
 import { MinimaxProvider } from "../src/providers/minimax.js";
 import { OpenRouterProvider } from "../src/providers/openrouter.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
@@ -9,18 +9,19 @@ import { CohereEmbeddingProvider } from "../src/providers/embedding/cohere.js";
 import { VoyageEmbeddingProvider } from "../src/providers/embedding/voyage.js";
 import { OpenRouterEmbeddingProvider } from "../src/providers/embedding/openrouter.js";
 
-// A fetch mock that never resolves — simulates a hung upstream.
+// A fetch mock that never resolves — simulates a hung upstream. Like real
+// fetch, it rejects with the signal's abort reason.
 function hangingFetch(_url: string, _init?: RequestInit): Promise<Response> {
   // honour AbortSignal so the timeout actually cancels us
   const init = _init ?? {};
   return new Promise<Response>((_resolve, reject) => {
     if (init.signal) {
       if (init.signal.aborted) {
-        reject(new DOMException("AbortError", "AbortError"));
+        reject(init.signal.reason);
         return;
       }
       init.signal.addEventListener("abort", () => {
-        reject(new DOMException("AbortError", "AbortError"));
+        reject(init.signal!.reason);
       });
     }
   });
@@ -32,7 +33,7 @@ function stalledBodyFetch(_url: string, init?: RequestInit): Promise<Response> {
   const body = new ReadableStream({
     start(controller) {
       signal.addEventListener("abort", () =>
-        controller.error(new DOMException("AbortError", "AbortError")),
+        controller.error(signal.reason),
       );
     },
   });
@@ -61,10 +62,10 @@ describe("fetchWithTimeout", () => {
     expect(res.status).toBe(200);
   });
 
-  it("aborts with an AbortError when fetch hangs beyond the configured timeout", async () => {
+  it("aborts with a ProviderTimeoutError when fetch hangs beyond the configured timeout", async () => {
     await expect(
       fetchWithTimeout("https://example.com", {}, 50),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(ProviderTimeoutError);
   });
 
   it("reads AGENTMEMORY_LLM_TIMEOUT_MS as the default timeout when no explicit ms is given", async () => {
@@ -128,7 +129,7 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
       signals.push(signal);
       return new Promise<Response>((_resolve, reject) => {
         signal.addEventListener("abort", () =>
-          reject(new DOMException("AbortError", "AbortError")),
+          reject(signal.reason),
         );
       });
     }) as typeof fetch;
@@ -161,7 +162,7 @@ describe("fetchWithTimeout bounded retry (total deadline)", () => {
       signals.push(signal);
       return new Promise<Response>((_resolve, reject) => {
         signal.addEventListener("abort", () =>
-          reject(new DOMException("AbortError", "AbortError")),
+          reject(signal.reason),
         );
       });
     }) as typeof fetch;
