@@ -751,7 +751,7 @@ describe("mem::summarize chunking", () => {
     expect(result).toMatchObject({ success: false, error: "empty_provider_response" });
   });
 
-  it("on a chunked Session, a merged summary that fails schema re-runs every chunk and the reduce", async () => {
+  it("on a chunked Session, a merged summary that fails schema re-runs only the reduce", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
     const provider = makeProvider([
@@ -759,9 +759,6 @@ describe("mem::summarize chunking", () => {
       summaryXml({ title: "Chunk 2" }),
       summaryXml({ title: "Chunk 3" }),
       summaryXml({ title: "Merged short", narrative: SHORT_NARRATIVE }),
-      summaryXml({ title: "Chunk 1" }),
-      summaryXml({ title: "Chunk 2" }),
-      summaryXml({ title: "Chunk 3" }),
       summaryXml({ title: "Merged" }),
     ]);
     const { handler, kv } = await setupHandler({ sessionId: "ses_chunked_invalid", obsCount: 250, provider });
@@ -769,10 +766,9 @@ describe("mem::summarize chunking", () => {
     const result: any = await handler({ sessionId: "ses_chunked_invalid" });
 
     expect(result.success).toBe(true);
-    // 3 chunks + 1 reduce per attempt, two attempts.
-    expect(provider.calls).toHaveLength(8);
-    expect(provider.calls[3].system).toContain("merging multiple partial summaries");
-    expect(provider.calls[7].system).toContain("merging multiple partial summaries");
+    const isReduce = (c: { system: string }) => c.system.includes("merging multiple partial summaries");
+    expect(provider.calls.filter((c) => !isReduce(c))).toHaveLength(3);
+    expect(provider.calls.filter(isReduce)).toHaveLength(2);
     const stored: any = await kv.get("summaries", "ses_chunked_invalid");
     expect(stored.title).toBe("Merged");
     expect(stored.narrative).toBe(VALID_NARRATIVE);

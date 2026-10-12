@@ -1,6 +1,6 @@
 import type { MemoryProvider, ProviderUsage } from "../types.js";
 import { getEnvVar } from "../config.js";
-import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
+import { fetchWithTimeout, ProviderHttpError, ProviderTimeoutError } from "./_fetch.js";
 import { UsageTally, hostOf } from "./_usage.js";
 import {
   DEFAULT_AZURE_API_VERSION,
@@ -166,9 +166,8 @@ export class OpenAIProvider implements MemoryProvider {
         this.timeoutMs,
       );
     } catch (err) {
-      const aborted = err instanceof Error && err.name === "AbortError";
-      if (aborted) {
-        throw new Error(
+      if (err instanceof ProviderTimeoutError) {
+        throw new ProviderTimeoutError(
           `OpenAI API request timed out after ${this.timeoutMs}ms — set OPENAI_TIMEOUT_MS (or AGENTMEMORY_LLM_TIMEOUT_MS) to raise the bound or check the provider status.`,
         );
       }

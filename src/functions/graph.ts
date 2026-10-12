@@ -31,6 +31,7 @@ import {
   buildGraphExtractionPrompt,
 } from "../prompts/graph-extraction.js";
 import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
+import { ProviderTimeoutError } from "../providers/_fetch.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { attributedIds, capSourceIds } from "./graph-provenance.js";
 import { withProjectRelativeFiles } from "./project-files.js";
@@ -1059,6 +1060,9 @@ async function extractGraph(
     }
     // One prompt per batch bounds its size: a whole long Session in one
     // prompt ran past the LLM timeout mid-prefill.
+    // Two batches in a row that time out even on their retry mean a wedged
+    // provider, which the breaker misses when timeouts are minutes apart.
+    let timedOutInARow = 0;
     for (let i = 0; i < observations.length; i += batchSize) {
       const batch = observations.slice(i, i + batchSize);
       const prompt = buildGraphExtractionPrompt(
@@ -1072,7 +1076,18 @@ async function extractGraph(
       );
       const started = Date.now();
       try {
-        const response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        let response: string;
+        try {
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        } catch (err) {
+          if (!(err instanceof ProviderTimeoutError)) throw err;
+          logger.warn("Retrying a graph batch after a timeout", {
+            sessionId: batch[0]!.sessionId,
+            batchSize: batch.length,
+            promptChars: prompt.length,
+          });
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        }
         const parsed = parseGraphXml(
           response,
           batch.map((o) => o.id),
@@ -1087,8 +1102,10 @@ async function extractGraph(
           annotations.set(obsId, annotation);
         }
         if (failure === undefined) extracted = i + batch.length;
+        timedOutInARow = 0;
       } catch (err) {
         failure ??= err;
+        timedOutInARow = err instanceof ProviderTimeoutError ? timedOutInARow + 1 : 0;
         logger.error("LLM graph extraction failed", {
           error: err instanceof Error ? err.message : String(err),
           sessionId: batch[0]!.sessionId,
@@ -1097,7 +1114,7 @@ async function extractGraph(
           promptChars: prompt.length,
           tookMs: Date.now() - started,
         });
-        if (stopAtFirstFailure || isProviderDown(err)) break;
+        if (stopAtFirstFailure || isProviderDown(err) || timedOutInARow >= 2) break;
       }
     }
   }
@@ -1224,7 +1241,11 @@ export function registerGraphFunction(
   // With a sessionId, observations are extracted oldest first and the
   // Session's watermark advances only past batches that succeeded.
   sdk.registerFunction("mem::graph-extract",
-    async (data: { observations: CompressedObservation[]; sessionId?: string }) => {
+    async (data: {
+      observations: CompressedObservation[];
+      sessionId?: string;
+      recovery?: boolean;
+    }) => {
       if (!data.observations || data.observations.length === 0) {
         return { success: false, error: "No observations provided" };
       }
@@ -1255,7 +1276,7 @@ export function registerGraphFunction(
           provider,
           observations,
           batchSize,
-          true,
+          !data.recovery,
         );
         if (progress) {
           await advanceGraphWatermark(kv, sessionId, observations, batchSize, progress);

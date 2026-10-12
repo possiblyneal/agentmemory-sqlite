@@ -27,6 +27,12 @@ export class ProviderHttpError extends Error {
   }
 }
 
+// The caller's deadline passed before the request, its retries or the read of
+// its body finished.
+export class ProviderTimeoutError extends Error {
+  override name = "TimeoutError";
+}
+
 // OpenAI answers an exhausted quota with 429 too; that never clears by waiting,
 // so it counts as broken and opens the breaker.
 export function isProviderBusy(err: unknown): boolean {
@@ -86,7 +92,10 @@ export async function fetchWithTimeout(
   // the headers arrive, so a server that stalls mid-body is cut off too.
   const start = Date.now();
   const deadline = new AbortController();
-  setTimeout(() => deadline.abort(), ms).unref();
+  setTimeout(
+    () => deadline.abort(new ProviderTimeoutError(`request timed out after ${ms}ms`)),
+    ms,
+  ).unref();
   const signal = init.signal
     ? AbortSignal.any([init.signal, deadline.signal])
     : deadline.signal;

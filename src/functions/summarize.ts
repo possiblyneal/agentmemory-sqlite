@@ -211,16 +211,23 @@ async function planChunks(
   return chunks;
 }
 
+interface ChunkPartials {
+  reduceInput: ReducePartial[];
+  skipped: number;
+}
+
 // Returns the final summary XML string. A single chunk is one LLM call.
 // Several are processed in parallel batches, each chunk retried once on
 // parse failure, persistently-bad chunks skipped, and the remaining
-// partials merged via a reduce call.
+// partials merged via a reduce call. The partials land in `chunkPartials`, so a
+// retry of a rejected merge re-runs the reduce alone.
 async function produceSummaryXml(
   provider: MemoryProvider,
   chunks: CompressedObservation[][],
   sessionId: string,
   project: string,
   concurrency: number,
+  chunkPartials: { partials?: ChunkPartials },
 ): Promise<{
   response: string;
   mode: "single" | "chunked";
@@ -235,6 +242,25 @@ async function produceSummaryXml(
     return { response, mode: "single", chunks: 1 };
   }
 
+  chunkPartials.partials ??= await summarizeChunks(provider, chunks, sessionId, project, concurrency);
+  const { reduceInput, skipped } = chunkPartials.partials;
+  const response = await reducePartials(
+    provider,
+    reduceInput,
+    sessionId,
+    project,
+    concurrency,
+  );
+  return { response, mode: "chunked", chunks: chunks.length, skipped };
+}
+
+async function summarizeChunks(
+  provider: MemoryProvider,
+  chunks: CompressedObservation[][],
+  sessionId: string,
+  project: string,
+  concurrency: number,
+): Promise<ChunkPartials> {
   // Results keep chunk order, so the reduce step sees partials in
   // chronological order even when some were skipped.
   const partialByIdx = await mapWithConcurrency(
@@ -270,14 +296,7 @@ async function produceSummaryXml(
     const start = chunkStarts[originalIdx] ?? 0;
     return toReducePartial(p, start + 1, start + chunks[originalIdx]!.length);
   });
-  const response = await reducePartials(
-    provider,
-    reduceInput,
-    sessionId,
-    project,
-    concurrency,
-  );
-  return { response, mode: "chunked", chunks: chunks.length, skipped };
+  return { reduceInput, skipped };
 }
 
 function toReducePartial(
@@ -499,6 +518,7 @@ export function registerSummarizeFunction(
           compressed[priorCount - 1]!.id === existing.lastObservationId;
         let foldPrompt: string | null = null;
         let planned: CompressedObservation[][] | null = null;
+        const chunkCache: { partials?: ChunkPartials } = {};
         if (foldable) {
           const prompt = buildFoldPrompt(existing, compressed.slice(priorCount), priorCount);
           const budget = getChunkTokens();
@@ -520,6 +540,7 @@ export function registerSummarizeFunction(
                 sessionId,
                 session.project,
                 concurrency,
+                chunkCache,
               );
           const response = produced.response;
           mode = produced.mode;
