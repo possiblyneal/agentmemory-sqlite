@@ -166,10 +166,7 @@ export class OpenAIProvider implements MemoryProvider {
         this.timeoutMs,
       );
     } catch (err) {
-      const aborted =
-        err instanceof ProviderTimeoutError ||
-        (err instanceof Error && err.name === "AbortError");
-      if (aborted) {
+      if (err instanceof ProviderTimeoutError) {
         throw new ProviderTimeoutError(
           `OpenAI API request timed out after ${this.timeoutMs}ms — set OPENAI_TIMEOUT_MS (or AGENTMEMORY_LLM_TIMEOUT_MS) to raise the bound or check the provider status.`,
         );

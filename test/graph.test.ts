@@ -315,6 +315,38 @@ describe("Graph Functions", () => {
         expect(mockProvider.compress).toHaveBeenCalledTimes(2);
       });
 
+      it("ends a recovery pass after two batches in a row time out on their retry", async () => {
+        mockProvider.compress
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout());
+
+        await recover();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(4);
+        expect(await session()).toMatchObject({ graphExtractFailures: 1 });
+      });
+
+      it("keeps a recovery pass going when a success separates two timed-out batches", async () => {
+        const fourBatches = Array.from({ length: 35 }, (_, i) => ({
+          ...testObs,
+          id: `obs_${i}`,
+          timestamp: `2026-02-01T10:00:${String(i).padStart(2, "0")}Z`,
+        }));
+        mockProvider.compress
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout())
+          .mockResolvedValueOnce("<entities></entities>")
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout())
+          .mockResolvedValueOnce("<entities></entities>");
+
+        await recover(fourBatches);
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(6);
+      });
+
       it("still ends a recovery pass when the provider is down", async () => {
         mockProvider.compress.mockRejectedValueOnce(new Error("circuit_breaker_open"));
 

@@ -219,7 +219,7 @@ interface ChunkPartials {
 // Returns the final summary XML string. A single chunk is one LLM call.
 // Several are processed in parallel batches, each chunk retried once on
 // parse failure, persistently-bad chunks skipped, and the remaining
-// partials merged via a reduce call. The partials land in `cache`, so a
+// partials merged via a reduce call. The partials land in `chunkPartials`, so a
 // retry of a rejected merge re-runs the reduce alone.
 async function produceSummaryXml(
   provider: MemoryProvider,
@@ -227,7 +227,7 @@ async function produceSummaryXml(
   sessionId: string,
   project: string,
   concurrency: number,
-  cache: { partials?: ChunkPartials },
+  chunkPartials: { partials?: ChunkPartials },
 ): Promise<{
   response: string;
   mode: "single" | "chunked";
@@ -242,8 +242,8 @@ async function produceSummaryXml(
     return { response, mode: "single", chunks: 1 };
   }
 
-  cache.partials ??= await summarizeChunks(provider, chunks, sessionId, project, concurrency);
-  const { reduceInput, skipped } = cache.partials;
+  chunkPartials.partials ??= await summarizeChunks(provider, chunks, sessionId, project, concurrency);
+  const { reduceInput, skipped } = chunkPartials.partials;
   const response = await reducePartials(
     provider,
     reduceInput,

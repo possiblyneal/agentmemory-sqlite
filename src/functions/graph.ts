@@ -1060,6 +1060,9 @@ async function extractGraph(
     }
     // One prompt per batch bounds its size: a whole long Session in one
     // prompt ran past the LLM timeout mid-prefill.
+    // Two batches in a row that time out even on their retry mean a wedged
+    // provider, which the breaker misses when timeouts are minutes apart.
+    let timedOutInARow = 0;
     for (let i = 0; i < observations.length; i += batchSize) {
       const batch = observations.slice(i, i + batchSize);
       const prompt = buildGraphExtractionPrompt(
@@ -1099,8 +1102,10 @@ async function extractGraph(
           annotations.set(obsId, annotation);
         }
         if (failure === undefined) extracted = i + batch.length;
+        timedOutInARow = 0;
       } catch (err) {
         failure ??= err;
+        timedOutInARow = err instanceof ProviderTimeoutError ? timedOutInARow + 1 : 0;
         logger.error("LLM graph extraction failed", {
           error: err instanceof Error ? err.message : String(err),
           sessionId: batch[0]!.sessionId,
@@ -1109,7 +1114,7 @@ async function extractGraph(
           promptChars: prompt.length,
           tookMs: Date.now() - started,
         });
-        if (stopAtFirstFailure || isProviderDown(err)) break;
+        if (stopAtFirstFailure || isProviderDown(err) || timedOutInARow >= 2) break;
       }
     }
   }
