@@ -428,6 +428,24 @@ describe("event::session::stopped graph extraction watermark", () => {
     expect(kv.update).not.toHaveBeenCalled();
   });
 
+  it("tells graph extraction when the stop is a recovery stop", async () => {
+    const kv = storeKV();
+    kv.scope("mem:sessions").set("ses_1", { id: "ses_1" });
+    kv.scope("mem:obs:ses_1").set("a", observation("a", "2026-09-28T10:00:00.000Z"));
+    const { sdk, handlers, trigger } = mockSdk();
+    registerEventTriggers(sdk as never, kv as never);
+    const payloads = () =>
+      trigger.mock.calls
+        .map((c) => c[0] as { function_id: string; payload: { recovery?: boolean } })
+        .filter((c) => c.function_id === "mem::graph-extract")
+        .map((c) => c.payload.recovery === true);
+
+    await handlers.get("event::session::stopped")!({ sessionId: "ses_1", recovery: true });
+    await handlers.get("event::session::stopped")!({ sessionId: "ses_1" });
+
+    expect(payloads()).toEqual([true, false]);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });

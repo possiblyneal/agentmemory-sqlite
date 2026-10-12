@@ -31,6 +31,7 @@ import {
   buildGraphExtractionPrompt,
 } from "../prompts/graph-extraction.js";
 import { getGraphBatchSize, isGraphExtractionEnabled } from "../config.js";
+import { ProviderTimeoutError } from "../providers/_fetch.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { attributedIds, capSourceIds } from "./graph-provenance.js";
 import { withProjectRelativeFiles } from "./project-files.js";
@@ -1072,7 +1073,18 @@ async function extractGraph(
       );
       const started = Date.now();
       try {
-        const response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        let response: string;
+        try {
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        } catch (err) {
+          if (!(err instanceof ProviderTimeoutError)) throw err;
+          logger.warn("Retrying a graph batch after a timeout", {
+            sessionId: batch[0]!.sessionId,
+            batchSize: batch.length,
+            promptChars: prompt.length,
+          });
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+        }
         const parsed = parseGraphXml(
           response,
           batch.map((o) => o.id),
@@ -1224,7 +1236,11 @@ export function registerGraphFunction(
   // With a sessionId, observations are extracted oldest first and the
   // Session's watermark advances only past batches that succeeded.
   sdk.registerFunction("mem::graph-extract",
-    async (data: { observations: CompressedObservation[]; sessionId?: string }) => {
+    async (data: {
+      observations: CompressedObservation[];
+      sessionId?: string;
+      recovery?: boolean;
+    }) => {
       if (!data.observations || data.observations.length === 0) {
         return { success: false, error: "No observations provided" };
       }
@@ -1255,7 +1271,7 @@ export function registerGraphFunction(
           provider,
           observations,
           batchSize,
-          true,
+          !data.recovery,
         );
         if (progress) {
           await advanceGraphWatermark(kv, sessionId, observations, batchSize, progress);
