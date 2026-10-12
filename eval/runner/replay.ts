@@ -482,8 +482,9 @@ async function main(): Promise<void> {
   writeFileSync(ndjson, "");
 
   // Every Session is imported whichever split runs, but only the split's
-  // Sessions are probed, and probing writes Session and Injection rows, so the
-  // dev and holdout stores differ. Compare a run only with one of its own split.
+  // Sessions are probed, and probing agentmemory writes Session and Injection
+  // rows, so its dev and holdout stores differ. Compare a run only with one of
+  // its own split.
   const scored = new Set(selectSplit("replay", sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
   const backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
   const ingested: ReplaySession[] = [];

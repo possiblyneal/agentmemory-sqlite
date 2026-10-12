@@ -16,7 +16,8 @@ import type { ReplaySession } from "./replay-transcript.js";
 import { isListening } from "./sandbox.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-export const HINDSIGHT_IMAGE = "ghcr.io/vectorize-io/hindsight:latest";
+// Pinned so runs stay comparable across Hindsight releases.
+const HINDSIGHT_IMAGE = "ghcr.io/vectorize-io/hindsight:0.10.3";
 const CONTAINER = "hindsight-eval";
 const DATA_DIR = resolve(REPO_ROOT, "tmp/eval-sandbox/hindsight");
 const PG_DIR = "/home/hindsight/.pg0";
@@ -39,7 +40,7 @@ function containerEngine(): string {
 
 // The run's OpenAI-compatible provider, renamed for Hindsight. The key goes
 // to the container through the environment, never on the command line.
-function llmEnv(): Record<string, string> {
+export function llmEnv(): Record<string, string> {
   const url = new URL(process.env.OPENAI_BASE_URL ?? "https://api.openai.com");
   if (url.pathname.replace(/\/+$/, "") === "") url.pathname = "/v1";
   const env: Record<string, string> = {
@@ -90,9 +91,7 @@ interface LlmRequest {
 // its embedded Postgres under the repo's tmp/, and drives it the way the
 // Claude Code integration would. stop() removes the container and its data.
 export async function startHindsight(opts: { port: number }) {
-  if (!process.env.OPENAI_API_KEY || !process.env.OPENAI_MODEL) {
-    throw new Error("--backend hindsight needs the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
-  }
+  if (!process.env.OPENAI_MODEL) throw new Error("--backend hindsight needs OPENAI_MODEL in the shell; Hindsight has no default model");
   if (await isListening(opts.port)) throw new Error(`port ${opts.port} already in use; pick another --hindsight-port`);
   const engine = containerEngine();
   const run = (args: string[], env?: Record<string, string>) =>
@@ -123,19 +122,29 @@ export async function startHindsight(opts: { port: number }) {
   };
 
   const baseUrl = `http://127.0.0.1:${opts.port}`;
-  const deadline = Date.now() + BOOT_TIMEOUT_MS;
-  for (;;) {
-    const up = await call(baseUrl, "GET", "/health").then(() => true, () => false);
-    if (up) break;
-    if (Date.now() > deadline || run(["inspect", "-f", "{{.State.Running}}", CONTAINER]) !== "true") {
-      const logs = spawnSync(engine, ["logs", "--tail", "20", CONTAINER], { encoding: "utf8" });
-      await stop();
-      throw new Error(`hindsight did not come up on ${baseUrl}:\n${logs.stdout}${logs.stderr}`);
+  const boot = async () => {
+    const deadline = Date.now() + BOOT_TIMEOUT_MS;
+    for (;;) {
+      const up = await call(baseUrl, "GET", "/health").then(() => true, () => false);
+      if (up) break;
+      if (Date.now() > deadline || run(["inspect", "-f", "{{.State.Running}}", CONTAINER]) !== "true") {
+        const logs = spawnSync(engine, ["logs", "--tail", "20", CONTAINER], { encoding: "utf8" });
+        throw new Error(`hindsight did not come up on ${baseUrl}:\n${logs.stdout}${logs.stderr}`);
+      }
+      await new Promise((r) => setTimeout(r, 2000));
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    const version = (await call<{ api_version?: string; version?: string }>(baseUrl, "GET", "/version")).body;
+    const imageId = run(["inspect", "-f", "{{.Image}}", CONTAINER]);
+    return { version, imageId };
+  };
+  let booted: Awaited<ReturnType<typeof boot>>;
+  try {
+    booted = await boot();
+  } catch (err) {
+    await stop();
+    throw err;
   }
-  const version = (await call<{ api_version?: string; version?: string }>(baseUrl, "GET", "/version")).body;
-  const imageId = run(["inspect", "-f", "{{.Image}}", CONTAINER]);
+  const { version, imageId } = booted;
 
   const missions = new Set<string>();
   const owners = new Map<string, string>();
@@ -152,13 +161,15 @@ export async function startHindsight(opts: { port: number }) {
     missions.add(project);
   };
 
-  const recall = (project: string, query: string, types?: readonly string[]) =>
-    call<{ results?: RecallResult[] }>(baseUrl, "POST", `${bankPath(project)}/memories/recall`, {
+  const recall = async (project: string, query: string, types?: readonly string[]) => {
+    await ensureBank(project);
+    return call<{ results?: RecallResult[] }>(baseUrl, "POST", `${bankPath(project)}/memories/recall`, {
       query,
       max_tokens: HINDSIGHT_PLUGIN.recall.maxTokens,
       budget: HINDSIGHT_PLUGIN.recall.budget,
       ...(types && { types }),
     });
+  };
 
   // Retain is async and schedules consolidation (which writes the
   // observations recall injects); the bank is idle once neither is queued.
@@ -185,13 +196,13 @@ export async function startHindsight(opts: { port: number }) {
     }
   };
 
-  const paged = async <T>(path: string, key: "items"): Promise<T[]> => {
+  const paged = async <T>(path: string): Promise<T[]> => {
     const out: T[] = [];
     for (let offset = 0; ; offset += PAGE) {
       const sep = path.includes("?") ? "&" : "?";
-      const { body } = await call<Record<typeof key, T[]> & { total: number }>(baseUrl, "GET", `${path}${sep}limit=${PAGE}&offset=${offset}`);
-      out.push(...body[key]);
-      if (body[key].length < PAGE) return out;
+      const { body } = await call<{ items: T[] }>(baseUrl, "GET", `${path}${sep}limit=${PAGE}&offset=${offset}`);
+      out.push(...body.items);
+      if (body.items.length < PAGE) return out;
     }
   };
 
@@ -207,7 +218,6 @@ export async function startHindsight(opts: { port: number }) {
     };
     const project = session.project;
     const projectCwds = [...(cwds.get(project) ?? []), session.cwd];
-    await ensureBank(project);
     for (const turn of session.userTurns.slice(0, maxPrompts)) {
       const query = recallQuery(turn.text);
       if (query) {
@@ -249,7 +259,7 @@ export async function startHindsight(opts: { port: number }) {
     await drained(project);
     const drainMs = Date.now() - t0;
     drainMsTotal += drainMs;
-    for (const unit of await paged<{ id: string }>(`${bankPath(project)}/memories/list`, "items")) owners.set(unit.id, project);
+    for (const unit of await paged<{ id: string }>(`${bankPath(project)}/memories/list`)) owners.set(unit.id, project);
     cwds.set(project, new Set([...(cwds.get(project) ?? []), session.cwd]));
     return ` retains=${retains.length} drain=${Math.round(drainMs / 1000)}s`;
   };
@@ -258,15 +268,15 @@ export async function startHindsight(opts: { port: number }) {
 
   const metrics = async () => {
     const requests = (
-      await Promise.all([...missions].map((p) => paged<LlmRequest>(`${bankPath(p)}/llm-requests`, "items")))
+      await Promise.all([...missions].map((p) => paged<LlmRequest>(`${bankPath(p)}/llm-requests`)))
     ).flat();
     const byOperation: Record<string, { calls: number; failures: number; avgLatencyMs: number | null }> = {};
     for (const op of new Set(requests.map((r) => r.operation ?? "unknown"))) {
-      const of = requests.filter((r) => (r.operation ?? "unknown") === op);
-      const timed = of.flatMap((r) => (r.duration_ms === null ? [] : [r.duration_ms]));
+      const opRequests = requests.filter((r) => (r.operation ?? "unknown") === op);
+      const timed = opRequests.flatMap((r) => (r.duration_ms === null ? [] : [r.duration_ms]));
       byOperation[op] = {
-        calls: of.length,
-        failures: of.filter((r) => r.status !== "success").length,
+        calls: opRequests.length,
+        failures: opRequests.filter((r) => r.status !== "success").length,
         avgLatencyMs: timed.length === 0 ? null : Math.round(timed.reduce((a, b) => a + b, 0) / timed.length),
       };
     }

@@ -125,6 +125,7 @@ export function stopRetains(text: string, sessionId: string): Retain[] {
   const messages: Message[] = [];
   const stops: number[] = [];
   let answered = false;
+  let answeredAt = 0;
   for (const line of text.split("\n")) {
     let entry: Entry;
     try {
@@ -135,16 +136,21 @@ export function stopRetains(text: string, sessionId: string): Retain[] {
     if (!entry || typeof entry !== "object") continue;
     if (isInterrupt(entry)) answered = false;
     else if (opensTurn(entry) && answered) {
-      stops.push(messages.length);
+      stops.push(answeredAt);
       answered = false;
     }
     const message = entry.message as Entry | undefined;
     if ((entry.type === "user" || entry.type === "assistant") && message && typeof message === "object" && message.role) {
       messages.push({ role: String(message.role), content: message.content });
     }
-    if (entry.type === "assistant" && entry.isSidechain !== true) answered = true;
+    // Stop fires when the answer is written, before any meta entry that
+    // precedes the next prompt.
+    if (entry.type === "assistant" && entry.isSidechain !== true) {
+      answered = true;
+      answeredAt = messages.length;
+    }
   }
-  if (answered) stops.push(messages.length);
+  if (answered) stops.push(answeredAt);
 
   const out: Retain[] = [];
   let committed = { count: 0, chunk: 0 };
