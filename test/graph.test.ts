@@ -10,7 +10,7 @@ vi.mock("../src/logger.js", () => ({
 import { logger } from "../src/logger.js";
 import { MAX_OBSERVATION_CONCEPTS, registerGraphFunction } from "../src/functions/graph.js";
 import { getSearchIndex } from "../src/functions/search.js";
-import { ProviderHttpError } from "../src/providers/_fetch.js";
+import { ProviderHttpError, ProviderTimeoutError } from "../src/providers/_fetch.js";
 import type {
   CompressedObservation,
   GraphNode,
@@ -222,6 +222,105 @@ describe("Graph Functions", () => {
       expect(await session()).toMatchObject({
         graphExtractedThrough: observations[24]!.timestamp,
         graphExtractFailures: 0,
+      });
+    });
+
+    describe("a batch whose LLM call times out", () => {
+      const timeout = () => new ProviderTimeoutError("timed out after 300000ms");
+      const recover = (obs = observations) =>
+        sdk.trigger("mem::graph-extract", {
+          observations: obs,
+          sessionId: "ses_1",
+          recovery: true,
+        });
+
+      it("is extracted on its retry and the watermark moves past it", async () => {
+        mockProvider.compress
+          .mockRejectedValueOnce(timeout())
+          .mockResolvedValueOnce("<entities></entities>")
+          .mockResolvedValueOnce("<entities></entities>")
+          .mockResolvedValueOnce("<entities></entities>");
+
+        await extract();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(4);
+        expect(await session()).toMatchObject({
+          graphExtractedThrough: observations[24]!.timestamp,
+          graphExtractFailures: 0,
+        });
+        const prompts = mockProvider.compress.mock.calls.map((c) => c[1]);
+        expect(prompts[1]).toBe(prompts[0]);
+        expect(logger.warn).toHaveBeenCalledWith("Retrying a graph batch after a timeout", {
+          sessionId: "ses_1",
+          batchSize: 10,
+          promptChars: String(prompts[0]).length,
+        });
+      });
+
+      it("records one failure when the retry times out too, and the watermark stays before it", async () => {
+        mockProvider.compress
+          .mockResolvedValueOnce("<entities></entities>")
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout());
+
+        await extract();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(3);
+        expect(await session()).toMatchObject({
+          graphExtractedThrough: observations[9]!.timestamp,
+          graphExtractFailures: 1,
+        });
+      });
+
+      it("is not retried when the failure is not a timeout", async () => {
+        mockProvider.compress.mockRejectedValueOnce(new Error("bad reply"));
+
+        await extract();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(1);
+      });
+
+      it("is not retried when the provider is down", async () => {
+        mockProvider.compress.mockRejectedValueOnce(
+          new ProviderHttpError("OpenAI API error (503): busy", 503),
+        );
+
+        await extract();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(1);
+      });
+
+      it("lets a recovery stop extract the batches after a failed one, and a live stop not", async () => {
+        mockProvider.compress
+          .mockResolvedValueOnce("<entities></entities>")
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout())
+          .mockResolvedValueOnce("<entities></entities>");
+
+        await recover();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(4);
+        expect(await session()).toMatchObject({
+          graphExtractedThrough: observations[9]!.timestamp,
+          graphExtractFailures: 1,
+        });
+
+        mockProvider.compress.mockClear();
+        mockProvider.compress
+          .mockRejectedValueOnce(timeout())
+          .mockRejectedValueOnce(timeout());
+
+        await extract(observations.slice(10));
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(2);
+      });
+
+      it("still ends a recovery pass when the provider is down", async () => {
+        mockProvider.compress.mockRejectedValueOnce(new Error("circuit_breaker_open"));
+
+        await recover();
+
+        expect(mockProvider.compress).toHaveBeenCalledTimes(1);
       });
     });
 

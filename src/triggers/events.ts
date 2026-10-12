@@ -160,6 +160,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
           await awaitIfRecovery("mem::graph-extract", {
             observations: fresh,
             sessionId: data.sessionId,
+            recovery: data.recovery === true,
           });
         }
       } catch (err) {
