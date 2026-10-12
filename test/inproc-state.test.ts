@@ -26,6 +26,11 @@ describe("inproc state store", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("opens with synchronous=NORMAL so a WAL commit does not fsync", () => {
+    const row = store.db.prepare("PRAGMA synchronous").get() as { synchronous: number };
+    expect(row.synchronous).toBe(1);
+  });
+
   it("list-newest returns the newest matching rows first, filtered and limited in SQL", async () => {
     const fns = stateFunctions(store);
     const rows: Array<[string, string, string]> = [
