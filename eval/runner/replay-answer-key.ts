@@ -200,3 +200,22 @@ export function deriveAnswerKey(session: ReplaySession, allEarlier: ReplaySessio
     decisions: decisionsRevisited(session, earlier),
   };
 }
+
+// The scored Sessions whose answer key is non-empty, plus every earlier
+// Session a key item names, so each kept key can still be answered. A Session
+// in neither set changes no score and is dropped to save its import.
+export function keyedSubset(sessions: ReplaySession[], scored: Set<string>): ReplaySession[] {
+  const keep = new Set<string>();
+  for (const session of sessions) {
+    if (!scored.has(session.id)) continue;
+    const key = deriveAnswerKey(session, sessions);
+    const sources = [
+      ...key.files.flatMap((f) => f.earlierSessionIds),
+      ...[...key.corrections, ...key.decisions].map((e) => e.earlierSessionId),
+    ];
+    if (sources.length === 0) continue;
+    keep.add(session.id);
+    for (const id of sources) keep.add(id);
+  }
+  return sessions.filter((s) => keep.has(s.id));
+}

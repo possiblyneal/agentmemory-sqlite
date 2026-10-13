@@ -9,10 +9,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { deriveAnswerKey } from "./replay-answer-key.js";
+import { deriveAnswerKey, keyedSubset } from "./replay-answer-key.js";
 import {
   scoreSession,
   summarizeReplay,
@@ -41,6 +42,7 @@ const SEARCH_LIMIT = 5;
 const MAX_TRANSCRIPT_BYTES = 20_000_000;
 const DRAIN_POLL_MS = 500;
 const DRAIN_STALL_MS = 15 * 60_000;
+const SUMMARIZE_TIMEOUT_MS = 60 * 60_000;
 
 type BackendName = "agentmemory" | "hindsight";
 
@@ -57,6 +59,9 @@ interface Options {
   root: string;
   out: string;
   split: Split;
+  keyedOnly: boolean;
+  saveCheckpoints: boolean;
+  fromCheckpoints?: string;
 }
 
 function parseOptions(): Options {
@@ -74,6 +79,9 @@ function parseOptions(): Options {
       root: { type: "string", default: join(homedir(), ".claude/projects") },
       out: { type: "string", default: join(REPO_TMP, "eval-replay") },
       split: { type: "string" },
+      "keyed-only": { type: "boolean", default: false },
+      "save-checkpoints": { type: "boolean", default: false },
+      "from-checkpoints": { type: "string" },
     },
   });
   const positive = (name: string, raw: string, min = 1): number => {
@@ -113,6 +121,18 @@ function parseOptions(): Options {
     console.error("--llm and --backend hindsight need the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
     process.exit(2);
   }
+  if (values["save-checkpoints"] && values["from-checkpoints"]) {
+    console.error("--save-checkpoints and --from-checkpoints are separate passes; pass one");
+    process.exit(2);
+  }
+  if ((values["save-checkpoints"] || values["from-checkpoints"]) && values.backend === "hindsight") {
+    console.error("checkpoints copy agentmemory's SQLite store; drop --backend hindsight");
+    process.exit(2);
+  }
+  if (values["from-checkpoints"] && values.llm) {
+    console.error("--from-checkpoints probes stores already compressed; drop --llm");
+    process.exit(2);
+  }
   return {
     backend: values.backend,
     hindsightPort: positive("hindsight-port", values["hindsight-port"] as string),
@@ -126,6 +146,9 @@ function parseOptions(): Options {
     root: resolve(values.root as string),
     out,
     split: openSplit(values.split, "replay"),
+    keyedOnly: values["keyed-only"] === true,
+    saveCheckpoints: values["save-checkpoints"] === true,
+    fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
   };
 }
 
@@ -366,7 +389,12 @@ async function ingestThroughHooks(baseUrl: string, session: ReplaySession): Prom
   const t0 = Date.now();
   await compressionDrained(baseUrl, session.id);
   const drainMs = Date.now() - t0;
-  const { body } = await post<{ success?: boolean }>(baseUrl, "summarize", { sessionId: session.id });
+  // A long Session summarizes in several chunk calls plus a merge, which at
+  // LLM concurrency 1 runs well past the default request timeout.
+  const { body } = await daemonCall<{ success?: boolean }>(baseUrl, "summarize", {
+    body: { sessionId: session.id },
+    timeoutMs: SUMMARIZE_TIMEOUT_MS,
+  });
   await post(baseUrl, "session/end", { sessionId: session.id });
   return { drainMs, summarized: body.success === true };
 }
@@ -422,14 +450,134 @@ function worstCasesMarkdown(scores: SessionScore[]): string {
 }
 
 // What the replay needs from a memory system: probe a Session against what
-// it holds, then ingest that Session.
+// it holds, then ingest that Session. Only agentmemory can checkpoint its store.
 interface Backend {
   probe(session: ReplaySession, maxPrompts: number): Promise<Probe[]>;
   ingest(session: ReplaySession): Promise<string>;
+  checkpoint?(dir: string, index: number, sessionId: string, ingested: ReplaySession[]): Promise<Checkpoint>;
   storeBytes(): Promise<number>;
   metrics(): Promise<Record<string, unknown> | undefined>;
   providers(): Record<string, unknown>;
   stop(): Promise<void>;
+}
+
+function agentmemoryProviders(opts: Options): Record<string, unknown> {
+  return {
+    backend: "agentmemory",
+    embeddings: opts.embeddings === "none" ? "none" : (process.env.EMBEDDING_PROVIDER ?? "local"),
+    embeddingModel: opts.embeddings === "none" ? null : (process.env.OPENAI_EMBEDDING_MODEL ?? null),
+    embeddingDimensions: process.env.OPENAI_EMBEDDING_DIMENSIONS ?? null,
+    rerank: process.env.RERANK_ENABLED ?? "off",
+    llm: opts.llm ? llmProvider() : "none",
+  };
+}
+
+function writeRun(
+  opts: Options,
+  scores: SessionScore[],
+  meta: { storeBytesStart: number; storeBytesEnd: number },
+  providers: Record<string, unknown>,
+  extra: { minutes: number } & Record<string, unknown>,
+): void {
+  const summary = summarizeReplay(scores, meta);
+  const run = {
+    date: new Date().toISOString(),
+    options: { ...opts, root: undefined, out: undefined },
+    providers,
+    ...extra,
+  };
+  writeFileSync(join(opts.out, "summary.json"), JSON.stringify({ run, summary }, null, 2));
+  writeFileSync(join(opts.out, "worst-cases.md"), worstCasesMarkdown(scores));
+  console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary }, null, 2));
+  console.log(`\nwrote ${opts.out}/{summary.json,scores.ndjson,worst-cases.md}`);
+}
+
+async function recordIngested(baseUrl: string, session: ReplaySession, resolver: Resolver): Promise<void> {
+  const { body } = await get<{ observations?: ObsRow[] }>(baseUrl, `observations?sessionId=${encodeURIComponent(session.id)}`);
+  for (const row of body.observations ?? []) resolver.observations.set(row.id, { session, row });
+  resolver.sessions.set(session.id, session);
+}
+
+// A copy of the store as it stands just before a scored Session would be
+// probed, so the probing pass can run later, and more than once, without
+// paying the import (and its LLM calls) again.
+interface Checkpoint {
+  sessionId: string;
+  file: string;
+  ingested: string[];
+}
+
+const MANIFEST = "manifest.json";
+
+async function saveCheckpoint(
+  sqlitePath: string,
+  dir: string,
+  index: number,
+  sessionId: string,
+  ingested: ReplaySession[],
+): Promise<Checkpoint> {
+  const file = `${String(index).padStart(3, "0")}-${sessionId}.sqlite`;
+  // VACUUM INTO, not sqlite.backup, which needs Node 22.16 against the 22.13 floor.
+  const db = new DatabaseSync(sqlitePath, { readOnly: true });
+  try {
+    db.prepare("VACUUM INTO ?").run(join(dir, file));
+  } finally {
+    db.close();
+  }
+  return { sessionId, file, ingested: ingested.map((s) => s.id) };
+}
+
+async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string): Promise<void> {
+  process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
+  const dir = opts.fromCheckpoints!;
+  const checkpoints = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as Checkpoint[];
+  // The save pass drew its own split; probing outside this pass's split would
+  // score holdout Sessions without opening the holdout.
+  const outside = checkpoints.filter((c) => !scored.has(c.sessionId));
+  if (outside.length > 0) {
+    throw new Error(`${outside.length} checkpoints are outside --split ${opts.split ?? "all"}; probe them with the split the save pass used`);
+  }
+  const byId = new Map(loaded.sessions.map((s) => [s.id, s]));
+  const find = (id: string) => {
+    const session = byId.get(id);
+    if (!session) throw new Error(`checkpoint names Session ${id}, which --projects did not load`);
+    return session;
+  };
+  const scores: SessionScore[] = [];
+  const t0 = Date.now();
+  // Store sizes as seeded: growth across the replay, as a normal run reports
+  // it, not what probing adds.
+  let bytesStart = 0;
+  let bytesEnd = 0;
+  for (const [i, checkpoint] of checkpoints.entries()) {
+    const session = find(checkpoint.sessionId);
+    const ingested = checkpoint.ingested.map(find);
+    const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, seed: join(dir, checkpoint.file) });
+    try {
+      bytesEnd = storeBytes(sandbox.sqlitePath);
+      if (i === 0) bytesStart = bytesEnd;
+      await sandbox.vectorsFilled();
+      const resolver: Resolver = { observations: new Map(), sessions: new Map() };
+      for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
+      const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
+      const score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
+      scores.push(score);
+      appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
+      console.log(
+        `[${i + 1}/${checkpoints.length}] ${session.id.slice(0, 8)} turns=${score.turns} key=${score.outcomes.length} ` +
+          `injected=${score.items.length} used=${score.items.filter((x) => x.used).length} ` +
+          `hit=${score.outcomes.filter((o) => o.injected).length} total=${Math.round((Date.now() - t0) / 1000)}s`,
+      );
+    } finally {
+      await sandbox.stop();
+    }
+  }
+  writeRun(opts, scores, { storeBytesStart: bytesStart, storeBytesEnd: bytesEnd }, agentmemoryProviders(opts), {
+    checkpoints: dir,
+    directories: loaded.perDirectory,
+    projects: loaded.perProject,
+    minutes: (Date.now() - t0) / 60_000,
+  });
 }
 
 async function startAgentmemory(opts: Options): Promise<Backend> {
@@ -453,40 +601,48 @@ async function startAgentmemory(opts: Options): Promise<Backend> {
       } else {
         await post(sandbox.baseUrl, "replay/import-jsonl", { path: session.sourcePath, project: session.project });
       }
-      const { body } = await get<{ observations?: ObsRow[] }>(sandbox.baseUrl, `observations?sessionId=${encodeURIComponent(session.id)}`);
-      for (const row of body.observations ?? []) resolver.observations.set(row.id, { session, row });
-      resolver.sessions.set(session.id, session);
+      await recordIngested(sandbox.baseUrl, session, resolver);
       return drain;
+    },
+    checkpoint(dir, index, sessionId, ingested) {
+      return saveCheckpoint(sandbox.sqlitePath, dir, index, sessionId, ingested);
     },
     storeBytes: async () => storeBytes(sandbox.sqlitePath),
     metrics: async () =>
       opts.llm ? { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions } : undefined,
-    providers: () => ({
-      backend: "agentmemory",
-      embeddings: opts.embeddings === "none" ? "none" : (process.env.EMBEDDING_PROVIDER ?? "local"),
-      embeddingModel: opts.embeddings === "none" ? null : (process.env.OPENAI_EMBEDDING_MODEL ?? null),
-      embeddingDimensions: process.env.OPENAI_EMBEDDING_DIMENSIONS ?? null,
-      rerank: process.env.RERANK_ENABLED ?? "off",
-      llm: opts.llm ? llmProvider() : "none",
-    }),
+    providers: () => agentmemoryProviders(opts),
     stop: () => sandbox.stop(),
   };
 }
 
 async function main(): Promise<void> {
   const opts = parseOptions();
-  const { sessions, perDirectory, perProject } = loadSessions(opts);
+  const loaded = loadSessions(opts);
+  const { perDirectory, perProject } = loaded;
+  // Every Session is imported whichever split runs, but only the split's
+  // Sessions are probed, and probing agentmemory writes Session and Injection
+  // rows, so its dev and holdout stores differ. Compare a run only with one of
+  // its own split. The split is drawn over every loaded Session, so
+  // --keyed-only leaves each Session in the split it would have had without
+  // the flag.
+  const scored = new Set(selectSplit("replay", loaded.sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
+  const sessions = opts.keyedOnly ? keyedSubset(loaded.sessions, scored) : loaded.sessions;
+  if (opts.keyedOnly) console.log(`--keyed-only: ${sessions.length} of ${loaded.sessions.length} Sessions carry or answer a key item`);
   console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
   writeFileSync(ndjson, "");
+  if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson);
 
-  // Every Session is imported whichever split runs, but only the split's
-  // Sessions are probed, and probing agentmemory writes Session and Injection
-  // rows, so its dev and holdout stores differ. Compare a run only with one of
-  // its own split.
-  const scored = new Set(selectSplit("replay", sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
-  const backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
+  const checkpointDir = join(opts.out, "checkpoints");
+  const checkpoints: Checkpoint[] = [];
+  if (opts.saveCheckpoints) {
+    // A save pass takes hours of LLM time; never let a rerun mix its stores
+    // with, or silently stand behind, an earlier pass's manifest.
+    if (existsSync(join(checkpointDir, MANIFEST))) throw new Error(`${checkpointDir} already holds a save pass; pass a fresh --out`);
+    mkdirSync(checkpointDir, { recursive: true });
+  }
+  const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
   const ingested: ReplaySession[] = [];
   const scores: SessionScore[] = [];
   const t0 = Date.now();
@@ -495,7 +651,11 @@ async function main(): Promise<void> {
     for (const [i, session] of sessions.entries()) {
       const probeStart = Date.now();
       let score: SessionScore | undefined;
-      if (scored.has(session.id)) {
+      const checkpointing = scored.has(session.id) && opts.saveCheckpoints;
+      if (checkpointing) {
+        checkpoints.push(await backend.checkpoint!(checkpointDir, i, session.id, ingested));
+        writeFileSync(join(checkpointDir, MANIFEST), JSON.stringify(checkpoints, null, 2));
+      } else if (scored.has(session.id)) {
         const probes = await backend.probe(session, opts.maxPrompts);
         score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
         scores.push(score);
@@ -513,28 +673,25 @@ async function main(): Promise<void> {
       const scoredLine = score
         ? `turns=${score.turns} key=${score.outcomes.length} injected=${score.items.length} ` +
           `used=${score.items.filter((x) => x.used).length} hit=${score.outcomes.filter((o) => o.injected).length} `
-        : "unscored ";
+        : checkpointing
+          ? "checkpoint "
+          : "unscored ";
       console.log(
         `[${i + 1}/${sessions.length}] ${session.id.slice(0, 8)} ${scoredLine}probe=${Math.round((importStart - probeStart) / 1000)}s ` +
           `import=${Math.round((Date.now() - importStart) / 1000)}s${detail} total=${Math.round((Date.now() - t0) / 1000)}s`,
       );
     }
-    const meta = { storeBytesStart: bytesStart, storeBytesEnd: await backend.storeBytes() };
-    const summary = summarizeReplay(scores, meta);
+    const minutes = (Date.now() - t0) / 60_000;
     const metrics = await backend.metrics();
-    const run = {
-      date: new Date().toISOString(),
-      options: { ...opts, root: undefined, out: undefined },
-      providers: backend.providers(),
-      ...(metrics && { llm: metrics }),
-      directories: perDirectory,
-      projects: perProject,
-      minutes: (Date.now() - t0) / 60_000,
-    };
-    writeFileSync(join(opts.out, "summary.json"), JSON.stringify({ run, summary }, null, 2));
-    writeFileSync(join(opts.out, "worst-cases.md"), worstCasesMarkdown(scores));
-    console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary }, null, 2));
-    console.log(`\nwrote ${opts.out}/{summary.json,scores.ndjson,worst-cases.md}`);
+    const llm = metrics && { llm: metrics };
+    if (opts.saveCheckpoints) {
+      const run = { date: new Date().toISOString(), options: { ...opts, root: undefined, out: undefined }, ...llm, minutes };
+      writeFileSync(join(checkpointDir, "run.json"), JSON.stringify(run, null, 2));
+      console.log(`wrote ${checkpoints.length} checkpoints to ${checkpointDir}`);
+      return;
+    }
+    const meta = { storeBytesStart: bytesStart, storeBytesEnd: await backend.storeBytes() };
+    writeRun(opts, scores, meta, backend.providers(), { ...llm, directories: perDirectory, projects: perProject, minutes });
   } finally {
     await backend.stop();
   }
