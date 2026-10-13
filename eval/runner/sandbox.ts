@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, rmSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,11 +9,15 @@ export type EmbeddingMode = "local" | "none";
 export interface Sandbox {
   baseUrl: string;
   sqlitePath: string;
+  // Resolves once the boot vector fill has embedded every row the store
+  // arrived without, so a seeded store is searched with all its vectors.
+  vectorsFilled(): Promise<void>;
   stop(): Promise<void>;
 }
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BOOT_TIMEOUT_MS = 30_000;
+const VECTOR_FILL_TIMEOUT_MS = 10 * 60_000;
 const STOP_GRACE_MS = 10_000;
 
 // Mirrors `--instance N` in src/cli.ts: REST anchors the block, streams and
@@ -39,9 +43,11 @@ export function isListening(port: number): Promise<boolean> {
   });
 }
 
+// readyz, not livez: livez answers as soon as the ports bind, while every
+// other route still answers 503 until a non-empty store has hydrated.
 async function isUp(baseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(`${baseUrl}/agentmemory/livez`, {
+    const res = await fetch(`${baseUrl}/agentmemory/readyz`, {
       signal: AbortSignal.timeout(500),
     });
     return res.ok;
@@ -173,5 +179,13 @@ export async function startSandbox(opts: {
     }
     await new Promise((r) => setTimeout(r, 200));
   }
-  return { baseUrl, sqlitePath, stop };
+  const vectorsFilled = async () => {
+    if (opts.embeddings === "none") return;
+    const deadline = Date.now() + VECTOR_FILL_TIMEOUT_MS;
+    while (!readFileSync(logPath, "utf8").includes("index-fill-missing finished")) {
+      if (hasExited() || Date.now() > deadline) throw new Error(`sandbox on ${baseUrl} never finished its vector fill; see ${logPath}`);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  };
+  return { baseUrl, sqlitePath, vectorsFilled, stop };
 }

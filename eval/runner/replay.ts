@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { backup, DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -517,19 +517,26 @@ async function saveCheckpoint(
   ingested: ReplaySession[],
 ): Promise<Checkpoint> {
   const file = `${String(index).padStart(3, "0")}-${sessionId}.sqlite`;
+  // VACUUM INTO, not sqlite.backup, which needs Node 22.16 against the 22.13 floor.
   const db = new DatabaseSync(sqlitePath, { readOnly: true });
   try {
-    await backup(db, join(dir, file));
+    db.prepare("VACUUM INTO ?").run(join(dir, file));
   } finally {
     db.close();
   }
   return { sessionId, file, ingested: ingested.map((s) => s.id) };
 }
 
-async function probeCheckpoints(opts: Options, loaded: Loaded, ndjson: string): Promise<void> {
+async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string): Promise<void> {
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const dir = opts.fromCheckpoints!;
   const checkpoints = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as Checkpoint[];
+  // The save pass drew its own split; probing outside this pass's split would
+  // score holdout Sessions without opening the holdout.
+  const outside = checkpoints.filter((c) => !scored.has(c.sessionId));
+  if (outside.length > 0) {
+    throw new Error(`${outside.length} checkpoints are outside --split ${opts.split ?? "all"}; probe them with the split the save pass used`);
+  }
   const byId = new Map(loaded.sessions.map((s) => [s.id, s]));
   const find = (id: string) => {
     const session = byId.get(id);
@@ -538,6 +545,8 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, ndjson: string): 
   };
   const scores: SessionScore[] = [];
   const t0 = Date.now();
+  // Store sizes as seeded: growth across the replay, as a normal run reports
+  // it, not what probing adds.
   let bytesStart = 0;
   let bytesEnd = 0;
   for (const [i, checkpoint] of checkpoints.entries()) {
@@ -545,14 +554,15 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, ndjson: string): 
     const ingested = checkpoint.ingested.map(find);
     const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, seed: join(dir, checkpoint.file) });
     try {
-      if (i === 0) bytesStart = storeBytes(sandbox.sqlitePath);
+      bytesEnd = storeBytes(sandbox.sqlitePath);
+      if (i === 0) bytesStart = bytesEnd;
+      await sandbox.vectorsFilled();
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
       const score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
-      bytesEnd = storeBytes(sandbox.sqlitePath);
       console.log(
         `[${i + 1}/${checkpoints.length}] ${session.id.slice(0, 8)} turns=${score.turns} key=${score.outcomes.length} ` +
           `injected=${score.items.length} used=${score.items.filter((x) => x.used).length} ` +
@@ -622,12 +632,17 @@ async function main(): Promise<void> {
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
   writeFileSync(ndjson, "");
-  if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, ndjson);
+  if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson);
 
-  const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
   const checkpointDir = join(opts.out, "checkpoints");
   const checkpoints: Checkpoint[] = [];
-  if (opts.saveCheckpoints) mkdirSync(checkpointDir, { recursive: true });
+  if (opts.saveCheckpoints) {
+    // A save pass takes hours of LLM time; never let a rerun mix its stores
+    // with, or silently stand behind, an earlier pass's manifest.
+    if (existsSync(join(checkpointDir, MANIFEST))) throw new Error(`${checkpointDir} already holds a save pass; pass a fresh --out`);
+    mkdirSync(checkpointDir, { recursive: true });
+  }
+  const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
   const ingested: ReplaySession[] = [];
   const scores: SessionScore[] = [];
   const t0 = Date.now();
@@ -636,7 +651,8 @@ async function main(): Promise<void> {
     for (const [i, session] of sessions.entries()) {
       const probeStart = Date.now();
       let score: SessionScore | undefined;
-      if (scored.has(session.id) && opts.saveCheckpoints) {
+      const checkpointing = scored.has(session.id) && opts.saveCheckpoints;
+      if (checkpointing) {
         checkpoints.push(await backend.checkpoint!(checkpointDir, i, session.id, ingested));
         writeFileSync(join(checkpointDir, MANIFEST), JSON.stringify(checkpoints, null, 2));
       } else if (scored.has(session.id)) {
@@ -657,7 +673,7 @@ async function main(): Promise<void> {
       const scoredLine = score
         ? `turns=${score.turns} key=${score.outcomes.length} injected=${score.items.length} ` +
           `used=${score.items.filter((x) => x.used).length} hit=${score.outcomes.filter((o) => o.injected).length} `
-        : scored.has(session.id) && opts.saveCheckpoints
+        : checkpointing
           ? "checkpoint "
           : "unscored ";
       console.log(

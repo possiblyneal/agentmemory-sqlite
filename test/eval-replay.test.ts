@@ -287,6 +287,18 @@ describe("keyedSubset", () => {
   it("drops everything when no scored Session has a key", () => {
     expect(keyedSubset(all, new Set(["s1", "n1"]))).toEqual([]);
   });
+
+  it("keeps the earlier Session a repeated correction names", () => {
+    const corrected = session("e1", "2026-09-01T10:00:00Z", [
+      { user: "no, don't use raw sql strings in the repository layer, use the query builder" },
+      { user: "x" },
+    ]);
+    const repeat = session("c1", "2026-09-02T10:00:00Z", [
+      { user: "I told you, don't use raw sql strings in the repository layer, the query builder only" },
+      { user: "x" },
+    ]);
+    expect(keyedSubset([corrected, noise, repeat], new Set(["c1"])).map((s) => s.id)).toEqual(["e1", "c1"]);
+  });
 });
 
 function item(over: Partial<ProbeItem> & { ref: string }): ProbeItem {
