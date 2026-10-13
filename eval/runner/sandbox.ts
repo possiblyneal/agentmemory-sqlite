@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +116,8 @@ export async function startSandbox(opts: {
   instance: number;
   embeddings: EmbeddingMode;
   llm?: boolean;
+  // A store file the daemon starts from instead of an empty one.
+  seed?: string;
 }): Promise<Sandbox> {
   const cli = resolve(REPO_ROOT, "dist/cli.mjs");
   if (!existsSync(cli)) throw new Error(`${cli} not found; run npm run build first`);
@@ -135,6 +137,7 @@ export async function startSandbox(opts: {
   const log = openSync(logPath, "w");
 
   const sqlitePath = resolve(dir, "agentmemory.sqlite");
+  if (opts.seed) copyFileSync(opts.seed, sqlitePath);
   const child: ChildProcess = spawn(
     process.execPath,
     [cli, "--instance", String(opts.instance)],

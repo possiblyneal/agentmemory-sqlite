@@ -4,6 +4,7 @@ import {
   deriveAnswerKey,
   filesNeeded,
   isCorrection,
+  keyedSubset,
   repeatedCorrections,
 } from "../eval/runner/replay-answer-key.js";
 import {
@@ -270,6 +271,21 @@ describe("deriveAnswerKey", () => {
     const later = session("l1", "2026-09-03T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/a.ts` }]);
     const current = session("c1", "2026-09-02T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/a.ts` }]);
     expect(deriveAnswerKey(current, [other, later, current]).files).toEqual([]);
+  });
+});
+
+describe("keyedSubset", () => {
+  const source = session("s1", "2026-09-01T10:00:00Z", [{ user: "x" }, { tool: "Edit", file: `${CWD}/a.ts` }]);
+  const noise = session("n1", "2026-09-02T10:00:00Z", [{ user: "x" }, { tool: "Edit", file: `${CWD}/b.ts` }]);
+  const keyed = session("k1", "2026-09-03T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/a.ts` }]);
+  const all = [source, noise, keyed];
+
+  it("keeps the keyed Sessions and the earlier Sessions their key items name", () => {
+    expect(keyedSubset(all, new Set(["s1", "n1", "k1"])).map((s) => s.id)).toEqual(["s1", "k1"]);
+  });
+
+  it("drops everything when no scored Session has a key", () => {
+    expect(keyedSubset(all, new Set(["s1", "n1"]))).toEqual([]);
   });
 });
 
