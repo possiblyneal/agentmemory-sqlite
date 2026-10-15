@@ -8,6 +8,7 @@ import type {
 } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isConsolidationEnabled } from "../config.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
@@ -173,9 +174,8 @@ async function recoverOrEvictStaleSession(
 }
 
 export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
-  let recoveryRunning = false;
-  sdk.registerFunction("mem::evict", 
-    async (data: { dryRun?: boolean }): Promise<EvictionStats> => {
+  sdk.registerFunction("mem::evict", (data: { dryRun?: boolean }) =>
+    withKeyedLock("mem::evict", async (): Promise<EvictionStats> => {
       const dryRun = data?.dryRun ?? false;
       const { decrementImageRef } = await import("./image-refs.js");
 
@@ -209,35 +209,21 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           now - new Date(session.startedAt).getTime() > staleMs &&
           !summaryIds.has(session.id),
       );
-      // One recovery sweep at a time, so the sweep's one-LLM-slot bound holds
-      // when a second eviction is triggered while the first is still running.
-      // A second sweep skips rather than queuing behind a keyed lock: it would
-      // mostly repeat the running sweep's Sessions, and the next sweep finds
-      // any that went stale since.
       if (dryRun) {
         stats.staleSessions = staleSessions.length;
-      } else if (recoveryRunning) {
-        logger.info("Stale-Session recovery already running; this sweep skips it", {
-          staleSessions: staleSessions.length,
-        });
       } else {
-        recoveryRunning = true;
-        try {
-          let recoveredStaleSessions = 0;
-          for (const session of staleSessions) {
-            const { recovered, evicted } = await recoverOrEvictStaleSession(
-              sdk,
-              kv,
-              session.id,
-            );
-            if (recovered) recoveredStaleSessions++;
-            if (evicted) stats.staleSessions++;
-          }
-          if (recoveredStaleSessions > 0) {
-            await runRecoveredSessionConsolidation(sdk);
-          }
-        } finally {
-          recoveryRunning = false;
+        let recoveredStaleSessions = 0;
+        for (const session of staleSessions) {
+          const { recovered, evicted } = await recoverOrEvictStaleSession(
+            sdk,
+            kv,
+            session.id,
+          );
+          if (recovered) recoveredStaleSessions++;
+          if (evicted) stats.staleSessions++;
+        }
+        if (recoveredStaleSessions > 0) {
+          await runRecoveredSessionConsolidation(sdk);
         }
       }
 
@@ -420,6 +406,6 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
 
       logger.info("Eviction complete", { stats });
       return stats;
-    },
+    }),
   );
 }
