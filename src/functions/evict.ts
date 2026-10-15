@@ -27,7 +27,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const DEFAULTS: EvictionConfig = {
   staleSessionDays: 30,
-  lowImportanceMaxDays: 0,
+  lowImportanceMaxDays: 1,
   lowImportanceThreshold: 5,
   nonLatestMemoryMaxDays: 90,
   maxObservationsPerProject: 10_000,
@@ -382,7 +382,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           mem.createdAt
         ) {
           const age = now - new Date(mem.createdAt).getTime();
-          if (age > cfg.nonLatestMemoryMaxDays * MS_PER_DAY) {
+          if (age >= cfg.nonLatestMemoryMaxDays * MS_PER_DAY) {
             if (dryRun) {
               stats.nonLatestMemories++;
             } else {

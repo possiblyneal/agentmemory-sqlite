@@ -395,6 +395,9 @@ describe("mem::evict stale sessions", () => {
   });
 });
 
+// The floor before #225, so the cap cases evict only what the cap selects.
+const PRE_225_FLOOR = { lowImportanceThreshold: 3, lowImportanceMaxDays: 90 };
+
 describe("mem::evict session observation counts", () => {
   function observation(
     sessionId: string,
@@ -500,8 +503,7 @@ describe("mem::evict session observation counts", () => {
       },
     ]);
     store.get(KV.config)!.set("eviction", {
-      lowImportanceThreshold: 3,
-      lowImportanceMaxDays: 90,
+      ...PRE_225_FLOOR,
       maxObservationsPerProject: 1,
     });
 
@@ -530,8 +532,7 @@ describe("mem::evict session observation counts", () => {
       },
     ]);
     store.get(KV.config)!.set("eviction", {
-      lowImportanceThreshold: 3,
-      lowImportanceMaxDays: 90,
+      ...PRE_225_FLOOR,
       maxObservationsPerProject: 1,
     });
     const kv = mockKV(store);
@@ -560,8 +561,7 @@ describe("mem::evict session observation counts", () => {
       },
     ]);
     store.get(KV.config)!.set("eviction", {
-      lowImportanceThreshold: 3,
-      lowImportanceMaxDays: 90,
+      ...PRE_225_FLOOR,
       maxObservationsPerProject: 1,
     });
     store.set(
@@ -647,13 +647,17 @@ describe("mem::evict default importance floor", () => {
     return { run, keptObs, keptMem };
   }
 
-  it("removes a one-day-old Observation of importance 4 and keeps importance 5", async () => {
-    const t = setup([obs("ses_d", "low", 1, 4), obs("ses_d", "ok", 1, 5)]);
+  it("removes a one-day-old Observation of importance 4 and keeps importance 5 and a fresh one", async () => {
+    const t = setup([
+      obs("ses_d", "low", 1, 4),
+      obs("ses_d", "ok", 1, 5),
+      obs("ses_d", "fresh", 0, 4),
+    ]);
 
     const stats = await t.run();
 
     expect(stats).toMatchObject({ lowImportanceObs: 1 });
-    expect(await t.keptObs()).toEqual(["ok"]);
+    expect(await t.keptObs()).toEqual(["fresh", "ok"]);
   });
 
   it("keeps a superseded Memory under 90 days old and evicts one over 90", async () => {

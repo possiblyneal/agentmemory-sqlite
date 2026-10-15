@@ -20,7 +20,7 @@ Deeper passes keep the totals at baseline but trade items. They lose some items 
 
 So this run does not show that eviction improves Recall. It shows that a modest floor or cap is free, and that deeper ones change *which* items arrive.
 
-At the measured commit, the daemon's own defaults (`evict`, `auto-forget`) remove nothing here, because every Observation is under five weeks old. Following this run, #225 makes `evict-importance:5` the default Eviction floor.
+At the measured commit, the daemon's own defaults (`evict`, `auto-forget`) remove nothing here, because every Observation is under five weeks old. Following this run, #225 makes `evict-importance:5` the default Eviction floor, for Observations at least a day old so a Session is summarized and graph-extracted before its rows go.
 
 ## Per pass
 

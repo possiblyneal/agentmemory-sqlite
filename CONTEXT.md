@@ -178,7 +178,7 @@ Deliberately removing Memories that have aged out or lost relevance, under a pol
 an Observation or Memory also evicts every Entity and Relation whose Provenance it was the last
 of: a Provenance below the cap that names no stored Observation or Memory. A Provenance at the
 cap may have dropped a live source, so it is never evicted. By default an Observation of
-importance below 5 is evicted at any age and a superseded Memory after 90 days; the
+importance below 5 is evicted once it is a day old and a superseded Memory after 90 days; the
 `mem:config/eviction` record overrides both. Distinct from Reclaim.
 
 **Reclaim**:
