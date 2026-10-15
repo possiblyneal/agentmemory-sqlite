@@ -451,10 +451,16 @@ export function registerSummarizeFunction(
         return { success: false, error: "session_not_found" };
       }
 
+      const listedAt = new Date().toISOString();
       const observations = await kv.list<CompressedObservation>(
         KV.observations(sessionId),
       );
       const compressed = observations.filter((o) => o.title);
+      // A row still awaiting compression keeps its earlier timestamp once
+      // titled, so the Summary covers only what precedes the oldest of them.
+      const coveredThrough = observations
+        .filter((o) => !o.title)
+        .reduce((min, o) => (o.timestamp < min ? o.timestamp : min), listedAt);
 
       if (compressed.length === 0) {
         logger.info("No observations to summarize", {
@@ -593,6 +599,7 @@ export function registerSummarizeFunction(
             continue;
           }
           parsed.lastObservationId = lastObservationId;
+          parsed.coveredThrough = coveredThrough;
           summary = parsed;
           break;
         }

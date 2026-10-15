@@ -811,6 +811,7 @@ describe("mem::evict spares Observations their Session's stop has not finished w
   function setup(opts: {
     observations: CompressedObservation[];
     summaryAt?: string;
+    coveredThrough?: string;
     extractedThrough?: string;
     config?: Record<string, unknown>;
   }) {
@@ -827,7 +828,18 @@ describe("mem::evict spares Observations their Session's stop has not finished w
         KV.summaries,
         new Map(
           opts.summaryAt
-            ? [[sessionId, { sessionId, createdAt: opts.summaryAt }]]
+            ? [
+                [
+                  sessionId,
+                  {
+                    sessionId,
+                    createdAt: opts.summaryAt,
+                    ...(opts.coveredThrough
+                      ? { coveredThrough: opts.coveredThrough }
+                      : {}),
+                  },
+                ],
+              ]
             : [],
         ),
       ],
@@ -879,6 +891,55 @@ describe("mem::evict spares Observations their Session's stop has not finished w
 
     expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
     expect(await t.kept()).toEqual(["after"]);
+  });
+
+  it("judges by the Summary's coverage, not its write time, when it records one", async () => {
+    const t = setup({
+      observations: [obs("covered", daysAgo(5)), obs("pending", daysAgo(3))],
+      summaryAt: daysAgo(1),
+      coveredThrough: daysAgo(4),
+    });
+
+    expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+    expect(await t.kept()).toEqual(["pending"]);
+  });
+
+  it("evicts an Observation older than the stale-session window whose Session has no Summary", async () => {
+    const t = setup({ observations: [obs("old", daysAgo(31)), obs("young", daysAgo(5))] });
+
+    expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+    expect(await t.kept()).toEqual(["young"]);
+  });
+
+  it("evicts an Observation older than the stale-session window past the watermark", async () => {
+    await withEnv({ GRAPH_EXTRACTION_ENABLED: "true" }, async () => {
+      const t = setup({
+        observations: [obs("old", daysAgo(31)), obs("young", daysAgo(5))],
+        summaryAt: daysAgo(1),
+        extractedThrough: daysAgo(40),
+      });
+
+      expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+      expect(await t.kept()).toEqual(["young"]);
+    });
+  });
+
+  it("evicts a recovered stale Session's old low-importance Observations in the same sweep", async () => {
+    const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    sdk.registerFunction("event::session::stopped", () => ({ success: true }));
+    sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
+
+    const stats = (await sdk.trigger({ function_id: "mem::evict", payload: {} })) as Record<
+      string,
+      number
+    >;
+
+    expect(stats).toMatchObject({ staleSessions: 1, lowImportanceObs: 1 });
+    expect(await kv.list(KV.observations(sessionId))).toEqual([]);
   });
 
   it("reports the same count on a dry run without deleting", async () => {

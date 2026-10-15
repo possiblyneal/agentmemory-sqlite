@@ -828,6 +828,32 @@ describe("mem::summarize Session Summary reuse", () => {
     expect(stored.lastObservationId).toBe("obs_11");
   });
 
+  it("records coverage up to the oldest Observation still awaiting compression", async () => {
+    const { handler, kv } = await withStoredSummary("ses_pending", 3, 0);
+    const pendingAt = new Date(Date.now() - 60_000).toISOString();
+    await kv.set("obs:ses_pending", "raw_0", {
+      id: "raw_0",
+      sessionId: "ses_pending",
+      timestamp: pendingAt,
+    });
+
+    await handler({ sessionId: "ses_pending" });
+
+    const stored: any = await kv.get("summaries", "ses_pending");
+    expect(stored.coveredThrough).toBe(pendingAt);
+  });
+
+  it("records coverage up to when it listed the Observations when none is pending", async () => {
+    const { handler, kv } = await withStoredSummary("ses_done", 3, 0);
+    const before = new Date().toISOString();
+
+    await handler({ sessionId: "ses_done" });
+
+    const stored: any = await kv.get("summaries", "ses_done");
+    expect(stored.coveredThrough >= before).toBe(true);
+    expect(stored.coveredThrough <= stored.createdAt).toBe(true);
+  });
+
   it("reproduces the summary when the count matches but the last Observation changed", async () => {
     const { handler, provider } = await withStoredSummary("ses_swap", 10, 10, "obs_deleted");
 

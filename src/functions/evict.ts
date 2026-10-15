@@ -57,7 +57,7 @@ function isStopFinishedWith(
   session: Session,
   summary: SessionSummary | undefined,
 ): boolean {
-  if (!summary || summary.createdAt < o.timestamp) return false;
+  if (!summary || o.timestamp >= (summary.coveredThrough ?? summary.createdAt)) return false;
   if (!isGraphExtractionEnabled() || graphLegDisabled()) return true;
   return !!session.graphExtractedThrough && o.timestamp <= session.graphExtractedThrough;
 }
@@ -221,6 +221,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           now - new Date(session.startedAt).getTime() > staleMs &&
           !summaryIds.has(session.id),
       );
+      const evictedStaleSessionIds = new Set<string>();
       if (dryRun) {
         stats.staleSessions = staleSessions.length;
       } else {
@@ -232,7 +233,10 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
             session.id,
           );
           if (recovered) recoveredStaleSessions++;
-          if (evicted) stats.staleSessions++;
+          if (evicted) {
+            stats.staleSessions++;
+            evictedStaleSessionIds.add(session.id);
+          }
         }
         if (recoveredStaleSessions > 0) {
           await runRecoveredSessionConsolidation(sdk);
@@ -244,7 +248,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       const countRemoval = (sessionId: string) =>
         removedBySession.set(sessionId, (removedBySession.get(sessionId) ?? 0) + 1);
       const projectObs = new Map<string, CompressedObservation[]>();
-      const spared = new Set<string>();
+      const awaitingStop = new Set<string>();
       for (const session of sessions) {
         const obs = await kv
           .list<CompressedObservation>(KV.observations(session.id))
@@ -255,11 +259,15 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         const summary = summaryBySession.get(session.id);
         for (const o of compressed) {
           if (!o.timestamp) continue;
-          if (!isStopFinishedWith(o, session, summary)) {
-            spared.add(o.id);
+          const age = now - new Date(o.timestamp).getTime();
+          if (
+            !evictedStaleSessionIds.has(session.id) &&
+            age < staleMs &&
+            !isStopFinishedWith(o, session, summary)
+          ) {
+            awaitingStop.add(o.id);
             continue;
           }
-          const age = now - new Date(o.timestamp).getTime();
           const maxAge = cfg.lowImportanceMaxDays * MS_PER_DAY;
           if (
             age >= maxAge &&
@@ -305,7 +313,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       for (const [, obs] of projectObs) {
         if (obs.length > cfg.maxObservationsPerProject) {
           const sorted = obs
-            .filter((o) => !spared.has(o.id))
+            .filter((o) => !awaitingStop.has(o.id))
             .sort((a, b) => (a.importance ?? 5) - (b.importance ?? 5));
           const toEvict = sorted.slice(
             0,

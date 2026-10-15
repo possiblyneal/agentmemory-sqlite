@@ -157,6 +157,7 @@ export interface SessionSummary {
   concepts: string[];
   observationCount: number;
   lastObservationId?: string;
+  coveredThrough?: string;
 }
 
 export type HookType =
