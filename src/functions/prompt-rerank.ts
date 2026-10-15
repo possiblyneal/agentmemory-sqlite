@@ -13,10 +13,6 @@ export function rerankDocument(observation: { timestamp?: unknown; title?: strin
   return `${date} ${observation.title ?? ""} ${(observation.narrative ?? "").slice(0, RERANK_NARRATIVE_CHARS)}`.trim();
 }
 
-// Each caller keeps its own cooldown and counts, so a slow search never
-// switches prompt-submit Injection to its BM25 selection.
-export type GateCaller = "prompt-submit" | "search";
-
 type FailureReason = "timeout" | "connection" | "malformed" | `http_${number}`;
 
 export interface InjectionGateState {
@@ -44,16 +40,15 @@ const freshCounters = (): GateCounters => ({
   cooldownUntil: 0,
 });
 
-const gates: Record<GateCaller, GateCounters> = { "prompt-submit": freshCounters(), search: freshCounters() };
+let gate = freshCounters();
 
 export function resetInjectionGate(): void {
-  gates["prompt-submit"] = freshCounters();
-  gates.search = freshCounters();
+  gate = freshCounters();
 }
 
-export function injectionGateState(caller: GateCaller): InjectionGateState {
+export function injectionGateState(): InjectionGateState {
   const { enabled, url } = getPromptRerankConfig();
-  const { calls, fallbacks, failing, lastFailure } = gates[caller];
+  const { calls, fallbacks, failing, lastFailure } = gate;
   return { enabled, url, calls, fallbacks, failing, lastFailure };
 }
 
@@ -93,8 +88,7 @@ function parseScores(body: unknown, documents: number): number[] {
   return scores;
 }
 
-function recordFailure(caller: GateCaller, reason: FailureReason, url: string): void {
-  const gate = gates[caller];
+function recordFailure(reason: FailureReason, url: string): void {
   const now = Date.now();
   const alreadyCooling = now < gate.cooldownUntil;
   gate.fallbacks++;
@@ -103,7 +97,6 @@ function recordFailure(caller: GateCaller, reason: FailureReason, url: string): 
   gate.cooldownUntil = now + RERANK_COOLDOWN_MS;
   if (alreadyCooling) return;
   logger.warn("Injection Gate failed; keeping BM25 selection", {
-    caller,
     reason,
     url,
     retryInSeconds: RERANK_COOLDOWN_MS / 1000,
@@ -112,14 +105,12 @@ function recordFailure(caller: GateCaller, reason: FailureReason, url: string): 
 
 // null means keep the BM25 selection: the gate is off, cooling down, or failed.
 export async function relevantOrder(
-  caller: GateCaller,
   prompt: string,
   documents: string[],
 ): Promise<number[] | null> {
   const config = getPromptRerankConfig();
   if (!config.enabled) return null;
 
-  const gate = gates[caller];
   if (Date.now() < gate.cooldownUntil) {
     gate.fallbacks++;
     return null;
@@ -151,18 +142,17 @@ export async function relevantOrder(
       .sort((a, b) => b.score - a.score)
       .map(({ index }) => index);
   } catch (err) {
-    recordFailure(caller, failureReason(err), config.url);
+    recordFailure(failureReason(err), config.url);
     return null;
   }
 }
 
 export async function gateByRelevance<T>(
-  caller: GateCaller,
   query: string,
   items: T[],
   observationOf: (item: T) => Parameters<typeof rerankDocument>[0],
 ): Promise<T[]> {
   if (items.length === 0) return items;
-  const order = await relevantOrder(caller, query, items.map((item) => rerankDocument(observationOf(item))));
+  const order = await relevantOrder(query, items.map((item) => rerankDocument(observationOf(item))));
   return order ? order.map((index) => items[index]) : items;
 }

@@ -80,7 +80,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = strong
         .map((hit, i) => ({ hit, ref: refs[i] }))
         .filter(({ ref }) => !seen.has(refKey(ref)));
-      const chosen = (await gateByRelevance("prompt-submit", prompt, candidates, ({ hit }) => hit.observation)).slice(0, MAX_RESULTS);
+      const chosen = (await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
       const lines = chosen.map(({ hit }) => escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
