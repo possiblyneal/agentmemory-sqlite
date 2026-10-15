@@ -179,7 +179,12 @@ an Observation or Memory also evicts every Entity and Relation whose Provenance 
 of: a Provenance below the cap that names no stored Observation or Memory. A Provenance at the
 cap may have dropped a live source, so it is never evicted. By default an Observation of
 importance below 5 is evicted once it is a day old and a superseded Memory after 90 days; the
-`mem:config/eviction` record overrides both. Distinct from Reclaim.
+`mem:config/eviction` record overrides both. Eviction never deletes an Observation its
+Session's stop has not finished with: the Session needs a Summary covering the Observation
+(written after it, and before the oldest Observation still awaiting compression) and, with
+graph extraction on and the graph leg not off, a graph extraction watermark at or past it. A
+Session the sweep has just recovered, and an Observation older than the stale-Session window
+(30 days), count as finished. Distinct from Reclaim.
 
 **Reclaim**:
 Deleting stored bytes that no longer back any live concept — data left behind by a removed

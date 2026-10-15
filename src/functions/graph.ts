@@ -676,9 +676,11 @@ function parseObservationAnnotations(
   return annotations;
 }
 
-// Field-level, so a concurrent writer's other fields survive. An Observation
-// gone from KV is skipped: update() would recreate it as a bare stub. Failures
-// are logged, not thrown: the graph is already written by then.
+// Field-level, so a concurrent writer's other fields survive. The read and
+// update hold the Observation's access lock, the one deleteIndexed takes, so a
+// delete cannot land between them and update() recreate a bare stub. An
+// Observation gone from KV is skipped. Failures are logged, not thrown: the
+// graph is already written by then.
 async function writeObservationAnnotations(
   kv: StateKV,
   observations: CompressedObservation[],
@@ -690,21 +692,23 @@ async function writeObservationAnnotations(
       const annotation = annotations.get(o.id);
       if (!annotation || !o.sessionId) return;
       const scope = KV.observations(o.sessionId);
-      const current = await kv.get<CompressedObservation>(scope, o.id);
-      if (!current) return;
-      const fields: Pick<CompressedObservation, "importance" | "concepts"> = {
-        importance: annotation.importance ?? current.importance,
-        concepts: [...new Set([...(current.concepts ?? []), ...annotation.concepts])].slice(
-          0,
-          MAX_OBSERVATION_CONCEPTS,
-        ),
-      };
-      await kv.update(
-        scope,
-        o.id,
-        Object.entries(fields).map(([path, value]) => ({ type: "set", path, value })),
-      );
-      if (index.has(o.id)) index.add({ ...current, ...fields });
+      await withKeyedLock(`mem:access:${o.id}`, async () => {
+        const current = await kv.get<CompressedObservation>(scope, o.id);
+        if (!current) return;
+        const fields: Pick<CompressedObservation, "importance" | "concepts"> = {
+          importance: annotation.importance ?? current.importance,
+          concepts: [...new Set([...(current.concepts ?? []), ...annotation.concepts])].slice(
+            0,
+            MAX_OBSERVATION_CONCEPTS,
+          ),
+        };
+        await kv.update(
+          scope,
+          o.id,
+          Object.entries(fields).map(([path, value]) => ({ type: "set", path, value })),
+        );
+        if (index.has(o.id)) index.add({ ...current, ...fields });
+      });
     }),
   );
   const failed = results.filter((r) => r.status === "rejected");
