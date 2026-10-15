@@ -9,7 +9,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { logger } from "../src/logger.js";
 import { MAX_OBSERVATION_CONCEPTS, registerGraphFunction } from "../src/functions/graph.js";
-import { getSearchIndex } from "../src/functions/search.js";
+import { deleteIndexed, getSearchIndex } from "../src/functions/search.js";
 import { ProviderHttpError, ProviderTimeoutError } from "../src/providers/_fetch.js";
 import type {
   CompressedObservation,
@@ -1578,6 +1578,32 @@ describe("graph-extract importance and concepts (#90)", () => {
       importance: 8,
       concepts: ["routing", "connection pooling", "pgbouncer"],
     });
+    expect(await stored("obs_b")).toMatchObject({ importance: 2, concepts: ["pgbouncer"] });
+  });
+
+  it("does not recreate an Observation deleted between the write-back's read and update", async () => {
+    const realGet = kv.get;
+    let deletion: Promise<void> | undefined;
+    kv.get = (async (scope: string, key: string) => {
+      const row = await realGet(scope, key);
+      if (scope === "mem:obs:ses_1" && key === "obs_a" && !deletion) {
+        deletion = deleteIndexed(kv as never, scope, key);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      return row;
+    }) as typeof kv.get;
+
+    await extract(
+      [obs("obs_a"), obs("obs_b")],
+      `<observations>
+<observation n="1" importance="8"/>
+<observation n="2" importance="2"/>
+</observations>
+<entities><entity type="library" name="pgbouncer" obs="1,2"/></entities>`,
+    );
+    await deletion;
+
+    expect(await stored("obs_a")).toBeNull();
     expect(await stored("obs_b")).toMatchObject({ importance: 2, concepts: ["pgbouncer"] });
   });
 
