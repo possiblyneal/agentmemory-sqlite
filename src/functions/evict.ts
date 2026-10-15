@@ -19,6 +19,7 @@ interface EvictionConfig {
   staleSessionDays: number;
   lowImportanceMaxDays: number;
   lowImportanceThreshold: number;
+  nonLatestMemoryMaxDays: number;
   maxObservationsPerProject: number;
 }
 
@@ -26,8 +27,9 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const DEFAULTS: EvictionConfig = {
   staleSessionDays: 30,
-  lowImportanceMaxDays: 90,
-  lowImportanceThreshold: 3,
+  lowImportanceMaxDays: 0,
+  lowImportanceThreshold: 5,
+  nonLatestMemoryMaxDays: 90,
   maxObservationsPerProject: 10_000,
 };
 
@@ -256,7 +258,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           const age = now - new Date(o.timestamp).getTime();
           const maxAge = cfg.lowImportanceMaxDays * MS_PER_DAY;
           if (
-            age > maxAge &&
+            age >= maxAge &&
             (o.importance ?? 5) < cfg.lowImportanceThreshold
           ) {
             if (dryRun) {
@@ -380,7 +382,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           mem.createdAt
         ) {
           const age = now - new Date(mem.createdAt).getTime();
-          if (age > cfg.lowImportanceMaxDays * MS_PER_DAY) {
+          if (age > cfg.nonLatestMemoryMaxDays * MS_PER_DAY) {
             if (dryRun) {
               stats.nonLatestMemories++;
             } else {
