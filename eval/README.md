@@ -33,7 +33,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 
 | Adapter | Backend | Paths | Needs |
 |---|---|---|---|
-| `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on first use |
+| `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on the first sandbox run |
 | `agentmemory-bm25` | sandbox daemon, no embeddings | all | `npm run build` |
 | `grep` | tokenized substring match, project-filtered | search, prompt-submit | nothing |
 | `random` | k Sessions drawn per question, seeded by question id | all | nothing — the floor every path must beat |
@@ -44,6 +44,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 The `agentmemory` adapters start their own daemon (`runner/sandbox.ts`) and stop it when they finish. It runs `dist/cli.mjs --instance 3` (REST 3411) with:
 
 - a store and a scratch `HOME` under `tmp/eval-sandbox/instance-3/`, deleted before and after the run, so neither your real `~/.agentmemory` store nor its `.env` is touched;
+- the embedding model cached in `tmp/eval-sandbox/models/` (`AGENTMEMORY_MODEL_CACHE_DIR`), which outlives every instance, so only the first run ever downloads it and a replay checkpoint restore does not re-download it into its first search's latency;
 - an environment built from scratch: `PATH`, the `HF_*` cache variables, `EMBEDDING_PROVIDER=local` unless the adapter is `agentmemory-bm25`, the shell's `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*` when set (not for `agentmemory-bm25`), and `RERANK_ENABLED` when the shell sets it (`RERANK_ENABLED=true npm run eval:coding-life` scores the cross-encoder reranker). No LLM provider, so compression is synthetic and there are no summaries. Synthetic compression rates every Observation 5, so the runner writes each Observation's `importance` from `sessions.json` over the stored row (read back through `GET /observations`, merged through `POST /import`) and refuses to run unless the store ends up with more than one value;
 - the Injection Gate (prompt-submit only) off (`AGENTMEMORY_PROMPT_RERANK=off`), so runs are BM25-only and never touch the network. To score the gate, set `AGENTMEMORY_PROMPT_RERANK_URL` in the shell (for example `AGENTMEMORY_PROMPT_RERANK_URL=http://ai.lan:9202/v1/rerank npm run eval:coding-life`); the sandbox then forwards `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN` and `_TIMEOUT_MS` when set. Without the URL it ignores the other three. `npm run eval:gate` must stay BM25-only, so never set the URL for it;
 - its log at `tmp/eval-sandbox/instance-3.log`.

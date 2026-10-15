@@ -76,12 +76,21 @@ const LLM_ENV = [
   "AGENTMEMORY_AUTO_COMPRESS",
 ];
 
-function sandboxEnv(home: string, sqlitePath: string, embeddings: EmbeddingMode, llm: boolean) {
+// The model cache sits beside the instance dirs, not in the per-run HOME
+// that startSandbox wipes, so a restart does not download the model again.
+export function sandboxEnv(
+  home: string,
+  sqlitePath: string,
+  modelCacheDir: string,
+  embeddings: EmbeddingMode,
+  llm: boolean,
+) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: home,
     USERPROFILE: home,
     AGENTMEMORY_SQLITE_PATH: sqlitePath,
+    AGENTMEMORY_MODEL_CACHE_DIR: modelCacheDir,
   };
   for (const [key, value] of Object.entries(process.env)) {
     if (key.startsWith("HF_") && value !== undefined) env[key] = value;
@@ -163,7 +172,13 @@ export async function startSandbox(opts: {
     process.execPath,
     [cli, "--instance", String(opts.instance)],
     {
-      env: sandboxEnv(resolve(dir, "home"), sqlitePath, opts.embeddings, opts.llm === true),
+      env: sandboxEnv(
+        resolve(dir, "home"),
+        sqlitePath,
+        resolve(root, "models"),
+        opts.embeddings,
+        opts.llm === true,
+      ),
       stdio: ["ignore", log, log],
     },
   );
