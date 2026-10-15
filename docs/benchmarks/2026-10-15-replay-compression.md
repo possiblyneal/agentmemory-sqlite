@@ -6,12 +6,12 @@
 **K:** 5 for the `smart-search` baseline; a prompt-context Injection is scored whole
 **Hardware:** linux 6.12, 8 cores, node 22.23
 **Embeddings:** on-device (local MiniLM); `RERANK_ENABLED` off in every arm
-**Injection Gate:** off arm `AGENTMEMORY_PROMPT_RERANK=off`; on arm `AGENTMEMORY_PROMPT_RERANK_URL=http://ai.lan:9202/v1/rerank`, defaults otherwise (min score 0.03)
+**Injection Gate:** off arm `AGENTMEMORY_PROMPT_RERANK=off`; on arm `AGENTMEMORY_PROMPT_RERANK_URL=http://ai.lan:9202/v1/rerank`, defaults otherwise (min score 0.03, timeout capped at 1000 ms)
 **LLM:** OpenAI-compatible `general` → `Occult-Nail-1.0-35B-A3B-UD-Q4_K_XL` via the inference-runtime-broker, `AGENTMEMORY_LLM_MAX_CONCURRENCY=1`, `AGENTMEMORY_LLM_TIMEOUT_MS=300000`, for the save passes that use it; the probe passes make no LLM calls
 
 ## Headline
 
-LLM Compression helps, and on a local broker the cost is worth paying. Against the same hook-path store with synthetic compression, it delivers 7 more of 58 key items in time by either path (39 → 46). Search alone gains 9 (4 → 13; sign test p = 0.02), and on terse prompts search goes from 1 to 12 of 29 (p = 0.001). The LLM store is also 12% smaller (77.5 vs 88.5 MB). The gain comes almost entirely from file attribution: 76% of LLM-compressed Observations name a file, against 8% of synthetic ones. The price is 41 h of extra broker time and 12,983 compress calls for 4.09 weeks of replayed work. All of it runs off the critical path, and no hook probe in any arm passed 1.5 s.
+LLM Compression helps, and on a local broker the cost is worth paying. Against the same hook-path store with synthetic compression, it delivers 7 more of 58 key items in time by either path (39 → 46; sign test p = 0.09, so directional). The significant gain is search: alone it gains 9 (4 → 13; p = 0.02), and on terse prompts it goes from 1 to 12 of 29 (p = 0.001). The LLM store is also 12% smaller (77.5 vs 88.5 MB). The gain comes almost entirely from file attribution: 76% of LLM-compressed Observations name a file, against 8% of synthetic ones. The price is 45.0 h of waiting on compression (41 h more wall-clock than the synthetic build) and 12,983 compress calls for 4.09 weeks of replayed work. All of it runs off the critical path, and no hook probe in any arm passed 1.5 s.
 
 ## Builds
 
@@ -56,9 +56,12 @@ Store size and growth are unchanged from the gate-off table.
 | Right content | Injection chars per used item | 3,467 | 3,816 | 7,085 |
 | Right moment | key items in time, Injection / search / either | 44 / 13 / 46 of 58 | 37 / 4 / 39 of 58 | 3 / 4 / 5 of 58 |
 | Right moment | terse prompts, Injection / search / either | 22 / 12 / 22 of 29 | 18 / 1 / 18 of 29 | 0 / 0 / 0 of 29 |
+| Right scope | injected items from another project | 0 | 0 | 0 |
 | Durable beats recent | repeated corrections injected before the repeat | 2 / 3 | 1 / 3 | 0 / 3 |
 | Least record | distinct used items | 56 | 53 | 48 |
+| Never on the critical path | session-start p50 / p99 | 7 / 132 ms | 7 / 152 ms | 36 / 108 ms |
 | Never on the critical path | prompt-context p50 / p99 | 22 / 529 ms | 28 / 492 ms | 286 / 664 ms |
+| Never on the critical path | smart-search p50 / p99 | 60 / 184 ms | 59 / 292 ms | 86 / 336 ms |
 | Never on the critical path | hook probes over 1.5 s | 0 of 377 | 0 of 377 | 0 of 377 |
 
 ## Cost of each build
@@ -66,17 +69,17 @@ Store size and growth are unchanged from the gate-off table.
 | Build | Wall-clock | Compress calls | Summarize calls | Mean summarize latency |
 |---|---|---|---|---|
 | LLM | 47.9 h (45.0 h waiting on compression) | 12,983 (13 fell back to synthetic) | 55 (55 succeeded) | 181 s |
-| Synthetic | 6.9 h | 0 | 57 (56 succeeded; 54 of 55 Sessions summarized) | 460 s |
+| Synthetic | 6.9 h | 0 | 57 (56 succeeded; 1 of 55 Sessions has no Summary) | 460 s |
 | Import | 48.7 min | 0 | 0 | — |
 
-Compression adds 41.0 h and 12,983 calls, about 12.5 s of broker time per call at concurrency 1. It also makes each Summary about 2.5× cheaper, because compressed narratives are about 3× shorter (470 vs 1,390 chars per Observation in the final checkpoint).
+The LLM build spent 45.0 h waiting on 12,983 compress calls, about 12.5 s per call at concurrency 1. Its wall-clock is 41.0 h longer than the synthetic build's, because the synthetic build's Summaries are slower. Mean summarize latency, queue wait included, is about 2.5× lower with LLM Compression, and its narratives are about 3× shorter (470 vs 1,390 chars per Observation in the final checkpoint).
 
 ## Methodology
 
 - **Scope.** As in the [2026-10-15 gate scorecard](2026-10-15-replay-gate.md): all 107 `~/.claude/projects` directories, frozen under `tmp/frozen-projects`, `--cap 1000 --min-turns 2 --keyed-only`, default dev split. The scored Sessions and answer key are identical in all six arms.
 - **Paired test.** Each arm scores the same 58 + 29 key items, so LLM and Synthetic are compared item by item with a two-sided sign test on the items only one of them delivered. Gate off: either path 10 vs 3 (p = 0.09), search 11 vs 2 (p = 0.02), terse search 11 vs 0 (p = 0.001). Gate on gives the same picture (either 9 vs 2, p = 0.07).
 - **Store size** is the last checkpoint (before the 40th probed Session), the same for both gate arms of a build.
-- **Load.** The probe passes ran on `--instance 6` while another worktree's replay sandboxes ran on the same host, so latency is comparable within this scorecard only.
+- **Load.** The probe passes ran on `--instance 6` while another worktree's replay sandboxes ran on the same host, so latency is comparable within this scorecard only. The LLM build's latencies differ from the gate scorecard's for the same checkpoints for this reason.
 - Everything else is as in `eval/README.md` (Replay).
 
 ## Reproduce
@@ -96,14 +99,15 @@ AGENTMEMORY_PROMPT_RERANK=off npm run eval:replay -- "${COMMON[@]}" \
   --from-checkpoints tmp/eval-replay/<build>/checkpoints --out tmp/eval-replay/<build>-off
 AGENTMEMORY_PROMPT_RERANK_URL=<reranker> npm run eval:replay -- "${COMMON[@]}" \
   --from-checkpoints tmp/eval-replay/<build>/checkpoints --out tmp/eval-replay/<build>-on
+# the LLM build's checkpoints are tmp/eval-replay/ckpt/checkpoints
 ```
 
 Needs your own `~/.claude/projects` and an OpenAI-compatible LLM; numbers will differ.
 
 ## Notes
 
-- **Verdict: helps, and justifies its cost on a local broker.** Against the synthetic hook-path store, LLM Compression delivers 7 more key items by either path, 9 more by search alone and 11 more terse-prompt items by search. It also holds 1 more repeated correction and keeps a 12% smaller store, while the used share stays level (12.4% vs 12.1%). Its cost is broker time, not money and not latency. It runs off the critical path, and 45 h over 4.09 replayed weeks is about 11 h a week at concurrency 1. These were 55 of the 242 Sessions in that span, so live load is higher, but it still fits a dedicated broker. On a metered API, 12,983 calls per 55 Sessions would need its own price check.
+- **Verdict: helps, and justifies its cost on a local broker.** It helps significantly on search and directionally by either path. Against the synthetic hook-path store, LLM Compression delivers 7 more key items by either path (p = 0.09), 9 more by search alone and 11 more terse-prompt items by search. It also holds 1 more repeated correction and keeps a 12% smaller store, while the used share stays level (12.4% vs 12.1%). Its cost is broker time, not money and not latency. It runs off the critical path, and 45.0 h of compression over 4.09 replayed weeks is about 11 h a week at concurrency 1. These were 55 of the 242 Sessions in that span, so live load is higher, but it still fits a dedicated broker. On a metered API, 12,983 calls per 55 Sessions would need its own price check.
 - **The gain is file attribution.** Synthetic compression names a file in 8% of Observations, LLM Compression in 76%. 55 of 58 headline items are files, so this measure leans toward that gain. Better synthetic file extraction could close part of the search gap without the LLM.
-- **The ticket's no-LLM arm measures `import-jsonl`, not compression.** The importer files 35,421 Observations for the same 55 Sessions (2.4× the hook path), 55% of them typed `other`, and only 4% name a file. It also writes no Summaries. Its 6 / 58 is a fact about that ingest path, which hooks never take and only backfilled history (`agentmemory import-jsonl`) goes through, so the Synthetic build is the fair counterfactual.
-- **The gate's effect does not depend on the build.** In LLM, Synthetic and Import alike, the gate cuts injected items by 23–29% and leaves Injection hits unchanged.
+- **The ticket's no-LLM arm measures `import-jsonl`, not compression.** In the final checkpoint (54 Sessions) the importer has filed 35,421 Observations, 2.4× the hook path's 15,042, 55% of them typed `other`, and only 4% name a file. It also writes no Summaries. Its 6 / 58 is a fact about that ingest path, which hooks never take and only backfilled history (`agentmemory import-jsonl`) goes through, so the Synthetic build is the fair counterfactual.
+- **The gate's effect does not depend on the build.** In LLM, Synthetic and Import alike, the gate cuts injected items by 23–29% and leaves key-item Injection hits unchanged. Terse-prompt Injection hits rise from 20 to 22 of 29 for LLM only.
 - **The key is still mostly files**, and no revisited decisions appear, so this run does not test whether LLM Compression helps decisions.
