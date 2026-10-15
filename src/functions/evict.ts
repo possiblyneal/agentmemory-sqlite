@@ -57,7 +57,11 @@ function isStopFinishedWith(
   session: Session,
   summary: SessionSummary | undefined,
 ): boolean {
-  if (!summary || o.timestamp >= (summary.coveredThrough ?? summary.createdAt)) return false;
+  if (!summary) return false;
+  const covered = summary.coveredThrough
+    ? o.timestamp < summary.coveredThrough
+    : o.timestamp <= summary.createdAt;
+  if (!covered) return false;
   if (!isGraphExtractionEnabled() || graphLegDisabled()) return true;
   return !!session.graphExtractedThrough && o.timestamp <= session.graphExtractedThrough;
 }
@@ -224,6 +228,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       const evictedStaleSessionIds = new Set<string>();
       if (dryRun) {
         stats.staleSessions = staleSessions.length;
+        for (const session of staleSessions) evictedStaleSessionIds.add(session.id);
       } else {
         let recoveredStaleSessions = 0;
         for (const session of staleSessions) {

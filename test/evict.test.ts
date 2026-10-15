@@ -942,6 +942,21 @@ describe("mem::evict spares Observations their Session's stop has not finished w
     expect(await kv.list(KV.observations(sessionId))).toEqual([]);
   });
 
+  it("previews a stale Session's old low-importance Observations as evicted on a dry run", async () => {
+    const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    const stats = (await sdk.trigger({
+      function_id: "mem::evict",
+      payload: { dryRun: true },
+    })) as Record<string, number>;
+
+    expect(stats).toMatchObject({ staleSessions: 1, lowImportanceObs: 1 });
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+  });
+
   it("reports the same count on a dry run without deleting", async () => {
     const t = setup({
       observations: [obs("before", daysAgo(5)), obs("after", daysAgo(3))],
