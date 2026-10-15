@@ -4,6 +4,7 @@ import { connect } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { KV } from "../../src/state/schema.js";
 
 export type EmbeddingMode = "local" | "none";
 
@@ -90,6 +91,7 @@ export function sandboxEnv(
     HOME: home,
     USERPROFILE: home,
     AGENTMEMORY_SQLITE_PATH: sqlitePath,
+    EVICTION_ENABLED: "false",
     AGENTMEMORY_MODEL_CACHE_DIR: modelCacheDir,
   };
   for (const [key, value] of Object.entries(process.env)) {
@@ -134,7 +136,7 @@ export async function startSandbox(opts: {
   llm?: boolean;
   // A store file the daemon starts from instead of an empty one.
   seed?: string;
-  // `mem:config` rows written into the seeded store before the daemon boots.
+  // Config rows written into the seeded store before the daemon boots.
   config?: Record<string, unknown>;
 }): Promise<Sandbox> {
   const cli = resolve(REPO_ROOT, "dist/cli.mjs");
@@ -160,10 +162,10 @@ export async function startSandbox(opts: {
     const db = new DatabaseSync(sqlitePath);
     try {
       const put = db.prepare(
-        `INSERT INTO kv (scope, key, value, updated_at) VALUES ('mem:config', ?, ?, ?)
+        `INSERT INTO kv (scope, key, value, updated_at) VALUES (?, ?, ?, ?)
          ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
       );
-      for (const [key, value] of Object.entries(opts.config)) put.run(key, JSON.stringify(value), Date.now());
+      for (const [key, value] of Object.entries(opts.config)) put.run(KV.config, key, JSON.stringify(value), Date.now());
     } finally {
       db.close();
     }

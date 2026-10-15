@@ -144,12 +144,12 @@ Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` bec
 
 | Pass | Call | What it removes |
 |---|---|---|
-| `evict` | `POST /evict` with the daemon's defaults | what the live daemon's eviction sweep would remove |
+| `evict` | `POST /evict` with the current defaults | what the live daemon's eviction sweep would remove: every Observation with importance below 5 once it is a day old, since #225 (the 2026-10-15 maintenance scorecard's `evict` row ran the earlier schedule at `7c0415f`) |
 | `auto-forget` | `POST /auto-forget` | what the hourly auto-forget would remove |
 | `evict-importance:N` | `POST /evict` | every Observation with importance below N, whatever its age |
 | `evict-cap:N` | `POST /evict` | the lowest-importance Observations past N per project |
 
-The `evict-*` passes write `mem:config/eviction` into the restored store before the daemon boots, which `mem::evict` merges over its defaults. Both set `staleSessionDays` to 36,500 so the pass never recovers a stale Session, which would need the LLM. `evict-importance:N` also sets `lowImportanceMaxDays` to 0, and `evict-cap:N` sets `maxObservationsPerProject`. A checkpoint pass reports live bytes whether or not it runs a pass, so compare a maintenance pass with a `--from-checkpoints` pass that runs none. `summary.json` records the pass and the last checkpoint's live bytes before it. Retention eviction, Decay and consolidation are not passes: `mem::retention-evict` and Decay touch only Memories and semantic and procedural memories, no REST route reaches retention eviction, and consolidation needs the LLM, which a probe pass does not have.
+The `evict-*` passes write `mem:config/eviction` into the restored store before the daemon boots, which `mem::evict` merges over its defaults. Both set `staleSessionDays` to 36,500 so the pass never recovers a stale Session, which would need the LLM; plain `evict` keeps the daemon's recovery, which fails without the LLM. The sandbox sets `EVICTION_ENABLED=false`, so its boot sweep never evicts behind a pass. `evict-importance:N` also sets `lowImportanceMaxDays` to 0, and `evict-cap:N` sets `maxObservationsPerProject`. A checkpoint pass reports live bytes whether or not it runs a pass, so compare a maintenance pass with a `--from-checkpoints` pass that runs none. `summary.json` records the pass and the last checkpoint's live bytes before it. Retention eviction, Decay and consolidation are not passes: `mem::retention-evict` and Decay touch only Memories and semantic and procedural memories, no REST route reaches retention eviction, and consolidation needs the LLM, which a probe pass does not have.
 
 Each Session is filed under its repository the way the live hooks' `resolveProject()` files it: the main checkout's basename, shared by every worktree. The runner asks git for the common dir from the Session's cwd (or its nearest surviving ancestor), falls back to the Orca layout `<...>/workspaces/<repo>/<worktree>` for a deleted worktree, and otherwise keeps the importer's name; it passes the result as `project` to the import. So list every directory of a repository (main checkout and worktrees) in `--projects` to replay it whole.
 
@@ -191,9 +191,9 @@ Session start is turn 0; a prompt's Injection arrives before the work on that pr
 | Right moment | share of key items delivered in time by Injection alone, by search alone, and by either; split by rule |
 | Right scope | Injected items whose project is not Session k's project (target 0) |
 | Durable beats recent | share of repeated corrections whose earlier correction was injected before the repeat |
-| Least record | store bytes at the end (database + WAL) per distinct item ever used |
+| Least record | store bytes at the end (database + WAL; live bytes, pages in use, in a checkpoint pass) per distinct item ever used |
 | Never on the critical path | p50/p99 of each probe, and how many exceeded the 1.5 s hook timeout |
-| Operator attention | store growth in bytes per replayed week (span of start times, at least one day) |
+| Operator attention | store growth in bytes per replayed week (span of start times, at least one day; live bytes in a checkpoint pass) |
 
 #### Blind spots
 
