@@ -4,6 +4,7 @@ import type {
   Memory,
   RawObservation,
   Session,
+  SessionSummary,
 } from "../src/types.js";
 import { registerEvictFunction } from "../src/functions/evict.js";
 import { KV } from "../src/state/schema.js";
@@ -61,6 +62,20 @@ function makeRawObservation(sessionId: string): RawObservation {
     hookType: "post_tool_use",
     toolName: "Edit",
     raw: { file_path: "src/state/kv.ts" },
+  };
+}
+
+function summaryFor(sessionId: string): SessionSummary {
+  return {
+    sessionId,
+    project: "agentmemory",
+    createdAt: new Date().toISOString(),
+    title: "Summary",
+    narrative: "",
+    keyDecisions: [],
+    filesModified: [],
+    concepts: [],
+    observationCount: 0,
   };
 }
 
@@ -424,7 +439,7 @@ describe("mem::evict session observation counts", () => {
   ): Store {
     const store: Store = new Map([
       [KV.sessions, new Map(sessions.map(({ session }) => [session.id, session]))],
-      [KV.summaries, new Map()],
+      [KV.summaries, new Map(sessions.map(({ session }) => [session.id, summaryFor(session.id)]))],
       [KV.config, new Map()],
       [KV.audit, new Map()],
     ]);
@@ -679,7 +694,7 @@ describe("mem::evict default importance floor", () => {
     const session: Session = { ...makeSession("ses_d"), startedAt: daysAgo(1) };
     const store: Store = new Map([
       [KV.sessions, new Map([[session.id, session]])],
-      [KV.summaries, new Map()],
+      [KV.summaries, new Map([[session.id, summaryFor(session.id)]])],
       [KV.observations(session.id), new Map(observations.map((o) => [o.id, o]))],
       [KV.memories, new Map(memories.map((m) => [m.id, m]))],
       [KV.config, new Map()],
@@ -783,5 +798,163 @@ describe("mem::evict default importance floor", () => {
     await t.run();
 
     expect(await t.keptMem()).toEqual(["m"]);
+  });
+});
+
+describe("mem::evict spares Observations their Session's stop has not finished with", () => {
+  const sessionId = "ses_gate";
+
+  function obs(id: string, timestamp: string, importance = 1): CompressedObservation {
+    return { ...makeObservation(sessionId), id, timestamp, importance };
+  }
+
+  function setup(opts: {
+    observations: CompressedObservation[];
+    summaryAt?: string;
+    extractedThrough?: string;
+    config?: Record<string, unknown>;
+  }) {
+    const session: Session = {
+      ...makeSession(sessionId),
+      startedAt: daysAgo(1),
+      ...(opts.extractedThrough
+        ? { graphExtractedThrough: opts.extractedThrough }
+        : {}),
+    };
+    const store: Store = new Map([
+      [KV.sessions, new Map([[session.id, session]])],
+      [
+        KV.summaries,
+        new Map(
+          opts.summaryAt
+            ? [[sessionId, { sessionId, createdAt: opts.summaryAt }]]
+            : [],
+        ),
+      ],
+      [KV.observations(sessionId), new Map(opts.observations.map((o) => [o.id, o]))],
+      [KV.config, new Map(opts.config ? [["eviction", opts.config]] : [])],
+      [KV.audit, new Map()],
+    ]);
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    const run = (dryRun = false) =>
+      sdk.trigger({ function_id: "mem::evict", payload: { dryRun } }) as Promise<
+        Record<string, number>
+      >;
+    const kept = async () =>
+      (await kv.list<CompressedObservation>(KV.observations(sessionId)))
+        .map((o) => o.id)
+        .sort();
+    return { run, kept };
+  }
+
+  async function withEnv(vars: Record<string, string>, fn: () => Promise<void>) {
+    const saved = Object.fromEntries(
+      Object.keys(vars).map((k) => [k, process.env[k]]),
+    );
+    Object.assign(process.env, vars);
+    try {
+      await fn();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }
+
+  it("keeps an old low-importance Observation whose Session has no Summary", async () => {
+    const t = setup({ observations: [obs("a", daysAgo(5))] });
+
+    expect(await t.run()).toMatchObject({ lowImportanceObs: 0 });
+    expect(await t.kept()).toEqual(["a"]);
+  });
+
+  it("keeps one written after its Session's Summary and evicts one written before it", async () => {
+    const t = setup({
+      observations: [obs("before", daysAgo(5)), obs("after", daysAgo(3))],
+      summaryAt: daysAgo(4),
+    });
+
+    expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+    expect(await t.kept()).toEqual(["after"]);
+  });
+
+  it("reports the same count on a dry run without deleting", async () => {
+    const t = setup({
+      observations: [obs("before", daysAgo(5)), obs("after", daysAgo(3))],
+      summaryAt: daysAgo(4),
+    });
+
+    expect(await t.run(true)).toMatchObject({ lowImportanceObs: 1, dryRun: true });
+    expect(await t.kept()).toEqual(["after", "before"]);
+  });
+
+  it("with graph extraction enabled keeps one past the watermark and evicts one behind it", async () => {
+    await withEnv({ GRAPH_EXTRACTION_ENABLED: "true" }, async () => {
+      const t = setup({
+        observations: [obs("behind", daysAgo(5)), obs("past", daysAgo(3))],
+        summaryAt: daysAgo(1),
+        extractedThrough: daysAgo(4),
+      });
+
+      expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+      expect(await t.kept()).toEqual(["past"]);
+    });
+  });
+
+  it("with graph extraction enabled keeps everything when the Session has no watermark", async () => {
+    await withEnv({ GRAPH_EXTRACTION_ENABLED: "true" }, async () => {
+      const t = setup({
+        observations: [obs("a", daysAgo(5))],
+        summaryAt: daysAgo(1),
+      });
+
+      expect(await t.run()).toMatchObject({ lowImportanceObs: 0 });
+      expect(await t.kept()).toEqual(["a"]);
+    });
+  });
+
+  it("ignores the watermark with graph extraction disabled", async () => {
+    await withEnv({ GRAPH_EXTRACTION_ENABLED: "false" }, async () => {
+      const t = setup({
+        observations: [obs("past", daysAgo(3))],
+        summaryAt: daysAgo(1),
+        extractedThrough: daysAgo(4),
+      });
+
+      expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+    });
+  });
+
+  it("ignores the watermark when the graph leg is off", async () => {
+    await withEnv(
+      { GRAPH_EXTRACTION_ENABLED: "true", AGENTMEMORY_GRAPH_LEG: "off" },
+      async () => {
+        const t = setup({
+          observations: [obs("past", daysAgo(3))],
+          summaryAt: daysAgo(1),
+          extractedThrough: daysAgo(4),
+        });
+
+        expect(await t.run()).toMatchObject({ lowImportanceObs: 1 });
+      },
+    );
+  });
+
+  it("makes the per-project cap skip Observations that fail the rule", async () => {
+    const t = setup({
+      observations: [
+        obs("a", daysAgo(0.5), 1),
+        obs("b", daysAgo(0.4), 2),
+        obs("c", daysAgo(0.3), 3),
+      ],
+      summaryAt: daysAgo(0.45),
+      config: { maxObservationsPerProject: 1 },
+    });
+
+    expect(await t.run()).toMatchObject({ capEvictions: 1 });
+    expect(await t.kept()).toEqual(["b", "c"]);
   });
 });

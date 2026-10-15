@@ -9,7 +9,8 @@ import type {
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
-import { isConsolidationEnabled } from "../config.js";
+import { isConsolidationEnabled, isGraphExtractionEnabled } from "../config.js";
+import { graphLegDisabled } from "../state/graph-indexes.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { evictGraphForSources } from "./graph-eviction.js";
@@ -49,6 +50,16 @@ function isValidRecoveryResult(result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   if (!("success" in result)) return true;
   return (result as { success?: unknown }).success !== false;
+}
+
+function isStopFinishedWith(
+  o: CompressedObservation,
+  session: Session,
+  summary: SessionSummary | undefined,
+): boolean {
+  if (!summary || summary.createdAt < o.timestamp) return false;
+  if (!isGraphExtractionEnabled() || graphLegDisabled()) return true;
+  return !!session.graphExtractedThrough && o.timestamp <= session.graphExtractedThrough;
 }
 
 function isCompressedObservation(
@@ -200,7 +211,8 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       const summaries = await kv
         .list<SessionSummary>(KV.summaries)
         .catch(() => []);
-      const summaryIds = new Set(summaries.map((s) => s.sessionId));
+      const summaryBySession = new Map(summaries.map((s) => [s.sessionId, s]));
+      const summaryIds = new Set(summaryBySession.keys());
 
       const staleMs = cfg.staleSessionDays * MS_PER_DAY;
       const staleSessions = sessions.filter(
@@ -232,6 +244,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       const countRemoval = (sessionId: string) =>
         removedBySession.set(sessionId, (removedBySession.get(sessionId) ?? 0) + 1);
       const projectObs = new Map<string, CompressedObservation[]>();
+      const spared = new Set<string>();
       for (const session of sessions) {
         const obs = await kv
           .list<CompressedObservation>(KV.observations(session.id))
@@ -239,8 +252,13 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         const compressed = obs.filter((o) => o.title);
         const lowImportanceIds = new Set<string>();
 
+        const summary = summaryBySession.get(session.id);
         for (const o of compressed) {
           if (!o.timestamp) continue;
+          if (!isStopFinishedWith(o, session, summary)) {
+            spared.add(o.id);
+            continue;
+          }
           const age = now - new Date(o.timestamp).getTime();
           const maxAge = cfg.lowImportanceMaxDays * MS_PER_DAY;
           if (
@@ -286,9 +304,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
 
       for (const [, obs] of projectObs) {
         if (obs.length > cfg.maxObservationsPerProject) {
-          const sorted = obs.sort(
-            (a, b) => (a.importance ?? 5) - (b.importance ?? 5),
-          );
+          const sorted = obs
+            .filter((o) => !spared.has(o.id))
+            .sort((a, b) => (a.importance ?? 5) - (b.importance ?? 5));
           const toEvict = sorted.slice(
             0,
             obs.length - cfg.maxObservationsPerProject,
