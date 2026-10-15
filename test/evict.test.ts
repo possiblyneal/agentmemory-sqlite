@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   CompressedObservation,
+  Memory,
   RawObservation,
   Session,
 } from "../src/types.js";
@@ -498,7 +499,11 @@ describe("mem::evict session observation counts", () => {
         ],
       },
     ]);
-    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    store.get(KV.config)!.set("eviction", {
+      lowImportanceThreshold: 3,
+      lowImportanceMaxDays: 90,
+      maxObservationsPerProject: 1,
+    });
 
     const kv = await evict(store);
 
@@ -524,7 +529,11 @@ describe("mem::evict session observation counts", () => {
         ],
       },
     ]);
-    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    store.get(KV.config)!.set("eviction", {
+      lowImportanceThreshold: 3,
+      lowImportanceMaxDays: 90,
+      maxObservationsPerProject: 1,
+    });
     const kv = mockKV(store);
     const { sdk } = mockSdk();
     registerEvictFunction(sdk as never, kv as never);
@@ -550,7 +559,11 @@ describe("mem::evict session observation counts", () => {
         ],
       },
     ]);
-    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    store.get(KV.config)!.set("eviction", {
+      lowImportanceThreshold: 3,
+      lowImportanceMaxDays: 90,
+      maxObservationsPerProject: 1,
+    });
     store.set(
       KV.graphObsNodes,
       new Map([
@@ -568,5 +581,148 @@ describe("mem::evict session observation counts", () => {
     expect(await kv.get(KV.graphObsNodes, "old_a")).toBeNull();
     expect(await kv.get(KV.graphObsNodes, "new_a")).toBeNull();
     expect(await kv.get(KV.graphObsNodes, "new_b")).toEqual(["n3"]);
+  });
+});
+
+describe("mem::evict default importance floor", () => {
+  function obs(
+    sessionId: string,
+    id: string,
+    ageDays: number,
+    importance: number,
+  ): CompressedObservation {
+    return {
+      ...makeObservation(sessionId),
+      id,
+      timestamp: daysAgo(ageDays),
+      importance,
+    };
+  }
+
+  function memory(id: string, ageDays: number, isLatest: boolean): Memory {
+    return {
+      id,
+      createdAt: daysAgo(ageDays),
+      updatedAt: daysAgo(ageDays),
+      type: "fact",
+      title: id,
+      content: id,
+      concepts: [],
+      files: [],
+      sessionIds: [],
+      strength: 5,
+      version: 1,
+      isLatest,
+    };
+  }
+
+  function setup(
+    observations: CompressedObservation[],
+    memories: Memory[] = [],
+    config?: Record<string, unknown>,
+  ) {
+    const session: Session = { ...makeSession("ses_d"), startedAt: daysAgo(1) };
+    const store: Store = new Map([
+      [KV.sessions, new Map([[session.id, session]])],
+      [KV.summaries, new Map()],
+      [KV.observations(session.id), new Map(observations.map((o) => [o.id, o]))],
+      [KV.memories, new Map(memories.map((m) => [m.id, m]))],
+      [KV.config, new Map()],
+      [KV.audit, new Map()],
+    ]);
+    if (config) store.get(KV.config)!.set("eviction", config);
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    const run = (dryRun = false) =>
+      sdk.trigger({ function_id: "mem::evict", payload: { dryRun } }) as Promise<
+        Record<string, unknown>
+      >;
+    const keptObs = async () =>
+      (await kv.list<CompressedObservation>(KV.observations(session.id)))
+        .map((o) => o.id)
+        .sort();
+    const keptMem = async () =>
+      (await kv.list<Memory>(KV.memories)).map((m) => m.id).sort();
+    return { run, keptObs, keptMem };
+  }
+
+  it("removes a one-day-old Observation of importance 4 and keeps importance 5", async () => {
+    const t = setup([obs("ses_d", "low", 1, 4), obs("ses_d", "ok", 1, 5)]);
+
+    const stats = await t.run();
+
+    expect(stats).toMatchObject({ lowImportanceObs: 1 });
+    expect(await t.keptObs()).toEqual(["ok"]);
+  });
+
+  it("keeps a superseded Memory under 90 days old and evicts one over 90", async () => {
+    const t = setup([], [
+      memory("young", 30, false),
+      memory("old", 100, false),
+      memory("latest", 100, true),
+    ]);
+
+    const stats = await t.run();
+
+    expect(stats).toMatchObject({ nonLatestMemories: 1 });
+    expect(await t.keptMem()).toEqual(["latest", "young"]);
+  });
+
+  it("reports the default removals on a dry run without deleting", async () => {
+    const t = setup(
+      [obs("ses_d", "low", 1, 4), obs("ses_d", "ok", 1, 5)],
+      [memory("old", 100, false)],
+    );
+
+    const stats = await t.run(true);
+
+    expect(stats).toMatchObject({
+      dryRun: true,
+      lowImportanceObs: 1,
+      nonLatestMemories: 1,
+    });
+    expect(await t.keptObs()).toEqual(["low", "ok"]);
+    expect(await t.keptMem()).toEqual(["old"]);
+  });
+
+  it("honours a lowImportanceThreshold override", async () => {
+    const t = setup(
+      [obs("ses_d", "four", 1, 4), obs("ses_d", "two", 1, 2)],
+      [],
+      { lowImportanceThreshold: 3 },
+    );
+
+    await t.run();
+
+    expect(await t.keptObs()).toEqual(["four"]);
+  });
+
+  it("honours a lowImportanceMaxDays override", async () => {
+    const t = setup(
+      [obs("ses_d", "new", 1, 1), obs("ses_d", "old", 100, 1)],
+      [],
+      { lowImportanceMaxDays: 90 },
+    );
+
+    await t.run();
+
+    expect(await t.keptObs()).toEqual(["new"]);
+  });
+
+  it("honours a nonLatestMemoryMaxDays override", async () => {
+    const t = setup([], [memory("m", 10, false)], { nonLatestMemoryMaxDays: 5 });
+
+    await t.run();
+
+    expect(await t.keptMem()).toEqual([]);
+  });
+
+  it("does not let lowImportanceMaxDays gate superseded Memories", async () => {
+    const t = setup([], [memory("m", 30, false)], { lowImportanceMaxDays: 0 });
+
+    await t.run();
+
+    expect(await t.keptMem()).toEqual(["m"]);
   });
 });
