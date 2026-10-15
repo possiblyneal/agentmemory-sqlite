@@ -144,7 +144,7 @@ Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` bec
 
 | Pass | Call | What it removes |
 |---|---|---|
-| `evict` | `POST /evict` with the current defaults | what the live daemon's eviction sweep would remove: every Observation with importance below 5 once it is a day old, since #225 (the 2026-10-15 maintenance scorecard's `evict` row ran the earlier schedule at `7c0415f`) |
+| `evict` | `POST /evict` with the current defaults | what the live daemon's eviction sweep would remove: every Observation with importance below 5 once it is a day old and its Session's stop has finished with it (#225, #230) (the 2026-10-15 maintenance scorecard's `evict` row ran the earlier schedule at `7c0415f`) |
 | `auto-forget` | `POST /auto-forget` | what the hourly auto-forget would remove |
 | `evict-importance:N` | `POST /evict` | every Observation with importance below N, whatever its age |
 | `evict-cap:N` | `POST /evict` | the lowest-importance Observations past N per project |

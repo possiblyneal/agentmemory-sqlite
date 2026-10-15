@@ -679,8 +679,8 @@ function parseObservationAnnotations(
 // Field-level, so a concurrent writer's other fields survive. The read and
 // update hold the Observation's access lock, the one deleteIndexed takes, so a
 // delete cannot land between them and update() recreate a bare stub. An
-// Observation gone from KV is skipped. Failures
-// are logged, not thrown: the graph is already written by then.
+// Observation gone from KV is skipped. Failures are logged, not thrown: the
+// graph is already written by then.
 async function writeObservationAnnotations(
   kv: StateKV,
   observations: CompressedObservation[],
