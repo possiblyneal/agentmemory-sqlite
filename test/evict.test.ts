@@ -261,15 +261,19 @@ describe("mem::evict stale sessions", () => {
     expect(result.staleSessions).toBe(2);
   });
 
-  it("does not start a second recovery sweep while one is running", async () => {
+  it("runs at most one recovery at a time when two sweeps overlap", async () => {
     const sessionId = "ses_stale";
     const kv = mockKV(storeForObservedSession(sessionId));
     const { sdk } = mockSdk();
     registerEvictFunction(sdk as never, kv as never);
+    let running = 0;
+    let peak = 0;
     let recoveries = 0;
     sdk.registerFunction("event::session::stopped", async () => {
       recoveries++;
+      peak = Math.max(peak, ++running);
       await new Promise((r) => setTimeout(r, 5));
+      running--;
       return { success: true };
     });
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
@@ -281,10 +285,7 @@ describe("mem::evict stale sessions", () => {
     ]);
 
     expect(recoveries).toBe(1);
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining("recovery already running"),
-      { staleSessions: 1 },
-    );
+    expect(peak).toBe(1);
   });
 
   it("keeps a stale observed session when recovery fails", async () => {
@@ -463,6 +464,60 @@ describe("mem::evict session observation counts", () => {
     expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
       observationCount: 3,
     });
+  });
+
+  it("deletes each Observation once when two sweeps overlap", async () => {
+    const sessionId = "ses_overlap";
+    const store = storeForSessions([
+      {
+        session: liveSession(sessionId, 5),
+        observations: [
+          observation(sessionId, "obs_a", lowValue),
+          observation(sessionId, "obs_b", lowValue),
+          { ...makeObservation(sessionId), id: "obs_keep" },
+        ],
+      },
+    ]);
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    const [first, second] = (await Promise.all([
+      sdk.trigger({ function_id: "mem::evict", payload: {} }),
+      sdk.trigger({ function_id: "mem::evict", payload: {} }),
+    ])) as Array<{ lowImportanceObs: number }>;
+
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
+      observationCount: 3,
+    });
+    expect(first.lowImportanceObs).toBe(2);
+    expect(second.lowImportanceObs).toBe(0);
+  });
+
+  it("keeps a shared image referenced when two sweeps overlap", async () => {
+    const sessionId = "ses_images";
+    const image = "images/shared.png";
+    const store = storeForSessions([
+      {
+        session: liveSession(sessionId, 2),
+        observations: [
+          { ...observation(sessionId, "obs_old", lowValue), imageRef: image },
+          { ...makeObservation(sessionId), id: "obs_keep", imageRef: image },
+        ],
+      },
+    ]);
+    store.set(KV.imageRefs, new Map([[image, 2]]));
+    const kv = mockKV(store);
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    await Promise.all([
+      sdk.trigger({ function_id: "mem::evict", payload: {} }),
+      sdk.trigger({ function_id: "mem::evict", payload: {} }),
+    ]);
+
+    expect(await kv.get<number>(KV.imageRefs, image)).toBe(1);
   });
 
   it("floors a count already below the number evicted at zero", async () => {
