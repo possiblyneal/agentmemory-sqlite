@@ -72,7 +72,7 @@ Store size and growth are unchanged from the gate-off table.
 | Synthetic | 6.9 h | 0 | 57 (56 succeeded; 1 of 55 Sessions has no Summary) | 460 s |
 | Import | 48.7 min | 0 | 0 | — |
 
-The LLM build spent 45.0 h waiting on 12,983 compress calls, about 12.5 s per call at concurrency 1. Its wall-clock is 41.0 h longer than the synthetic build's, because the synthetic build's Summaries are slower. Mean summarize latency, queue wait included, is about 2.5× lower with LLM Compression, and its narratives are about 3× shorter (470 vs 1,390 chars per Observation in the final checkpoint).
+The LLM build spent 45.0 h waiting on 12,983 compress calls, about 12.5 s per call at concurrency 1. Its wall-clock is 41.0 h longer than the synthetic build's: outside compression it took 2.9 h, against the synthetic build's 6.9 h. Mean summarize latency, queue wait included, is about 2.5× lower with LLM Compression, and its narratives are about 3× shorter (470 vs 1,390 chars per Observation in the final checkpoint).
 
 ## Methodology
 
