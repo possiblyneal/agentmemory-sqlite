@@ -7,7 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { registerSmartSearchFunction } from "../src/functions/smart-search.js";
-import { injectionGateState, resetInjectionGate } from "../src/functions/prompt-rerank.js";
+import { resetInjectionGate } from "../src/functions/prompt-rerank.js";
 import type { CompactSearchResult, CompressedObservation, HybridSearchResult } from "../src/types.js";
 import { mockKV, mockSdk } from "./helpers/mocks.js";
 
@@ -31,7 +31,7 @@ function hit(id: string, bm25Score: number): HybridSearchResult {
   return { observation, bm25Score, vectorScore: 0, combinedScore: 0.01, sessionId: "ses_1" };
 }
 
-describe("mem::smart-search reranker gate", () => {
+describe("mem::smart-search is not reranker-gated", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let server: Server;
   let requests: Array<{ query: string; documents: string[] }>;
@@ -84,35 +84,8 @@ describe("mem::smart-search reranker gate", () => {
     await new Promise((done) => server.close(done));
   });
 
-  it("drops hits below the threshold and orders the rest by score", async () => {
-    reply = { scores: [0.2, 0.01, 0.9] };
-    expect(await search()).toEqual(["obs_c", "obs_a"]);
-    expect(requests[0].documents).toEqual([
-      "2026-02-01 title obs_a narrative of obs_a",
-      "2026-02-01 title obs_b narrative of obs_b",
-      "2026-02-01 title obs_c narrative of obs_c",
-    ]);
-  });
-
-  it("returns nothing when no hit clears the threshold", async () => {
+  it("returns every hit in BM25 order and never calls the reranker, even when it would score them all below the floor", async () => {
     reply = { scores: [0.01, 0.02, 0] };
-    expect(await search()).toEqual([]);
-  });
-
-  it("fails open to the relevance-floor selection on a 500 reply", async () => {
-    reply = { status: 500 };
-    expect(await search()).toEqual(["obs_a", "obs_b", "obs_c"]);
-  });
-
-  it("counts and cools down apart from prompt-submit Injection", async () => {
-    reply = { status: 500 };
-    await search();
-    expect(injectionGateState("search")).toMatchObject({ calls: 1, fallbacks: 1, failing: true });
-    expect(injectionGateState("prompt-submit")).toMatchObject({ calls: 0, fallbacks: 0, failing: false });
-  });
-
-  it("never calls the endpoint when disabled", async () => {
-    process.env.AGENTMEMORY_PROMPT_RERANK = "off";
     expect(await search()).toEqual(["obs_a", "obs_b", "obs_c"]);
     expect(requests).toHaveLength(0);
   });

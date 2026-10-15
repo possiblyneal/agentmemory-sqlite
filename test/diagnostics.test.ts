@@ -228,9 +228,8 @@ describe("Diagnostics Functions", () => {
       // 1 Missed Injection record (#73) +
       // 1 Unrecalled Memory report (#76) +
       // 1 injected-item use report (#85) +
-      // 1 prompt rerank gate report (#169) +
-      // 1 search rerank gate report.
-      expect(result.summary.pass).toBe(21);
+      // 1 prompt rerank gate report (#169).
+      expect(result.summary.pass).toBe(20);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
@@ -677,8 +676,7 @@ describe("Diagnostics Functions", () => {
       const gate = (await injectionChecks()).find((c) => c.name === "injection-gate");
       expect(gate?.status).toBe("pass");
       expect(gate?.message).toBe("Injection Gate off: prompt-submit Injection is BM25-only");
-      const search = (await injectionChecks()).find((c) => c.name === "search-gate");
-      expect(search?.message).toBe("Search gate off: smart-search keeps every hit above its relevance floor");
+      expect((await injectionChecks()).find((c) => c.name === "search-gate")).toBeUndefined();
     });
   });
 
