@@ -23,6 +23,7 @@ import {
   createProvider,
   createFallbackProvider,
   createEmbeddingProvider,
+  warmInBackground,
   createImageEmbeddingProvider,
 } from "./providers/index.js";
 import { StateKV } from "./state/kv.js";
@@ -475,6 +476,8 @@ async function main() {
     sdk.setReady();
     bootLog("Ready: /agentmemory/readyz -> 200, routes open");
   }
+
+  warmInBackground(embeddingProvider);
 
   // One-time repair of stores written before this fork: id lists that predate
   // their write-time bounds, duplicate file nodes, and the index shards the
