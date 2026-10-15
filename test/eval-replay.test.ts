@@ -24,6 +24,7 @@ import {
   stopRetains,
 } from "../eval/runner/replay-hindsight.js";
 import { llmEnv } from "../eval/runner/hindsight.js";
+import { parseMaintenance } from "../eval/runner/replay-maintenance.js";
 import {
   isMainTranscriptName,
   parseTranscript,
@@ -587,5 +588,32 @@ describe("Hindsight provider env", () => {
     expect(bare).not.toHaveProperty("HINDSIGHT_API_LLM_TIMEOUT");
     const full = withEnv({ OPENAI_REASONING_EFFORT: "low", AGENTMEMORY_LLM_MAX_CONCURRENCY: "2", AGENTMEMORY_LLM_TIMEOUT_MS: "90500" });
     expect(full).toMatchObject({ HINDSIGHT_API_LLM_REASONING_EFFORT: "low", HINDSIGHT_API_LLM_MAX_CONCURRENT: "2", HINDSIGHT_API_LLM_TIMEOUT: "91" });
+  });
+});
+
+describe("parseMaintenance", () => {
+  it("runs evict and auto-forget as the daemon configures them", () => {
+    expect(parseMaintenance("evict")).toEqual({ name: "evict", path: "evict" });
+    expect(parseMaintenance("auto-forget")).toEqual({ name: "auto-forget", path: "auto-forget" });
+  });
+
+  it("opens the age gate for an importance floor and keeps stale-Session recovery out", () => {
+    expect(parseMaintenance("evict-importance:5")).toMatchObject({
+      path: "evict",
+      eviction: { lowImportanceMaxDays: 0, lowImportanceThreshold: 5, staleSessionDays: 36_500 },
+    });
+  });
+
+  it("caps Observations per project", () => {
+    expect(parseMaintenance("evict-cap:500")).toMatchObject({
+      path: "evict",
+      eviction: { maxObservationsPerProject: 500, staleSessionDays: 36_500 },
+    });
+  });
+
+  it("refuses an unknown pass or a zero cap", () => {
+    expect(parseMaintenance("consolidate")).toHaveProperty("error");
+    expect(parseMaintenance("evict-cap:0")).toHaveProperty("error");
+    expect(parseMaintenance("evict-importance:x")).toHaveProperty("error");
   });
 });

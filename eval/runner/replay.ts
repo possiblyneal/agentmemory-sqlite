@@ -36,6 +36,7 @@ import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
+import { parseMaintenance, type MaintenancePass } from "./replay-maintenance.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
 const SEARCH_LIMIT = 5;
@@ -43,6 +44,7 @@ const MAX_TRANSCRIPT_BYTES = 20_000_000;
 const DRAIN_POLL_MS = 500;
 const DRAIN_STALL_MS = 15 * 60_000;
 const SUMMARIZE_TIMEOUT_MS = 60 * 60_000;
+const MAINTENANCE_TIMEOUT_MS = 30 * 60_000;
 
 type BackendName = "agentmemory" | "hindsight";
 
@@ -62,6 +64,7 @@ interface Options {
   keyedOnly: boolean;
   saveCheckpoints: boolean;
   fromCheckpoints?: string;
+  maintenance?: MaintenancePass;
 }
 
 function parseOptions(): Options {
@@ -82,6 +85,7 @@ function parseOptions(): Options {
       "keyed-only": { type: "boolean", default: false },
       "save-checkpoints": { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
+      maintenance: { type: "string" },
     },
   });
   const positive = (name: string, raw: string, min = 1): number => {
@@ -133,6 +137,15 @@ function parseOptions(): Options {
     console.error("--from-checkpoints probes stores already compressed; drop --llm");
     process.exit(2);
   }
+  if (values.maintenance && !values["from-checkpoints"]) {
+    console.error("--maintenance runs on restored checkpoints; pass --from-checkpoints");
+    process.exit(2);
+  }
+  const maintenance = values.maintenance ? parseMaintenance(values.maintenance) : undefined;
+  if (maintenance && "error" in maintenance) {
+    console.error(maintenance.error);
+    process.exit(2);
+  }
   return {
     backend: values.backend,
     hindsightPort: positive("hindsight-port", values["hindsight-port"] as string),
@@ -149,6 +162,7 @@ function parseOptions(): Options {
     keyedOnly: values["keyed-only"] === true,
     saveCheckpoints: values["save-checkpoints"] === true,
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
+    maintenance,
   };
 }
 
@@ -290,6 +304,18 @@ interface SearchRow {
 
 function storeBytes(sqlitePath: string): number {
   return [sqlitePath, `${sqlitePath}-wal`].reduce((n, p) => n + (existsSync(p) ? statSync(p).size : 0), 0);
+}
+
+// Pages in use, not file size: a delete frees pages without shrinking the
+// file, so a maintenance pass shows up here and not in storeBytes.
+function liveStoreBytes(sqlitePath: string): number {
+  const db = new DatabaseSync(sqlitePath, { readOnly: true });
+  try {
+    const pragma = (name: string) => Object.values(db.prepare(`PRAGMA ${name}`).get()!)[0] as number;
+    return (pragma("page_count") - pragma("freelist_count")) * pragma("page_size");
+  } finally {
+    db.close();
+  }
 }
 
 function errorMessage(err: unknown): string {
@@ -545,18 +571,30 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
   };
   const scores: SessionScore[] = [];
   const t0 = Date.now();
-  // Store sizes as seeded: growth across the replay, as a normal run reports
-  // it, not what probing adds.
+  // Live store bytes as seeded and after any maintenance pass: growth across
+  // the replay, as a normal run reports it, not what probing adds.
   let bytesStart = 0;
   let bytesEnd = 0;
+  let bytesBeforePass = 0;
+  const pass = opts.maintenance;
   for (const [i, checkpoint] of checkpoints.entries()) {
     const session = find(checkpoint.sessionId);
     const ingested = checkpoint.ingested.map(find);
-    const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, seed: join(dir, checkpoint.file) });
+    const sandbox = await startSandbox({
+      instance: opts.instance,
+      embeddings: opts.embeddings,
+      seed: join(dir, checkpoint.file),
+      config: pass?.eviction && { eviction: pass.eviction },
+    });
     try {
-      bytesEnd = storeBytes(sandbox.sqlitePath);
-      if (i === 0) bytesStart = bytesEnd;
       await sandbox.vectorsFilled();
+      bytesBeforePass = liveStoreBytes(sandbox.sqlitePath);
+      if (pass) {
+        const { body } = await daemonCall(sandbox.baseUrl, pass.path, { body: {}, timeoutMs: MAINTENANCE_TIMEOUT_MS });
+        console.log(`  ${pass.name}: ${JSON.stringify(body).slice(0, 300)}`);
+      }
+      bytesEnd = liveStoreBytes(sandbox.sqlitePath);
+      if (i === 0) bytesStart = bytesEnd;
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
@@ -574,6 +612,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
   }
   writeRun(opts, scores, { storeBytesStart: bytesStart, storeBytesEnd: bytesEnd }, agentmemoryProviders(opts), {
     checkpoints: dir,
+    maintenance: pass && { pass: pass.name, lastCheckpointBytesBeforePass: bytesBeforePass },
     directories: loaded.perDirectory,
     projects: loaded.perProject,
     minutes: (Date.now() - t0) / 60_000,
