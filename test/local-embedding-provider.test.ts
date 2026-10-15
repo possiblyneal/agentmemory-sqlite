@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 afterEach(() => {
@@ -176,6 +177,14 @@ describe("warmInBackground", () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("model missing")),
     );
     warn.mockRestore();
+  });
+
+  it("starts at boot once the daemon is ready", () => {
+    const boot = readFileSync(new URL("../src/index.ts", import.meta.url), "utf-8");
+    const ready = boot.indexOf("sdk.setReady();");
+    const warm = boot.indexOf("warmInBackground(embeddingProvider);");
+    expect(ready).toBeGreaterThan(-1);
+    expect(warm).toBeGreaterThan(ready);
   });
 
   it("does nothing without a provider or a warm-up", async () => {

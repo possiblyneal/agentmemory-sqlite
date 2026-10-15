@@ -75,7 +75,7 @@ export function withEmbeddingGuards(provider: EmbeddingProvider): EmbeddingProvi
     return out;
   };
   if (provider.warm) {
-    wrapped.warm = () => provider.warm!();
+    wrapped.warm = provider.warm.bind(provider);
   }
   if (provider.embedImage) {
     wrapped.embedImage = async (s: string) =>
