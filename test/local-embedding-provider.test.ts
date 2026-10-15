@@ -115,4 +115,79 @@ describe("LocalEmbeddingProvider (with loaded pipeline)", () => {
     expect(() => new Fresh()).toThrow("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS");
     vi.unstubAllEnvs();
   });
+
+  it("loads the model once when a warm-up and an embed overlap", async () => {
+    const { pipeline } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    const provider = new Fresh();
+    await Promise.all([provider.warm(), provider.embed("hello")]);
+    await provider.embed("again");
+    expect(pipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries the load on the next embed after a failed one", async () => {
+    const { pipeline, extractor } = mockSuccessModule();
+    pipeline.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    const provider = new Fresh();
+    await expect(provider.warm()).rejects.toThrow("offline");
+    await provider.embed("hello");
+    expect(pipeline).toHaveBeenCalledTimes(2);
+    expect(extractor).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("warmInBackground", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("loads the boot provider's model before any embed, and the embed reuses it", async () => {
+    vi.stubEnv("EMBEDDING_PROVIDER", "local");
+    const pipeline = vi.fn(async () =>
+      vi.fn(async (texts: string[]) => ({ tolist: () => texts.map(() => new Array(384).fill(0)) })),
+    );
+    vi.doMock("@huggingface/transformers", () => ({ env: {}, pipeline }));
+    vi.resetModules();
+    const { createEmbeddingProvider, warmInBackground } = await import(
+      "../src/providers/embedding/index.js"
+    );
+    const provider = createEmbeddingProvider()!;
+
+    warmInBackground(provider);
+    await vi.waitFor(() => expect(pipeline).toHaveBeenCalledTimes(1));
+    await provider.embed("first search");
+    expect(pipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a failed warm-up instead of rejecting", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { warmInBackground } = await import("../src/providers/embedding/index.js");
+    warmInBackground({
+      name: "fake",
+      dimensions: 3,
+      embed: async () => new Float32Array(3),
+      embedBatch: async () => [],
+      warm: () => Promise.reject(new Error("model missing")),
+    });
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("model missing")),
+    );
+    warn.mockRestore();
+  });
+
+  it("does nothing without a provider or a warm-up", async () => {
+    const { warmInBackground } = await import("../src/providers/embedding/index.js");
+    expect(() => warmInBackground(null)).not.toThrow();
+    expect(() =>
+      warmInBackground({
+        name: "remote",
+        dimensions: 3,
+        embed: async () => new Float32Array(3),
+        embedBatch: async () => [],
+      }),
+    ).not.toThrow();
+  });
 });

@@ -15,7 +15,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly name = "local";
   readonly dimensions: number;
   private readonly modelId: string;
-  private extractor: FeatureExtractor | null = null;
+  private extractor: Promise<FeatureExtractor> | null = null;
 
   constructor() {
     this.modelId = getEnvVar("AGENTMEMORY_LOCAL_EMBEDDING_MODEL") || DEFAULT_MODEL;
@@ -25,6 +25,10 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
         (this.modelId === DEFAULT_MODEL ? DEFAULT_DIMENSIONS : undefined),
       "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS",
     );
+  }
+
+  async warm(): Promise<void> {
+    await this.getExtractor();
   }
 
   async embed(text: string): Promise<Float32Array> {
@@ -41,8 +45,15 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     return output.tolist().map((v) => new Float32Array(v));
   }
 
-  private async getExtractor() {
-    if (this.extractor) return this.extractor;
+  private getExtractor(): Promise<FeatureExtractor> {
+    this.extractor ??= this.loadExtractor().catch((err: unknown) => {
+      this.extractor = null;
+      throw err;
+    });
+    return this.extractor;
+  }
+
+  private async loadExtractor(): Promise<FeatureExtractor> {
     let transformers: typeof import("@huggingface/transformers");
     try {
       transformers = await import("@huggingface/transformers");
@@ -55,11 +66,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       throw err;
     }
     configureTransformers(transformers);
-    this.extractor = (await transformers.pipeline(
-      "feature-extraction",
-      this.modelId,
-      { dtype: "q8" },
-    )) as FeatureExtractor;
-    return this.extractor;
+    return (await transformers.pipeline("feature-extraction", this.modelId, {
+      dtype: "q8",
+    })) as FeatureExtractor;
   }
 }

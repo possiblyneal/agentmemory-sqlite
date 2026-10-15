@@ -330,6 +330,7 @@ export interface EmbeddingProvider {
   embed(text: string): Promise<Float32Array>;
   embedBatch(texts: string[]): Promise<Float32Array[]>;
   embedImage?(src: string): Promise<Float32Array>;
+  warm?(): Promise<void>;
 }
 
 export interface MemoryRelation {

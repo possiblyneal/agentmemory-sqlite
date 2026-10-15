@@ -74,9 +74,25 @@ export function withEmbeddingGuards(provider: EmbeddingProvider): EmbeddingProvi
     out.forEach((v, i) => check(v, `embedBatch[${i}]`));
     return out;
   };
+  if (provider.warm) {
+    wrapped.warm = () => provider.warm!();
+  }
   if (provider.embedImage) {
     wrapped.embedImage = async (s: string) =>
       check(await provider.embedImage!(s), "embedImage");
   }
   return wrapped;
+}
+
+// Loading a local model costs about a second, which the first query embed
+// (a smart-search) would otherwise pay. Never awaited: boot does not wait,
+// and a load that fails here is retried by the next embed.
+export function warmInBackground(provider: EmbeddingProvider | null): void {
+  void provider?.warm?.().catch((err: unknown) => {
+    console.warn(
+      `[agentmemory] Embedding model warm-up failed; the first embed will load it: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  });
 }
