@@ -1,4 +1,4 @@
-import type { CompressOptions, MemoryProvider, ProviderUsage } from "../types.js";
+import { compressMaxTokens, type CompressOptions, type MemoryProvider, type ProviderUsage } from "../types.js";
 import { getEnvVar } from "../config.js";
 import { fetchWithTimeout, ProviderHttpError, ProviderTimeoutError } from "./_fetch.js";
 import { UsageTally, hostOf } from "./_usage.js";
@@ -95,7 +95,7 @@ export class OpenAIProvider implements MemoryProvider {
     return this.call(
       systemPrompt,
       userPrompt,
-      Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens),
+      compressMaxTokens(this.maxTokens, options),
     );
   }
 
@@ -206,7 +206,7 @@ export class OpenAIProvider implements MemoryProvider {
     }
     if (data.choices?.[0]?.finish_reason === "length") {
       throw new Error(
-        `OpenAI finish_reason length: reply was cut off at max_tokens (${maxTokens}) with no content — raise MAX_TOKENS or turn thinking off with OPENAI_EXTRA_BODY / OPENAI_REASONING_EFFORT`,
+        `OpenAI finish_reason length: reply was cut off at max_tokens (${maxTokens}) with no content — turn thinking off with OPENAI_EXTRA_BODY / OPENAI_REASONING_EFFORT, or raise MAX_TOKENS if it set that limit`,
       );
     }
     // Fallback: some thinking models return reasoning but no content.

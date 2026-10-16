@@ -1,4 +1,4 @@
-import type { CompressOptions, MemoryProvider } from "../types.js";
+import { compressMaxTokens, type CompressOptions, type MemoryProvider } from "../types.js";
 import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
 
 export class OpenRouterProvider implements MemoryProvider {
@@ -29,7 +29,7 @@ export class OpenRouterProvider implements MemoryProvider {
     return this.call(
       systemPrompt,
       userPrompt,
-      Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens),
+      compressMaxTokens(this.maxTokens, options),
     );
   }
 

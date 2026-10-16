@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { CompressOptions, MemoryProvider, ProviderUsage } from '../types.js'
+import { compressMaxTokens, type CompressOptions, type MemoryProvider, type ProviderUsage } from '../types.js'
 import { getEnvVar } from '../config.js'
 import { UsageTally, hostOf } from './_usage.js'
 
@@ -36,7 +36,7 @@ export class AnthropicProvider implements MemoryProvider {
   }
 
   async compress(systemPrompt: string, userPrompt: string, options?: CompressOptions): Promise<string> {
-    return this.call(systemPrompt, userPrompt, Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens))
+    return this.call(systemPrompt, userPrompt, compressMaxTokens(this.maxTokens, options))
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {

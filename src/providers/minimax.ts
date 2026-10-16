@@ -1,4 +1,4 @@
-import type { CompressOptions, MemoryProvider } from '../types.js'
+import { compressMaxTokens, type CompressOptions, type MemoryProvider } from '../types.js'
 import { getEnvVar } from '../config.js'
 import { fetchWithTimeout, ProviderHttpError } from './_fetch.js'
 
@@ -32,7 +32,7 @@ export class MinimaxProvider implements MemoryProvider {
   }
 
   async compress(systemPrompt: string, userPrompt: string, options?: CompressOptions): Promise<string> {
-    return this.call(systemPrompt, userPrompt, Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens))
+    return this.call(systemPrompt, userPrompt, compressMaxTokens(this.maxTokens, options))
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {

@@ -207,6 +207,10 @@ export interface CompressOptions {
   maxTokens?: number;
 }
 
+export function compressMaxTokens(budget: number, options?: CompressOptions): number {
+  return Math.min(budget, options?.maxTokens ?? budget);
+}
+
 export interface MemoryProvider {
   name: string;
   usage?(): ProviderUsage[];
