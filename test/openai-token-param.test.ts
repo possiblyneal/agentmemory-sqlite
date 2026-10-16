@@ -37,4 +37,22 @@ describe("OpenAIProvider output-token parameter (#1219)", () => {
     expect(body.max_tokens).toBe(8192);
     expect(body).not.toHaveProperty("max_completion_tokens");
   });
+
+  it("lowers the output budget to a compress call's maxTokens", async () => {
+    const fetchSpy = stubFetch();
+    await new OpenAIProvider("key", "general", 8192, "http://broker:4010/v1").compress("s", "u", {
+      maxTokens: 2048,
+    });
+
+    expect(sentBody(fetchSpy).max_tokens).toBe(2048);
+  });
+
+  it("never raises the output budget above MAX_TOKENS", async () => {
+    const fetchSpy = stubFetch();
+    await new OpenAIProvider("key", "general", 1024, "http://broker:4010/v1").compress("s", "u", {
+      maxTokens: 2048,
+    });
+
+    expect(sentBody(fetchSpy).max_tokens).toBe(1024);
+  });
 });

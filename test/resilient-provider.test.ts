@@ -20,6 +20,12 @@ async function failTimes(fn: () => Promise<unknown>, n: number) {
 }
 
 describe("ResilientProvider per-operation breakers", () => {
+  it("passes compress options to the inner provider", async () => {
+    const compress = vi.fn(async () => "ok");
+    await new ResilientProvider(fakeProvider({ compress })).compress("s", "u", { maxTokens: 2048 });
+    expect(compress).toHaveBeenCalledWith("s", "u", { maxTokens: 2048 });
+  });
+
   it("keeps compress allowed after summarize's breaker opens", async () => {
     const provider = new ResilientProvider(
       fakeProvider({ summarize: async () => { throw new Error("boom"); } }),

@@ -202,10 +202,19 @@ export interface ProviderUsage {
   totalTokens: number;
 }
 
+// maxTokens lowers the provider's output budget for one call; it never raises it.
+export interface CompressOptions {
+  maxTokens?: number;
+}
+
+export function compressMaxTokens(budget: number, options?: CompressOptions): number {
+  return Math.min(budget, options?.maxTokens ?? budget);
+}
+
 export interface MemoryProvider {
   name: string;
   usage?(): ProviderUsage[];
-  compress(systemPrompt: string, userPrompt: string): Promise<string>;
+  compress(systemPrompt: string, userPrompt: string, options?: CompressOptions): Promise<string>;
   summarize(systemPrompt: string, userPrompt: string): Promise<string>;
   describeImage?(imageData: string, mimeType: string, prompt: string): Promise<string>;
   countTokens?(text: string): Promise<number>;

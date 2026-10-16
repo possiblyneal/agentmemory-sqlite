@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { FallbackChainProvider } from "../src/providers/fallback-chain.js";
 import type { MemoryProvider } from "../src/types.js";
 
@@ -89,5 +89,13 @@ describe("FallbackChainProvider", () => {
     ]);
     const result = await chain.summarize("sys", "user");
     expect(result).toBe("summarized by backup");
+  });
+
+  it("passes compress options to the provider that answers", async () => {
+    const compress = vi.fn(async () => "ok");
+    await new FallbackChainProvider([makeProvider("only", { compress })]).compress("s", "u", {
+      maxTokens: 2048,
+    });
+    expect(compress).toHaveBeenCalledWith("s", "u", { maxTokens: 2048 });
   });
 });

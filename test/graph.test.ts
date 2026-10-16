@@ -159,6 +159,48 @@ describe("Graph Functions", () => {
     expect(result.nodesAdded).toBe(4);
   });
 
+  it("caps each batch's reply at 2048 output tokens, so a run-on reply ends before the LLM timeout", async () => {
+    const observations = Array.from({ length: 25 }, (_, i) => ({ ...testObs, id: `obs_${i}` }));
+
+    await sdk.trigger("mem::graph-extract", { observations });
+
+    expect(mockProvider.compress.mock.calls.map((c) => c[2])).toEqual([
+      { maxTokens: 2048 },
+      { maxTokens: 2048 },
+      { maxTokens: 2048 },
+    ]);
+  });
+
+  it("keeps every entity a reply closed before it was cut off at the cap", async () => {
+    mockProvider.compress.mockResolvedValueOnce(`<entities>
+<entity type="file" name="src/index.ts"><property key="path">src/index.ts</property></entity>
+<entity type="function" name="main"><property key="lang">typescript</property></entity>
+<entity type="function" name="unfinis`);
+
+    const result = (await sdk.trigger("mem::graph-extract", {
+      observations: [testObs],
+    })) as { success: boolean; nodesAdded: number };
+
+    expect(result).toMatchObject({ success: true, nodesAdded: 2 });
+    const names = (await kv.list<GraphNode>("mem:graph:nodes")).map((n) => n.name).sort();
+    expect(names).toEqual(["main", "src/index.ts"]);
+  });
+
+  it("warns with the reply's tail when it ends before its relationships close", async () => {
+    const reply = `<entities>\n<entity type="function" name="main"/>\n</entities>\n<relationships>\n<rel`;
+    mockProvider.compress.mockResolvedValueOnce(reply);
+
+    await sdk.trigger("mem::graph-extract", { observations: [testObs] });
+
+    const prompt = String(mockProvider.compress.mock.calls[0]![1]);
+    expect(logger.warn).toHaveBeenCalledWith("Graph extraction reply cut off before </relationships>", {
+      sessionId: "ses_1",
+      promptChars: prompt.length,
+      responseChars: reply.length,
+      tail: reply,
+    });
+  });
+
   it("logs the Sessions, prompt size and elapsed time of a failed batch", async () => {
     mockProvider.compress.mockRejectedValueOnce(new Error("timed out after 300000ms"));
 
@@ -1605,6 +1647,17 @@ describe("graph-extract importance and concepts (#90)", () => {
 
     expect(await stored("obs_a")).toBeNull();
     expect(await stored("obs_b")).toMatchObject({ importance: 2, concepts: ["pgbouncer"] });
+  });
+
+  it("adds no concept for an entity the reply was cut off inside", async () => {
+    await extract(
+      [obs("obs_a")],
+      `<entities>
+<entity type="library" name="pgbouncer" obs="1"/>
+<entity type="concept" name="half done" obs="1"><property key="note">cut`,
+    );
+
+    expect(await stored("obs_a")).toMatchObject({ concepts: ["pgbouncer"] });
   });
 
   it("makes written concepts searchable", async () => {

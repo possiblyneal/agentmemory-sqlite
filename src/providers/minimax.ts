@@ -1,4 +1,4 @@
-import type { MemoryProvider } from '../types.js'
+import { compressMaxTokens, type CompressOptions, type MemoryProvider } from '../types.js'
 import { getEnvVar } from '../config.js'
 import { fetchWithTimeout, ProviderHttpError } from './_fetch.js'
 
@@ -31,15 +31,15 @@ export class MinimaxProvider implements MemoryProvider {
       getEnvVar('MINIMAX_BASE_URL') || 'https://api.minimax.io/anthropic'
   }
 
-  async compress(systemPrompt: string, userPrompt: string): Promise<string> {
-    return this.call(systemPrompt, userPrompt)
+  async compress(systemPrompt: string, userPrompt: string, options?: CompressOptions): Promise<string> {
+    return this.call(systemPrompt, userPrompt, compressMaxTokens(this.maxTokens, options))
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {
     return this.call(systemPrompt, userPrompt)
   }
 
-  private async call(systemPrompt: string, userPrompt: string): Promise<string> {
+  private async call(systemPrompt: string, userPrompt: string, maxTokens = this.maxTokens): Promise<string> {
     const url = `${this.baseUrl}/v1/messages`
     const response = await fetchWithTimeout(url, {
       method: 'POST',
@@ -50,7 +50,7 @@ export class MinimaxProvider implements MemoryProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: this.maxTokens,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }),

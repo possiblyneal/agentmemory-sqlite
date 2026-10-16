@@ -1009,6 +1009,24 @@ async function persistGraphDeltaUnlocked(
 // batch that can never extract does not cost an LLM call on every stop.
 const GRAPH_BATCH_MAX_FAILURES = 3;
 
+// A batch's reply runs about 1-1.6k tokens. Some replies run on past 3k, and
+// at the decode rate of a contended local server they outlast the LLM timeout.
+// A reply cut at this cap keeps every entity closed before the cut but loses
+// its relationships, which come last, and the batch still counts as extracted.
+const GRAPH_EXTRACTION_MAX_TOKENS = 2048;
+
+const RELATIONSHIPS_CLOSED = /<\/relationships>|<relationships\s*\/>/;
+
+// An entity cut off inside its body would still match the annotation parser's
+// open tag and add a concept for a node parseGraphXml never writes.
+function dropUnclosedEntity(response: string): string {
+  const last = response.lastIndexOf("<entity");
+  if (last === -1) return response;
+  const tail = response.slice(last);
+  const closed = /^<entity\b[^>]*?\/>/.test(tail) || /^<entity\b[^>]*[^/]>[\s\S]*?<\/entity>/.test(tail);
+  return closed ? response : response.slice(0, last);
+}
+
 // An unreachable or overloaded provider says nothing about the batch, so it
 // does not count toward GRAPH_BATCH_MAX_FAILURES.
 function isProviderDown(err: unknown): boolean {
@@ -1082,7 +1100,9 @@ async function extractGraph(
       try {
         let response: string;
         try {
-          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt, {
+            maxTokens: GRAPH_EXTRACTION_MAX_TOKENS,
+          });
         } catch (err) {
           if (!(err instanceof ProviderTimeoutError)) throw err;
           logger.warn("Retrying a graph batch after a timeout", {
@@ -1090,7 +1110,18 @@ async function extractGraph(
             batchSize: batch.length,
             promptChars: prompt.length,
           });
-          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt, {
+            maxTokens: GRAPH_EXTRACTION_MAX_TOKENS,
+          });
+        }
+        if (!RELATIONSHIPS_CLOSED.test(response)) {
+          logger.warn("Graph extraction reply cut off before </relationships>", {
+            sessionId: batch[0]!.sessionId,
+            promptChars: prompt.length,
+            responseChars: response.length,
+            tail: response.slice(-200),
+          });
+          response = dropUnclosedEntity(response);
         }
         const parsed = parseGraphXml(
           response,

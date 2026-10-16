@@ -1,4 +1,4 @@
-import type { MemoryProvider, ProviderUsage } from "../types.js";
+import type { CompressOptions, MemoryProvider, ProviderUsage } from "../types.js";
 
 export class FallbackChainProvider implements MemoryProvider {
   name: string;
@@ -17,8 +17,12 @@ export class FallbackChainProvider implements MemoryProvider {
     return this.providers.flatMap((p) => p.usage?.() ?? []);
   }
 
-  async compress(systemPrompt: string, userPrompt: string): Promise<string> {
-    return this.tryAll((p) => p.compress(systemPrompt, userPrompt));
+  async compress(
+    systemPrompt: string,
+    userPrompt: string,
+    options?: CompressOptions,
+  ): Promise<string> {
+    return this.tryAll((p) => p.compress(systemPrompt, userPrompt, options));
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {
