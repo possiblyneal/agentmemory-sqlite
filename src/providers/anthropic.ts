@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { MemoryProvider, ProviderUsage } from '../types.js'
+import type { CompressOptions, MemoryProvider, ProviderUsage } from '../types.js'
 import { getEnvVar } from '../config.js'
 import { UsageTally, hostOf } from './_usage.js'
 
@@ -35,8 +35,8 @@ export class AnthropicProvider implements MemoryProvider {
     return this.effort ? { output_config: { effort: this.effort } } : {}
   }
 
-  async compress(systemPrompt: string, userPrompt: string): Promise<string> {
-    return this.call(systemPrompt, userPrompt)
+  async compress(systemPrompt: string, userPrompt: string, options?: CompressOptions): Promise<string> {
+    return this.call(systemPrompt, userPrompt, Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens))
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -65,10 +65,10 @@ export class AnthropicProvider implements MemoryProvider {
     return textBlock?.text ?? ''
   }
 
-  private async call(systemPrompt: string, userPrompt: string): Promise<string> {
+  private async call(systemPrompt: string, userPrompt: string, maxTokens = this.maxTokens): Promise<string> {
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: this.maxTokens,
+      max_tokens: maxTokens,
       ...this.outputConfig,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],

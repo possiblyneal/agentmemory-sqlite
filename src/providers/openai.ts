@@ -1,4 +1,4 @@
-import type { MemoryProvider, ProviderUsage } from "../types.js";
+import type { CompressOptions, MemoryProvider, ProviderUsage } from "../types.js";
 import { getEnvVar } from "../config.js";
 import { fetchWithTimeout, ProviderHttpError, ProviderTimeoutError } from "./_fetch.js";
 import { UsageTally, hostOf } from "./_usage.js";
@@ -87,8 +87,16 @@ export class OpenAIProvider implements MemoryProvider {
     return [this.tally.snapshot()];
   }
 
-  async compress(systemPrompt: string, userPrompt: string): Promise<string> {
-    return this.call(systemPrompt, userPrompt);
+  async compress(
+    systemPrompt: string,
+    userPrompt: string,
+    options?: CompressOptions,
+  ): Promise<string> {
+    return this.call(
+      systemPrompt,
+      userPrompt,
+      Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens),
+    );
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -126,12 +134,16 @@ export class OpenAIProvider implements MemoryProvider {
     return data.tokens.length;
   }
 
-  private async call(systemPrompt: string, userPrompt: string): Promise<string> {
+  private async call(
+    systemPrompt: string,
+    userPrompt: string,
+    maxTokens = this.maxTokens,
+  ): Promise<string> {
     const url = buildChatUrl(this.baseUrl, this.isAzure, this.azureApiVersion);
     const body: Record<string, unknown> = {
       ...this.extraBody,
       model: this.model,
-      [this.outputTokenParam]: this.maxTokens,
+      [this.outputTokenParam]: maxTokens,
       // OpenAI API spec defines `stream` as defaulting to false, so omitting
       // it should yield a JSON response. Some OpenAI-compatible proxies
       // (notably 9Router < 0.4.56 — see decolua/9router#1260) default to
@@ -194,7 +206,7 @@ export class OpenAIProvider implements MemoryProvider {
     }
     if (data.choices?.[0]?.finish_reason === "length") {
       throw new Error(
-        `OpenAI finish_reason length: reply was cut off at max_tokens (${this.maxTokens}) with no content — raise MAX_TOKENS or turn thinking off with OPENAI_EXTRA_BODY / OPENAI_REASONING_EFFORT`,
+        `OpenAI finish_reason length: reply was cut off at max_tokens (${maxTokens}) with no content — raise MAX_TOKENS or turn thinking off with OPENAI_EXTRA_BODY / OPENAI_REASONING_EFFORT`,
       );
     }
     // Fallback: some thinking models return reasoning but no content.

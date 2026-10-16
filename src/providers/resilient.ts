@@ -1,4 +1,4 @@
-import type { MemoryProvider, CircuitBreakerState, ProviderUsage } from "../types.js";
+import type { CompressOptions, MemoryProvider, CircuitBreakerState, ProviderUsage } from "../types.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
 import { isContentFilterRejection, isProviderBusy } from "./_fetch.js";
 import { getEnvVar } from "../config.js";
@@ -90,9 +90,13 @@ export class ResilientProvider implements MemoryProvider {
     }
   }
 
-  async compress(systemPrompt: string, userPrompt: string): Promise<string> {
+  async compress(
+    systemPrompt: string,
+    userPrompt: string,
+    options?: CompressOptions,
+  ): Promise<string> {
     return this.call("compress", () =>
-      this.inner.compress(systemPrompt.toWellFormed(), userPrompt.toWellFormed()),
+      this.inner.compress(systemPrompt.toWellFormed(), userPrompt.toWellFormed(), options),
     );
   }
 

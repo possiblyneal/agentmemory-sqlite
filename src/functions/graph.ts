@@ -1009,6 +1009,11 @@ async function persistGraphDeltaUnlocked(
 // batch that can never extract does not cost an LLM call on every stop.
 const GRAPH_BATCH_MAX_FAILURES = 3;
 
+// A batch's reply runs about 1-1.6k tokens. Some replies run on past 3k, and
+// at the decode rate of a contended local server they outlast the LLM timeout;
+// cut at this cap, the reply still carries every element closed before it.
+const GRAPH_EXTRACTION_MAX_TOKENS = 2048;
+
 // An unreachable or overloaded provider says nothing about the batch, so it
 // does not count toward GRAPH_BATCH_MAX_FAILURES.
 function isProviderDown(err: unknown): boolean {
@@ -1082,7 +1087,9 @@ async function extractGraph(
       try {
         let response: string;
         try {
-          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt, {
+            maxTokens: GRAPH_EXTRACTION_MAX_TOKENS,
+          });
         } catch (err) {
           if (!(err instanceof ProviderTimeoutError)) throw err;
           logger.warn("Retrying a graph batch after a timeout", {
@@ -1090,7 +1097,9 @@ async function extractGraph(
             batchSize: batch.length,
             promptChars: prompt.length,
           });
-          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt);
+          response = await provider.compress(GRAPH_EXTRACTION_SYSTEM, prompt, {
+            maxTokens: GRAPH_EXTRACTION_MAX_TOKENS,
+          });
         }
         const parsed = parseGraphXml(
           response,

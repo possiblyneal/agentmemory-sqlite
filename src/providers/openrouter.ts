@@ -1,4 +1,4 @@
-import type { MemoryProvider } from "../types.js";
+import type { CompressOptions, MemoryProvider } from "../types.js";
 import { fetchWithTimeout, ProviderHttpError } from "./_fetch.js";
 
 export class OpenRouterProvider implements MemoryProvider {
@@ -21,8 +21,16 @@ export class OpenRouterProvider implements MemoryProvider {
     this.name = baseUrl.includes("openrouter") ? "openrouter" : "gemini";
   }
 
-  async compress(systemPrompt: string, userPrompt: string): Promise<string> {
-    return this.call(systemPrompt, userPrompt);
+  async compress(
+    systemPrompt: string,
+    userPrompt: string,
+    options?: CompressOptions,
+  ): Promise<string> {
+    return this.call(
+      systemPrompt,
+      userPrompt,
+      Math.min(this.maxTokens, options?.maxTokens ?? this.maxTokens),
+    );
   }
 
   async summarize(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -32,6 +40,7 @@ export class OpenRouterProvider implements MemoryProvider {
   private async call(
     systemPrompt: string,
     userPrompt: string,
+    maxTokens = this.maxTokens,
   ): Promise<string> {
     const response = await fetchWithTimeout(this.baseUrl, {
       method: "POST",
@@ -44,7 +53,7 @@ export class OpenRouterProvider implements MemoryProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: this.maxTokens,
+        max_tokens: maxTokens,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
