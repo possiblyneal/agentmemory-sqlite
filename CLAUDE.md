@@ -196,10 +196,19 @@ Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateB
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
-`summary` ref. Those Sessions lead the Injection under one header, newest first by the Summary's
-`coveredThrough` (else `createdAt`) and each dated, so a later Session that amends a rule is read before the rule it
-replaces. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
-missing, unreadable or has no decisions are given as themselves, after them.
+`summary` ref. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
+missing, unreadable or has no decisions are given as themselves. The decisions come first,
+one block per Session dated by its Summary's `coveredThrough` (else `createdAt`) and ordered
+newest first, under a header telling the Agent the rules still hold, with their exact values,
+even where the current code does not follow them yet, and that the newer of two conflicting
+rules holds. The top 3 are counted in rendered units from a 30-hit search: a covered Session is
+one unit however many of its Observations hit.
+Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
+when the best-scoring other Session there scores at least 0.35 of the given Session's own best
+hit, leads the runner-up by 1.25x and its Summary dates later, its decisions are given too, as
+the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Memory hits, this
+Session and any Summary already given are dropped before ranking. A failed amendment lookup
+drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
 (300 chars each) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
 the rest of the budget; its `summary` ref keeps every file.
