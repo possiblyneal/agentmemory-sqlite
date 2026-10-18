@@ -19,6 +19,7 @@ Output EXACTLY this XML format with no additional text:
 Rules:
 - Focus on outcomes, not individual tool calls
 - Highlight decisions and their rationale
+- Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
 - List all files that were created or modified
 - Concepts should be searchable terms for future context retrieval`
 
@@ -62,6 +63,7 @@ Output EXACTLY this XML format with no additional text:
 Rules:
 - Synthesize a single narrative that reflects the whole arc, not a chunk-by-chunk recap
 - Preserve every distinct decision across chunks
+- Keep every rule, requirement or constraint the user stated as its own decision, with its exact values (status codes, limits, thresholds, names) and conditions; never merge two of them or generalize a specific value away
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome`
 
@@ -113,6 +115,7 @@ Output EXACTLY this XML format with no additional text:
 Rules:
 - Rewrite the narrative so it covers the whole session, not only the new observations
 - Keep every existing decision unless a new observation reverses it; add new ones
+- Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome so far`
 
