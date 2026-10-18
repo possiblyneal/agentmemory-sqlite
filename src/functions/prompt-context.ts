@@ -52,11 +52,12 @@ async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
 
 // An Observation a Session Summary covers is a fragment of a conversation
 // whose conclusions the Summary already holds, so the Session's decisions
-// stand in for it, once per Session.
+// stand in for it, once per Session. They lead, newest Session first, so a
+// later Session that amends a rule is read before the rule it replaces.
 async function renderWithSessionDecisions(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: InjectedRef }>) {
-  const lines: string[] = [];
-  const injected: InjectedRef[] = [];
-  const rendered = new Set<string>();
+  const fragments: string[] = [];
+  const fragmentRefs: InjectedRef[] = [];
+  const sessions = new Map<string, { sessionId: string; summary: SessionSummary; at: string }>();
   const summaries = await Promise.all(
     chosen.map(({ hit, ref }) =>
       ref.kind === "observation" ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null) : null,
@@ -66,19 +67,30 @@ async function renderWithSessionDecisions(kv: StateKV, chosen: Array<{ hit: Narr
     const summary = summaries[i];
     const { timestamp } = hit.observation;
     if (!summary?.keyDecisions?.length || !timestamp || !summaryCovers(summary, timestamp)) {
-      lines.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
-      injected.push(ref);
+      fragments.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
+      fragmentRefs.push(ref);
       continue;
     }
-    if (rendered.has(hit.sessionId)) continue;
-    rendered.add(hit.sessionId);
+    const known = sessions.get(hit.sessionId);
+    if (!known || timestamp > known.at) sessions.set(hit.sessionId, { sessionId: hit.sessionId, summary, at: timestamp });
+  }
+  const newestFirst = [...sessions.values()].sort((a, b) => b.at.localeCompare(a.at));
+  const lines = newestFirst.length
+    ? ["Rules settled in past Sessions of this project, newest first; where two conflict, the newer one holds."]
+    : [];
+  for (const { summary, at } of newestFirst) {
     lines.push(
-      `Decisions from the Session "${escapeXml(summary.title)}":`,
+      `Session "${escapeXml(summary.title)}" (${at.slice(0, 10)}):`,
       ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(d.slice(0, MAX_DECISION_CHARS))}`),
     );
-    injected.push(withFiles({ kind: "summary", id: hit.sessionId }, summary.filesModified));
   }
-  return { lines, injected };
+  return {
+    lines: [...lines, ...fragments],
+    injected: [
+      ...newestFirst.map(({ sessionId, summary }) => withFiles({ kind: "summary", id: sessionId }, summary.filesModified)),
+      ...fragmentRefs,
+    ],
+  };
 }
 
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
