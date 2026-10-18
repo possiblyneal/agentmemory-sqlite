@@ -171,6 +171,45 @@ describe("mem::prompt-context", () => {
     expect((await run("staging auth fails when the token is unset")).injected.map((r) => r.id)).toEqual(["obs_b"]);
   });
 
+  it("gives a summarized Session's decisions once in place of its matching Observations", async () => {
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      project: "shipctl",
+      title: "Token handling for staging auth",
+      keyDecisions: ["Fail closed when SHIPCTL_TOKEN is unset", "Never log the token <redacted>"],
+      filesModified: ["src/auth.rs"],
+    });
+    hits = [
+      { id: "obs_a", score: 16 },
+      { id: "obs_b", score: 14 },
+      { id: "obs_c", score: 12, sessionId: "ses_other" },
+    ];
+    const result = await run("staging auth fails when SHIPCTL_TOKEN is unset");
+    expect(result.context).toContain('Decisions from the Session "Token handling for staging auth":');
+    expect(result.context).toContain("- Fail closed when SHIPCTL_TOKEN is unset");
+    expect(result.context).toContain("- Never log the token &lt;redacted&gt;");
+    expect(result.context).not.toContain("narrative of obs_a");
+    expect(result.context).toContain("narrative of obs_c");
+    expect(result.injected).toEqual([
+      { kind: "summary", id: "ses_old", files: ["src/auth.rs"] },
+      { kind: "observation", id: "obs_c" },
+    ]);
+  });
+
+  it("keeps a Memory hit as the Memory even when its Session is summarized", async () => {
+    await kv.set(KV.memories, "mem_a", { id: "mem_a", title: "t", content: "c" });
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      title: "t",
+      keyDecisions: ["d"],
+      filesModified: [],
+    });
+    hits = [{ id: "mem_a", score: 16 }];
+    expect((await run("staging auth fails when the token is unset")).injected).toEqual([
+      { kind: "memory", id: "mem_a" },
+    ]);
+  });
+
   it("fails instead of answering empty when search fails", async () => {
     sdk.registerFunction("mem::search", async () => {
       throw new Error("isolated scope without agent id");
