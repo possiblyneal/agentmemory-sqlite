@@ -115,7 +115,7 @@ function summaryXml(opts: {
   files?: string[];
   concepts?: string[];
 }): string {
-  const d = (opts.decisions ?? []).map((x) => `<decision>${x}</decision>`).join("");
+  const d = (opts.decisions ?? ["decision"]).map((x) => `<decision>${x}</decision>`).join("");
   const f = (opts.files ?? []).map((x) => `<file>${x}</file>`).join("");
   const c = (opts.concepts ?? []).map((x) => `<concept>${x}</concept>`).join("");
   return `<summary>
@@ -618,6 +618,35 @@ describe("mem::summarize chunking", () => {
     expect(result.success).toBe(true);
     expect(result.summary.title).toBe("second-attempt");
     expect((provider as any).calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("retries a first summary with no decisions and stores the second", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "no-decisions", decisions: [] }),
+      summaryXml({ title: "second-attempt", decisions: ["rule"] }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_nodec", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_nodec" });
+
+    expect(result.success).toBe(true);
+    expect(provider.calls).toHaveLength(2);
+    const stored: any = await kv.get("summaries", "ses_nodec");
+    expect(stored.keyDecisions).toEqual(["rule"]);
+  });
+
+  it("keeps a decision-less summary when the retry fails or has none either", async () => {
+    for (const second of ["garbage", summaryXml({ title: "also-none", decisions: [] })]) {
+      const provider = makeProvider([summaryXml({ title: "no-decisions", decisions: [] }), second]);
+      const { handler, kv } = await setupHandler({ sessionId: "ses_nodec2", obsCount: 1, provider });
+
+      const result: any = await handler({ sessionId: "ses_nodec2" });
+
+      expect(result.success).toBe(true);
+      expect(provider.calls).toHaveLength(2);
+      const stored: any = await kv.get("summaries", "ses_nodec2");
+      expect(stored.title).toBe("no-decisions");
+    }
   });
 
   it("measures every Observation once, even across the summarize retry", async () => {

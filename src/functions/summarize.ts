@@ -604,7 +604,14 @@ export function registerSummarizeFunction(
           }
           parsed.lastObservationId = lastObservationId;
           parsed.coveredThrough = coveredThrough;
+          if (summary && parsed.keyDecisions.length === 0) break;
           summary = parsed;
+          // About one full re-read in ten drops every decision; a Summary
+          // with none gives Injection nothing to deliver, so it is tried again.
+          if (attempt === 1 && parsed.keyDecisions.length === 0) {
+            logger.warn("Summary has no decisions, retrying", { sessionId, mode });
+            continue;
+          }
           break;
         }
 
