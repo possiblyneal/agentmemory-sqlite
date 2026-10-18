@@ -237,6 +237,37 @@ describe("mem::prompt-context", () => {
     expect(result.injected.map((r) => r.id)).toEqual(["ses_amend", "ses_policy", "obs_raw"]);
   });
 
+  it("orders and dates Sessions by their last Observation, not by when their Summaries were written", async () => {
+    await Promise.all(
+      [
+        ["ses_policy", "Overage policy", "No waiver for overage", "2026-07-16T02:16:45.000Z", "2026-10-18T19:22:03.747Z"],
+        ["ses_amend", "Overage grace amendment", "Subtract a 25-unit grace first", "2026-07-16T03:16:15.000Z", "2026-10-18T19:22:03.742Z"],
+      ].map(([id, title, decision, lastObservationAt, coveredThrough]) =>
+        kv.set(KV.summaries, id, {
+          sessionId: id,
+          createdAt: coveredThrough,
+          coveredThrough,
+          lastObservationAt,
+          title,
+          keyDecisions: [decision],
+          filesModified: [],
+        }),
+      ),
+    );
+    hits = [
+      { id: "obs_p", score: 16, sessionId: "ses_policy", timestamp: "2026-07-16T02:13:15.000Z" },
+      { id: "obs_a", score: 14, sessionId: "ses_amend", timestamp: "2026-07-16T03:13:15.000Z" },
+    ];
+    const result = await run("overage billing charges customers under quota");
+    const lines = result.context.split("\n");
+    expect(lines.slice(2, 6)).toEqual([
+      'Session "Overage grace amendment" (2026-07-16):',
+      "- Subtract a 25-unit grace first",
+      'Session "Overage policy" (2026-07-16):',
+      "- No waiver for overage",
+    ]);
+  });
+
   it("spends its three results on distinct Sessions, so hits from one Session do not crowd out another", async () => {
     await Promise.all(
       ["ses_busy", "ses_quiet"].map((id) =>

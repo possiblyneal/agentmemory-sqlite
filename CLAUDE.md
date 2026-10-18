@@ -198,7 +198,9 @@ Observation hit that its Session Summary covers (`summaryCovers()`, the same `co
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
 `summary` ref. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
 missing, unreadable or has no decisions are given as themselves. The decisions come first,
-one block per Session dated by its Summary's `coveredThrough` (else `createdAt`) and ordered
+one block per Session dated by its Summary's `lastObservationAt`, the time of the last Observation it
+summarized (else `coveredThrough`, else `createdAt`; never write time alone, which is milliseconds
+apart for Sessions summarized together), and ordered
 newest first, under a header telling the Agent the rules still hold, with their exact values,
 even where the current code does not follow them yet, and that the newer of two conflicting
 rules holds. The top 3 are counted in rendered units from a 30-hit search: a covered Session is
