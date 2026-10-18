@@ -161,7 +161,7 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
   }
   const newestFirst = sessions.sort((a, b) => b.at.localeCompare(a.at));
   const lines = newestFirst.length
-    ? ["Rules settled in past Sessions of this project, newest first; where two of these conflict, the newer one holds."]
+    ? ["Requirements the user settled in past Sessions of this project. They still hold: where the task touches what a rule governs, apply it with its exact values, even where the current code does not follow it yet. Newest Session first; where two of these conflict, the newer one holds."]
     : [];
   for (const { summary, at } of newestFirst) {
     lines.push(

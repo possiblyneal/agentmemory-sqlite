@@ -199,9 +199,10 @@ test Eviction uses) as that Summary's first 10 decisions, once per Session and r
 `summary` ref. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
 missing, unreadable or has no decisions are given as themselves. The decisions come first,
 one block per Session dated by its Summary's `coveredThrough` (else `createdAt`) and ordered
-newest first, under a header telling the Agent that the newer of two conflicting rules holds.
-The top 3 are counted in rendered units from a 30-hit search: a covered Session is one unit
-however many of its Observations hit.
+newest first, under a header telling the Agent the rules still hold, with their exact values,
+even where the current code does not follow them yet, and that the newer of two conflicting
+rules holds. The top 3 are counted in rendered units from a 30-hit search: a covered Session is
+one unit however many of its Observations hit.
 Each covered Session given also triggers a search on its Summary's title and decisions: when
 the best-scoring other Session there is later, scores at least 0.35 of the given Session's own
 best hit and leads the runner-up by 1.25x, its decisions are given too, as the amendment

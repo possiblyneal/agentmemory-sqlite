@@ -227,7 +227,7 @@ describe("mem::prompt-context", () => {
     const result = await run("overage billing charges customers under quota");
     const lines = result.context.split("\n");
     expect(lines.slice(1, 7)).toEqual([
-      "Rules settled in past Sessions of this project, newest first; where two of these conflict, the newer one holds.",
+      "Requirements the user settled in past Sessions of this project. They still hold: where the task touches what a rule governs, apply it with its exact values, even where the current code does not follow it yet. Newest Session first; where two of these conflict, the newer one holds.",
       'Session "Overage grace amendment" (2026-09-03):',
       "- Subtract a 25-unit grace first",
       'Session "Overage policy" (2026-09-02):',
@@ -279,13 +279,13 @@ describe("mem::prompt-context", () => {
     beforeEach(async () => {
       await Promise.all(
         [
-          ["ses_rule", "Dedupe rule", "Keep the newest record on collision"],
-          ["ses_amend", "Merge amendment", "Keep the record with the most filled fields"],
-          ["ses_decoy", "Cache sizing", "Cap the cache at 512 entries"],
-        ].map(([id, title, decision]) =>
+          ["ses_rule", "Dedupe rule", "Keep the newest record on collision", "2026-07-17T02:30:00.000Z"],
+          ["ses_amend", "Merge amendment", "Keep the record with the most filled fields", "2026-07-17T03:30:00.000Z"],
+          ["ses_decoy", "Cache sizing", "Cap the cache at 512 entries", "2026-08-01T10:30:00.000Z"],
+        ].map(([id, title, decision, createdAt]) =>
           kv.set(KV.summaries, id, {
             sessionId: id,
-            createdAt: "2026-10-01T12:00:00.000Z",
+            createdAt,
             title,
             keyDecisions: [decision],
             filesModified: [],
