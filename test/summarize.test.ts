@@ -23,6 +23,7 @@ vi.mock("../src/functions/audit.js", () => ({
 
 import { registerSummarizeFunction } from "../src/functions/summarize.js";
 import { estimateTokens } from "../src/utils/tokens.js";
+import { renderSummaryObservation } from "../src/prompts/summary.js";
 import type {
   CompressedObservation,
   Session,
@@ -1010,5 +1011,26 @@ describe("mem::summarize incremental fold", () => {
 
     expect(result.reused).toBe(true);
     expect(provider.calls).toHaveLength(0);
+  });
+});
+
+describe("summary input", () => {
+  it("gives the summarizer the agent's reply, so a recap and the question a short answer replies to are seen", () => {
+    const obs = { ...makeObs(0, "ses_reply"), title: "stop", narrative: "", assistantResponse: "Settled: retry 3 times, then 503." };
+
+    expect(renderSummaryObservation(obs, 0)).toContain("Agent reply:\nSettled: retry 3 times, then 503.");
+  });
+
+  it("keeps the closing lines of a long reply", () => {
+    const obs = { ...makeObs(0, "ses_long"), assistantResponse: `${"x".repeat(5000)}Round half up or down?` };
+
+    const rendered = renderSummaryObservation(obs, 0);
+
+    expect(rendered).toContain("Round half up or down?");
+    expect(rendered.length).toBeLessThan(2300);
+  });
+
+  it("renders an Observation without a reply as before", () => {
+    expect(renderSummaryObservation(makeObs(0, "ses_none"), 0)).not.toContain("Agent reply");
   });
 });
