@@ -192,7 +192,7 @@ case "memory_your_tool": {
 ### Injection Gate
 Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
-### Session decisions in Injection
+### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
@@ -200,6 +200,9 @@ test Eviction uses) as that Summary's first 10 decisions, once per Session and r
 `coveredThrough` (else `createdAt`) and each dated, so a later Session that amends a rule is read before the rule it
 replaces. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
 missing, unreadable or has no decisions are given as themselves, after them.
+At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
+(300 chars each) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
+the rest of the budget; its `summary` ref keeps every file.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
