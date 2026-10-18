@@ -112,8 +112,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
         injectedInSession(kv, data.sessionId),
       ]);
 
-      // This Session's own Observations, the prompt just observed among
-      // them, are already in the Agent's context.
+      // This Session's own Observations are already in the Agent's context.
       const earlier = search.results.filter((r) => r.sessionId !== data.sessionId);
       const best = earlier[0]?.score ?? 0;
       const floor = Math.max(MIN_SCORE, best * MIN_SCORE_RATIO_TO_BEST);
