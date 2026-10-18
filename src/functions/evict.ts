@@ -15,6 +15,7 @@ import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
+import { summaryCovers } from "./summarize.js";
 import { logger } from "../logger.js";
 
 interface EvictionConfig {
@@ -58,10 +59,7 @@ function isStopFinishedWith(
   summary: SessionSummary | undefined,
 ): boolean {
   if (!summary) return false;
-  const covered = summary.coveredThrough
-    ? o.timestamp < summary.coveredThrough
-    : o.timestamp <= summary.createdAt;
-  if (!covered) return false;
+  if (!summaryCovers(summary, o.timestamp)) return false;
   if (!isGraphExtractionEnabled() || graphLegDisabled()) return true;
   return !!session.graphExtractedThrough && o.timestamp <= session.graphExtractedThrough;
 }

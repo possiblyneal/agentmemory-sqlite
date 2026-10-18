@@ -125,7 +125,8 @@ _Avoid_: search, query, lookup, retrieval
 
 **Injection**:
 Recall delivered into an Agent's context at a hook boundary — session start, on a user
-prompt, before compaction — without the Agent asking for it.
+prompt, before compaction — without the Agent asking for it. On a user prompt, an Observation
+its Session Summary covers is given as that Summary's decisions instead.
 _Avoid_: enrichment, context push
 
 **Missed Injection**:

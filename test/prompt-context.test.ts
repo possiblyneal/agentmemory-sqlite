@@ -13,6 +13,7 @@ interface Hit {
   id: string;
   score: number;
   sessionId?: string;
+  timestamp?: string;
   narrative?: string;
   files?: string[];
 }
@@ -43,7 +44,12 @@ describe("mem::prompt-context", () => {
         results: hits.map((h) => ({
           score: h.score,
           sessionId: h.sessionId ?? "ses_old",
-          observation: { id: h.id, narrative: h.narrative ?? `narrative of ${h.id}`, files: h.files },
+          observation: {
+            id: h.id,
+            timestamp: h.timestamp ?? "2026-10-01T10:00:00.000Z",
+            narrative: h.narrative ?? `narrative of ${h.id}`,
+            files: h.files,
+          },
         })),
       };
     });
@@ -169,6 +175,87 @@ describe("mem::prompt-context", () => {
       { id: "obs_b", score: 12, sessionId: "ses_other" },
     ];
     expect((await run("staging auth fails when the token is unset")).injected.map((r) => r.id)).toEqual(["obs_b"]);
+  });
+
+  it("gives a summarized Session's decisions once in place of its matching Observations", async () => {
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      project: "shipctl",
+      createdAt: "2026-10-01T12:00:00.000Z",
+      title: "Token handling for staging auth",
+      keyDecisions: ["Fail closed when SHIPCTL_TOKEN is unset", "Never log the token <redacted>"],
+      filesModified: ["src/auth.rs"],
+    });
+    hits = [
+      { id: "obs_a", score: 16 },
+      { id: "obs_b", score: 14 },
+      { id: "obs_c", score: 12, sessionId: "ses_other" },
+    ];
+    const result = await run("staging auth fails when SHIPCTL_TOKEN is unset");
+    expect(result.context).toContain('Decisions from the Session "Token handling for staging auth":');
+    expect(result.context).toContain("- Fail closed when SHIPCTL_TOKEN is unset");
+    expect(result.context).toContain("- Never log the token &lt;redacted&gt;");
+    expect(result.context).not.toContain("narrative of obs_a");
+    expect(result.context).toContain("narrative of obs_c");
+    expect(result.injected).toEqual([
+      { kind: "summary", id: "ses_old", files: ["src/auth.rs"] },
+      { kind: "observation", id: "obs_c" },
+    ]);
+  });
+
+  it("keeps an Observation the Session Summary does not cover as itself", async () => {
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      createdAt: "2026-10-01T12:00:00.000Z",
+      coveredThrough: "2026-10-01T11:00:00.000Z",
+      title: "t",
+      keyDecisions: ["d"],
+      filesModified: [],
+    });
+    hits = [{ id: "obs_late", score: 16, timestamp: "2026-10-01T11:30:00.000Z" }];
+    const result = await run("staging auth fails when the token is unset");
+    expect(result.context).toContain("narrative of obs_late");
+    expect(result.injected).toEqual([{ kind: "observation", id: "obs_late" }]);
+  });
+
+  it("gives at most 10 of a Session Summary's decisions", async () => {
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      createdAt: "2026-10-01T12:00:00.000Z",
+      title: "t",
+      keyDecisions: Array.from({ length: 12 }, (_, i) => `decision ${i + 1}.`),
+      filesModified: [],
+    });
+    hits = [{ id: "obs_a", score: 16 }];
+    const { context } = await run("staging auth fails when the token is unset");
+    expect(context).toContain("- decision 10.");
+    expect(context).not.toContain("- decision 11.");
+  });
+
+  it("gives the Observation when its Session Summary cannot be read", async () => {
+    const get = kv.get.bind(kv);
+    kv.get = (async (scope: string, key: string) => {
+      if (scope === KV.summaries) throw new Error("corrupt row");
+      return get(scope, key);
+    }) as typeof kv.get;
+    hits = [{ id: "obs_a", score: 16 }];
+    expect((await run("staging auth fails when the token is unset")).injected).toEqual([
+      { kind: "observation", id: "obs_a" },
+    ]);
+  });
+
+  it("keeps a Memory hit as the Memory even when its Session is summarized", async () => {
+    await kv.set(KV.memories, "mem_a", { id: "mem_a", title: "t", content: "c" });
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      title: "t",
+      keyDecisions: ["d"],
+      filesModified: [],
+    });
+    hits = [{ id: "mem_a", score: 16 }];
+    expect((await run("staging auth fails when the token is unset")).injected).toEqual([
+      { kind: "memory", id: "mem_a" },
+    ]);
   });
 
   it("fails instead of answering empty when search fails", async () => {

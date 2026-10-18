@@ -1,5 +1,5 @@
 import type { ISdk } from "../engine/types.js";
-import type { InjectedRef, Memory } from "../types.js";
+import type { InjectedRef, Memory, SessionSummary } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
@@ -8,6 +8,7 @@ import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
+import { summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -18,6 +19,8 @@ const MIN_SCORE = 5;
 const MIN_SCORE_RATIO_TO_BEST = 0.5;
 const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
+const MAX_DECISION_CHARS = 300;
+const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 10;
 
 interface SearchHit {
@@ -45,6 +48,37 @@ function wordCount(prompt: string): number {
 async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
   const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
   return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
+}
+
+// An Observation a Session Summary covers is a fragment of a conversation
+// whose conclusions the Summary already holds, so the Session's decisions
+// stand in for it, once per Session.
+async function renderWithSessionDecisions(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: InjectedRef }>) {
+  const lines: string[] = [];
+  const injected: InjectedRef[] = [];
+  const rendered = new Set<string>();
+  const summaries = await Promise.all(
+    chosen.map(({ hit, ref }) =>
+      ref.kind === "observation" ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null) : null,
+    ),
+  );
+  for (const [i, { hit, ref }] of chosen.entries()) {
+    const summary = summaries[i];
+    const { timestamp } = hit.observation;
+    if (!summary?.keyDecisions?.length || !timestamp || !summaryCovers(summary, timestamp)) {
+      lines.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
+      injected.push(ref);
+      continue;
+    }
+    if (rendered.has(hit.sessionId)) continue;
+    rendered.add(hit.sessionId);
+    lines.push(
+      `Decisions from the Session "${escapeXml(summary.title)}":`,
+      ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(d.slice(0, MAX_DECISION_CHARS))}`),
+    );
+    injected.push(withFiles({ kind: "summary", id: hit.sessionId }, summary.filesModified));
+  }
+  return { lines, injected };
 }
 
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
@@ -83,20 +117,20 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const chosen = (await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
-      const lines = chosen.map(({ hit }) => escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
+      const { lines, injected } = await renderWithSessionDecisions(kv, chosen);
       const context = `<agentmemory-relevant-context>\n${lines.join("\n")}\n</agentmemory-relevant-context>`;
 
       logger.info("Prompt context built", {
         sessionId: data.sessionId,
         project: data.project,
-        results: chosen.length,
+        results: injected.length,
         contextLength: context.length,
       });
 
       return {
         context,
         tokens: estimateTokens(context),
-        injected: chosen.map(({ ref }) => ref),
+        injected,
       };
     },
   );
