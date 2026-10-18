@@ -86,41 +86,52 @@ function distinctUnits(ranked: Resolved[]): Resolved[] {
   return units;
 }
 
+// The date a Session's decisions are ordered by, so "later" means the same
+// thing when choosing an amendment as when rendering it.
+const decidedAt = (summary: SessionSummary) => summary.coveredThrough ?? summary.createdAt;
+
 // A Session that amends another's rules restates them, so a search on those
 // rules finds it. Measured on sdebench's amended tasks against 140 decoys: the
 // amendment is the closest other Session, scores at least 0.35 of the
 // Session's own best hit and leads the runner-up by 1.25x; a decoy rarely
-// does all three while also being the later Session.
+// does all three while also being the later Session. Memory hits carry no
+// Session's decisions, and skipped Sessions cannot be given, so neither
+// competes for the lead.
 async function laterAmendment(
   sdk: ISdk,
   kv: StateKV,
-  unit: Resolved & { summary: SessionSummary },
+  given: Resolved & { summary: SessionSummary },
   skip: (sessionId: string) => boolean,
   project?: string,
 ): Promise<Resolved | null> {
+  const ownId = given.hit.sessionId;
   const { results } = await sdk.trigger<{ query: string; limit: number; project?: string }, { results: SearchHit[] }>({
     function_id: "mem::search",
     payload: {
-      query: [unit.summary.title, ...unit.summary.keyDecisions].join(" "),
+      query: [given.summary.title, ...given.summary.keyDecisions.slice(0, MAX_DECISIONS)].join(" "),
       limit: SEARCH_LIMIT,
       ...(project && { project }),
     },
   });
+  const memories = await Promise.all(results.map((r) => kv.get<Memory>(KV.memories, r.observation.id).catch(() => null)));
   const bestPerSession = new Map<string, SearchHit>();
-  for (const r of results) {
+  results.forEach((r, i) => {
+    if (memories[i] || (r.sessionId !== ownId && skip(r.sessionId))) return;
     if ((bestPerSession.get(r.sessionId)?.score ?? -Infinity) < r.score) bestPerSession.set(r.sessionId, r);
-  }
-  const own = bestPerSession.get(unit.hit.sessionId)?.score ?? 0;
-  bestPerSession.delete(unit.hit.sessionId);
+  });
+  const own = bestPerSession.get(ownId)?.score ?? 0;
+  bestPerSession.delete(ownId);
   const [top, runnerUp] = [...bestPerSession.values()].sort((a, b) => b.score - a.score);
-  if (!top?.observation.narrative || !top.observation.timestamp || skip(top.sessionId)) return null;
-  if (top.observation.timestamp <= unit.hit.observation.timestamp!) return null;
+  if (!top?.observation.narrative) return null;
   if (top.score < own * AMENDMENT_MIN_RATIO || (runnerUp && top.score < runnerUp.score * AMENDMENT_MIN_LEAD)) return null;
   const hit = top as NarratedHit;
-  const [resolved] = await withCoveringSummaries(kv, [{ hit, ref: await refFor(kv, hit) }]);
-  return resolved.summary ? resolved : null;
+  const ref = withFiles({ kind: "observation", id: hit.observation.id }, hit.observation.files);
+  const [amendment] = await withCoveringSummaries(kv, [{ hit, ref }]);
+  return amendment.summary && decidedAt(amendment.summary) > decidedAt(given.summary) ? amendment : null;
 }
 
+// An amendment that cannot be looked up is left out; the Sessions already
+// chosen are still given.
 async function withLaterAmendments(
   sdk: ISdk,
   kv: StateKV,
@@ -128,11 +139,11 @@ async function withLaterAmendments(
   skip: (sessionId: string) => boolean,
   project?: string,
 ): Promise<Resolved[]> {
-  const given = new Set(chosen.map((c) => c.hit.sessionId));
+  const given = new Set(chosen.filter((c) => c.summary).map((c) => c.hit.sessionId));
   const amendments = await Promise.all(
     chosen.map((c) =>
       c.summary
-        ? laterAmendment(sdk, kv, { ...c, summary: c.summary }, (id) => given.has(id) || skip(id), project)
+        ? laterAmendment(sdk, kv, { ...c, summary: c.summary }, (id) => given.has(id) || skip(id), project).catch(() => null)
         : null,
     ),
   );
@@ -157,7 +168,7 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
       fragmentRefs.push(ref);
       continue;
     }
-    sessions.push({ sessionId: hit.sessionId, summary, at: summary.coveredThrough ?? summary.createdAt });
+    sessions.push({ sessionId: hit.sessionId, summary, at: decidedAt(summary) });
   }
   const newestFirst = sessions.sort((a, b) => b.at.localeCompare(a.at));
   const lines = newestFirst.length

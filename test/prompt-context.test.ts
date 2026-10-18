@@ -310,8 +310,12 @@ describe("mem::prompt-context", () => {
     it("does not give an earlier Session or one that barely leads the rest", async () => {
       amendmentSearch([
         { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
-        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-06-01T10:00:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
       ]);
+      await kv.set(KV.summaries, "ses_rule", {
+        ...(await kv.get(KV.summaries, "ses_rule")),
+        coveredThrough: "2026-09-01T00:00:00.000Z",
+      });
       expect((await run("contact sync leaves duplicates behind")).injected.map((r) => r.id)).toEqual(["ses_rule"]);
 
       amendmentSearch([
@@ -320,6 +324,78 @@ describe("mem::prompt-context", () => {
         { id: "obs_d", score: 24, sessionId: "ses_decoy", timestamp: "2026-08-01T10:00:00.000Z" },
       ]);
       expect((await run("contact sync leaves duplicates behind", "ses_2")).injected.map((r) => r.id)).toEqual(["ses_rule"]);
+    });
+
+    it("lets neither the current Session nor a Memory hit stand in front of the amendment", async () => {
+      await kv.set(KV.memories, "mem_rule", { id: "mem_rule", title: "t", content: "c" });
+      amendmentSearch([
+        { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
+        { id: "obs_live", score: 45, sessionId: "ses_1", timestamp: "2026-10-01T10:00:00.000Z" },
+        { id: "mem_rule", score: 40, sessionId: "ses_mem", timestamp: "2026-10-01T10:00:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
+      ]);
+      expect((await run("contact sync leaves duplicates behind")).injected.map((r) => r.id)).toEqual([
+        "ses_amend",
+        "ses_rule",
+      ]);
+    });
+
+    it("does not give an amendment already given earlier in the Session", async () => {
+      await kv.set<InjectionRecord>(KV.injections, "inj_1", {
+        id: "inj_1",
+        source: "prompt-submit",
+        sessionId: "ses_1",
+        injected: [{ kind: "summary", id: "ses_amend" }],
+        tokens: 10,
+        at: "2026-10-03T00:00:00.000Z",
+      });
+      amendmentSearch([
+        { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
+      ]);
+      expect((await run("contact sync leaves duplicates behind")).injected.map((r) => r.id)).toEqual(["ses_rule"]);
+    });
+
+    it("gives an amendment two given Sessions both single out once", async () => {
+      hits.push({ id: "obs_d", score: 19, sessionId: "ses_decoy", timestamp: "2026-08-01T10:00:00.000Z" });
+      await kv.set(KV.summaries, "ses_amend", {
+        ...(await kv.get(KV.summaries, "ses_amend")),
+        createdAt: "2026-09-01T00:00:00.000Z",
+      });
+      sdk.registerFunction("mem::search", async (data: unknown) => {
+        const { query } = data as { query: string };
+        const found =
+          query === "contact sync leaves duplicates behind"
+            ? hits
+            : [{ id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" }];
+        return {
+          results: found.map((h) => ({
+            score: h.score,
+            sessionId: h.sessionId,
+            observation: { id: h.id, timestamp: h.timestamp, narrative: `narrative of ${h.id}` },
+          })),
+        };
+      });
+      expect((await run("contact sync leaves duplicates behind")).injected.map((r) => r.id)).toEqual([
+        "ses_amend",
+        "ses_decoy",
+        "ses_rule",
+      ]);
+    });
+
+    it("still gives the chosen Sessions when the amendment search fails", async () => {
+      sdk.registerFunction("mem::search", async (data: unknown) => {
+        const { query } = data as { query: string };
+        if (query.startsWith("Dedupe rule")) throw new Error("index unavailable");
+        return {
+          results: hits.map((h) => ({
+            score: h.score,
+            sessionId: h.sessionId,
+            observation: { id: h.id, timestamp: h.timestamp, narrative: `narrative of ${h.id}` },
+          })),
+        };
+      });
+      expect((await run("contact sync leaves duplicates behind")).injected.map((r) => r.id)).toEqual(["ses_rule"]);
     });
   });
 

@@ -203,10 +203,12 @@ newest first, under a header telling the Agent the rules still hold, with their 
 even where the current code does not follow them yet, and that the newer of two conflicting
 rules holds. The top 3 are counted in rendered units from a 30-hit search: a covered Session is
 one unit however many of its Observations hit.
-Each covered Session given also triggers a search on its Summary's title and decisions: when
-the best-scoring other Session there is later, scores at least 0.35 of the given Session's own
-best hit and leads the runner-up by 1.25x, its decisions are given too, as the amendment
-(`laterAmendment`). It skips this Session and any Summary already given.
+Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
+when the best-scoring other Session there scores at least 0.35 of the given Session's own best
+hit, leads the runner-up by 1.25x and its Summary dates later, its decisions are given too, as
+the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Memory hits, this
+Session and any Summary already given are dropped before ranking. A failed amendment lookup
+drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
 (300 chars each) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
 the rest of the budget; its `summary` ref keeps every file.
