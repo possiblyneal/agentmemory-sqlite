@@ -21,7 +21,7 @@ const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
 const MAX_DECISION_CHARS = 300;
 const MAX_DECISIONS = 10;
-const SEARCH_LIMIT = 10;
+const SEARCH_LIMIT = 30;
 
 interface SearchHit {
   score: number;
@@ -50,30 +50,55 @@ async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
   return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
 }
 
+type Candidate = { hit: NarratedHit; ref: InjectedRef };
+type Resolved = Candidate & { summary: SessionSummary | null };
+
 // An Observation a Session Summary covers is a fragment of a conversation
 // whose conclusions the Summary already holds, so the Session's decisions
-// stand in for it, once per Session. They lead, newest Session first, so a
-// later Session that amends a rule is read before the rule it replaces.
-async function renderWithSessionDecisions(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: InjectedRef }>) {
-  const fragments: string[] = [];
-  const fragmentRefs: InjectedRef[] = [];
-  const sessions = new Map<string, { sessionId: string; summary: SessionSummary; at: string }>();
+// stand in for it.
+async function withCoveringSummaries(kv: StateKV, ranked: Candidate[]): Promise<Resolved[]> {
   const summaries = await Promise.all(
-    chosen.map(({ hit, ref }) =>
+    ranked.map(({ hit, ref }) =>
       ref.kind === "observation" ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null) : null,
     ),
   );
-  for (const [i, { hit, ref }] of chosen.entries()) {
+  return ranked.map((c, i) => {
     const summary = summaries[i];
-    const { timestamp } = hit.observation;
-    if (!summary?.keyDecisions?.length || !timestamp || !summaryCovers(summary, timestamp)) {
+    const { timestamp } = c.hit.observation;
+    const covers = !!summary?.keyDecisions?.length && !!timestamp && summaryCovers(summary, timestamp);
+    return { ...c, summary: covers ? summary : null };
+  });
+}
+
+// A covered Session renders once however many of its Observations hit, so
+// the result budget counts Sessions, not hits: a second hit from the same
+// Session would spend a slot another Session could use.
+function distinctUnits(ranked: Resolved[]): Resolved[] {
+  const sessions = new Set<string>();
+  const units: Resolved[] = [];
+  for (const r of ranked) {
+    if (r.summary && sessions.has(r.hit.sessionId)) continue;
+    if (r.summary) sessions.add(r.hit.sessionId);
+    units.push(r);
+  }
+  return units;
+}
+
+// Decisions lead, newest Session first, so a later Session that amends a
+// rule is read before the rule it replaces.
+function renderWithSessionDecisions(chosen: Resolved[]) {
+  const fragments: string[] = [];
+  const fragmentRefs: InjectedRef[] = [];
+  const sessions: Array<{ sessionId: string; summary: SessionSummary; at: string }> = [];
+  for (const { hit, ref, summary } of chosen) {
+    if (!summary) {
       fragments.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
       fragmentRefs.push(ref);
       continue;
     }
-    sessions.set(hit.sessionId, { sessionId: hit.sessionId, summary, at: summary.coveredThrough ?? summary.createdAt });
+    sessions.push({ sessionId: hit.sessionId, summary, at: summary.coveredThrough ?? summary.createdAt });
   }
-  const newestFirst = [...sessions.values()].sort((a, b) => b.at.localeCompare(a.at));
+  const newestFirst = sessions.sort((a, b) => b.at.localeCompare(a.at));
   const lines = newestFirst.length
     ? ["Rules settled in past Sessions of this project, newest first; where two of these conflict, the newer one holds."]
     : [];
@@ -125,10 +150,11 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = strong
         .map((hit, i) => ({ hit, ref: refs[i] }))
         .filter(({ ref }) => !seen.has(refKey(ref)));
-      const chosen = (await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation)).slice(0, MAX_RESULTS);
+      const gated = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
+      const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
-      const { lines, injected } = await renderWithSessionDecisions(kv, chosen);
+      const { lines, injected } = renderWithSessionDecisions(chosen);
       const context = `<agentmemory-relevant-context>\n${lines.join("\n")}\n</agentmemory-relevant-context>`;
 
       logger.info("Prompt context built", {

@@ -237,6 +237,29 @@ describe("mem::prompt-context", () => {
     expect(result.injected.map((r) => r.id)).toEqual(["ses_amend", "ses_policy", "obs_raw"]);
   });
 
+  it("spends its three results on distinct Sessions, so hits from one Session do not crowd out another", async () => {
+    await Promise.all(
+      ["ses_busy", "ses_quiet"].map((id) =>
+        kv.set(KV.summaries, id, {
+          sessionId: id,
+          createdAt: "2026-10-01T12:00:00.000Z",
+          title: id,
+          keyDecisions: [`rule of ${id}`],
+          filesModified: [],
+        }),
+      ),
+    );
+    hits = [
+      { id: "obs_b1", score: 20, sessionId: "ses_busy", timestamp: "2026-09-10T10:00:00.000Z" },
+      { id: "obs_b2", score: 19, sessionId: "ses_busy", timestamp: "2026-09-10T10:05:00.000Z" },
+      { id: "obs_b3", score: 18, sessionId: "ses_busy", timestamp: "2026-09-10T10:10:00.000Z" },
+      { id: "obs_q", score: 17, sessionId: "ses_quiet", timestamp: "2026-09-05T10:00:00.000Z" },
+    ];
+    const result = await run("ledger rounding drifts by a cent each month");
+    expect(result.injected.map((r) => r.id)).toEqual(["ses_busy", "ses_quiet"]);
+    expect(result.context).toContain("- rule of ses_quiet");
+  });
+
   it("keeps an Observation the Session Summary does not cover as itself", async () => {
     await kv.set(KV.summaries, "ses_old", {
       sessionId: "ses_old",
