@@ -37,7 +37,15 @@ async function main() {
   const cwd = hookCwd(data) || process.cwd();
   const project = resolveProject(cwd);
   const prompt = data.prompt;
+  const timestamp = new Date().toISOString();
 
+  // Only Claude Code's UserPromptSubmit reads additionalContext from stdout;
+  // other hosts run this script as telemetry. Subagent prompts are skipped.
+  if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") {
+    await injectContext(sessionId, project, prompt);
+  }
+  // Observed after the Injection: indexed first, the prompt would match its
+  // own search and dilute every earlier Session's score.
   fetch(`${REST_URL}/agentmemory/observe`, {
     method: "POST",
     headers: authHeaders(),
@@ -46,17 +54,11 @@ async function main() {
       sessionId,
       project,
       cwd,
-      timestamp: new Date().toISOString(),
+      timestamp,
       data: { prompt },
     }),
     signal: AbortSignal.timeout(3000),
   }).catch(() => {});
-
-  // Only Claude Code's UserPromptSubmit reads additionalContext from stdout;
-  // other hosts run this script as telemetry. Subagent prompts are skipped.
-  if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") {
-    await injectContext(sessionId, project, prompt);
-  }
   setTimeout(() => process.exit(0), 500).unref();
 }
 

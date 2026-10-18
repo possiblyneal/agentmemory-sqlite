@@ -217,6 +217,8 @@ async function main() {
 	const cwd = hookCwd(data) || process.cwd();
 	const project = resolveProject(cwd);
 	const prompt = data.prompt;
+	const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+	if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") await injectContext(sessionId, project, prompt);
 	fetch(`${REST_URL}/agentmemory/observe`, {
 		method: "POST",
 		headers: authHeaders(),
@@ -225,12 +227,11 @@ async function main() {
 			sessionId,
 			project,
 			cwd,
-			timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+			timestamp,
 			data: { prompt }
 		}),
 		signal: AbortSignal.timeout(3e3)
 	}).catch(() => {});
-	if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") await injectContext(sessionId, project, prompt);
 	setTimeout(() => process.exit(0), 500).unref();
 }
 async function injectContext(sessionId, project, prompt) {

@@ -255,7 +255,7 @@ describe("prompt-submit hook — per-prompt Injection (#106)", () => {
     });
     const ask = requests.find((r) => r.path === "/agentmemory/prompt-context");
     expect(ask?.body).toEqual({ sessionId: "ses_test", project: "shipctl", prompt: prompt.prompt });
-    expect(requests.some((r) => r.path === "/agentmemory/observe")).toBe(true);
+    expect(requests.map((r) => r.path)).toEqual(["/agentmemory/prompt-context", "/agentmemory/observe"]);
   });
 
   it("does not inject into a subagent", async () => {
