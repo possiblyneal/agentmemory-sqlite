@@ -203,15 +203,16 @@ describe("mem::prompt-context", () => {
     ]);
   });
 
-  it("leads with Session decisions, newest Session first, so an amendment is read before the rule it replaces", async () => {
+  it("leads with Session decisions, newest Summary first, so an amendment is read before the rule it replaces", async () => {
     await Promise.all(
       [
-        ["ses_policy", "Overage policy", "No waiver for overage", "2026-09-01"],
-        ["ses_amend", "Overage grace amendment", "Subtract a 25-unit grace first", "2026-09-20"],
-      ].map(([id, title, decision]) =>
+        ["ses_policy", "Overage policy", "No waiver for overage", "2026-09-02T18:00:00.000Z"],
+        ["ses_amend", "Overage grace amendment", "Subtract a 25-unit grace first", "2026-09-03T18:00:00.000Z"],
+      ].map(([id, title, decision, coveredThrough]) =>
         kv.set(KV.summaries, id, {
           sessionId: id,
-          createdAt: "2026-10-01T12:00:00.000Z",
+          createdAt: coveredThrough,
+          coveredThrough,
           title,
           keyDecisions: [decision],
           filesModified: [],
@@ -220,16 +221,16 @@ describe("mem::prompt-context", () => {
     );
     hits = [
       { id: "obs_raw", score: 18, sessionId: "ses_unsummarized" },
-      { id: "obs_p", score: 16, sessionId: "ses_policy", timestamp: "2026-09-01T10:00:00.000Z" },
-      { id: "obs_a", score: 14, sessionId: "ses_amend", timestamp: "2026-09-20T10:00:00.000Z" },
+      { id: "obs_p", score: 16, sessionId: "ses_policy", timestamp: "2026-09-02T10:00:00.000Z" },
+      { id: "obs_a", score: 14, sessionId: "ses_amend", timestamp: "2026-09-01T10:00:00.000Z" },
     ];
     const result = await run("overage billing charges customers under quota");
     const lines = result.context.split("\n");
     expect(lines.slice(1, 7)).toEqual([
-      "Rules settled in past Sessions of this project, newest first; where two conflict, the newer one holds.",
-      'Session "Overage grace amendment" (2026-09-20):',
+      "Rules settled in past Sessions of this project, newest first; where two of these conflict, the newer one holds.",
+      'Session "Overage grace amendment" (2026-09-03):',
       "- Subtract a 25-unit grace first",
-      'Session "Overage policy" (2026-09-01):',
+      'Session "Overage policy" (2026-09-02):',
       "- No waiver for overage",
       "narrative of obs_raw",
     ]);

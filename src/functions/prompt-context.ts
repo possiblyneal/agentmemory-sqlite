@@ -71,12 +71,11 @@ async function renderWithSessionDecisions(kv: StateKV, chosen: Array<{ hit: Narr
       fragmentRefs.push(ref);
       continue;
     }
-    const known = sessions.get(hit.sessionId);
-    if (!known || timestamp > known.at) sessions.set(hit.sessionId, { sessionId: hit.sessionId, summary, at: timestamp });
+    sessions.set(hit.sessionId, { sessionId: hit.sessionId, summary, at: summary.coveredThrough ?? summary.createdAt });
   }
   const newestFirst = [...sessions.values()].sort((a, b) => b.at.localeCompare(a.at));
   const lines = newestFirst.length
-    ? ["Rules settled in past Sessions of this project, newest first; where two conflict, the newer one holds."]
+    ? ["Rules settled in past Sessions of this project, newest first; where two of these conflict, the newer one holds."]
     : [];
   for (const { summary, at } of newestFirst) {
     lines.push(
