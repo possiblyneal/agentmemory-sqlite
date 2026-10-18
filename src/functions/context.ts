@@ -22,6 +22,10 @@ import {
   renderPinnedContext,
 } from "./slots.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+
+const MAX_SUMMARY_DECISIONS = 10;
+const MAX_SUMMARY_DECISION_CHARS = 300;
+const MAX_SUMMARY_FILES = 10;
 import { CHARS_PER_TOKEN, estimateTokens } from "../utils/tokens.js";
 
 function oneLine(s: string): string {
@@ -251,7 +255,13 @@ export function registerContextFunction(
       for (let i = 0; i < sessions.length; i++) {
         const summary = summariesPerSession[i];
         if (summary) {
-          const content = `## ${summary.title}\n${summary.narrative}\nDecisions: ${summary.keyDecisions.join("; ")}\nFiles: ${summary.filesModified.join(", ")}`;
+          const decisions = summary.keyDecisions
+            .slice(0, MAX_SUMMARY_DECISIONS)
+            .map((d) => d.slice(0, MAX_SUMMARY_DECISION_CHARS));
+          const unlistedFiles = summary.filesModified.length - MAX_SUMMARY_FILES;
+          const files = summary.filesModified.slice(0, MAX_SUMMARY_FILES).join(", ") +
+            (unlistedFiles > 0 ? ` (+${unlistedFiles} more)` : "");
+          const content = `## ${summary.title}\n${summary.narrative}\nDecisions: ${decisions.join("; ")}\nFiles: ${files}`;
           blocks.push({
             type: "summary",
             content,
