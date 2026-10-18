@@ -649,6 +649,22 @@ describe("mem::summarize chunking", () => {
     }
   });
 
+  it("keeps a decision-less summary when the retry throws", async () => {
+    const provider = makeProvider([summaryXml({ title: "no-decisions", decisions: [] })]);
+    const first = provider.summarize;
+    provider.summarize = async (system, user) => {
+      if (provider.calls.length > 0) throw new Error("provider down");
+      return first(system, user);
+    };
+    const { handler, kv } = await setupHandler({ sessionId: "ses_nodec3", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_nodec3" });
+
+    expect(result.success).toBe(true);
+    const stored: any = await kv.get("summaries", "ses_nodec3");
+    expect(stored.title).toBe("no-decisions");
+  });
+
   it("measures every Observation once, even across the summarize retry", async () => {
     // The chars/3 estimate (~31 per Observation with separator) overruns this
     // budget, so the Session is measured; the measured 14 each fits exactly.
@@ -1030,6 +1046,33 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls[1].user).not.toContain("prior narrative text");
     const stored: any = await kv.get("summaries", "ses_retry");
     expect(stored.observationCount).toBe(8);
+  });
+
+  it("retries a fold that drops every decision the prior summary had", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_folddrop", 8, 5, "obs_4", [
+      summaryXml({ title: "folded", decisions: [] }),
+      summaryXml({ title: "whole", decisions: ["rule"] }),
+    ]);
+
+    await handler({ sessionId: "ses_folddrop" });
+
+    expect(provider.calls).toHaveLength(2);
+    const stored: any = await kv.get("summaries", "ses_folddrop");
+    expect(stored.keyDecisions).toEqual(["rule"]);
+  });
+
+  it("keeps a decision-less fold of a prior summary that had none", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_foldnone", 8, 5, "obs_4", [
+      summaryXml({ title: "folded", decisions: [] }),
+    ]);
+    const prior: any = await kv.get("summaries", "ses_foldnone");
+    await kv.set("summaries", "ses_foldnone", { ...prior, keyDecisions: [] });
+
+    await handler({ sessionId: "ses_foldnone" });
+
+    expect(provider.calls).toHaveLength(1);
+    const stored: any = await kv.get("summaries", "ses_foldnone");
+    expect(stored.title).toBe("folded");
   });
 
   it("reuses without calling the provider when no new Observations arrived", async () => {
