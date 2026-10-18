@@ -22,6 +22,8 @@ const MAX_NARRATIVE_CHARS = 400;
 const MAX_DECISION_CHARS = 300;
 const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 30;
+const AMENDMENT_MIN_RATIO = 0.35;
+const AMENDMENT_MIN_LEAD = 1.25;
 
 interface SearchHit {
   score: number;
@@ -82,6 +84,65 @@ function distinctUnits(ranked: Resolved[]): Resolved[] {
     units.push(r);
   }
   return units;
+}
+
+// A Session that amends another's rules restates them, so a search on those
+// rules finds it. Measured on sdebench's amended tasks against 140 decoys: the
+// amendment is the closest other Session, scores at least 0.35 of the
+// Session's own best hit and leads the runner-up by 1.25x; a decoy rarely
+// does all three while also being the later Session.
+async function laterAmendment(
+  sdk: ISdk,
+  kv: StateKV,
+  unit: Resolved & { summary: SessionSummary },
+  skip: (sessionId: string) => boolean,
+  project?: string,
+): Promise<Resolved | null> {
+  const { results } = await sdk.trigger<{ query: string; limit: number; project?: string }, { results: SearchHit[] }>({
+    function_id: "mem::search",
+    payload: {
+      query: [unit.summary.title, ...unit.summary.keyDecisions].join(" "),
+      limit: SEARCH_LIMIT,
+      ...(project && { project }),
+    },
+  });
+  const bestPerSession = new Map<string, SearchHit>();
+  for (const r of results) {
+    if ((bestPerSession.get(r.sessionId)?.score ?? -Infinity) < r.score) bestPerSession.set(r.sessionId, r);
+  }
+  const own = bestPerSession.get(unit.hit.sessionId)?.score ?? 0;
+  bestPerSession.delete(unit.hit.sessionId);
+  const [top, runnerUp] = [...bestPerSession.values()].sort((a, b) => b.score - a.score);
+  if (!top?.observation.narrative || !top.observation.timestamp || skip(top.sessionId)) return null;
+  if (top.observation.timestamp <= unit.hit.observation.timestamp!) return null;
+  if (top.score < own * AMENDMENT_MIN_RATIO || (runnerUp && top.score < runnerUp.score * AMENDMENT_MIN_LEAD)) return null;
+  const hit = top as NarratedHit;
+  const [resolved] = await withCoveringSummaries(kv, [{ hit, ref: await refFor(kv, hit) }]);
+  return resolved.summary ? resolved : null;
+}
+
+async function withLaterAmendments(
+  sdk: ISdk,
+  kv: StateKV,
+  chosen: Resolved[],
+  skip: (sessionId: string) => boolean,
+  project?: string,
+): Promise<Resolved[]> {
+  const given = new Set(chosen.map((c) => c.hit.sessionId));
+  const amendments = await Promise.all(
+    chosen.map((c) =>
+      c.summary
+        ? laterAmendment(sdk, kv, { ...c, summary: c.summary }, (id) => given.has(id) || skip(id), project)
+        : null,
+    ),
+  );
+  const added = new Set<string>();
+  const fresh = amendments.filter((a): a is Resolved => {
+    if (!a || added.has(a.hit.sessionId)) return false;
+    added.add(a.hit.sessionId);
+    return true;
+  });
+  return [...chosen, ...fresh];
 }
 
 // Decisions lead, newest Session first, so a later Session that amends a
@@ -154,7 +215,14 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
-      const { lines, injected } = renderWithSessionDecisions(chosen);
+      const withAmendments = await withLaterAmendments(
+        sdk,
+        kv,
+        chosen,
+        (id) => id === data.sessionId || seen.has(refKey({ kind: "summary", id })),
+        data.project,
+      );
+      const { lines, injected } = renderWithSessionDecisions(withAmendments);
       const context = `<agentmemory-relevant-context>\n${lines.join("\n")}\n</agentmemory-relevant-context>`;
 
       logger.info("Prompt context built", {

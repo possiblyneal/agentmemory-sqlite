@@ -260,6 +260,69 @@ describe("mem::prompt-context", () => {
     expect(result.context).toContain("- rule of ses_quiet");
   });
 
+  describe("a later Session that amends a given one", () => {
+    const amendmentSearch = (decisionHits: Hit[]) => {
+      sdk.registerFunction("mem::search", async (data: unknown) => {
+        const { query } = data as { query: string };
+        searched.push(data as { query: string });
+        const found = query.startsWith("Dedupe rule") ? decisionHits : hits;
+        return {
+          results: found.map((h) => ({
+            score: h.score,
+            sessionId: h.sessionId ?? "ses_old",
+            observation: { id: h.id, timestamp: h.timestamp, narrative: `narrative of ${h.id}` },
+          })),
+        };
+      });
+    };
+
+    beforeEach(async () => {
+      await Promise.all(
+        [
+          ["ses_rule", "Dedupe rule", "Keep the newest record on collision"],
+          ["ses_amend", "Merge amendment", "Keep the record with the most filled fields"],
+          ["ses_decoy", "Cache sizing", "Cap the cache at 512 entries"],
+        ].map(([id, title, decision]) =>
+          kv.set(KV.summaries, id, {
+            sessionId: id,
+            createdAt: "2026-10-01T12:00:00.000Z",
+            title,
+            keyDecisions: [decision],
+            filesModified: [],
+          }),
+        ),
+      );
+      hits = [{ id: "obs_r", score: 20, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" }];
+    });
+
+    it("gives the later Session a search on the given Session's rules singles out, newest first", async () => {
+      amendmentSearch([
+        { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
+        { id: "obs_d", score: 19, sessionId: "ses_decoy", timestamp: "2026-08-01T10:00:00.000Z" },
+      ]);
+      const result = await run("contact sync leaves duplicates behind");
+      expect(searched[1]).toMatchObject({ query: "Dedupe rule Keep the newest record on collision", project: "shipctl" });
+      expect(result.injected.map((r) => r.id)).toEqual(["ses_amend", "ses_rule"]);
+      expect(result.context).toContain("- Keep the record with the most filled fields");
+    });
+
+    it("does not give an earlier Session or one that barely leads the rest", async () => {
+      amendmentSearch([
+        { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-06-01T10:00:00.000Z" },
+      ]);
+      expect((await run("contact sync leaves duplicates behind")).injected.map((r) => r.id)).toEqual(["ses_rule"]);
+
+      amendmentSearch([
+        { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
+        { id: "obs_d", score: 24, sessionId: "ses_decoy", timestamp: "2026-08-01T10:00:00.000Z" },
+      ]);
+      expect((await run("contact sync leaves duplicates behind", "ses_2")).injected.map((r) => r.id)).toEqual(["ses_rule"]);
+    });
+  });
+
   it("keeps an Observation the Session Summary does not cover as itself", async () => {
     await kv.set(KV.summaries, "ses_old", {
       sessionId: "ses_old",
