@@ -22,11 +22,11 @@ import {
   renderPinnedContext,
 } from "./slots.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
+import { CHARS_PER_TOKEN, estimateTokens } from "../utils/tokens.js";
 
 const MAX_SUMMARY_DECISIONS = 10;
 const MAX_SUMMARY_DECISION_CHARS = 300;
 const MAX_SUMMARY_FILES = 10;
-import { CHARS_PER_TOKEN, estimateTokens } from "../utils/tokens.js";
 
 function oneLine(s: string): string {
   return s.replace(/\s*\n+\s*/g, " ").trim();

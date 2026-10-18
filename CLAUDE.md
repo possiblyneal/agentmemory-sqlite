@@ -198,6 +198,9 @@ Observation hit that its Session Summary covers (`summaryCovers()`, the same `co
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
 `summary` ref. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
 missing, unreadable or has no decisions are given as themselves.
+At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
+(300 chars each) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
+the rest of the budget; its `summary` ref keeps every file.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
