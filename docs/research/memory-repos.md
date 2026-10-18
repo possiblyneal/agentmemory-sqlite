@@ -5,7 +5,8 @@ interventions. It is read for ideas, never for patches, and is not kept current.
 
 sdebench (AMB harness, 61 boltons tasks) imports each task's past conversations, or its git
 history, alongside 140 decoy Sessions. A fresh Claude Sonnet agent then gets a vague task and
-must apply the rules those Sessions settled. The score is interventions; fewer is better.
+must apply the rules those Sessions settled. The score is interventions, the corrections the
+agent needs before the task is done; fewer is better.
 Vanilla scores about 41 and Hindsight 17–25 (published, Sonnet 5).
 
 Remaining failure causes, from the `s55am2` intervention analysis:
@@ -53,21 +54,21 @@ Ordered by the expected cut in interventions per unit of work. Hot path means in
 prompt-submit hook's 1,500 ms budget.
 
 1. **One result slot per Session, from a wider pool** (memanto k ablation, ai-memory one vote
-   per Session). Fixes F1. Size S, no hot-path LLM. Done in `054b4d4`.
+   per Session). Fixes F1. Size S, no hot-path LLM. In progress in #242 (`054b4d4`).
 2. **Fetch the later amending Session** (memvid latest match, LongMemory current pointer,
    Hindsight "LATEST wins"). When a covered Session is chosen, also inject a later Session of
    the project that shares its files or concepts. The newest-first header already settles the
-   conflict. Fixes F2. Size S, no hot-path LLM.
-3. **Search Summary decisions directly, with trigger words** (nocturne disclosure, ai-memory,
-   MemPalace rule documents). Index each Session Summary's decisions, plus an LLM-written
+   conflict. Fixes F2. Size S, no hot-path LLM. In progress in #242 (`784cf44`).
+3. **Search Session Summary decisions directly, with trigger words** (nocturne disclosure,
+   ai-memory, MemPalace rule documents). Index each Session Summary's decisions, plus an LLM-written
    "applies when" line naming the words a future task would use, and fuse them with Observation
-   hits by RRF. Fixes F1. Size M, LLM at summary time only.
+   hits by RRF. Fixes F1. Size M, LLM at Session Summary time only.
 4. **Wrapper that asks for the exact values** (Hindsight `buildSystemInjection`). Tell the Agent
    to apply the stated values and conditions as given and check them against the code. Fixes
    F3. Size S.
-5. **Final-state-wins summaries** (Hindsight `CONVERSATION_MISSION`, mem0 transitions). Keep
-   only the last value of a rule the conversation changed, with "changed from X". Fixes F2
-   within one Session. Size S, prompt only.
+5. **Final-state-wins Session Summaries** (Hindsight `CONVERSATION_MISSION`, mem0
+   transitions). Keep only the last value of a rule the conversation changed, with "changed
+   from X". Fixes F2 within one Session. Size S, prompt only.
 6. **Rules from git history** (Hindsight `GIT_MISSION`). Summarize commits, message and diff, as
    decision records. Fixes F4. Size M, LLM at ingest only. Low priority: history tasks rarely
    need an intervention.
@@ -82,4 +83,5 @@ Not pursued:
 - **First-prompt LLM reflect** (Hindsight). It needs a hook budget near 20 s, against the
   Goal's "never on the critical path".
 - **Pull designs** (memU, nocturne, LongMemory and MemPalace skills). They fail F5.
-- **Per-candidate LLM rerank.** The Injection Gate already does this.
+- **Per-candidate LLM rerank.** The Injection Gate already reranks each candidate with a reranker
+  model.
