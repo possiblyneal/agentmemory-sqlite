@@ -192,7 +192,7 @@ describe("mem::prompt-context", () => {
       { id: "obs_c", score: 12, sessionId: "ses_other" },
     ];
     const result = await run("staging auth fails when SHIPCTL_TOKEN is unset");
-    expect(result.context).toContain('Decisions from the Session "Token handling for staging auth":');
+    expect(result.context).toContain('Session "Token handling for staging auth" (2026-10-01):');
     expect(result.context).toContain("- Fail closed when SHIPCTL_TOKEN is unset");
     expect(result.context).toContain("- Never log the token &lt;redacted&gt;");
     expect(result.context).not.toContain("narrative of obs_a");
@@ -201,6 +201,40 @@ describe("mem::prompt-context", () => {
       { kind: "summary", id: "ses_old", files: ["src/auth.rs"] },
       { kind: "observation", id: "obs_c" },
     ]);
+  });
+
+  it("leads with Session decisions, newest Summary first, so an amendment is read before the rule it replaces", async () => {
+    await Promise.all(
+      [
+        ["ses_policy", "Overage policy", "No waiver for overage", "2026-09-02T18:00:00.000Z"],
+        ["ses_amend", "Overage grace amendment", "Subtract a 25-unit grace first", "2026-09-03T18:00:00.000Z"],
+      ].map(([id, title, decision, coveredThrough]) =>
+        kv.set(KV.summaries, id, {
+          sessionId: id,
+          createdAt: coveredThrough,
+          coveredThrough,
+          title,
+          keyDecisions: [decision],
+          filesModified: [],
+        }),
+      ),
+    );
+    hits = [
+      { id: "obs_raw", score: 18, sessionId: "ses_unsummarized" },
+      { id: "obs_p", score: 16, sessionId: "ses_policy", timestamp: "2026-09-02T10:00:00.000Z" },
+      { id: "obs_a", score: 14, sessionId: "ses_amend", timestamp: "2026-09-01T10:00:00.000Z" },
+    ];
+    const result = await run("overage billing charges customers under quota");
+    const lines = result.context.split("\n");
+    expect(lines.slice(1, 7)).toEqual([
+      "Rules settled in past Sessions of this project, newest first; where two of these conflict, the newer one holds.",
+      'Session "Overage grace amendment" (2026-09-03):',
+      "- Subtract a 25-unit grace first",
+      'Session "Overage policy" (2026-09-02):',
+      "- No waiver for overage",
+      "narrative of obs_raw",
+    ]);
+    expect(result.injected.map((r) => r.id)).toEqual(["ses_amend", "ses_policy", "obs_raw"]);
   });
 
   it("keeps an Observation the Session Summary does not cover as itself", async () => {

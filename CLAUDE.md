@@ -196,8 +196,10 @@ Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateB
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
-`summary` ref. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
-missing, unreadable or has no decisions are given as themselves.
+`summary` ref. Those Sessions lead the Injection under one header, newest first by the Summary's
+`coveredThrough` (else `createdAt`) and each dated, so a later Session that amends a rule is read before the rule it
+replaces. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
+missing, unreadable or has no decisions are given as themselves, after them.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
