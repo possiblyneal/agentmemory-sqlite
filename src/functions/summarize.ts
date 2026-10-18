@@ -425,6 +425,10 @@ function parseSummaryXml(
   };
 }
 
+export function summaryCovers(summary: SessionSummary, timestamp: string): boolean {
+  return summary.coveredThrough ? timestamp < summary.coveredThrough : timestamp <= summary.createdAt;
+}
+
 export function registerSummarizeFunction(
   sdk: ISdk,
   kv: StateKV,

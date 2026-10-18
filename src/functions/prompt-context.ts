@@ -8,6 +8,7 @@ import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
+import { summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -19,6 +20,7 @@ const MIN_SCORE_RATIO_TO_BEST = 0.5;
 const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
 const MAX_DECISION_CHARS = 300;
+const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 10;
 
 interface SearchHit {
@@ -48,10 +50,10 @@ async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
   return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
 }
 
-// An Observation from a summarized Session is a fragment of a conversation
+// An Observation a Session Summary covers is a fragment of a conversation
 // whose conclusions the Summary already holds, so the Session's decisions
 // stand in for it, once per Session.
-async function render(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: InjectedRef }>) {
+async function renderWithSessionDecisions(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: InjectedRef }>) {
   const lines: string[] = [];
   const injected: InjectedRef[] = [];
   const rendered = new Set<string>();
@@ -62,7 +64,8 @@ async function render(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: Inject
   );
   for (const [i, { hit, ref }] of chosen.entries()) {
     const summary = summaries[i];
-    if (!summary?.keyDecisions?.length) {
+    const { timestamp } = hit.observation;
+    if (!summary?.keyDecisions?.length || !timestamp || !summaryCovers(summary, timestamp)) {
       lines.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
       injected.push(ref);
       continue;
@@ -71,7 +74,7 @@ async function render(kv: StateKV, chosen: Array<{ hit: NarratedHit; ref: Inject
     rendered.add(hit.sessionId);
     lines.push(
       `Decisions from the Session "${escapeXml(summary.title)}":`,
-      ...summary.keyDecisions.map((d) => `- ${escapeXml(d.slice(0, MAX_DECISION_CHARS))}`),
+      ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(d.slice(0, MAX_DECISION_CHARS))}`),
     );
     injected.push(withFiles({ kind: "summary", id: hit.sessionId }, summary.filesModified));
   }
@@ -114,13 +117,13 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const chosen = (await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
-      const { lines, injected } = await render(kv, chosen);
+      const { lines, injected } = await renderWithSessionDecisions(kv, chosen);
       const context = `<agentmemory-relevant-context>\n${lines.join("\n")}\n</agentmemory-relevant-context>`;
 
       logger.info("Prompt context built", {
         sessionId: data.sessionId,
         project: data.project,
-        results: chosen.length,
+        results: injected.length,
         contextLength: context.length,
       });
 
