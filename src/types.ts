@@ -343,8 +343,12 @@ export interface EmbeddingProvider {
   dimensions: number;
   embed(text: string): Promise<Float32Array>;
   embedBatch(texts: string[]): Promise<Float32Array[]>;
+  embedQuery?(text: string): Promise<Float32Array>;
   embedImage?(src: string): Promise<Float32Array>;
   warm?(): Promise<void>;
+  // Names the vector space this provider writes into: two providers with the
+  // same value produce comparable vectors. Defaults to `${name}:${dimensions}`.
+  vectorSpace?: string;
 }
 
 export interface MemoryRelation {

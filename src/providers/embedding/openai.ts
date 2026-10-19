@@ -89,6 +89,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       getEnvVar("OPENAI_API_VERSION") || DEFAULT_AZURE_API_VERSION;
   }
 
+  get vectorSpace(): string {
+    return `openai:${this.model}:${this.dimensions}`;
+  }
+
   async embed(text: string): Promise<Float32Array> {
     const [result] = await this.embedBatch([text]);
     return result;
