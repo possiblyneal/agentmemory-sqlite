@@ -113,7 +113,9 @@ _Avoid_: cache, summary, materialized view
 Turning one Observation into the structured record that search indexes: a title, facts, a
 narrative, concepts and files. Synthetic Compression builds it with no LLM and is the default.
 LLM Compression (auto-compress) has a model write it instead, except for a read-only tool
-call — one that only read or listed — which stays synthetic.
+call — one that only read or listed — which stays synthetic. LLM Compression is batched per
+Session: the Observation is searchable at once as a synthetic record, which the batch result
+replaces.
 _Avoid_: summarization (that is a Session Summary), distillation
 
 **Extraction**:

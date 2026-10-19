@@ -18,6 +18,7 @@ import {
   type ReducePartial,
 } from "../prompts/summary.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
+import { isAwaitingCompression } from "./compress-synthetic.js";
 import { SummaryOutputSchema } from "../eval/schemas.js";
 import { validateOutput } from "../eval/validator.js";
 import { scoreSummary } from "../eval/quality.js";
@@ -467,11 +468,11 @@ export function registerSummarizeFunction(
       const observations = await kv.list<CompressedObservation>(
         KV.observations(sessionId),
       );
-      const compressed = observations.filter((o) => o.title);
+      const compressed = observations.filter((o) => !isAwaitingCompression(o));
       // A row still awaiting compression keeps its earlier timestamp once
       // titled, so the Summary covers only what precedes the oldest of them.
       const coveredThrough = observations
-        .filter((o) => !o.title)
+        .filter(isAwaitingCompression)
         .reduce((min, o) => (o.timestamp < min ? o.timestamp : min), listedAt);
 
       if (compressed.length === 0) {

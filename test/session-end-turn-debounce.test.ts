@@ -141,6 +141,16 @@ describe("POST /agentmemory/session/end with turnEnd (#1131)", () => {
     expect(stopped).toEqual(["ses_1"]);
   });
 
+  it("flushes the Session's compression batch on a turn end and on a real end", async () => {
+    const flushed: string[] = [];
+    sdk.registerFunction("mem::compress-flush", async (data: { sessionId: string }) => {
+      flushed.push(data.sessionId);
+    });
+    await endSession({ sessionId: "ses_1", turnEnd: true });
+    await endSession({ sessionId: "ses_1" });
+    expect(flushed).toEqual(["ses_1", "ses_1"]);
+  });
+
   it("still answers 404 for a Session that never started", async () => {
     const res = await endSession({ sessionId: "ses_never", turnEnd: true });
     expect(res.status_code).toBe(404);

@@ -906,6 +906,24 @@ describe("mem::summarize Session Summary reuse", () => {
     expect(stored.coveredThrough).toBe(pendingAt);
   });
 
+  it("treats a synthetic record queued for batch compression as awaiting", async () => {
+    const { handler, kv } = await withStoredSummary("ses_queued", 3, 0);
+    const pendingAt = new Date(Date.now() - 60_000).toISOString();
+    await kv.set("obs:ses_queued", "queued_0", {
+      id: "queued_0",
+      sessionId: "ses_queued",
+      timestamp: pendingAt,
+      title: "Synthetic stand-in",
+      awaitingCompression: true,
+    });
+
+    await handler({ sessionId: "ses_queued" });
+
+    const stored: any = await kv.get("summaries", "ses_queued");
+    expect(stored.coveredThrough).toBe(pendingAt);
+    expect(stored.lastObservationId).not.toBe("queued_0");
+  });
+
   it("records coverage up to when it listed the Observations when none is pending", async () => {
     const { handler, kv } = await withStoredSummary("ses_done", 3, 0);
     const before = new Date().toISOString();

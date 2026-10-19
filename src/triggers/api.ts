@@ -14,6 +14,7 @@ import type { ResilientProvider } from "../providers/resilient.js";
 import { VERSION } from "../version.js";
 import { timingSafeCompare } from "../auth.js";
 import { isSlotsEnabled, isReflectEnabled } from "../functions/slots.js";
+import { QUEUED } from "../functions/compress-batch.js";
 import { renderViewerDocument } from "../viewer/document.js";
 import { getBoundViewerPort, getViewerSkipped } from "../viewer/server.js";
 import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
@@ -879,6 +880,11 @@ export function registerApiTriggers(
         return { status_code: 404, body: { error: "session_not_found" } };
       }
       clearTimeout(pendingSessionEnds.get(sessionId));
+      await sdk.trigger({
+        function_id: "mem::compress-flush",
+        payload: { sessionId },
+        action: TriggerAction.Void(),
+      });
       if (body.turnEnd === true) {
         endWhenIdle(sessionId, session.observationCount);
         return { status_code: 200, body: { success: true, deferred: true } };
@@ -2060,9 +2066,18 @@ export function registerApiTriggers(
         sessionId?: string;
         raw?: unknown;
         attempts?: number;
+        reason?: string;
+        queuedAt?: string;
       }>(KV.compressPending)) {
         if (typeof p?.observationId !== "string" || typeof p?.sessionId !== "string") continue;
         if (queued.has(p.observationId)) continue;
+        // A batch entry inside the grace is still queued or in flight; past it,
+        // the batch lost it and the sweep takes over.
+        if (p.reason === QUEUED) {
+          const ts = new Date(String(p.queuedAt)).getTime();
+          const bypass = Number.isFinite(graceBypassBefore) && Number.isFinite(ts) && ts < graceBypassBefore;
+          if (Number.isFinite(ts) && now - ts < GRACE_MS && !bypass) continue;
+        }
         if ((p.attempts ?? 0) >= MAX_ATTEMPTS) {
           quarantined++;
           if (!requeueQuarantined) continue;

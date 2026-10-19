@@ -226,3 +226,9 @@ export function buildSyntheticCompression(
   if (raw.origin) result.origin = raw.origin;
   return result;
 }
+
+// Still waiting for its LLM record: untitled (single path) or a batch's
+// synthetic stand-in. The Session Summary and graph extraction hold back for it.
+export function isAwaitingCompression(o: CompressedObservation): boolean {
+  return !o.title || o.awaitingCompression === true;
+}

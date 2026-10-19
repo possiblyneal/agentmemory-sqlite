@@ -3,6 +3,7 @@ import type { CompressedObservation, HookPayload, Session } from "../types.js";
 import { KV, STREAM } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { isReflectEnabled } from "../functions/slots.js";
+import { isAwaitingCompression } from "../functions/compress-synthetic.js";
 import {
   getAgentId,
   getConsolidationCooldownMs,
@@ -148,13 +149,15 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
         const unseen = observations.filter((o) => o.timestamp > extractedThrough);
         const holdSince = new Date(Date.now() - PENDING_COMPRESSION_HOLD_MS).toISOString();
         const oldestPending = unseen
-          .filter((o) => !o.title && o.timestamp > holdSince)
+          .filter((o) => isAwaitingCompression(o) && o.timestamp > holdSince)
           .reduce<string | undefined>(
             (min, o) => (min === undefined || o.timestamp < min ? o.timestamp : min),
             undefined,
           );
         const fresh = unseen.filter(
-          (o) => o.title && (oldestPending === undefined || o.timestamp < oldestPending),
+          (o) =>
+            !isAwaitingCompression(o) &&
+            (oldestPending === undefined || o.timestamp < oldestPending),
         );
         if (session && fresh.length > 0) {
           await awaitIfRecovery("mem::graph-extract", {
