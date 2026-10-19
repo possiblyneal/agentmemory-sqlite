@@ -203,6 +203,22 @@ describe("mem::prompt-context", () => {
     ]);
   });
 
+  it("carries a 500-character decision whole and cuts a 700-character one to 600 plus an ellipsis", async () => {
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      project: "shipctl",
+      createdAt: "2026-10-01T12:00:00.000Z",
+      title: "Token handling for staging auth",
+      keyDecisions: ["a".repeat(500), "b".repeat(700)],
+      filesModified: [],
+    });
+    hits = [{ id: "obs_a", score: 16 }];
+    const { context } = await run("staging auth fails when SHIPCTL_TOKEN is unset");
+    expect(context).toContain(`- ${"a".repeat(500)}\n`);
+    expect(context).toContain(`- ${"b".repeat(600)}…\n`);
+    expect(context).not.toContain("b".repeat(601));
+  });
+
   it("leads with Session decisions, newest Summary first, so an amendment is read before the rule it replaces", async () => {
     await Promise.all(
       [

@@ -8,7 +8,7 @@ import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
-import { summaryCovers } from "./summarize.js";
+import { cutDecision, summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -19,7 +19,6 @@ const MIN_SCORE = 5;
 const MIN_SCORE_RATIO_TO_BEST = 0.5;
 const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
-const MAX_DECISION_CHARS = 300;
 const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 30;
 const AMENDMENT_MIN_RATIO = 0.35;
@@ -180,7 +179,7 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
   for (const { summary, at } of newestFirst) {
     lines.push(
       `Session "${escapeXml(summary.title)}" (${at.slice(0, 10)}):`,
-      ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(d.slice(0, MAX_DECISION_CHARS))}`),
+      ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(cutDecision(d))}`),
     );
   }
   return {

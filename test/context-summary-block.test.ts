@@ -56,10 +56,15 @@ describe("session-start Summary block is bounded", () => {
     expect(context).not.toContain("d11");
   });
 
-  it("cuts a decision over 300 characters to 300", async () => {
-    const { context } = await start({ keyDecisions: ["x".repeat(400)] });
-    expect(context).toContain(`Decisions: ${"x".repeat(300)}\n`);
-    expect(context).not.toContain("x".repeat(301));
+  it("carries a 500-character decision whole", async () => {
+    const { context } = await start({ keyDecisions: ["x".repeat(500)] });
+    expect(context).toContain(`Decisions: ${"x".repeat(500)}\n`);
+  });
+
+  it("cuts a 700-character decision to its first 600 followed by an ellipsis", async () => {
+    const { context } = await start({ keyDecisions: ["x".repeat(700)] });
+    expect(context).toContain(`Decisions: ${"x".repeat(600)}…\n`);
+    expect(context).not.toContain("x".repeat(601));
   });
 
   it("renders 10 of 15 files with a count of the rest, and the ref keeps all 15", async () => {

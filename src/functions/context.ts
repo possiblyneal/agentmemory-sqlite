@@ -1,4 +1,5 @@
 import type { ISdk } from "../engine/types.js";
+import { cutDecision } from "./summarize.js";
 import type {
   Session,
   CompressedObservation,
@@ -25,7 +26,6 @@ import { getAgentId, isAgentScopeIsolated } from "../config.js";
 import { CHARS_PER_TOKEN, estimateTokens } from "../utils/tokens.js";
 
 const MAX_SUMMARY_DECISIONS = 10;
-const MAX_SUMMARY_DECISION_CHARS = 300;
 const MAX_SUMMARY_FILES = 10;
 
 function oneLine(s: string): string {
@@ -257,7 +257,7 @@ export function registerContextFunction(
         if (summary) {
           const decisions = summary.keyDecisions
             .slice(0, MAX_SUMMARY_DECISIONS)
-            .map((d) => d.slice(0, MAX_SUMMARY_DECISION_CHARS));
+            .map(cutDecision);
           const unlistedFiles = summary.filesModified.length - MAX_SUMMARY_FILES;
           const files = summary.filesModified.slice(0, MAX_SUMMARY_FILES).join(", ") +
             (unlistedFiles > 0 ? ` (+${unlistedFiles} more)` : "");

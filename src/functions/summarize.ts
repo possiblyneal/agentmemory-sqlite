@@ -425,6 +425,14 @@ function parseSummaryXml(
   };
 }
 
+const MAX_INJECTED_DECISION_CHARS = 600;
+
+export function cutDecision(decision: string): string {
+  return decision.length > MAX_INJECTED_DECISION_CHARS
+    ? `${decision.slice(0, MAX_INJECTED_DECISION_CHARS)}…`
+    : decision;
+}
+
 export function summaryCovers(summary: SessionSummary, timestamp: string): boolean {
   return summary.coveredThrough ? timestamp < summary.coveredThrough : timestamp <= summary.createdAt;
 }

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolveGitProject } from "../hooks/_project.js";
 import type { HookType, RawObservation } from "../types.js";
-import { generateId } from "../state/schema.js";
+import { fingerprintId, generateId } from "../state/schema.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 
 interface JsonlEntry {
@@ -110,11 +110,11 @@ function extractToolResults(content: unknown): Array<{ toolUseId: string; output
 
 export function parseJsonlText(text: string, fallbackSessionId?: string): ParsedTranscript {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
-  const entries: JsonlEntry[] = [];
+  const entries: Array<{ entry: JsonlEntry; line: string }> = [];
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line);
-      if (parsed && typeof parsed === "object") entries.push(parsed as JsonlEntry);
+      if (parsed && typeof parsed === "object") entries.push({ entry: parsed as JsonlEntry, line });
     } catch {
       // skip malformed lines
     }
@@ -127,7 +127,9 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
 
   const observations: RawObservation[] = [];
 
-  for (const entry of entries) {
+  for (const { entry, line } of entries) {
+    let position = 0;
+    const nextId = () => fingerprintId("obs", `${position++}:${line}`);
     if (entry.sessionId && !sessionId) sessionId = entry.sessionId;
     if (typeof entry.cwd === "string" && entry.cwd.trim() && !cwd) cwd = entry.cwd;
     const ts = entry.timestamp || new Date().toISOString();
@@ -142,7 +144,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
       if (toolResults.length > 0) {
         for (const result of toolResults) {
           observations.push({
-            id: generateId("obs"),
+            id: nextId(),
             sessionId: sessionId || "imported",
             timestamp: ts,
             hookType: (result.isError ? "post_tool_failure" : "post_tool_use") as HookType,
@@ -156,7 +158,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
         const text = toText(content);
         if (text.trim().length > 0 && !isHarnessMessage(text) && !isContinuationSummary(entry, text)) {
           observations.push({
-            id: generateId("obs"),
+            id: nextId(),
             sessionId: sessionId || "imported",
             timestamp: ts,
             hookType: "prompt_submit" as HookType,
@@ -170,7 +172,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
       const tools = extractToolUses(content);
       if (text.trim().length > 0) {
         observations.push({
-          id: generateId("obs"),
+          id: nextId(),
           sessionId: sessionId || "imported",
           timestamp: ts,
           hookType: "stop" as HookType,
@@ -180,7 +182,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
       }
       for (const tool of tools) {
         observations.push({
-          id: generateId("obs"),
+          id: nextId(),
           sessionId: sessionId || "imported",
           timestamp: ts,
           hookType: "pre_tool_use" as HookType,
@@ -196,7 +198,10 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
 
   const effectiveSessionId = sessionId || fallbackSessionId || generateId("sess");
   for (const obs of observations) {
-    if (obs.sessionId === "imported") obs.sessionId = effectiveSessionId;
+    if (obs.sessionId === "imported") {
+      obs.sessionId = effectiveSessionId;
+      obs.id = fingerprintId("obs", `${effectiveSessionId}:${obs.id}`);
+    }
   }
 
   const nowIso = new Date().toISOString();
