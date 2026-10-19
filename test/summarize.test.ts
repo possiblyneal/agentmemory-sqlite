@@ -1030,11 +1030,20 @@ describe("summary input", () => {
     expect(rendered).not.toContain("x".repeat(SUMMARY_REPLY_MAX));
   });
 
-  it("gives the reply once, in place of the narrative that restates it", () => {
+  it("does not repeat a reply the narrative already holds", () => {
     const reply = "Settled: retry 3 times, then 503.";
     const obs = { ...makeObs(0, "ses_once"), narrative: reply, assistantResponse: reply };
 
     expect(renderSummaryObservation(obs, 0).split(reply)).toHaveLength(2);
+  });
+
+  it("keeps the narrative of a long reply, so its opening is still seen", () => {
+    const obs = { ...makeObs(0, "ses_open"), narrative: "Renamed the retry helper.", assistantResponse: "y".repeat(5000) };
+
+    const rendered = renderSummaryObservation(obs, 0);
+
+    expect(rendered).toContain("Renamed the retry helper.");
+    expect(rendered).toContain("Agent reply:\n…y");
   });
 
   it("does not present a subagent's closing message as the Agent's reply", () => {

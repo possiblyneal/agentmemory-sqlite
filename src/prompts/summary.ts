@@ -37,15 +37,16 @@ export interface SummaryObservation {
 // A reply's closing lines carry the recap and the question the user answers next, so a long one keeps its tail.
 export const SUMMARY_REPLY_MAX = 2000
 
-// The Agent's reply stands in for its Observation's narrative, which only restates it. A
-// subagent's closing message is not one the user answers, so it keeps its narrative.
+// A synthetic stop's narrative already holds a short reply, so the tail is not given twice. A
+// subagent's closing message is not one the user answers, so it is not given as the Agent's reply.
 export function renderSummaryObservation(obs: SummaryObservation, index: number): string {
   const facts = obs.facts.map((f) => `  - ${f}`).join('\n')
+  const base = `[${index + 1}] ${obs.type}: ${obs.title}\n${obs.narrative}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
   const reply = obs.type === 'subagent' ? undefined : obs.assistantResponse
-  const body = !reply
-    ? obs.narrative
-    : `Agent reply:\n${reply.length > SUMMARY_REPLY_MAX ? `…${reply.slice(-SUMMARY_REPLY_MAX)}` : reply}`
-  return `[${index + 1}] ${obs.type}: ${obs.title}\n${body}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
+  if (!reply) return base
+  const tail = reply.slice(-SUMMARY_REPLY_MAX)
+  if (obs.narrative.includes(tail)) return base
+  return `${base}\nAgent reply:\n${tail.length < reply.length ? `…${tail}` : tail}`
 }
 
 export function buildSummaryPrompt(observations: SummaryObservation[]): string {
