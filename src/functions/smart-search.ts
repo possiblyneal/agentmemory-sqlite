@@ -33,7 +33,9 @@ import { recallSemanticFacts } from "./semantic-recall.js";
 // On-device cosine for the one gold Session BM25 alone misses is 0.33 and
 // off-topic vector-only hits stay at or under 0.17, but off-topic hits with
 // lexical overlap reach 0.58, so cosine alone never admits a hit: it only
-// rescues one that BM25 already matched.
+// rescues one that BM25 already matched. These cosines are MiniLM's: BGE-small
+// scores off-topic pairs at 0.5-0.6, so it admits nearly every hit here
+// (docs/benchmarks/2026-10-19-embedding-model.md).
 const MIN_BM25_SCORE = 3.5;
 const MIN_BM25_RATIO_TO_BEST = 0.5;
 const MIN_COSINE_SCORE = 0.3;
