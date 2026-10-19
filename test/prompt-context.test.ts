@@ -237,6 +237,37 @@ describe("mem::prompt-context", () => {
     expect(result.injected.map((r) => r.id)).toEqual(["ses_amend", "ses_policy", "obs_raw"]);
   });
 
+  it("dates a Summary written before lastObservationAt existed by coveredThrough", async () => {
+    await Promise.all(
+      [
+        ["ses_old", "Pre-field rule", "Round half down", "2026-07-16T05:00:00.000Z", undefined],
+        ["ses_new", "Dated rule", "Round half up", "2026-10-18T19:22:03.742Z", "2026-07-16T04:00:00.000Z"],
+      ].map(([id, title, decision, coveredThrough, lastObservationAt]) =>
+        kv.set(KV.summaries, id!, {
+          sessionId: id,
+          createdAt: coveredThrough,
+          coveredThrough,
+          ...(lastObservationAt ? { lastObservationAt } : {}),
+          title,
+          keyDecisions: [decision],
+          filesModified: [],
+        }),
+      ),
+    );
+    hits = [
+      { id: "obs_o", score: 16, sessionId: "ses_old", timestamp: "2026-07-16T04:55:00.000Z" },
+      { id: "obs_n", score: 14, sessionId: "ses_new", timestamp: "2026-07-16T03:55:00.000Z" },
+    ];
+    const result = await run("rounding rule for half values");
+    const lines = result.context.split("\n");
+    expect(lines.slice(2, 6)).toEqual([
+      'Session "Pre-field rule" (2026-07-16):',
+      "- Round half down",
+      'Session "Dated rule" (2026-07-16):',
+      "- Round half up",
+    ]);
+  });
+
   it("orders and dates Sessions by their last Observation, not by when their Summaries were written", async () => {
     await Promise.all(
       [

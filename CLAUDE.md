@@ -200,7 +200,8 @@ test Eviction uses) as that Summary's first 10 decisions, once per Session and r
 missing, unreadable or has no decisions are given as themselves. The decisions come first,
 one block per Session dated by its Summary's `lastObservationAt`, the time of the last Observation it
 summarized (else `coveredThrough`, else `createdAt`; never write time alone, which is milliseconds
-apart for Sessions summarized together), and ordered
+apart for Sessions summarized together; a Summary written before the field existed keeps the
+fallback until its Session is summarized again), and ordered
 newest first, under a header telling the Agent the rules still hold, with their exact values,
 even where the current code does not follow them yet, and that the newer of two conflicting
 rules holds. The top 3 are counted in rendered units from a 30-hit search: a covered Session is
