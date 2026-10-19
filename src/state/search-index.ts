@@ -1,6 +1,7 @@
 import type { CompressedObservation } from "../types.js";
 import { stem } from "./stemmer.js";
 import { getSynonyms } from "./synonyms.js";
+import { STOP_WORDS } from "./stopwords.js";
 import { segmentCjk, hasCjk, cjkBigrams } from "./cjk-segmenter.js";
 
 interface IndexEntry {
@@ -123,7 +124,7 @@ export class SearchIndex {
     limit = 20,
     layer?: IndexLayer,
   ): Array<{ obsId: string; sessionId: string; score: number }> {
-    const rawTerms = this.tokenize(query.toLowerCase());
+    const rawTerms = this.tokenize(query.toLowerCase(), STOP_WORDS);
     if (rawTerms.length === 0) return [];
 
     const N = this.entries.size;
@@ -350,11 +351,11 @@ export class SearchIndex {
     return unique.sort((a, b) => df(a) - df(b)).slice(0, MAX_QUERY_TERMS);
   }
 
-  private tokenize(text: string): string[] {
+  private tokenize(text: string, skip?: ReadonlySet<string>): string[] {
     const cleaned = text.replace(/[^\p{L}\p{N}\s/.\\-_]/gu, " ");
     const out: string[] = [];
     for (const raw of cleaned.split(/\s+/)) {
-      if (raw.length < 2) continue;
+      if (raw.length < 2 || skip?.has(raw)) continue;
       if (hasCjk(raw)) {
         const segs = segmentCjk(raw);
         // One segment means no segmenter split the run (jieba/tiny-segmenter

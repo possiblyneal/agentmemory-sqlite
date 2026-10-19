@@ -391,3 +391,15 @@ describe("SearchIndex long queries with unseen terms", () => {
     expect(ids).toContain("hit");
   });
 });
+
+describe("SearchIndex query stopwords", () => {
+  it("does not match a document on function words or their prefix expansions", () => {
+    const idx = new SearchIndex();
+    idx.add(makeObs({ id: "redis", title: "redis cache" }));
+    idx.add(makeObs({ id: "function-words", title: "how should my domain look" }));
+
+    const ids = idx.search("how do I configure redis").map((h) => h.obsId);
+
+    expect(ids).toEqual(["redis"]);
+  });
+});
