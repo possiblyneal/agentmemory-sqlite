@@ -435,14 +435,26 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
           : undefined;
         if (firstPrompt && isHarnessPrompt(firstPrompt)) continue;
 
-        const storedFlags = await Promise.all(
-          parsed.observations.map(async (o) =>
-            (await kv.get(KV.observations(parsed.sessionId), o.id)) !== null,
-          ),
-        );
-        const fresh = parsed.observations.filter((_, i) => !storedFlags[i]);
+        const compressed = parsed.observations.map((obs) => {
+          const synthetic = buildSyntheticCompression(obs);
+          synthetic.origin = importOrigin(
+            synthetic.origin,
+            synthetic.timestamp,
+            "jsonl",
+          );
+          return synthetic;
+        });
+        let fresh: CompressedObservation[] = [];
 
         await withKeyedLock(`obs:${parsed.sessionId}`, async () => {
+          const stored = await Promise.all(
+            compressed.map((c) => kv.get(KV.observations(parsed.sessionId), c.id)),
+          );
+          fresh = [
+            ...new Map(
+              compressed.filter((_, i) => stored[i] === null).map((c) => [c.id, c]),
+            ).values(),
+          ];
           const existing = await kv.get<Session>(KV.sessions, parsed.sessionId);
           if (existing) {
             // Field ops, not a whole-row write: graph extraction, finishSession and
@@ -483,29 +495,21 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
             };
             await kv.set(KV.sessions, session.id, session);
           }
+          await Promise.all(
+            fresh.map((c) => kv.set(KV.observations(parsed.sessionId), c.id, c)),
+          );
         });
 
-        const compressed: CompressedObservation[] = [];
-        await Promise.all(
-          fresh.map(async (obs) => {
-            const synthetic = buildSyntheticCompression(obs);
-            synthetic.origin = importOrigin(
-              synthetic.origin,
-              synthetic.timestamp,
-              "jsonl",
-            );
-            compressed.push(synthetic);
-            await kv.set(KV.observations(parsed.sessionId), obs.id, synthetic);
-          }),
-        );
         // BM25 + vector in one path so jsonl-imported observations are
         // reachable by semantic search, not just keyword.
-        try {
-          await indexRecords(compressed, []);
-        } catch (err) {
-          logger.warn("Import indexing failed; restart rebuild will recover", {
-            error: err instanceof Error ? err.message : String(err),
-          });
+        if (fresh.length > 0) {
+          try {
+            await indexRecords(fresh, []);
+          } catch (err) {
+            logger.warn("Import indexing failed; restart rebuild will recover", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         observationCount += fresh.length;
         sessionIds.push(parsed.sessionId);

@@ -425,7 +425,7 @@ function parseSummaryXml(
   };
 }
 
-export const MAX_INJECTED_DECISION_CHARS = 600;
+const MAX_INJECTED_DECISION_CHARS = 600;
 
 export function cutDecision(decision: string): string {
   return decision.length > MAX_INJECTED_DECISION_CHARS

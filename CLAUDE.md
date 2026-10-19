@@ -196,7 +196,8 @@ Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateB
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
-`summary` ref. A Memory hit, an Observation the Summary does not cover, and one whose Summary is
+`summary` ref. Each decision is cut to 600 chars with a trailing `…` (`cutDecision()` in
+`src/functions/summarize.ts`, shared with session start). A Memory hit, an Observation the Summary does not cover, and one whose Summary is
 missing, unreadable or has no decisions are given as themselves. The decisions come first,
 one block per Session dated by its Summary's `lastObservationAt`, the time of the last Observation it
 summarized (else `coveredThrough`, else `createdAt`; never write time alone, which is milliseconds
@@ -213,8 +214,8 @@ the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Me
 Session and any Summary already given are dropped before ranking. A failed amendment lookup
 drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
-(each cut to 600 chars with a trailing `…`; prompt-submit uses the same cap and marker) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
-the rest of the budget; its `summary` ref keeps every file.
+(each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
+out the rest of the budget; its `summary` ref keeps every file.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression

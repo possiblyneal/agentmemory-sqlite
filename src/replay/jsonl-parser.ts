@@ -198,7 +198,10 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
 
   const effectiveSessionId = sessionId || fallbackSessionId || generateId("sess");
   for (const obs of observations) {
-    if (obs.sessionId === "imported") obs.sessionId = effectiveSessionId;
+    if (obs.sessionId === "imported") {
+      obs.sessionId = effectiveSessionId;
+      obs.id = fingerprintId("obs", `${effectiveSessionId}:${obs.id}`);
+    }
   }
 
   const nowIso = new Date().toISOString();
