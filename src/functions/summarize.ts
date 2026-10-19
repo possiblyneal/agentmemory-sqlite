@@ -477,6 +477,7 @@ export function registerSummarizeFunction(
       // last Observation id still match: a delete followed by a new
       // Observation keeps the count but moves the id.
       const lastObservationId = compressed[compressed.length - 1]!.id;
+      const lastObservationAt = compressed[compressed.length - 1]!.timestamp;
       const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
       if (!data.force) {
         if (
@@ -613,6 +614,7 @@ export function registerSummarizeFunction(
             continue;
           }
           parsed.lastObservationId = lastObservationId;
+          parsed.lastObservationAt = lastObservationAt;
           parsed.coveredThrough = coveredThrough;
           // A Summary with no decisions gives Injection nothing to deliver, so
           // the first one is tried again and kept when the retry is no better.

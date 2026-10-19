@@ -87,8 +87,11 @@ function distinctUnits(ranked: Resolved[]): Resolved[] {
 }
 
 // The date a Session's decisions are ordered by, so "later" means the same
-// thing when choosing an amendment as when rendering it.
-const decidedAt = (summary: SessionSummary) => summary.coveredThrough ?? summary.createdAt;
+// thing when choosing an amendment as when rendering it. coveredThrough is
+// when the Summary was written, so Sessions imported or summarized together
+// would be ordered by milliseconds of write time, not by when the work was done.
+const decidedAt = (summary: SessionSummary) =>
+  summary.lastObservationAt ?? summary.coveredThrough ?? summary.createdAt;
 
 // A Session that amends another's rules restates them, so a search on those
 // rules finds it. Measured on sdebench's amended tasks against 140 decoys: the

@@ -887,6 +887,8 @@ describe("mem::summarize Session Summary reuse", () => {
     const stored: any = await kv.get("summaries", "ses_stale");
     expect(stored.observationCount).toBe(12);
     expect(stored.lastObservationId).toBe("obs_11");
+    const last: any = await kv.get("obs:ses_stale", "obs_11");
+    expect(stored.lastObservationAt).toBe(last.timestamp);
   });
 
   it("records coverage up to the oldest Observation still awaiting compression", async () => {

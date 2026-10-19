@@ -157,6 +157,7 @@ export interface SessionSummary {
   concepts: string[];
   observationCount: number;
   lastObservationId?: string;
+  lastObservationAt?: string;
   coveredThrough?: string;
 }
 
