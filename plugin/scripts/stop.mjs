@@ -190,7 +190,8 @@ async function main() {
 	if (!data || typeof data !== "object") return;
 	if (shouldSkipSession()) return;
 	const sessionId = data.session_id || "unknown";
-	const reply = typeof data.last_assistant_message === "string" ? data.last_assistant_message.slice(0, MAX_REPLY_CHARS) : "";
+	const message = typeof data.last_assistant_message === "string" ? data.last_assistant_message : "";
+	const reply = message.length > MAX_REPLY_CHARS ? `${message.slice(0, MAX_REPLY_CHARS / 2)}\n…\n${message.slice(-MAX_REPLY_CHARS / 2)}` : message;
 	if (reply) {
 		const cwd = hookCwd(data) || process.cwd();
 		fetch(`${REST_URL}/agentmemory/observe`, {

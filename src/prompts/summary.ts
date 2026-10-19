@@ -42,7 +42,7 @@ export const SUMMARY_REPLY_MAX = 2000
 export function renderSummaryObservation(obs: SummaryObservation, index: number): string {
   const facts = obs.facts.map((f) => `  - ${f}`).join('\n')
   const base = `[${index + 1}] ${obs.type}: ${obs.title}\n${obs.narrative}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
-  const reply = obs.type === 'subagent' ? undefined : obs.assistantResponse
+  const reply = obs.type === 'subagent' ? undefined : obs.assistantResponse?.trim()
   if (!reply) return base
   const tail = reply.slice(-SUMMARY_REPLY_MAX)
   if (obs.narrative.includes(tail)) return base

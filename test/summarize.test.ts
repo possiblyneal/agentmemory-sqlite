@@ -1032,7 +1032,7 @@ describe("summary input", () => {
 
   it("does not repeat a reply the narrative already holds", () => {
     const reply = "Settled: retry 3 times, then 503.";
-    const obs = { ...makeObs(0, "ses_once"), narrative: reply, assistantResponse: reply };
+    const obs = { ...makeObs(0, "ses_once"), narrative: reply, assistantResponse: `${reply}\n` };
 
     expect(renderSummaryObservation(obs, 0).split(reply)).toHaveLength(2);
   });
