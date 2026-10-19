@@ -63,3 +63,14 @@ The Operator kept `INJECT_TIMEOUT_MS` at 1500 ms (`src/hooks/_missed-injection.t
 - **Done when.** Two weeks of the live `missed-injections.jsonl` (`/diagnostics` `injections`)
   show whether prompt-submit timeouts under normal use cost Injections, and the wait is either
   raised with that evidence or kept and this item deleted.
+
+## Score the Operator's OpenAI-compatible embedding model (#257)
+
+#257 chose MiniLM over BGE-small without the third candidate: the broker answered
+`404 model_not_registered` for `wemm-embedding` and served no embedding model.
+
+- **What exists.** The sandbox forwards `EMBEDDING_PROVIDER` and `OPENAI_EMBEDDING_*`, and
+  `docs/benchmarks/2026-10-19-embedding-model.md` holds the MiniLM numbers to compare against.
+- **Done when.** An embedding model is served again and an `eval:suite --tier fast` run with
+  `EMBEDDING_PROVIDER=openai` is scored against MiniLM, with the cosine floor checked as for
+  BGE-small. A win then takes one holdout look before the default changes.

@@ -1,6 +1,6 @@
 # 2026-10-19 — embedding model per record kind
 
-**Commit:** `05fb197` against control `22e2bc0` (`main2`)
+**Commit:** `fb536e6` (`bge1`, reproduced exactly as `bge2` on a clean build of `9eef081`) against control `22e2bc0` (`main2`)
 **Bench:** `eval:suite --tier fast`: coding-agent-life-v2, PrecisionMemBench, LongMemEval `_s`
 **N:** dev only: coding-life 23 questions (4 no-answer), PMB 47 cases, LongMemEval 24 (4 per type)
 **K:** 5 (search only; an Injection is scored whole)
@@ -11,9 +11,10 @@
 ## Headline
 
 MiniLM stays the default. BGE-small loses search precision at the shipped cosine floor
-(coding-life 0.708 → 0.337, PMB pass 0.447 → 0.234). It still trails MiniLM on every bench
-when its floor is retuned for it. The Operator's OpenAI-compatible model could not be scored.
-Neither model wins one record kind while losing the other, so the record kinds keep one model.
+(coding-life 0.708 → 0.337, PMB pass 0.447 → 0.234). With its floor retuned it still trails on
+coding-life precision (0.597 against 0.708), leads on PMB exact by one case, and ties
+elsewhere. Neither model clearly wins one record kind while losing the other, so the record
+kinds keep one model. The Operator's OpenAI-compatible model could not be scored.
 
 ## Per bench
 
@@ -33,8 +34,8 @@ LongMemEval long Memories.
 | LongMemEval recall@5 | 0.865 | 0.851 |
 | LongMemEval hit | 0.958 | 0.917 |
 
-The precision and PMB pass drops are `worse` at 99.7% Bonferroni intervals (`bge1` against
-`main2`). Every other metric is ≈.
+Coding-life search precision, PMB pass, PMB active pass and PMB precision are `worse` at 99.7%
+Bonferroni intervals (`bge1` against `main2`). Every other metric is ≈.
 
 ## Why BGE loses: the cosine floor
 
@@ -65,8 +66,10 @@ precision. That is why no per-model floor shipped.
 ## Methodology
 
 As in `eval/README.md`. The sandbox now forwards `AGENTMEMORY_LOCAL_EMBEDDING_MODEL` and
-`_DIMENSIONS`, and `eval:suite` records both in its config. No holdout look was taken, because
-the default did not change. The cosine dumps come from a scratch build that returns BM25 and
+`_DIMENSIONS`, and `eval:suite` records both in its config. No holdout look was taken: #257
+asks for one only for a changed default, and the default did not change. Each bench stands in for
+one record kind; no bench is split into Observations and Memories, so the per-kind comparison is
+that proxy. The cosine dumps come from a scratch build that returns BM25 and
 cosine per hit with the floor removed; they are not in the repo.
 
 ## Reproduce
