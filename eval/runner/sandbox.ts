@@ -64,6 +64,8 @@ async function isUp(baseUrl: string): Promise<boolean> {
 // the embedding provider the run asks for. A shell that sets
 // EMBEDDING_PROVIDER and OPENAI_EMBEDDING_* picks a remote embedder for every
 // run that uses embeddings at all; the endpoint is never written in the repo.
+// AGENTMEMORY_LOCAL_EMBEDDING_* (model, dimensions) is forwarded the same way,
+// so the shell picks which local model a run embeds with.
 // A run that opts into an LLM gets the OpenAI-compatible provider settings
 // from the shell, and nothing else that would pick a different provider.
 const LLM_ENV = [
@@ -100,7 +102,10 @@ export function sandboxEnv(
   if (embeddings === "local") env.EMBEDDING_PROVIDER = "local";
   if (embeddings !== "none") {
     for (const [key, value] of Object.entries(process.env)) {
-      const forwarded = key === "EMBEDDING_PROVIDER" || key.startsWith("OPENAI_EMBEDDING_");
+      const forwarded =
+        key === "EMBEDDING_PROVIDER" ||
+        key.startsWith("OPENAI_EMBEDDING_") ||
+        key.startsWith("AGENTMEMORY_LOCAL_EMBEDDING_");
       if (forwarded && value !== undefined) env[key] = value;
     }
   }
