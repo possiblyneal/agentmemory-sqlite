@@ -11,6 +11,7 @@ import { getXmlElementsById } from "../prompts/xml.js";
 import {
   checkCompression,
   commitCompression,
+  compressionPromptArgs,
   storeDegradedCompression,
   type CompressionJob,
 } from "./compress.js";
@@ -31,12 +32,8 @@ export const BATCH_IDLE_MS = 5_000;
 // api::recompress-orphans like any other failed compression.
 export const QUEUED = "queued";
 
-interface QueuedJob extends CompressionJob {
-  promptChars: number;
-}
-
 interface SessionQueue {
-  jobs: QueuedJob[];
+  jobs: CompressionJob[];
   chars: number;
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -53,18 +50,6 @@ export async function parkForCompression(kv: StateKV, raw: RawObservation): Prom
     queuedAt: new Date().toISOString(),
     attempts: 0,
   });
-}
-
-function promptArgs(raw: RawObservation) {
-  return {
-    hookType: raw.hookType,
-    toolName: raw.toolName,
-    toolInput: raw.toolInput,
-    toolOutput: raw.toolOutput,
-    userPrompt: raw.userPrompt,
-    assistantResponse: raw.assistantResponse,
-    timestamp: raw.timestamp,
-  };
 }
 
 // Compresses each Session's queued Observations several to one LLM call. Every
@@ -85,9 +70,9 @@ export function registerCompressBatchFunction(
       payload: { observationId: job.observationId, sessionId: job.sessionId, raw: job.raw },
     });
 
-  const compressBatch = async (sessionId: string, queued: QueuedJob[]): Promise<void> => {
+  const compressBatch = async (sessionId: string, queued: CompressionJob[]): Promise<void> => {
     // Evicted or forgotten while it waited: writing it now would resurrect it.
-    const jobs: QueuedJob[] = [];
+    const jobs: CompressionJob[] = [];
     for (const job of queued) {
       if (await kv.get(KV.observations(sessionId), job.observationId)) jobs.push(job);
       else await kv.delete(KV.compressPending, job.observationId);
@@ -103,7 +88,7 @@ export function registerCompressBatchFunction(
     try {
       reply = await provider.compress(
         COMPRESSION_BATCH_SYSTEM,
-        buildBatchCompressionPrompt(jobs.map((j) => ({ id: j.observationId, ...promptArgs(j.raw) }))),
+        buildBatchCompressionPrompt(jobs.map((j) => ({ id: j.observationId, ...compressionPromptArgs(j.raw) }))),
       );
     } catch (err) {
       if (metricsStore) await metricsStore.record("mem::compress-batch", Date.now() - startMs, false);
@@ -117,7 +102,7 @@ export function registerCompressBatchFunction(
     }
 
     const blocks = getXmlElementsById(reply, "observation");
-    const fallback: QueuedJob[] = [];
+    const fallback: CompressionJob[] = [];
     for (const job of jobs) {
       const block = blocks.get(job.observationId);
       const verdict = block === undefined ? undefined : checkCompression(block);
@@ -125,7 +110,15 @@ export function registerCompressBatchFunction(
         fallback.push(job);
         continue;
       }
-      await commitCompression(sdk, kv, job, verdict.parsed);
+      try {
+        await commitCompression(sdk, kv, job, verdict.parsed);
+      } catch (err) {
+        logger.error("Batch compression commit failed", {
+          obsId: job.observationId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await storeDegradedCompression(kv, job, "compression_failed");
+      }
     }
 
     const latencyMs = Date.now() - startMs;
@@ -157,7 +150,11 @@ export function registerCompressBatchFunction(
 
   // Returns the flush it started, if any, so a caller can await the batch.
   const enqueue = (job: CompressionJob): Promise<void> => {
-    const promptChars = buildCompressionPrompt(promptArgs(job.raw)).length;
+    // Resume can list an Observation that observe already queued live.
+    if (queues.get(job.sessionId)?.jobs.some((j) => j.observationId === job.observationId)) {
+      return Promise.resolve();
+    }
+    const promptChars = buildCompressionPrompt(compressionPromptArgs(job.raw)).length;
     if (promptChars > BATCH_MAX_CHARS) {
       return compressOne(job).then(() => undefined);
     }
@@ -168,7 +165,7 @@ export function registerCompressBatchFunction(
     }
     const queue = queues.get(job.sessionId) ?? { jobs: [], chars: 0 };
     queues.set(job.sessionId, queue);
-    queue.jobs.push({ ...job, promptChars });
+    queue.jobs.push(job);
     queue.chars += promptChars;
     clearTimeout(queue.timer);
     if (queue.jobs.length >= BATCH_MAX_ITEMS) {

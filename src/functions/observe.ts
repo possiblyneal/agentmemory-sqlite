@@ -47,8 +47,12 @@ export function extractImage(d: unknown): string | undefined {
 export async function storeSyntheticCompression(
   kv: StateKV,
   raw: RawObservation,
+  { awaitingCompression = false } = {},
 ): Promise<CompressedObservation> {
-  const synthetic = buildSyntheticCompression(raw);
+  const synthetic: CompressedObservation = {
+    ...buildSyntheticCompression(raw),
+    ...(awaitingCompression ? { awaitingCompression: true } : {}),
+  };
   await kv.set(KV.observations(raw.sessionId), raw.id, synthetic);
   // Stored above unconditionally; only the INDEX writes are
   // skipped for excluded tools (retrieval echoes).
@@ -681,7 +685,9 @@ export function registerObserveFunction(
           });
         } else {
           if (path === "llm-batch") await parkForCompression(kv, raw);
-          const synthetic = await storeSyntheticCompression(kv, raw);
+          const synthetic = await storeSyntheticCompression(kv, raw, {
+            awaitingCompression: path === "llm-batch",
+          });
           await sdk.trigger({
             function_id: "stream::set",
             payload: {

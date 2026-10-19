@@ -65,8 +65,9 @@ export function getXmlChildren(
   return items;
 }
 
-// Every `<tag id="...">` element, inner text keyed by id. A repeated id keeps
-// the last one, as getXmlPayload keeps the last root.
+// Every `<tag id="...">` element, inner text keyed by id. A repeated id is
+// dropped: one element's content may have forged the other, so neither is
+// trusted.
 export function getXmlElementsById(xml: string, tag: string): Map<string, string> {
   const elements = new Map<string, string>();
   if (!VALID_TAG.test(tag)) return elements;
@@ -74,9 +75,13 @@ export function getXmlElementsById(xml: string, tag: string): Map<string, string
     `<${tag}\\s+id\\s*=\\s*"([^"<>]*)"\\s*>([\\s\\S]*?)${closeTag(tag)}`,
     "g",
   );
+  const repeated = new Set<string>();
   let m;
   while ((m = re.exec(xml)) !== null) {
-    elements.set(m[1].trim(), m[2]);
+    const id = m[1].trim();
+    if (elements.has(id)) repeated.add(id);
+    elements.set(id, m[2]);
   }
+  for (const id of repeated) elements.delete(id);
   return elements;
 }

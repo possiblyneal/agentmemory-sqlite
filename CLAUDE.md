@@ -235,13 +235,18 @@ options included; `sed` is absent because its script can do both. The `compress`
 An image goes alone to `mem::compress` (`llm`), since it needs the vision step. Every other
 LLM-bound Observation takes `llm-batch` (`src/functions/compress-batch.ts`):
 - observe parks the raw in `KV.compressPending` with reason `queued`, stores and indexes the
-  synthetic record, and enqueues it (`mem::compress-enqueue`) in an in-memory per-Session queue
+  synthetic record marked `awaitingCompression`, and enqueues it (`mem::compress-enqueue`) in an
+  in-memory per-Session queue. `isAwaitingCompression()` (`src/functions/compress-synthetic.ts`)
+  makes the Session Summary and graph extraction hold back for it as for an untitled row
 - a queue flushes at `BATCH_MAX_ITEMS`, before it would pass `BATCH_MAX_CHARS`, after
-  `BATCH_IDLE_MS` without a new item, and on `POST /agentmemory/session/end` (stop and real end)
+  `BATCH_IDLE_MS` without a new item, and on `POST /agentmemory/session/end` (stop and real end);
+  one Observation whose prompt alone passes `BATCH_MAX_CHARS` goes through `mem::compress`
 - one call compresses the batch; each reply block `<observation id="…">` is validated on its own
-  and overwrites its synthetic record and index entries. A missing or invalid block goes through
-  `mem::compress` alone; a failed call parks every item as `compression_failed` for
-  `api::recompress-orphans`
+  and overwrites its synthetic record and index entries. A missing, invalid or repeated block
+  goes through `mem::compress` alone, since a repeated id may be one Observation forging
+  another's record; a failed call, or a failed write of one record, parks the item as
+  `compression_failed` for `api::recompress-orphans`, which leaves a `queued` entry alone for its
+  one-hour grace
 - boot re-queues every `queued` entry (`mem::compress-resume`), so a restart loses nothing
 - the limits are constants, not env knobs; change them only with a measured reason
 

@@ -471,6 +471,22 @@ describe("event::session::stopped graph extraction watermark", () => {
     expect(extractedIds(trigger)).toEqual([["a"], ["b", "c"]]);
   });
 
+  it("holds extraction below a synthetic record queued for batch compression", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-28T10:30:00.000Z"), toFake: ["Date"] });
+    const kv = storeKV();
+    kv.scope("mem:sessions").set("ses_1", { id: "ses_1" });
+    const obs = kv.scope("mem:obs:ses_1");
+    obs.set("a", observation("a", "2026-09-28T10:00:00.000Z"));
+    obs.set("b", { ...observation("b", "2026-09-28T10:01:00.000Z"), awaitingCompression: true });
+    obs.set("c", observation("c", "2026-09-28T10:02:00.000Z"));
+    const { sdk, handlers, trigger } = mockSdk();
+    registerEventTriggers(sdk as never, kv as never);
+
+    await handlers.get("event::session::stopped")!({ sessionId: "ses_1" });
+
+    expect(extractedIds(trigger)).toEqual([["a"]]);
+  });
+
   it("stops holding extraction for a compression that never finished", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-28T12:00:00.000Z"), toFake: ["Date"] });
     const kv = storeKV();

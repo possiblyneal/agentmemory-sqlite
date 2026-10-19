@@ -144,6 +144,21 @@ export async function storeDegradedCompression(
   }
 }
 
+// The prompt fields of one Observation, shared by the single and batch paths.
+export function compressionPromptArgs(raw: RawObservation, imageDescription?: string) {
+  return {
+    hookType: raw.hookType,
+    toolName: raw.toolName,
+    toolInput: raw.toolInput,
+    toolOutput: imageDescription
+      ? `[Image Description]: ${imageDescription}\n\n${raw.toolOutput ?? ""}`
+      : raw.toolOutput,
+    userPrompt: raw.userPrompt,
+    assistantResponse: raw.assistantResponse,
+    timestamp: raw.timestamp,
+  };
+}
+
 // Writes the LLM record over whatever the Observation held (raw or synthetic),
 // clears its recovery entry, and re-indexes it: the BM25 add and the vector
 // add both replace an existing id.
@@ -283,17 +298,7 @@ export function registerCompressFunction(
         }
       }
 
-      const promptArgs = {
-        hookType: data.raw.hookType,
-        toolName: data.raw.toolName,
-        toolInput: data.raw.toolInput,
-        toolOutput: imageDescription
-          ? `[Image Description]: ${imageDescription}\n\n${data.raw.toolOutput ?? ""}`
-          : data.raw.toolOutput,
-        userPrompt: data.raw.userPrompt,
-        assistantResponse: data.raw.assistantResponse,
-        timestamp: data.raw.timestamp,
-      };
+      const promptArgs = compressionPromptArgs(data.raw, imageDescription);
       const prompt = buildCompressionPrompt(promptArgs);
 
       try {

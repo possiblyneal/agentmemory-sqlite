@@ -101,6 +101,9 @@ export interface CompressedObservation {
   // the synthetic narrative so replay shows what happened rather than a summary.
   toolInput?: string;
   assistantResponse?: string;
+  // A synthetic record whose LLM Compression is still queued in a batch. The
+  // batch result replaces the whole record, so the mark goes with it.
+  awaitingCompression?: true;
 }
 
 export type ObservationType =

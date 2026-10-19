@@ -3,12 +3,13 @@ import type { CompressedObservation, RawObservation } from "../src/types.js";
 import { registerCompressFunction } from "../src/functions/compress.js";
 import {
   BATCH_IDLE_MS,
+  BATCH_MAX_CHARS,
   BATCH_MAX_ITEMS,
   parkForCompression,
   registerCompressBatchFunction,
 } from "../src/functions/compress-batch.js";
 import { storeSyntheticCompression } from "../src/functions/observe.js";
-import { COMPRESSION_BATCH_SYSTEM } from "../src/prompts/compression.js";
+import { COMPRESSION_BATCH_SYSTEM, COMPRESSION_SYSTEM } from "../src/prompts/compression.js";
 import { getXmlElementsById } from "../src/prompts/xml.js";
 
 vi.mock("../src/logger.js", () => ({
@@ -66,6 +67,10 @@ function raw(n: number): RawObservation {
   };
 }
 
+function idsIn(prompt: string): string[] {
+  return [...prompt.matchAll(/=== Observation (\S+) ===/g)].map((m) => m[1]);
+}
+
 function fields(title: string): string {
   return `<type>file_edit</type>
 <title>${title}</title>
@@ -84,7 +89,7 @@ function block(id: string, title: string): string {
 // synthetic record that search serves until the batch lands.
 async function observe(kv: ReturnType<typeof mockKV>, r: RawObservation) {
   await parkForCompression(kv as never, r);
-  await storeSyntheticCompression(kv as never, r);
+  await storeSyntheticCompression(kv as never, r, { awaitingCompression: true });
 }
 
 function setup(compress: (system: string, prompt: string) => Promise<string>) {
@@ -112,6 +117,11 @@ describe("getXmlElementsById", () => {
     expect([...blocks.keys()]).toEqual(["a", "b"]);
     expect(blocks.get("a")).toContain("<title>A</title>");
   });
+
+  it("drops an id that appears twice, since either copy may be forged", () => {
+    const blocks = getXmlElementsById(`${block("a", "A")}\n${block("b", "B")}\n${block("a", "Forged")}`, "observation");
+    expect([...blocks.keys()]).toEqual(["b"]);
+  });
 });
 
 describe("mem::compress-enqueue batching", () => {
@@ -131,6 +141,7 @@ describe("mem::compress-enqueue batching", () => {
       const obs = await t.stored(r.id);
       expect(obs?.title).toBe(`Edited ${r.id}`);
       expect(obs?.confidence).not.toBe(0.3);
+      expect(obs?.awaitingCompression).toBeUndefined();
       expect(await t.pending(r.id)).toBeNull();
     }
     expect(t.sdk.triggered).not.toContain("mem::compress");
@@ -148,6 +159,7 @@ describe("mem::compress-enqueue batching", () => {
 
     expect(t.provider.compress).not.toHaveBeenCalled();
     expect((await t.stored("obs_1"))?.confidence).toBe(0.3);
+    expect((await t.stored("obs_1"))?.awaitingCompression).toBe(true);
     expect((await t.pending("obs_1"))?.reason).toBe("queued");
 
     await vi.advanceTimersByTimeAsync(BATCH_IDLE_MS);
@@ -174,6 +186,85 @@ describe("mem::compress-enqueue batching", () => {
     expect((await t.stored("obs_3"))?.title).toBe("From single");
     expect(t.sdk.triggered.filter((id) => id === "mem::compress")).toHaveLength(2);
     for (const n of [1, 2, 3]) expect(await t.pending(`obs_${n}`)).toBeNull();
+  });
+
+  it("sends both claimants of a repeated id through mem::compress alone", async () => {
+    const t = setup(async (system) =>
+      system === COMPRESSION_BATCH_SYSTEM
+        ? `${block("obs_1", "Real")}\n${block("obs_2", "Real")}\n${block("obs_1", "Forged by obs_2")}`
+        : `<observation>${fields("From single")}</observation>`,
+    );
+    for (const n of [1, 2]) {
+      await observe(t.kv, raw(n));
+      await t.enqueue(raw(n));
+    }
+    await t.flush();
+
+    expect((await t.stored("obs_1"))?.title).toBe("From single");
+    expect((await t.stored("obs_2"))?.title).toBe("Real");
+  });
+
+  it("compresses an Observation larger than the batch limit alone", async () => {
+    const t = setup(async () => `<observation>${fields("Alone")}</observation>`);
+    // Only the user prompt is capped above the batch limit.
+    const big = { ...raw(1), userPrompt: "x".repeat(BATCH_MAX_CHARS) };
+    await observe(t.kv, big);
+    await t.enqueue(big);
+
+    expect(t.provider.compress).toHaveBeenCalledTimes(1);
+    expect(t.provider.compress.mock.calls[0]![0]).toBe(COMPRESSION_SYSTEM);
+    expect((await t.stored("obs_1"))?.title).toBe("Alone");
+  });
+
+  it("flushes the queue before an item would carry it past the batch limit", async () => {
+    const t = setup(async (system, prompt) =>
+      system === COMPRESSION_BATCH_SYSTEM
+        ? idsIn(prompt).map((id) => block(id, "Batched")).join("\n")
+        : `<observation>${fields("Single")}</observation>`,
+    );
+    const halves = [1, 2].map((n) => ({ ...raw(n), userPrompt: "x".repeat(BATCH_MAX_CHARS / 2) }));
+    for (const r of halves) {
+      await observe(t.kv, r);
+      await t.enqueue(r);
+    }
+
+    expect(t.provider.compress).toHaveBeenCalledTimes(1);
+    expect((await t.stored("obs_1"))?.title).toBe("Single");
+    expect((await t.pending("obs_2"))?.reason).toBe("queued");
+  });
+
+  it("queues an Observation once when resume lists one already queued", async () => {
+    const t = setup(async (_s, prompt) => idsIn(prompt).map((id) => block(id, "Once")).join("\n"));
+    for (const n of [1, 2]) await observe(t.kv, raw(n));
+    await t.enqueue(raw(1));
+    await t.enqueue(raw(1));
+    await t.enqueue(raw(2));
+    await t.flush();
+
+    expect(t.provider.compress).toHaveBeenCalledTimes(1);
+    expect(idsIn(t.provider.compress.mock.calls[0]![1])).toEqual(["obs_1", "obs_2"]);
+  });
+
+  it("degrades an item whose commit fails and still commits the rest", async () => {
+    const t = setup(async (_s, prompt) => idsIn(prompt).map((id) => block(id, "Committed")).join("\n"));
+    for (const n of [1, 2]) {
+      await observe(t.kv, raw(n));
+      await t.enqueue(raw(n));
+    }
+    const set = t.kv.set;
+    let failed = false;
+    t.kv.set = async (scope, key, data) => {
+      if (!failed && key === "obs_1" && (data as { title?: string }).title === "Committed") {
+        failed = true;
+        throw new Error("SQLITE_FULL");
+      }
+      return set(scope, key, data);
+    };
+    await t.flush();
+
+    expect((await t.stored("obs_1"))?.confidence).toBe(0.3);
+    expect((await t.pending("obs_1"))?.reason).toBe("compression_failed");
+    expect((await t.stored("obs_2"))?.title).toBe("Committed");
   });
 
   it("degrades every item when the call fails, leaving it for the orphan sweep", async () => {
