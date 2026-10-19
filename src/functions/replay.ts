@@ -435,6 +435,13 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
           : undefined;
         if (firstPrompt && isHarnessPrompt(firstPrompt)) continue;
 
+        const storedFlags = await Promise.all(
+          parsed.observations.map(async (o) =>
+            (await kv.get(KV.observations(parsed.sessionId), o.id)) !== null,
+          ),
+        );
+        const fresh = parsed.observations.filter((_, i) => !storedFlags[i]);
+
         await withKeyedLock(`obs:${parsed.sessionId}`, async () => {
           const existing = await kv.get<Session>(KV.sessions, parsed.sessionId);
           if (existing) {
@@ -445,7 +452,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
               {
                 type: "set",
                 path: "observationCount",
-                value: (existing.observationCount || 0) + parsed.observations.length,
+                value: (existing.observationCount || 0) + fresh.length,
               },
               ...(parsed.endedAt > (existing.endedAt || "")
                 ? [{ type: "set", path: "endedAt", value: parsed.endedAt }]
@@ -470,7 +477,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
               startedAt: parsed.startedAt,
               endedAt: parsed.endedAt,
               status: "completed",
-              observationCount: parsed.observations.length,
+              observationCount: fresh.length,
               tags: ["jsonl-import"],
               firstPrompt,
             };
@@ -480,7 +487,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
 
         const compressed: CompressedObservation[] = [];
         await Promise.all(
-          parsed.observations.map(async (obs) => {
+          fresh.map(async (obs) => {
             const synthetic = buildSyntheticCompression(obs);
             synthetic.origin = importOrigin(
               synthetic.origin,
@@ -500,7 +507,7 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-        observationCount += parsed.observations.length;
+        observationCount += fresh.length;
         sessionIds.push(parsed.sessionId);
 
         await deriveCrystalAndLessons(
