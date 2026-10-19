@@ -50,10 +50,6 @@ const BATCH = 32;
 // entire backlog; the next hourly run picks up where this one stopped.
 const MAX_CONSECUTIVE_BATCH_FAILURES = 3;
 
-// Whether any content row calls for the vector `vectorId` RIGHT NOW. Both
-// kinds are checked: a memory and an observation may share a parent id, and a
-// memory may carry a real session id, so neither lookup can exclude the
-// other. `sessionId` is the vector row's current session id.
 export const VECTOR_SPACE_KEY = "embedding:vectorSpace";
 
 // Vectors from another model or pooling can share the active dimension yet
@@ -73,6 +69,10 @@ export function dropMismatchedVectors(
   return dropped;
 }
 
+// Whether any content row calls for the vector `vectorId` RIGHT NOW. Both
+// kinds are checked: a memory and an observation may share a parent id, and a
+// memory may carry a real session id, so neither lookup can exclude the
+// other. `sessionId` is the vector row's current session id.
 export function claimedNow(state: SqliteState, sessionId: string, vectorId: string): boolean {
   const parent = parentIdOf(vectorId);
   try {

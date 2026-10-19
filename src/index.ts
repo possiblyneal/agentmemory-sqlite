@@ -458,7 +458,7 @@ async function main() {
         `[agentmemory] Persisted vectors do not match the active provider ` +
           `(${activeSpace}, recorded ${recordedSpace ?? "none"}). ` +
           `Dropped all ${before} vectors; the fill pass is re-embedding them, ` +
-          `so Recall is BM25-only until it finishes.`,
+          `so Recall's vector leg covers only what it has re-embedded until it finishes.`,
       );
     }
   }

@@ -222,9 +222,10 @@ Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, def
 `${name}:${dimensions}`; the local provider adds model and pooling). Boot compares it with the
 one recorded under `KV.config` `embedding:vectorSpace` and, on any change or when none is
 recorded, drops every vector so the fill pass re-embeds them (`dropMismatchedVectors`,
-`src/functions/index-fill.ts`); Recall is BM25-only until it finishes. Query text is embedded
-through `embedQuery()` (`src/providers/embedding/index.ts`), which uses a provider's
-asymmetric query path when it has one — BGE v1.5 runs CLS pooling and prefixes its queries.
+`src/functions/index-fill.ts`); until it finishes, the vector leg of Recall covers only what it
+has re-embedded. Query text is embedded through `embedQuery()`
+(`src/providers/embedding/index.ts`), which uses a provider's asymmetric query path when it has
+one — BGE v1.5 runs CLS pooling and prefixes its queries.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
