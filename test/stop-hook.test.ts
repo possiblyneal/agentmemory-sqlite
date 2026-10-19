@@ -45,18 +45,18 @@ describe("stop hook — the turn-ending reply", () => {
     });
   }
 
-  it("posts the reply as a stop Observation, capped at 4,000 chars, besides ending the turn", async () => {
+  it("posts the reply as a stop Observation, its head and tail capped at 4,000 chars, besides ending the turn", async () => {
     const code = await runStop({
       session_id: "ses_stop",
       cwd: "/tmp/fake-project",
-      last_assistant_message: "r".repeat(5000),
+      last_assistant_message: `${"h".repeat(3000)}${"t".repeat(2000)}`,
     });
     expect(code).toBe(0);
 
     const observe = seen.find((s) => s.url === "/agentmemory/observe");
     expect(observe?.body["hookType"]).toBe("stop");
     expect(observe?.body["sessionId"]).toBe("ses_stop");
-    expect(observe?.body["data"]).toEqual({ last_message: "r".repeat(4000) });
+    expect(observe?.body["data"]).toEqual({ last_message: `${"h".repeat(2000)}\n…\n${"t".repeat(2000)}` });
     expect(seen.find((s) => s.url === "/agentmemory/session/end")?.body).toEqual({
       sessionId: "ses_stop",
       turnEnd: true,

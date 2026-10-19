@@ -23,6 +23,7 @@ vi.mock("../src/functions/audit.js", () => ({
 
 import { registerSummarizeFunction } from "../src/functions/summarize.js";
 import { estimateTokens } from "../src/utils/tokens.js";
+import { renderSummaryObservation, SUMMARY_REPLY_MAX } from "../src/prompts/summary.js";
 import type {
   CompressedObservation,
   Session,
@@ -1097,5 +1098,48 @@ describe("mem::summarize incremental fold", () => {
 
     expect(result.reused).toBe(true);
     expect(provider.calls).toHaveLength(0);
+  });
+});
+
+describe("summary input", () => {
+  it("gives the summarizer the agent's reply, so a recap and the question a short answer replies to are seen", () => {
+    const obs = { ...makeObs(0, "ses_reply"), title: "stop", narrative: "", assistantResponse: "Settled: retry 3 times, then 503." };
+
+    expect(renderSummaryObservation(obs, 0)).toContain("Agent reply:\nSettled: retry 3 times, then 503.");
+  });
+
+  it("keeps the closing lines of a long reply", () => {
+    const obs = { ...makeObs(0, "ses_long"), assistantResponse: `${"x".repeat(5000)}Round half up or down?` };
+
+    const rendered = renderSummaryObservation(obs, 0);
+
+    expect(rendered).toContain("Round half up or down?");
+    expect(rendered).not.toContain("x".repeat(SUMMARY_REPLY_MAX));
+  });
+
+  it("does not repeat a reply the narrative already holds", () => {
+    const reply = "Settled: retry 3 times, then 503.";
+    const obs = { ...makeObs(0, "ses_once"), narrative: reply, assistantResponse: `${reply}\n` };
+
+    expect(renderSummaryObservation(obs, 0).split(reply)).toHaveLength(2);
+  });
+
+  it("keeps the narrative of a long reply, so its opening is still seen", () => {
+    const obs = { ...makeObs(0, "ses_open"), narrative: "Renamed the retry helper.", assistantResponse: "y".repeat(5000) };
+
+    const rendered = renderSummaryObservation(obs, 0);
+
+    expect(rendered).toContain("Renamed the retry helper.");
+    expect(rendered).toContain("Agent reply:\n…y");
+  });
+
+  it("does not present a subagent's closing message as the Agent's reply", () => {
+    const obs = { ...makeObs(0, "ses_sub"), type: "subagent", assistantResponse: "Settled: use port 9000." };
+
+    expect(renderSummaryObservation(obs, 0)).not.toContain("Agent reply");
+  });
+
+  it("renders an Observation without a reply as before", () => {
+    expect(renderSummaryObservation(makeObs(0, "ses_none"), 0)).not.toContain("Agent reply");
   });
 });

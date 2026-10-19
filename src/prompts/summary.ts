@@ -20,6 +20,7 @@ Rules:
 - Focus on outcomes, not individual tool calls
 - Highlight decisions and their rationale
 - Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
+- When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
 - List all files that were created or modified
 - Concepts should be searchable terms for future context retrieval`
 
@@ -30,11 +31,22 @@ export interface SummaryObservation {
   narrative: string
   files: string[]
   concepts: string[]
+  assistantResponse?: string
 }
 
+// A reply's closing lines carry the recap and the question the user answers next, so a long one keeps its tail.
+export const SUMMARY_REPLY_MAX = 2000
+
+// A synthetic stop's narrative already holds a short reply, so the tail is not given twice. A
+// subagent's closing message is not one the user answers, so it is not given as the Agent's reply.
 export function renderSummaryObservation(obs: SummaryObservation, index: number): string {
   const facts = obs.facts.map((f) => `  - ${f}`).join('\n')
-  return `[${index + 1}] ${obs.type}: ${obs.title}\n${obs.narrative}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
+  const base = `[${index + 1}] ${obs.type}: ${obs.title}\n${obs.narrative}\nFacts:\n${facts}\nFiles: ${obs.files.join(', ')}`
+  const reply = obs.type === 'subagent' ? undefined : obs.assistantResponse?.trim()
+  if (!reply) return base
+  const tail = reply.slice(-SUMMARY_REPLY_MAX)
+  if (obs.narrative.includes(tail)) return base
+  return `${base}\nAgent reply:\n${tail.length < reply.length ? `…${tail}` : tail}`
 }
 
 export function buildSummaryPrompt(observations: SummaryObservation[]): string {
@@ -116,6 +128,7 @@ Rules:
 - Rewrite the narrative so it covers the whole session, not only the new observations
 - Keep every existing decision unless a new observation reverses it; add new ones
 - Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
+- When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome so far`
 

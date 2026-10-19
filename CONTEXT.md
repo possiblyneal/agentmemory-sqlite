@@ -56,6 +56,8 @@ _Avoid_: shared memory, unscoped memory
 **Session Summary**:
 The distilled account of one Session, produced each time the Session stops. Its decisions keep
 each rule, requirement or constraint the user stated as its own entry, with its exact values.
+It reads the tail of each Agent reply, so a recap the user accepts is kept verbatim and a short
+answer is read against the question it answers.
 A Session Summary is current until an Observation arrives after it was written, and a
 current one is reused rather than reproduced. A stale one is folded forward: only the
 Observations after its recorded count are sent, with the prior summary, and the whole Session

@@ -34,10 +34,13 @@ async function main() {
 
   const sessionId = (data.session_id as string) || "unknown";
 
+  // A reply closes on its recap and the question the user answers next, so a
+  // long one keeps its tail as well as its head.
+  const message = typeof data.last_assistant_message === "string" ? data.last_assistant_message : "";
   const reply =
-    typeof data.last_assistant_message === "string"
-      ? data.last_assistant_message.slice(0, MAX_REPLY_CHARS)
-      : "";
+    message.length > MAX_REPLY_CHARS
+      ? `${message.slice(0, MAX_REPLY_CHARS / 2)}\n…\n${message.slice(-MAX_REPLY_CHARS / 2)}`
+      : message;
   if (reply) {
     const cwd = hookCwd(data) || process.cwd();
     fetch(`${REST_URL}/agentmemory/observe`, {
