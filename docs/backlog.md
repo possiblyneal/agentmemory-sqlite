@@ -50,3 +50,16 @@ reach Recall either.
   used item. It names the arm to build: a connector for the sources that pay for themselves,
   or none. If commit text pays, it should be indexed through the existing commit-link path
   rather than through a new connector.
+
+## Revisit the prompt-submit hook's 1.5 s Injection wait (due 2026-11-02)
+
+The Operator kept `INJECT_TIMEOUT_MS` at 1500 ms (`src/hooks/_missed-injection.ts`) on
+2026-10-19 and asked to revisit it two weeks later.
+
+- **What exists.** The reranker gate (`ai.lan:9202`) takes about 870 ms per idle request and
+  serves one at a time; its cap is 1000 ms. Under 30 parallel sdebench tasks Injections arrived
+  1.7–5.2 s late and were lost. An internal 1300 ms budget (v13) scored worse than none
+  (`docs/benchmarks/2026-10-18-sdebench.md`).
+- **Done when.** Two weeks of the live `missed-injections.jsonl` (`/diagnostics` `injections`)
+  show whether prompt-submit timeouts under normal use cost Injections, and the wait is either
+  raised with that evidence or kept and this item deleted.
