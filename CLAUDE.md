@@ -213,7 +213,7 @@ the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Me
 Session and any Summary already given are dropped before ranking. A failed amendment lookup
 drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
-(300 chars each) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
+(each cut to 600 chars with a trailing `…`; prompt-submit uses the same cap and marker) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd out
 the rest of the budget; its `summary` ref keeps every file.
 
 ### Auto-compress
