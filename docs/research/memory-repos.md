@@ -56,11 +56,11 @@ Ordered by the expected cut in interventions per unit of work. Hot path means in
 prompt-submit hook's 1,500 ms budget.
 
 1. **One result slot per Session, from a wider pool** (memanto k ablation, ai-memory one vote
-   per Session). Fixes F1. Size S, no hot-path LLM. Shipped in #242 (`054b4d4`).
+   per Session). Fixes F1. Size S, no hot-path LLM. Shipped in #242 (`3974ad8`).
 2. **Fetch the later amending Session** (memvid latest match, LongMemory current pointer,
    Hindsight "LATEST wins"). When a covered Session is chosen, also inject a later Session of
    the project that shares its files or concepts. The newest-first header already settles the
-   conflict. Fixes F2. Size S, no hot-path LLM. Shipped in #242 (`784cf44`).
+   conflict. Fixes F2. Size S, no hot-path LLM. Shipped in #242 (`263dc44`).
 3. **Search Session Summary decisions directly, with trigger words** (nocturne disclosure,
    ai-memory, MemPalace rule documents). Index each Session Summary's decisions, plus an LLM-written
    "applies when" line naming the words a future task would use, and fuse them with Observation
