@@ -537,21 +537,31 @@ export function registerSummarizeFunction(
         }
         for (let attempt = 1; attempt <= 2; attempt++) {
           const fold = attempt === 1 ? foldPrompt : null;
-          if (!fold) planned ??= await planChunks(provider, compressed, sessionId, concurrency);
-          const produced = fold
-            ? {
-                response: await provider.summarize(FOLD_SYSTEM, fold),
-                mode: "folded" as const,
-                chunks: 1,
-              }
-            : await produceSummaryXml(
-                provider,
-                planned!,
-                sessionId,
-                session.project,
-                concurrency,
-                chunkCache,
-              );
+          let produced: { response: string; mode: "single" | "chunked" | "folded"; chunks: number };
+          try {
+            if (!fold) planned ??= await planChunks(provider, compressed, sessionId, concurrency);
+            produced = fold
+              ? {
+                  response: await provider.summarize(FOLD_SYSTEM, fold),
+                  mode: "folded",
+                  chunks: 1,
+                }
+              : await produceSummaryXml(
+                  provider,
+                  planned!,
+                  sessionId,
+                  session.project,
+                  concurrency,
+                  chunkCache,
+                );
+          } catch (err) {
+            if (!summary) throw err;
+            logger.warn("Summary retry failed, keeping the first", {
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            break;
+          }
           const response = produced.response;
           mode = produced.mode;
           chunks = produced.chunks;
@@ -604,7 +614,21 @@ export function registerSummarizeFunction(
           }
           parsed.lastObservationId = lastObservationId;
           parsed.coveredThrough = coveredThrough;
+          // A Summary with no decisions gives Injection nothing to deliver, so
+          // the first one is tried again and kept when the retry is no better.
+          // A fold of a prior Summary that had none is kept as is: retrying it
+          // would re-read the whole Session at every Stop. So is a merge of
+          // chunk partials that had none, since the retry reuses them.
+          const noDecisions = parsed.keyDecisions.length === 0;
+          if (summary && noDecisions) break;
           summary = parsed;
+          const inputHadNone = fold
+            ? !existing?.keyDecisions?.length
+            : (chunkCache.partials?.reduceInput.every((p) => p.keyDecisions.length === 0) ?? false);
+          if (attempt === 1 && noDecisions && !inputHadNone) {
+            logger.warn("Summary has no decisions, retrying", { sessionId, mode });
+            continue;
+          }
           break;
         }
 

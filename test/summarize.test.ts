@@ -115,7 +115,7 @@ function summaryXml(opts: {
   files?: string[];
   concepts?: string[];
 }): string {
-  const d = (opts.decisions ?? []).map((x) => `<decision>${x}</decision>`).join("");
+  const d = (opts.decisions ?? ["decision"]).map((x) => `<decision>${x}</decision>`).join("");
   const f = (opts.files ?? []).map((x) => `<file>${x}</file>`).join("");
   const c = (opts.concepts ?? []).map((x) => `<concept>${x}</concept>`).join("");
   return `<summary>
@@ -620,6 +620,66 @@ describe("mem::summarize chunking", () => {
     expect((provider as any).calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("retries a first summary with no decisions and stores the second", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "no-decisions", decisions: [] }),
+      summaryXml({ title: "second-attempt", decisions: ["rule"] }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_nodec", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_nodec" });
+
+    expect(result.success).toBe(true);
+    expect(provider.calls).toHaveLength(2);
+    const stored: any = await kv.get("summaries", "ses_nodec");
+    expect(stored.keyDecisions).toEqual(["rule"]);
+  });
+
+  it("keeps a decision-less summary when the retry fails or has none either", async () => {
+    for (const second of ["garbage", summaryXml({ title: "also-none", decisions: [] })]) {
+      const provider = makeProvider([summaryXml({ title: "no-decisions", decisions: [] }), second]);
+      const { handler, kv } = await setupHandler({ sessionId: "ses_nodec2", obsCount: 1, provider });
+
+      const result: any = await handler({ sessionId: "ses_nodec2" });
+
+      expect(result.success).toBe(true);
+      expect(provider.calls).toHaveLength(2);
+      const stored: any = await kv.get("summaries", "ses_nodec2");
+      expect(stored.title).toBe("no-decisions");
+    }
+  });
+
+  it("keeps a decision-less merge without retrying when no chunk had decisions", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(50);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([summaryXml({ title: "none", decisions: [] })]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_nodec_chunked", obsCount: 175, provider });
+
+    const result: any = await handler({ sessionId: "ses_nodec_chunked" });
+
+    expect(result.success).toBe(true);
+    // 4 chunks + 1 reduce, and no second reduce.
+    expect(provider.calls).toHaveLength(5);
+    const stored: any = await kv.get("summaries", "ses_nodec_chunked");
+    expect(stored.keyDecisions).toEqual([]);
+  });
+
+  it("keeps a decision-less summary when the retry throws", async () => {
+    const provider = makeProvider([summaryXml({ title: "no-decisions", decisions: [] })]);
+    const first = provider.summarize;
+    provider.summarize = async (system, user) => {
+      if (provider.calls.length > 0) throw new Error("provider down");
+      return first(system, user);
+    };
+    const { handler, kv } = await setupHandler({ sessionId: "ses_nodec3", obsCount: 1, provider });
+
+    const result: any = await handler({ sessionId: "ses_nodec3" });
+
+    expect(result.success).toBe(true);
+    const stored: any = await kv.get("summaries", "ses_nodec3");
+    expect(stored.title).toBe("no-decisions");
+  });
+
   it("measures every Observation once, even across the summarize retry", async () => {
     // The chars/3 estimate (~31 per Observation with separator) overruns this
     // budget, so the Session is measured; the measured 14 each fits exactly.
@@ -1001,6 +1061,33 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls[1].user).not.toContain("prior narrative text");
     const stored: any = await kv.get("summaries", "ses_retry");
     expect(stored.observationCount).toBe(8);
+  });
+
+  it("retries a fold that drops every decision the prior summary had", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_folddrop", 8, 5, "obs_4", [
+      summaryXml({ title: "folded", decisions: [] }),
+      summaryXml({ title: "whole", decisions: ["rule"] }),
+    ]);
+
+    await handler({ sessionId: "ses_folddrop" });
+
+    expect(provider.calls).toHaveLength(2);
+    const stored: any = await kv.get("summaries", "ses_folddrop");
+    expect(stored.keyDecisions).toEqual(["rule"]);
+  });
+
+  it("keeps a decision-less fold of a prior summary that had none", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_foldnone", 8, 5, "obs_4", [
+      summaryXml({ title: "folded", decisions: [] }),
+    ]);
+    const prior: any = await kv.get("summaries", "ses_foldnone");
+    await kv.set("summaries", "ses_foldnone", { ...prior, keyDecisions: [] });
+
+    await handler({ sessionId: "ses_foldnone" });
+
+    expect(provider.calls).toHaveLength(1);
+    const stored: any = await kv.get("summaries", "ses_foldnone");
+    expect(stored.title).toBe("folded");
   });
 
   it("reuses without calling the provider when no new Observations arrived", async () => {
