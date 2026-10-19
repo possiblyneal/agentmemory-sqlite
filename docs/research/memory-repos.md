@@ -6,9 +6,9 @@ Results of the levers tried, kept or rejected, are logged in
 [`docs/benchmarks/2026-10-18-sdebench.md`](../benchmarks/2026-10-18-sdebench.md).
 
 sdebench (AMB harness, 61 boltons tasks) imports each task's past conversations, or its git
-history, alongside 140 decoy Sessions. A fresh Claude Sonnet agent then gets a vague task and
+history, alongside 140 decoy Sessions. A fresh Claude Sonnet Agent then gets a vague task and
 must apply the rules those Sessions settled. The score is interventions, the corrections the
-agent needs before the task is done; fewer is better.
+Agent needs before the task is done; fewer is better.
 Vanilla scores about 41 and Hindsight 17–25 (published, Sonnet 5).
 
 Remaining failure causes, from the `s55am2` intervention analysis:
@@ -56,11 +56,11 @@ Ordered by the expected cut in interventions per unit of work. Hot path means in
 prompt-submit hook's 1,500 ms budget.
 
 1. **One result slot per Session, from a wider pool** (memanto k ablation, ai-memory one vote
-   per Session). Fixes F1. Size S, no hot-path LLM. In progress in #242 (`054b4d4`).
+   per Session). Fixes F1. Size S, no hot-path LLM. Shipped in #242 (`054b4d4`).
 2. **Fetch the later amending Session** (memvid latest match, LongMemory current pointer,
    Hindsight "LATEST wins"). When a covered Session is chosen, also inject a later Session of
    the project that shares its files or concepts. The newest-first header already settles the
-   conflict. Fixes F2. Size S, no hot-path LLM. In progress in #242 (`784cf44`).
+   conflict. Fixes F2. Size S, no hot-path LLM. Shipped in #242 (`784cf44`).
 3. **Search Session Summary decisions directly, with trigger words** (nocturne disclosure,
    ai-memory, MemPalace rule documents). Index each Session Summary's decisions, plus an LLM-written
    "applies when" line naming the words a future task would use, and fuse them with Observation
