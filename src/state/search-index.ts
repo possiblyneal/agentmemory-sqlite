@@ -24,6 +24,7 @@ export function isSearchLayer(value: unknown): value is SearchLayer {
 const TITLE_WEIGHT = 3;
 const SUBTITLE_WEIGHT = 2;
 const MAX_QUERY_TERMS = 25;
+const EDGE_PUNCTUATION = /^[/.\\_-]+|[/.\\_-]+$/g;
 
 export class SearchIndex {
   private entries: Map<string, IndexEntry> = new Map();
@@ -355,7 +356,7 @@ export class SearchIndex {
     const cleaned = text.replace(/[^\p{L}\p{N}\s/.\\-_]/gu, " ");
     const out: string[] = [];
     for (const raw of cleaned.split(/\s+/)) {
-      if (raw.length < 2 || skip?.has(raw)) continue;
+      if (raw.length < 2 || skip?.has(raw.replace(EDGE_PUNCTUATION, ""))) continue;
       if (hasCjk(raw)) {
         const segs = segmentCjk(raw);
         // One segment means no segmenter split the run (jieba/tiny-segmenter

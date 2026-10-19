@@ -402,4 +402,17 @@ describe("SearchIndex query stopwords", () => {
 
     expect(ids).toEqual(["redis"]);
   });
+
+  it("returns nothing for a query made only of function words", () => {
+    const idx = new SearchIndex();
+    idx.add(makeObs({ id: "function-words", title: "how should my domain look" }));
+
+    expect(idx.search("how should my")).toEqual([]);
+  });
+
+  it("drops a stopword that ends a sentence", () => {
+    const idx = new SearchIndex();
+    idx.add(makeObs({ id: "sentence-end", title: "we fixed this. then moved on" }));
+    expect(idx.search("How do I do this.")).toEqual([]);
+  });
 });

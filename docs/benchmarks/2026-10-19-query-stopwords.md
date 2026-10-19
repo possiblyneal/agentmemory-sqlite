@@ -11,11 +11,20 @@ holdout: coding-life 15, PMB 30, LongMemEval 112
 
 ## Headline
 
-Dropping English stopwords from BM25 query terms raised every precision metric on dev and
-holdout. Two recall metrics fell, both within noise. Every paired difference is ≈ at 99.7%
-Bonferroni intervals.
+Dropping English stopwords from BM25 query terms raised these on dev:
+
+- search precision on coding-life and PMB;
+- PMB pass;
+- LongMemEval recall@5 and hit.
+
+On holdout, the precision gains held. Two recall metrics fell, both within noise. Every
+paired difference is ≈ at 99.7% Bonferroni intervals.
 
 ## Per bench
+
+The rows are metrics and the columns are dev and holdout before/after, unlike the per-path
+table in `TEMPLATE.md`, because a single lever is judged on both splits. The n per split is in
+the header.
 
 | Metric | Dev before | Dev after | Holdout before | Holdout after |
 |---|---|---|---|---|
@@ -38,7 +47,11 @@ new search numbers.
 ## Methodology
 
 As in `eval/README.md`. The control is `main` at `e32ae98`, run under the same labels and
-seeds. Holdout looks are `main-hold` and `stop-hold` in `eval/holdout-ledger.ndjson`.
+seeds. The holdout looks are `main-hold` and `stop-hold` in `eval/holdout-ledger.ndjson`.
+`stop-hold` ran on the uncommitted change before `2675963` existed, so its ledger commit field
+reads `e32ae98`, the base it sat on. A later review fix also drops a stopword with sentence
+punctuation attached ("this."); a dev rerun with it (`stop2` against `stop1`) and `eval:gate`
+moved no metric.
 
 ## Reproduce
 
