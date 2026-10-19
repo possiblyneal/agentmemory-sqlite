@@ -2,6 +2,7 @@ import type { CompressedObservation } from "../types.js";
 import { stem } from "./stemmer.js";
 import { getSynonyms } from "./synonyms.js";
 import { STOP_WORDS } from "./stopwords.js";
+import { dateTermsForQuery, dateTermsForTimestamp } from "./date-terms.js";
 import { segmentCjk, hasCjk, cjkBigrams } from "./cjk-segmenter.js";
 
 interface IndexEntry {
@@ -53,6 +54,8 @@ export class SearchIndex {
         termCount++;
       }
     }
+
+    for (const term of dateTermsForTimestamp(obs.timestamp)) termFreq.set(term, 1);
 
     this.entries.set(obs.id, {
       obsId: obs.id,
@@ -126,7 +129,8 @@ export class SearchIndex {
     layer?: IndexLayer,
   ): Array<{ obsId: string; sessionId: string; score: number }> {
     const rawTerms = this.tokenize(query.toLowerCase(), STOP_WORDS);
-    if (rawTerms.length === 0) return [];
+    const dateTerms = dateTermsForQuery(query);
+    if (rawTerms.length === 0 && dateTerms.length === 0) return [];
 
     const N = this.entries.size;
     if (N === 0) return [];
@@ -146,6 +150,8 @@ export class SearchIndex {
         }
       }
     }
+
+    for (const term of dateTerms) queryTerms.push({ term, weight: 1.0 });
 
     const scores = new Map<string, number>();
     const sorted = this.getSortedTerms();

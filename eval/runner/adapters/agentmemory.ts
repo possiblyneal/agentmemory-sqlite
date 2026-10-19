@@ -197,6 +197,28 @@ async function ingestRemembered(state: AgentMemoryState, s: Session): Promise<vo
   });
   const memoryId = body.memory?.id ?? body.id;
   if (memoryId) state.memoryToSession.set(memoryId, s.id);
+  if (memoryId && s.timestamp) await dateMemory(state, memoryId, s.timestamp);
+}
+
+// /remember stamps the Memory with now; the import endpoint, which merges over
+// the stored row by id and re-indexes it, gives it the Session's own date.
+async function dateMemory(state: AgentMemoryState, memoryId: string, createdAt: string): Promise<void> {
+  const { body } = await daemonCall<{ memory: Record<string, unknown> }>(
+    state.baseUrl,
+    `memories/${encodeURIComponent(memoryId)}`,
+    { secret: state.secret },
+  );
+  const result = await post<{ success?: boolean; error?: string }>(state, "import", {
+    exportData: {
+      version: VERSION,
+      sessions: [],
+      memories: [{ ...body.memory, createdAt }],
+      summaries: [],
+      observations: {},
+    },
+    strategy: "merge",
+  });
+  if (!result.success) throw new Error(`${memoryId}: date import failed: ${result.error}`);
 }
 
 async function querySearch(q: Question, state: AgentMemoryState, k: number): Promise<QueryResult> {

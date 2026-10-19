@@ -9,6 +9,15 @@ interface LongMemEvalRaw {
   answer_session_ids: string[];
   haystack_session_ids: string[];
   haystack_sessions: Array<Array<{ role: string; content: string }>>;
+  haystack_dates?: string[];
+}
+
+// "2023/05/20 (Sat) 02:21" -> "2023-05-20T02:21:00.000Z"
+function haystackTimestamp(date: string | undefined): string | undefined {
+  const m = date?.match(/^(\d{4})\/(\d{2})\/(\d{2})\b.*?(\d{2}):(\d{2})/);
+  if (!m) return undefined;
+  const time = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00.000Z`);
+  return Number.isNaN(time.getTime()) ? undefined : time.toISOString();
 }
 
 function flattenSession(turns: Array<{ role: string; content: string }>): string {
@@ -27,7 +36,11 @@ export function loadLongMemEval(path: string, limit?: number): Question[] {
     }
     // _s ships some empty haystack Sessions (never gold); /remember rejects them.
     const haystack: Session[] = r.haystack_session_ids
-      .map((id, i) => ({ id, content: flattenSession(r.haystack_sessions[i]) }))
+      .map((id, i) => ({
+        id,
+        content: flattenSession(r.haystack_sessions[i]),
+        timestamp: haystackTimestamp(r.haystack_dates?.[i]),
+      }))
       .filter((s) => s.content);
     questions.push({
       id: r.question_id,
