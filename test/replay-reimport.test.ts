@@ -1,0 +1,137 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+vi.mock("../src/logger.js", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+import { registerReplayFunctions } from "../src/functions/replay.js";
+import { KV } from "../src/state/schema.js";
+function mockKV() {
+  const store = new Map<string, Map<string, unknown>>();
+  const setCalls: Array<{ scope: string; key: string | undefined; value: any }> = [];
+  return {
+    get: async <T>(scope: string, key: string): Promise<T | null> =>
+      (store.get(scope)?.get(key) as T) ?? null,
+    set: async <T>(scope: string, key: string, value: T): Promise<T> => {
+      setCalls.push({ scope, key, value });
+      if (!store.has(scope)) store.set(scope, new Map());
+      // Mirror the engine: a state::set with key=undefined fails. We
+      // surface this via setCalls so the test can assert key !== undefined.
+      if (key === undefined) {
+        throw new Error("missing field `key`");
+      }
+      store.get(scope)!.set(key, value);
+      return value;
+    },
+    update: async (
+      scope: string,
+      key: string | undefined,
+      ops: Array<{ type: string; path: string; value?: unknown }>,
+    ) => {
+      if (key === undefined) throw new Error("missing field `key`");
+      const row = { ...(store.get(scope)?.get(key) as Record<string, unknown>) };
+      for (const op of ops) if (op.type === "set") row[op.path] = op.value;
+      store.get(scope)!.set(key, row);
+      setCalls.push({ scope, key, value: row });
+      return { new_value: row };
+    },
+    delete: async (scope: string, key: string) => {
+      store.get(scope)?.delete(key);
+    },
+    list: async <T>(scope: string): Promise<T[]> =>
+      Array.from(store.get(scope)?.values() ?? []) as T[],
+    getSetCalls: () => setCalls,
+  };
+}
+
+function mockSdk(kv: ReturnType<typeof mockKV>) {
+  const fns = new Map<string, Function>();
+  return {
+    registerFunction: (id: string, handler: Function) => fns.set(id, handler),
+    registerTrigger: () => {},
+    trigger: async (
+      idOrInput: string | { function_id: string; payload?: unknown },
+      data?: unknown,
+    ) => {
+      const id =
+        typeof idOrInput === "string" ? idOrInput : idOrInput.function_id;
+      const payload =
+        typeof idOrInput === "string" ? data : (idOrInput as any).payload;
+      const fn = fns.get(id);
+      if (!fn) return { success: true };
+      return fn(payload);
+    },
+    _kv: kv,
+  } as any;
+}
+
+const SID = "sess-reimport";
+
+function line(type: "user" | "assistant", uuid: string, ts: string, text: string, cwd: string) {
+  return JSON.stringify({
+    type,
+    uuid,
+    sessionId: SID,
+    timestamp: ts,
+    cwd,
+    message: { role: type, content: [{ type: "text", text }] },
+  });
+}
+
+describe("import-jsonl re-import skips stored Observations", () => {
+  let root: string;
+  let file: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "replay-reimport-"));
+    file = join(root, `${SID}.jsonl`);
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  async function setup() {
+    const kv = mockKV();
+    const sdk = mockSdk(kv);
+    registerReplayFunctions(sdk, kv as never);
+    const run = () =>
+      sdk.trigger("mem::replay::import-jsonl", { path: root }) as Promise<{ observations: number }>;
+    const stored = async () => (await kv.list(KV.observations(SID))).length;
+    const count = async () => (await kv.get<any>(KV.sessions, SID))?.observationCount;
+    return { run, stored, count };
+  }
+
+  it("stores each Observation once when the same transcript is imported twice", async () => {
+    writeFileSync(
+      file,
+      [line("user", "u1", "2026-04-17T10:00:00Z", "hello", root), line("assistant", "a1", "2026-04-17T10:00:01Z", "world", root)].join("\n") + "\n",
+    );
+    const { run, stored, count } = await setup();
+    expect((await run()).observations).toBe(2);
+    expect((await run()).observations).toBe(0);
+    expect(await stored()).toBe(2);
+    expect(await count()).toBe(2);
+  });
+
+  it("adds only the new turns when the transcript has grown", async () => {
+    writeFileSync(file, line("user", "u1", "2026-04-17T10:00:00Z", "hello", root) + "\n");
+    const { run, stored, count } = await setup();
+    await run();
+    appendFileSync(file, line("assistant", "a1", "2026-04-17T10:00:01Z", "world", root) + "\n");
+    expect((await run()).observations).toBe(1);
+    expect(await stored()).toBe(2);
+    expect(await count()).toBe(2);
+  });
+
+  it("stores two distinct turns with identical text", async () => {
+    writeFileSync(
+      file,
+      [line("user", "u1", "2026-04-17T10:00:00Z", "again", root), line("user", "u2", "2026-04-17T10:05:00Z", "again", root)].join("\n") + "\n",
+    );
+    const { run, stored } = await setup();
+    await run();
+    expect(await stored()).toBe(2);
+  });
+});
