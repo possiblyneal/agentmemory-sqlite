@@ -12,6 +12,8 @@ import { StateKV } from "../state/kv.js";
 import {
   COMPRESSION_SYSTEM,
   buildCompressionPrompt,
+  truncate as truncateMiddleOut,
+  TOOL_OUTPUT_MAX,
 } from "../prompts/compression.js";
 import { VISION_DESCRIPTION_PROMPT } from "../prompts/vision.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
@@ -257,6 +259,10 @@ export function registerCompressFunction(
           // Full prompt text survives compression verbatim - the summary
           // above is derived from it, it does not replace it.
           ...(data.raw.userPrompt ? { userPrompt: data.raw.userPrompt } : {}),
+          // The Agent's reply survives too: the Session Summary reads its tail.
+          ...(data.raw.hookType === "stop" && data.raw.assistantResponse
+            ? { assistantResponse: truncateMiddleOut(stripPrivateData(data.raw.assistantResponse), TOOL_OUTPUT_MAX) }
+            : {}),
         };
 
         await kv.set(

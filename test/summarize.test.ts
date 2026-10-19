@@ -23,7 +23,7 @@ vi.mock("../src/functions/audit.js", () => ({
 
 import { registerSummarizeFunction } from "../src/functions/summarize.js";
 import { estimateTokens } from "../src/utils/tokens.js";
-import { renderSummaryObservation } from "../src/prompts/summary.js";
+import { renderSummaryObservation, SUMMARY_REPLY_MAX } from "../src/prompts/summary.js";
 import type {
   CompressedObservation,
   Session,
@@ -1027,7 +1027,20 @@ describe("summary input", () => {
     const rendered = renderSummaryObservation(obs, 0);
 
     expect(rendered).toContain("Round half up or down?");
-    expect(rendered.length).toBeLessThan(2300);
+    expect(rendered).not.toContain("x".repeat(SUMMARY_REPLY_MAX));
+  });
+
+  it("gives the reply once, in place of the narrative that restates it", () => {
+    const reply = "Settled: retry 3 times, then 503.";
+    const obs = { ...makeObs(0, "ses_once"), narrative: reply, assistantResponse: reply };
+
+    expect(renderSummaryObservation(obs, 0).split(reply)).toHaveLength(2);
+  });
+
+  it("does not present a subagent's closing message as the Agent's reply", () => {
+    const obs = { ...makeObs(0, "ses_sub"), type: "subagent", assistantResponse: "Settled: use port 9000." };
+
+    expect(renderSummaryObservation(obs, 0)).not.toContain("Agent reply");
   });
 
   it("renders an Observation without a reply as before", () => {

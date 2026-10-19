@@ -56,7 +56,7 @@ const RAW: RawObservation = {
   toolOutput: "file contents here",
 };
 
-async function runCompress(compress: () => Promise<string>) {
+async function runCompress(compress: () => Promise<string>, raw: RawObservation = RAW) {
   const { registerCompressFunction } = await import(
     "../src/functions/compress.js"
   );
@@ -67,14 +67,14 @@ async function runCompress(compress: () => Promise<string>) {
   } as never);
 
   const result = (await sdk.trigger("mem::compress", {
-    observationId: RAW.id,
-    sessionId: RAW.sessionId,
-    raw: RAW,
+    observationId: raw.id,
+    sessionId: raw.sessionId,
+    raw,
   })) as { success: boolean; error?: string };
 
   return {
     result,
-    stored: kv.store.get(`mem:obs:${RAW.sessionId}`),
+    stored: kv.store.get(`mem:obs:${raw.sessionId}`),
     pending: kv.store.get("mem:compress-pending"),
     kv,
   };
@@ -198,6 +198,31 @@ describe("mem::compress never orphans an observation on failure", () => {
     const obs = stored!.get(RAW.id) as { confidence: number; title: string };
     expect(obs.title).toBe("Read src/foo.ts");
     expect(obs.confidence).toBeGreaterThan(0.3);
+  });
+
+  it("provider succeeds on a stop: the Agent's reply survives for the Session Summary", async () => {
+    const stop: RawObservation = {
+      id: "obs_test_stop",
+      sessionId: "ses_test",
+      timestamp: new Date().toISOString(),
+      hookType: "stop",
+      assistantResponse: "Settled: retry 3 times, then 503.",
+    };
+    const { stored } = await runCompress(
+      async () => `<observation>
+  <type>conversation</type>
+  <title>Agent settled the retry rule</title>
+  <facts><fact>a</fact><fact>b</fact><fact>c</fact></facts>
+  <narrative>The agent recapped the agreed retry behaviour for the client.</narrative>
+  <concepts><concept>retry</concept></concepts>
+  <files></files>
+  <importance>5</importance>
+</observation>`,
+      stop,
+    );
+
+    const obs = stored!.get(stop.id) as { assistantResponse?: string };
+    expect(obs.assistantResponse).toBe("Settled: retry 3 times, then 503.");
   });
 
   it("a later successful re-compression clears the recovery queue", async () => {
