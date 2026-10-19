@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadLongMemEval } from "../eval/runner/load.js";
 
 const dirs: string[] = [];
 
 function write(rows: unknown[]): string {
+  mkdirSync(join(process.cwd(), "tmp"), { recursive: true });
   const dir = mkdtempSync(join(process.cwd(), "tmp", "lme-load-"));
   dirs.push(dir);
   const path = join(dir, "longmemeval_s.json");
