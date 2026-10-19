@@ -197,16 +197,16 @@ After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`)
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
 `summary` ref. Each decision is cut to 600 chars with a trailing `…` (`cutDecision()` in
-`src/functions/summarize.ts`, shared with session start). A Memory hit, an Observation the Summary does not cover, and one whose Summary is
-missing, unreadable or has no decisions are given as themselves. The decisions come first,
-one block per Session dated by its Summary's `lastObservationAt`, the time of the last Observation it
-summarized (else `coveredThrough`, else `createdAt`; never write time alone, which is milliseconds
-apart for Sessions summarized together; a Summary written before the field existed keeps the
-fallback until its Session is summarized again), and ordered
-newest first, under a header telling the Agent the rules still hold, with their exact values,
-even where the current code does not follow them yet, and that the newer of two conflicting
-rules holds. The top 3 are counted in rendered units from a 30-hit search: a covered Session is
-one unit however many of its Observations hit.
+`src/functions/summarize.ts`, shared with session start). A Memory hit, an Observation the
+Summary does not cover, and one whose Summary is missing, unreadable or has no decisions are
+given as themselves. The decisions come first, one block per Session dated by its Summary's
+`lastObservationAt`, the time of the last Observation it summarized (else `coveredThrough`,
+else `createdAt`; never write time alone, which is milliseconds apart for Sessions summarized
+together; a Summary written before the field existed keeps the fallback until its Session is
+summarized again), and ordered newest first, under a header telling the Agent the rules still
+hold, with their exact values, even where the current code does not follow them yet, and that
+the newer of two conflicting rules holds. The top 3 are counted in rendered units from a 30-hit
+search: a covered Session is one unit however many of its Observations hit.
 Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
 when the best-scoring other Session there scores at least 0.35 of the given Session's own best
 hit, leads the runner-up by 1.25x and its Summary dates later, its decisions are given too, as
