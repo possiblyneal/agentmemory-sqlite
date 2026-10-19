@@ -20,6 +20,7 @@ Rules:
 - Focus on outcomes, not individual tool calls
 - Highlight decisions and their rationale
 - Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
+- When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
 - List all files that were created or modified
 - Concepts should be searchable terms for future context retrieval`
@@ -76,6 +77,7 @@ Rules:
 - Synthesize a single narrative that reflects the whole arc, not a chunk-by-chunk recap
 - Preserve every distinct decision across chunks
 - Keep every rule, requirement or constraint the user stated as its own decision, with its exact values (status codes, limits, thresholds, names) and conditions; never merge two of them or generalize a specific value away
+- When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome`
 
@@ -128,6 +130,7 @@ Rules:
 - Rewrite the narrative so it covers the whole session, not only the new observations
 - Keep every existing decision unless a new observation reverses it; add new ones
 - Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
+- When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome so far`
