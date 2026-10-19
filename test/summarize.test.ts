@@ -649,6 +649,21 @@ describe("mem::summarize chunking", () => {
     }
   });
 
+  it("keeps a decision-less merge without retrying when no chunk had decisions", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(50);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([summaryXml({ title: "none", decisions: [] })]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_nodec_chunked", obsCount: 175, provider });
+
+    const result: any = await handler({ sessionId: "ses_nodec_chunked" });
+
+    expect(result.success).toBe(true);
+    // 4 chunks + 1 reduce, and no second reduce.
+    expect(provider.calls).toHaveLength(5);
+    const stored: any = await kv.get("summaries", "ses_nodec_chunked");
+    expect(stored.keyDecisions).toEqual([]);
+  });
+
   it("keeps a decision-less summary when the retry throws", async () => {
     const provider = makeProvider([summaryXml({ title: "no-decisions", decisions: [] })]);
     const first = provider.summarize;

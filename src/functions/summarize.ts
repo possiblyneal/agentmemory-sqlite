@@ -617,12 +617,15 @@ export function registerSummarizeFunction(
           // A Summary with no decisions gives Injection nothing to deliver, so
           // the first one is tried again and kept when the retry is no better.
           // A fold of a prior Summary that had none is kept as is: retrying it
-          // would re-read the whole Session at every Stop.
+          // would re-read the whole Session at every Stop. So is a merge of
+          // chunk partials that had none, since the retry reuses them.
           const noDecisions = parsed.keyDecisions.length === 0;
           if (summary && noDecisions) break;
           summary = parsed;
-          const priorHadNone = fold !== null && !existing?.keyDecisions?.length;
-          if (attempt === 1 && noDecisions && !priorHadNone) {
+          const inputHadNone = fold
+            ? !existing?.keyDecisions?.length
+            : (chunkCache.partials?.reduceInput.every((p) => p.keyDecisions.length === 0) ?? false);
+          if (attempt === 1 && noDecisions && !inputHadNone) {
             logger.warn("Summary has no decisions, retrying", { sessionId, mode });
             continue;
           }
