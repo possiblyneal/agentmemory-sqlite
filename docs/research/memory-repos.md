@@ -2,6 +2,8 @@
 
 A dated snapshot of 22 open-source agent-memory projects, read for techniques that cut sdebench
 interventions. It is read for ideas, never for patches, and is not kept current.
+Results of the levers tried, kept or rejected, are logged in
+[`docs/benchmarks/2026-10-18-sdebench.md`](../benchmarks/2026-10-18-sdebench.md).
 
 sdebench (AMB harness, 61 boltons tasks) imports each task's past conversations, or its git
 history, alongside 140 decoy Sessions. A fresh Claude Sonnet agent then gets a vague task and
