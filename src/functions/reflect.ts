@@ -288,7 +288,7 @@ export function registerReflectFunctions(
             : readBoundedGraphSnapshot(kv, REFLECT_GRAPH_NODE_LIMIT, inProject).catch(
                 () => noGraph,
               ),
-          kv.list<SemanticMemory>(KV.semantic).catch(() => []),
+          kv.list<SemanticMemory>(KV.semantic).then((all) => all.filter((m) => m.isLatest !== false)).catch(() => []),
           kv.list<Lesson>(KV.lessons).catch(() => []),
           kv.list<Crystal>(KV.crystals).catch(() => []),
         ]);
