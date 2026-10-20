@@ -22,6 +22,7 @@ const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
 const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 30;
+const GATE_POOL = 10;
 const AMENDMENT_MIN_RATIO = 0.35;
 const AMENDMENT_MIN_LEAD = 1.25;
 
@@ -240,7 +241,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = (await Promise.all(strong.map((r) => candidateFor(kv, r)))).filter(
         ({ ref }) => !seen.has(refKey(ref)),
       );
-      const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
+      const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation, GATE_POOL);
       const shadowed = await shadowedMemoryIds(
         kv,
         passed.filter(({ ref }) => ref.kind === "memory").map(({ ref }) => ref.id),
