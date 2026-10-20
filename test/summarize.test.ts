@@ -22,6 +22,7 @@ vi.mock("../src/functions/audit.js", () => ({
 }));
 
 import { registerSummarizeFunction } from "../src/functions/summarize.js";
+import { getSearchIndex } from "../src/functions/search.js";
 import { estimateTokens } from "../src/utils/tokens.js";
 import { renderSummaryObservation, SUMMARY_REPLY_MAX } from "../src/prompts/summary.js";
 import type {
@@ -1161,5 +1162,27 @@ describe("summary input", () => {
 
   it("renders an Observation without a reply as before", () => {
     expect(renderSummaryObservation(makeObs(0, "ses_none"), 0)).not.toContain("Agent reply");
+  });
+});
+
+describe("mem::summarize decision index", () => {
+  afterEach(() => {
+    getSearchIndex().clear();
+  });
+
+  it("makes the decisions searchable, and replaces them when the Summary is rewritten", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "First pass", decisions: ["Rollbacks restore the previous tarball"] }),
+      summaryXml({ title: "Second pass", decisions: ["Releases require a signed manifest"] }),
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_idx", obsCount: 3, provider });
+    const search = (q: string) => getSearchIndex().search(q).map((h) => [h.obsId, h.sessionId]);
+
+    await handler({ sessionId: "ses_idx" });
+    expect(search("rollbacks restore tarball")).toEqual([["summary:ses_idx", "ses_idx"]]);
+
+    await handler({ sessionId: "ses_idx", force: true });
+    expect(search("rollbacks restore tarball")).toEqual([]);
+    expect(search("releases signed manifest")).toEqual([["summary:ses_idx", "ses_idx"]]);
   });
 });

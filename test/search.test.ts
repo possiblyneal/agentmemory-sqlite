@@ -7,6 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { registerSearchFunction, getSearchIndex, rebuildIndex, setVectorIndex, setEmbeddingProvider, getVectorIndex } from "../src/functions/search.js";
 import { VectorIndex } from "../src/state/vector-index.js";
 import { KV } from "../src/state/schema.js";
+import { summaryIndexId } from "../src/state/summary-index.js";
 import type { CompressedObservation, Session } from "../src/types.js";
 
 function mockKV() {
@@ -324,5 +325,34 @@ describe("mem::search recency", () => {
   it("applies the limit after recency ranking", async () => {
     const ids = await search([obs("obs_old", "2026-09-01T10:00:00.000Z"), obs("obs_new", "2026-10-10T10:00:00.000Z")], 1);
     expect(ids).toEqual(["obs_new"]);
+  });
+});
+
+describe("mem::search over Session Summary decisions", () => {
+  it("returns the Summary of a Session whose decision matches, once the index is rebuilt", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerSearchFunction(sdk as never, kv as never);
+    await kv.set(KV.sessions, "ses_1", {
+      id: "ses_1", project: "demo", cwd: "/tmp/demo", startedAt: "2026-01-01T00:00:00Z", status: "completed", observationCount: 1,
+    });
+    await kv.set(KV.observations("ses_1"), "obs_a", {
+      id: "obs_a", sessionId: "ses_1", timestamp: "2026-01-01T00:00:00Z", type: "file_edit",
+      title: "Edit config loader", facts: [], narrative: "Edited the config loader", concepts: [], files: [], importance: 5,
+    });
+    await kv.set(KV.summaries, "ses_1", {
+      sessionId: "ses_1", project: "demo", createdAt: "2026-01-01T01:00:00Z", title: "Release tooling work",
+      narrative: "Worked on release tooling for staging.", keyDecisions: ["Rollbacks restore the previous tarball"],
+      filesModified: [], concepts: [], observationCount: 1,
+    });
+    getSearchIndex().clear();
+    await rebuildIndex(kv as never);
+
+    const result = (await sdk.trigger("mem::search", { query: "rollbacks restore tarball", project: "demo" })) as {
+      results: Array<{ sessionId: string; observation: CompressedObservation }>;
+    };
+    expect(result.results.map((r) => r.sessionId)).toEqual(["ses_1"]);
+    expect(result.results[0].observation.id).toBe(summaryIndexId("ses_1"));
+    expect(result.results[0].observation.narrative).toBe("Rollbacks restore the previous tarball");
   });
 });

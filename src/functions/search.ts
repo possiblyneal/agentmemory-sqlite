@@ -15,6 +15,7 @@ import {
   isLatestEligible,
   MEMORY_SESSION,
 } from '../state/memory-utils.js'
+import { summaryToIndexDoc, summaryIndexId, isSummaryIndexId, loadSummaryHit } from '../state/summary-index.js'
 import { recordAccessBatch } from './access-tracker.js'
 import { withKeyedLock } from '../state/keyed-mutex.js'
 import { clipEmbedInput, isIndexExcluded, enumerateIndexCorpus, type EmbedKind } from '../state/index-corpus.js'
@@ -61,6 +62,20 @@ export function isMemoryIndexReady(): boolean {
 export function getSearchIndex(): SearchIndex {
   if (!index) index = new SearchIndex()
   return index
+}
+
+// A Session Summary's decisions are one BM25 document (BM25 only: never
+// embedded). Writing a Summary replaces it; a Summary with no decisions, or
+// one that is deleted, leaves none.
+export function indexSummary(summary: SessionSummary): void {
+  const idx = getSearchIndex()
+  const doc = summaryToIndexDoc(summary)
+  if (doc) idx.add(doc, 'summary')
+  else idx.remove(summaryIndexId(summary.sessionId))
+}
+
+export function deindexSummary(sessionId: string): void {
+  getSearchIndex().remove(summaryIndexId(sessionId))
 }
 
 export function setVectorIndex(idx: VectorIndex | null): void {
@@ -189,6 +204,24 @@ export async function rebuildBm25FromContent(
     if (++rows % 2000 === 0) {
       await new Promise((r) => setImmediate(r))
       t = performance.now()
+    }
+  }
+  const summaryRows = db.prepare('SELECT key, value FROM kv WHERE scope = ? ORDER BY seq').iterate(KV.summaries) as Iterable<{ key: string; value: string }>
+  for (const r of summaryRows) {
+    try {
+      const doc = summaryToIndexDoc(JSON.parse(r.value) as SessionSummary)
+      if (doc) {
+        idx.add(doc, 'summary')
+        docs++
+      }
+    } catch (err) {
+      skipped++
+      if (skipped <= 20) {
+        logger.warn('BM25 rebuild: summary not indexable, skipped', {
+          key: r.key,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
     }
   }
   memoryIndexReady = true
@@ -553,6 +586,10 @@ export async function rebuildIndex(kv: StateKV): Promise<number> {
   }
 
   indexed += await indexRecords([], memories)
+  for (const summary of await kv.list<SessionSummary>(KV.summaries).catch(() => [])) {
+    indexSummary(summary)
+    indexed++
+  }
   if (memoriesLoaded) memoryIndexReady = true
   return indexed
 }
@@ -775,6 +812,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const filterNonLatest = isNonLatestFilterEnabled()
       const obsResults = await Promise.all(
         candidates.map(async (r) => {
+          if (isSummaryIndexId(r.obsId)) return loadSummaryHit(kv, r.obsId)
           const obs = await kv
             .get<CompressedObservation>(KV.observations(r.sessionId), r.obsId)
             .catch(() => null)

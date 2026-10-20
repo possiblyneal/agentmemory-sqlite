@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
+import { summaryIndexId, summaryToIndexDoc } from "../src/state/summary-index.js";
 import type { CompressedObservation, EmbeddingProvider } from "../src/types.js";
 
 function makeObs(
@@ -64,6 +65,24 @@ describe("HybridSearch", () => {
     expect(results[0].observation.id).toBe("obs_1");
     expect(results[0].vectorScore).toBe(0);
     expect(results[0].bm25Score).toBeGreaterThan(0);
+  });
+
+  it("returns the Session Summary for a decision hit on words the Session's Observations never used", async () => {
+    const obs = makeObs({ id: "obs_1", sessionId: "ses_1", title: "Edit loader", subtitle: undefined, narrative: "Edited the config loader", facts: [], concepts: [], files: [] });
+    bm25.add(obs);
+    await kv.set("mem:obs:ses_1", "obs_1", obs);
+    const summary = {
+      sessionId: "ses_1", project: "demo", createdAt: "2026-10-01T12:00:00.000Z", title: "Release tooling work",
+      narrative: "Worked on release tooling.", keyDecisions: ["Rollbacks restore the previous tarball"],
+      filesModified: [], concepts: [], observationCount: 1,
+    };
+    await kv.set("mem:summaries", "ses_1", summary);
+    bm25.add(summaryToIndexDoc(summary)!, "summary");
+
+    const hybrid = new HybridSearch(bm25, null, null, kv as never);
+    const results = await hybrid.search("rollbacks restore tarball");
+    expect(results.map((r) => [r.observation.id, r.sessionId])).toEqual([[summaryIndexId("ses_1"), "ses_1"]]);
+    expect(results[0].observation.narrative).toBe("Rollbacks restore the previous tarball");
   });
 
   it("returns empty results for no-match query", async () => {

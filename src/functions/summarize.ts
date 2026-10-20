@@ -19,6 +19,7 @@ import {
 } from "../prompts/summary.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { isAwaitingCompression } from "./compress-synthetic.js";
+import { indexSummary } from "./search.js";
 import { SummaryOutputSchema } from "../eval/schemas.js";
 import { validateOutput } from "../eval/validator.js";
 import { scoreSummary } from "../eval/quality.js";
@@ -661,6 +662,7 @@ export function registerSummarizeFunction(
         const qualityScore = scoreSummary(summary);
 
         await kv.set(KV.summaries, sessionId, summary);
+        indexSummary(summary);
         await safeAudit(kv, "compress", "mem::summarize", [sessionId], {
           title: summary.title,
           observationCount: compressed.length,

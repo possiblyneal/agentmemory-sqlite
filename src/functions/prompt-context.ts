@@ -10,6 +10,7 @@ import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
+import { isSummaryIndexId } from "../state/summary-index.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -48,7 +49,9 @@ function wordCount(prompt: string): number {
 
 // mem::search returns Memories in the Observation shape, under the
 // Memory's own id, so only the Memory store can tell the two apart.
+// A hit on a Summary's decisions stands for that Summary.
 async function candidateFor(kv: StateKV, hit: NarratedHit): Promise<Candidate> {
+  if (isSummaryIndexId(hit.observation.id)) return { hit, ref: { kind: "summary", id: hit.sessionId } };
   const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
   const ref = withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
   return { hit, ref, ...(memory && { memoryAt: memory.updatedAt ?? memory.createdAt }) };
@@ -63,13 +66,17 @@ type Resolved = Candidate & { summary: SessionSummary | null };
 async function withCoveringSummaries(kv: StateKV, ranked: Candidate[]): Promise<Resolved[]> {
   const summaries = await Promise.all(
     ranked.map(({ hit, ref }) =>
-      ref.kind === "observation" ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null) : null,
+      ref.kind === "observation" || ref.kind === "summary"
+        ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null)
+        : null,
     ),
   );
   return ranked.map((c, i) => {
     const summary = summaries[i];
     const { timestamp } = c.hit.observation;
-    const covers = !!summary?.keyDecisions?.length && !!timestamp && summaryCovers(summary, timestamp);
+    const covers =
+      !!summary?.keyDecisions?.length &&
+      (isSummaryIndexId(c.hit.observation.id) || (!!timestamp && summaryCovers(summary, timestamp)));
     return { ...c, summary: covers ? summary : null };
   });
 }
