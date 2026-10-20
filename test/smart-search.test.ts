@@ -253,7 +253,7 @@ describe("Smart Search Function", () => {
       await kv.set("mem:summaries", "ses_gone_here", { sessionId: "ses_gone_here", project: "my-project" });
       await kv.set("mem:summaries", "ses_gone_elsewhere", { sessionId: "ses_gone_elsewhere", project: "other-project" });
       const savedInEvicted = makeObs({ id: "mem_saved_in_gone", sessionId: "ses_gone_elsewhere", title: "Saved in evicted" });
-      await kv.set("mem:memories", "mem_saved_in_gone", { id: "mem_saved_in_gone", project: "my-project" });
+      await kv.set("mem:memories", "mem_saved_in_gone", { id: "mem_saved_in_gone", project: "my-project", content: "mem_saved_in_gone" });
       const blankSummary = makeObs({ id: "obs_blank_summary", sessionId: "ses_blank", title: "Blank summary" });
       await kv.set("mem:summaries", "ses_blank", { sessionId: "ses_blank", project: "" });
       await kv.set("mem:sessions", "ses_other", {
@@ -264,8 +264,8 @@ describe("Smart Search Function", () => {
         status: "completed",
         observationCount: 1,
       });
-      await kv.set("mem:memories", "mem_here", { id: "mem_here", project: "my-project" });
-      await kv.set("mem:memories", "mem_elsewhere", { id: "mem_elsewhere", project: "other-project" });
+      await kv.set("mem:memories", "mem_here", { id: "mem_here", project: "my-project", content: "mem_here" });
+      await kv.set("mem:memories", "mem_elsewhere", { id: "mem_elsewhere", project: "other-project", content: "mem_elsewhere" });
       searchResults.unshift(
         ...[other, savedHere, savedElsewhere, unknownSession, evictedHere, evictedElsewhere, savedInEvicted, blankSummary].map((observation) => ({
           observation,
