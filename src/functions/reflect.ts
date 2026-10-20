@@ -24,10 +24,14 @@ import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { logger } from "../logger.js";
 import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 import { getInsightMaxIdleWeeks } from "../config.js";
+import { insightClusterKey, restatesInsight } from "./insight-merge.js";
 
 const MIN_CLUSTER_ITEMS = 3;
 // Nodes one reflect pass reads from the graph indexes.
 const REFLECT_GRAPH_NODE_LIMIT = 5000;
+// What a cluster's reflect last read, under KV.config, keyed by the cluster.
+const reflectInputsKey = (clusterKey: string): string =>
+  fingerprintId("reflect:inputs", clusterKey);
 
 interface ConceptCluster {
   concepts: string[];
@@ -319,9 +323,19 @@ export function registerReflectFunctions(
         );
       }
 
+      const clusterInsights = new Map<string, Insight[]>();
+      for (const insight of await kv.list<Insight>(KV.insights).catch(() => [] as Insight[])) {
+        if (insight.deleted) continue;
+        const key = insightClusterKey(insight.project, insight.sourceConceptCluster);
+        const group = clusterInsights.get(key);
+        if (group) group.push(insight);
+        else clusterInsights.set(key, [insight]);
+      }
+
       let newInsights = 0;
       let reinforced = 0;
       let clustersSkipped = 0;
+      let clustersUnchanged = 0;
       let totalInsights = 0;
 
       for (const conceptNames of conceptClusters) {
@@ -377,6 +391,24 @@ export function registerReflectFunctions(
           continue;
         }
 
+        const clusterKey = insightClusterKey(data?.project, conceptNames);
+        const inputsKey = reflectInputsKey(clusterKey);
+        const inputsHash = fingerprintId(
+          "inputs",
+          [
+            ...fitted.facts.map((f) => `f:${f.id}:${f.fact}`),
+            ...fitted.lessons.map((l) => `l:${l.id}:${l.content}`),
+            ...fitted.crystals.map((c) => `c:${c.id}:${c.narrative}`),
+          ]
+            .sort()
+            .join("\n"),
+        );
+        const lastInputs = await kv.get<{ hash: string }>(KV.config, inputsKey).catch(() => null);
+        if (lastInputs?.hash === inputsHash) {
+          clustersUnchanged++;
+          continue;
+        }
+
         const cluster: ConceptCluster = {
           concepts: conceptNames,
           facts: fitted.facts.map((f) => ({
@@ -418,10 +450,15 @@ export function registerReflectFunctions(
 
             const fp = fingerprintId("ins", content.trim().toLowerCase());
             const existing = await kv.get<Insight>(KV.insights, fp);
+            const siblings = clusterInsights.get(clusterKey) ?? [];
+            const restated =
+              existing && !existing.deleted
+                ? existing
+                : siblings.find((i) => restatesInsight(i.content, content));
 
-            if (existing && !existing.deleted) {
-              reinforceInsight(existing);
-              await kv.set(KV.insights, existing.id, existing);
+            if (restated) {
+              reinforceInsight(restated);
+              await kv.set(KV.insights, restated.id, restated);
               reinforced++;
             } else {
               const now = new Date().toISOString();
@@ -442,12 +479,14 @@ export function registerReflectFunctions(
                 decayRate: 0.05,
               };
               await kv.set(KV.insights, insight.id, insight);
+              clusterInsights.set(clusterKey, [...siblings, insight]);
               newInsights++;
             }
 
             clusterCount++;
             totalInsights++;
           }
+          await kv.set(KV.config, inputsKey, { hash: inputsHash, at: new Date().toISOString() });
         } catch {
           continue;
         }
@@ -457,8 +496,9 @@ export function registerReflectFunctions(
         await recordAudit(kv, "reflect", "mem::reflect", [], {
           newInsights,
           reinforced,
-          clustersProcessed: conceptClusters.length - clustersSkipped,
+          clustersProcessed: conceptClusters.length - clustersSkipped - clustersUnchanged,
           clustersSkipped,
+          clustersUnchanged,
           clusterStrategy,
         });
       } catch {}
@@ -467,8 +507,9 @@ export function registerReflectFunctions(
         success: true,
         newInsights,
         reinforced,
-        clustersProcessed: conceptClusters.length - clustersSkipped,
+        clustersProcessed: conceptClusters.length - clustersSkipped - clustersUnchanged,
         clustersSkipped,
+        clustersUnchanged,
         clusterStrategy,
       };
     },

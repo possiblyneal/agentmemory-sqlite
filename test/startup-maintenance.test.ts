@@ -136,6 +136,7 @@ describe("startup maintenance", () => {
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
       decayRepaired: 0,
+      insightsCollapsed: 0,
     });
     expect(
       (store.get(KV.graphNodes, "node-2") as { sourceObservationIds: string[] })
@@ -433,5 +434,118 @@ describe("startup maintenance: decay repair", () => {
     expect(second.decayRepaired).toBe(0);
     expect((store.get(KV.semantic, "c") as { strength: number }).strength).toBe(0.1);
     expect(store.list(KV.audit)).toHaveLength(1);
+  });
+});
+
+describe("startup maintenance: Insight collapse (#271)", () => {
+  let store: SqliteState;
+
+  function insight(id: string, content: string, over: Record<string, unknown> = {}) {
+    return {
+      id,
+      title: id,
+      content,
+      confidence: 0.5,
+      reinforcements: 0,
+      sourceConceptCluster: ["Security", "validation"],
+      sourceMemoryIds: [`${id}-fact`],
+      sourceLessonIds: [],
+      sourceCrystalIds: [],
+      project: "app",
+      tags: [],
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      decayRate: 0.05,
+      ...over,
+    };
+  }
+
+  const LAYERED = "Layered protection for security means input validation safe APIs and deny lists applied together";
+  const LAYERED_AGAIN = "Security needs layered protection with input validation safe APIs and deny lists applied together";
+  const FUZZING = "Randomised payload generation surfaces parser crashes nobody wrote cases for";
+
+  beforeEach(() => {
+    store = new SqliteState(":memory:");
+  });
+
+  afterEach(() => store.close());
+
+  it("merges restating Insights of a cluster into one survivor", async () => {
+    store.set(KV.insights, "a", insight("a", LAYERED, { reinforcements: 2, confidence: 0.6, lastReinforcedAt: "2026-10-05T00:00:00.000Z" }));
+    store.set(KV.insights, "b", insight("b", LAYERED_AGAIN, { reinforcements: 1, confidence: 0.9 }));
+    store.set(KV.insights, "c", insight("c", LAYERED_AGAIN + " today", { reinforcements: 0, confidence: 0.4 }));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsCollapsed).toBe(2);
+    expect(store.list(KV.insights)).toHaveLength(1);
+    const survivor = store.get(KV.insights, "a") as {
+      reinforcements: number;
+      confidence: number;
+      sourceMemoryIds: string[];
+      lastReinforcedAt: string;
+    };
+    expect(survivor.reinforcements).toBe(3);
+    expect(survivor.confidence).toBe(0.9);
+    expect([...survivor.sourceMemoryIds].sort()).toEqual(["a-fact", "b-fact", "c-fact"]);
+    expect(survivor.lastReinforcedAt).toBe("2026-10-05T00:00:00.000Z");
+  });
+
+  it("keeps Insights that say different things, and Insights of other clusters or projects", async () => {
+    store.set(KV.insights, "a", insight("a", LAYERED));
+    store.set(KV.insights, "fuzz", insight("fuzz", FUZZING));
+    store.set(KV.insights, "other-project", insight("other-project", LAYERED_AGAIN, { project: "elsewhere" }));
+    store.set(KV.insights, "other-cluster", insight("other-cluster", LAYERED_AGAIN, { sourceConceptCluster: ["testing", "mocks"] }));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsCollapsed).toBe(0);
+    expect(store.list(KV.insights)).toHaveLength(4);
+  });
+
+  it("audits each merge, marks itself done in KV.config, and runs once", async () => {
+    store.set(KV.insights, "a", insight("a", LAYERED));
+    store.set(KV.insights, "b", insight("b", LAYERED_AGAIN));
+
+    await runStartupMaintenance(store);
+
+    expect(store.get(KV.config, "insight-collapse:done")).toBeTruthy();
+    const audits = store.list(KV.audit) as Array<{ operation: string; targetIds: string[]; details: { event: string; survivor: string } }>;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ operation: "delete", targetIds: ["b"] });
+    expect(audits[0].details).toMatchObject({ event: "insight.collapse", survivor: "a" });
+
+    store.set(KV.insights, "c", insight("c", LAYERED_AGAIN + " again"));
+    store.set(KV.state, "system:startupMaintenanceVersion", 0);
+    const second = await runStartupMaintenance(store);
+
+    expect(second.insightsCollapsed).toBe(0);
+    expect(store.get(KV.insights, "c")).toBeTruthy();
+  });
+
+  it("applies a cluster's merge and deletions together, so a rerun never double-counts", async () => {
+    store.set(KV.insights, "a", insight("a", LAYERED, { reinforcements: 1 }));
+    store.set(KV.insights, "b", insight("b", LAYERED_AGAIN, { reinforcements: 1 }));
+    const realDelete = store.delete.bind(store);
+    let failed = false;
+    store.delete = ((scope: string, key: string) => {
+      if (scope === KV.insights && !failed) {
+        failed = true;
+        throw new Error("interrupted");
+      }
+      return realDelete(scope, key);
+    }) as typeof store.delete;
+
+    await expect(runStartupMaintenance(store)).rejects.toThrow("interrupted");
+
+    expect(store.get(KV.config, "insight-collapse:done")).toBeNull();
+    expect((store.get(KV.insights, "a") as { reinforcements: number }).reinforcements).toBe(1);
+    expect(store.list(KV.insights)).toHaveLength(2);
+
+    store.delete = realDelete as typeof store.delete;
+    await runStartupMaintenance(store);
+
+    expect((store.get(KV.insights, "a") as { reinforcements: number }).reinforcements).toBe(2);
+    expect(store.list(KV.insights)).toHaveLength(1);
   });
 });

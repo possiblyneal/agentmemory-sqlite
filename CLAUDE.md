@@ -176,6 +176,15 @@ sources' obs-node rows: there is no sweep, so records orphaned before this exist
 disk. Import `replace` and snapshot restore rewrite the graph from their own file and do not
 call it.
 
+### Reflect
+`mem::reflect` (`src/functions/reflect.ts`) records a hash of each cluster's inputs in
+`KV.config` (`reflect:inputs_…`) after a successful pass and makes no LLM call for a cluster
+whose hash is unchanged. A new Insight that restates a live Insight of the same project and
+concept set (`restatesInsight()`, token Jaccard 0.3, `src/functions/insight-merge.ts`)
+reinforces it instead of adding a row. `collapseInsights` in `src/state/startup-maintenance.ts`
+merged existing copies once (`KV.config` `insight-collapse:done`). The threshold and its basis
+are in `docs/research/record-kind-counts.md`.
+
 ### MCP Tool Handler
 ```typescript
 case "memory_your_tool": {
