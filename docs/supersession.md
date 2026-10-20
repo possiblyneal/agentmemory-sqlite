@@ -15,7 +15,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 | Memory | stale hidden for a near-restatement (T1); **stale ranked first** for a contradiction with little shared wording (T3) or the only result when superseded by `mem::evolve` (T5) | not reachable (T7) | stale hidden for a near-restatement (T2); **stale ranked first** or alone for a low-overlap contradiction (T4) or `mem::evolve` (T6) |
 | Semantic Fact | **stale ranked first** (T8) | **stale ranked first** (T9) | not reachable (T10) |
 | Lesson | **newer ranked first** (T11) | **stale ranked first** (T12) | not reachable (T10) |
-| Insight | **stale ranked first** (T13) | **stale ranked first** (T14) | not reachable (T10) |
+| Insight | **stale ranked first** (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); **stale ranked first** when the newer work was summarized first (T18) | stale demoted, newest Session first (T16); **stale ranked first** against a contradicting Memory (T19) |
 | Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | **stale ranked first** when it matches the prompt more strongly (T22) or equally (T23) |
 
@@ -39,7 +39,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | passes |
 | T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | `it.fails` |
 | T13 | Insight: smart-search returns the newer Insight ahead of the contradicted one | `it.fails` |
-| T14 | Insight: session start lists the newer Insight ahead of the contradicted one | `it.fails` |
+| T14 | Insight: session start lists the newer Insight ahead of the contradicted one | passes |
 | T15 | Session Summary decision: smart-search never returns a Session Summary decision on its own | passes |
 | T16 | Session Summary decision: prompt-submit gives the newer Session's decisions ahead of the older one's | passes |
 | T17 | Session Summary decision: session start lists the Session whose work is newer first when summaries were written in work order | passes |
@@ -88,7 +88,8 @@ hit, so reinforcement cannot outvote a correction (T11). Session start still ord
 (T12).
 
 **Insights.** Written by `mem::reflect` from concept clusters and never compared with earlier
-Insights. Search ranks like Lessons and session start by confidence (T13, T14).
+Insights. Search ranks like Lessons by confidence (T13). Session start picks the top 5 by
+confidence and lists them newest `createdAt` first (T14).
 
 **Session Summary decisions.** Prompt submit renders covered Sessions newest first by
 `lastObservationAt`, under a header saying the newer of two conflicting rules holds, and adds a

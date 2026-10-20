@@ -331,7 +331,7 @@ describe("supersession: Insight", () => {
     expect(insights[0].insightId).toBe("ins_fresh");
   });
 
-  it.fails("session start lists the newer Insight ahead of the contradicted one", async () => {
+  it("session start lists the newer Insight ahead of the contradicted one", async () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });

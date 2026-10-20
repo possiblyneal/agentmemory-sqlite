@@ -277,6 +277,23 @@ describe("mem::context — insights auto-injection (upstream PR #615)", () => {
     expect(result.context).not.toContain("content-theirs");
     expect(result.context).not.toContain("content-gone");
   });
+
+  it("keeps the five most confident Insights and lists them newest first", async () => {
+    for (let i = 0; i < 5; i++) {
+      await seedInsight(`ins${i}`, { project: "/proj", confidence: 0.9 - i / 100, createdAt: `2026-03-0${i + 1}T00:00:00Z` });
+    }
+    await seedInsight("weak", { project: "/proj", confidence: 0.1, createdAt: "2026-04-01T00:00:00Z" });
+
+    const { context } = await handler({ sessionId: "ses_i", project: "/proj" });
+
+    expect(context).not.toContain("content-weak");
+    const at = (i: number) => context.indexOf(`content-ins${i}`);
+    expect(at(4)).toBeGreaterThan(-1);
+    expect(at(4)).toBeLessThan(at(3));
+    expect(at(3)).toBeLessThan(at(2));
+    expect(at(2)).toBeLessThan(at(1));
+    expect(at(1)).toBeLessThan(at(0));
+  });
 });
 
 describe("mem::context — Semantic Fact injection (#590)", () => {
