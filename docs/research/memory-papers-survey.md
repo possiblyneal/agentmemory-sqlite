@@ -20,9 +20,10 @@ evidence below comes from its abstract and method/results on arXiv unless the ro
   explainer fetches; arXiv was the source of record.
 - **Screen.** All 453 titles read by hand; summaries of 126 keyword hits
   (coding, SWE, supersede, stale, conflict, rerank, BM25, temporal, forget, admission, ...) and
-  58 shortlisted papers read in full summary. 22 had their arXiv HTML read for
-  method and results (1 of the 22, LifeFuse-Mem, was then excluded as latent memory); Threader had its abstract only because no HTML exists.
-- **Result.** 24 kept in the tables (21 read on arXiv, 1 abstract only, 2 site summary only); 429 excluded.
+  58 shortlisted papers read in full summary. The arXiv HTML of each kept paper not tagged
+  otherwise was read for method and results, as was LifeFuse-Mem's, which was then excluded as
+  latent memory; Threader had its abstract only because no HTML exists.
+- **Result.** 24 kept in the tables (20 read on arXiv, 1 abstract only, 3 site summary only: Zep, ECHO, ChronoMem); 429 excluded.
   Per-category counts of the exclusions were not tallied; categories and reasons follow.
 - **Baseline check.** Most conversational results (LoCoMo, LongMemEval) are against Mem0-style
   extraction, MemGPT-style summaries, full context or the paper's own earlier version, not a
