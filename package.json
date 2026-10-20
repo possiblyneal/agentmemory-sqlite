@@ -34,6 +34,7 @@
     "eval:replay": "tsx eval/runner/replay.ts",
     "eval:pmb": "tsx eval/runner/pmb.ts",
     "eval:suite": "tsx eval/runner/suite.ts",
+    "eval:supersession": "tsx eval/runner/supersession.ts",
     "eval:gate": "tsx eval/runner/coding-life.ts --gate eval/baselines/coding-agent-life-v2.json"
   },
   "keywords": [
