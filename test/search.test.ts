@@ -312,6 +312,15 @@ describe("mem::search recency", () => {
     expect(await search([weak, strong])).toEqual(["obs_old", "obs_new"]);
   });
 
+  it("caps an older near-twin below the newer one and leaves an unrelated older Observation in place", async () => {
+    const unrelated = obs("obs_unrelated", "2026-08-01T10:00:00.000Z", "Whitespace rule indent source file whitespace rule indent source file lint formatter config");
+    const twinOld = obs("obs_twin_old", "2026-09-01T10:00:00.000Z", `${text} whitespace rule whitespace rule indent indent source file source file`);
+    const twinNew = obs("obs_twin_new", "2026-10-10T10:00:00.000Z", text);
+    const ids = await search([twinOld, unrelated, twinNew]);
+    expect(ids.indexOf("obs_twin_new")).toBeLessThan(ids.indexOf("obs_twin_old"));
+    expect(ids.indexOf("obs_unrelated")).toBeLessThan(ids.indexOf("obs_twin_new"));
+  });
+
   it("applies the limit after recency ranking", async () => {
     const ids = await search([obs("obs_old", "2026-09-01T10:00:00.000Z"), obs("obs_new", "2026-10-10T10:00:00.000Z")], 1);
     expect(ids).toEqual(["obs_new"]);

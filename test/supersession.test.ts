@@ -407,7 +407,7 @@ describe("supersession: Observation", () => {
     expect(results[0].obsId).toBe("obs_b");
   });
 
-  it.fails("prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly", async () => {
+  it("prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly", async () => {
     await seedObservation(
       observation("obs_a2", "ses_a", OLD, `Whitespace rule whitespace rule: we ${STALE}, ${STALE}, never spaces, tabs tabs tabs in every source file of the repository`),
     );
