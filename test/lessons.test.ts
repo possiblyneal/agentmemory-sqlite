@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { registerLessonsFunctions } from "../src/functions/lessons.js";
+import { registerLessonsFunctions, resetLessonIndex } from "../src/functions/lessons.js";
 import { recordProjectActivity } from "../src/state/project-time.js";
 import type { Lesson } from "../src/types.js";
 
@@ -231,6 +231,54 @@ describe("Lessons", () => {
       })) as { lessons: Lesson[] };
 
       expect(result.lessons.length).toBe(0);
+    });
+
+    describe("a newer Lesson on the same topic", () => {
+      const save = (content: string, at: string) => {
+        vi.setSystemTime(new Date(at));
+        return sdk.trigger("mem::lesson-save", { content, project: "/app" });
+      };
+      const recall = async () =>
+        ((await sdk.trigger("mem::lesson-recall", { query: "deploy branch main release" })) as {
+          lessons: Lesson[];
+        }).lessons.map((l) => l.content);
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        resetLessonIndex();
+      });
+      afterEach(() => vi.useRealTimers());
+
+      it("ranks ahead of the reinforced contradicted Lesson", async () => {
+        await save("Deploy from the main branch release", "2026-09-01T10:00:00.000Z");
+        await save("Deploy from the main branch release", "2026-09-01T11:00:00.000Z");
+        await save("Deploy from the main branch release", "2026-09-01T12:00:00.000Z");
+        await save("Deploy from the staging branch release", "2026-10-10T10:00:00.000Z");
+        vi.setSystemTime(new Date("2026-10-20T10:00:00.000Z"));
+
+        expect(await recall()).toEqual([
+          "Deploy from the staging branch release",
+          "Deploy from the main branch release",
+        ]);
+      });
+
+      it("does not demote an older Lesson on an unrelated topic", async () => {
+        await save("Deploy from the main branch release", "2026-09-01T10:00:00.000Z");
+        await save("Deploy from the main branch release", "2026-09-01T11:00:00.000Z");
+        await save("Rotate keys quarterly", "2026-10-10T10:00:00.000Z");
+        vi.setSystemTime(new Date("2026-10-20T10:00:00.000Z"));
+
+        expect((await recall())[0]).toBe("Deploy from the main branch release");
+      });
+
+      it("lets a reinforcement make the older wording the newer claim", async () => {
+        await save("Deploy from the main branch release", "2026-09-01T10:00:00.000Z");
+        await save("Deploy from the staging branch release", "2026-10-10T10:00:00.000Z");
+        await save("Deploy from the main branch release", "2026-10-15T10:00:00.000Z");
+        vi.setSystemTime(new Date("2026-10-20T10:00:00.000Z"));
+
+        expect((await recall())[0]).toBe("Deploy from the main branch release");
+      });
     });
 
     it("rejects empty query", async () => {

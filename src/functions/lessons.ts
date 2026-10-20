@@ -1,6 +1,6 @@
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
-import { KV, fingerprintId } from "../state/schema.js";
+import { KV, fingerprintId, jaccardSimilarity } from "../state/schema.js";
 import type { Lesson } from "../types.js";
 import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
@@ -50,6 +50,28 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
   }
   await lessonIndexBuild;
   return lessonIndex ?? ensureLessonIndex(kv);
+}
+
+const CONTRADICTION_OVERLAP = 0.5;
+
+function lastActiveAt(lesson: Lesson): number {
+  return new Date(lesson.lastReinforcedAt ?? lesson.createdAt).getTime();
+}
+
+// A Lesson that restates a topic in nearly the same words is the same rule;
+// when its wording differs, the one touched later holds. Rank the older one
+// just behind the newer so reinforcement cannot outvote a correction.
+function ranksBehindNewerLessons(scored: Array<{ lesson: Lesson; score: number }>): void {
+  const byRecency = [...scored].sort((a, b) => lastActiveAt(b.lesson) - lastActiveAt(a.lesson));
+  for (let i = 1; i < byRecency.length; i++) {
+    const older = byRecency[i];
+    for (let j = 0; j < i; j++) {
+      const newer = byRecency[j];
+      if (lastActiveAt(newer.lesson) === lastActiveAt(older.lesson)) continue;
+      if (jaccardSimilarity(newer.lesson.content, older.lesson.content) < CONTRADICTION_OVERLAP) continue;
+      older.score = Math.min(older.score, newer.score * 0.99);
+    }
+  }
 }
 
 export function reinforceLesson(lesson: Lesson): void {
@@ -186,6 +208,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         scored.push({ lesson: l, score: l.confidence * relevance * recencyBoost });
       }
 
+      ranksBehindNewerLessons(scored);
       scored.sort(
         (a, b) =>
           b.score - a.score ||
