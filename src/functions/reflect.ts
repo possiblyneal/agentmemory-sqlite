@@ -221,6 +221,32 @@ function buildJaccardClusters(
   return clusters;
 }
 
+// Insights are never compared with earlier ones, so two with one title (and
+// project) are the same claim restated; the newer holds and takes the better slot.
+function newestFirstWithinTitle(scored: Array<{ insight: Insight; score: number }>): void {
+  const groups = new Map<string, Array<{ insight: Insight; score: number }>>();
+  for (const entry of scored) {
+    const key = `${entry.insight.project ?? ""}\u0000${entry.insight.title.trim().toLowerCase()}`;
+    const group = groups.get(key);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
+  }
+  const claimedAt = (i: Insight) => Date.parse(i.lastReinforcedAt ?? i.createdAt);
+  const slots = new Map<{ insight: Insight; score: number }, number>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const positions = group.map((e) => scored.indexOf(e)).sort((a, b) => a - b);
+    const newestFirst = [...group].sort((a, b) => claimedAt(b.insight) - claimedAt(a.insight));
+    const bestScores = group.map((e) => e.score).sort((a, b) => b - a);
+    newestFirst.forEach((e, n) => slots.set(e, positions[n]));
+    newestFirst.forEach((e, n) => { e.score = bestScores[n]; });
+  }
+  if (slots.size === 0) return;
+  const ordered = [...scored];
+  for (const [entry, pos] of slots) ordered[pos] = entry;
+  scored.splice(0, scored.length, ...ordered);
+}
+
 export function registerReflectFunctions(
   sdk: ISdk,
   kv: StateKV,
@@ -518,6 +544,7 @@ export function registerReflectFunctions(
         .filter(Boolean) as Array<{ insight: Insight; score: number }>;
 
       scored.sort((a, b) => b.score - a.score);
+      newestFirstWithinTitle(scored);
 
       try {
         await recordAudit(kv, "insight_search", "mem::insight-search", [], {
