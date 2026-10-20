@@ -301,13 +301,16 @@ describe("supersession: prompt-submit does not reach Semantic Facts, Lessons or 
 
 describe("supersession: Lesson", () => {
   beforeEach(async () => {
+    vi.setSystemTime(new Date(OLD));
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
+    vi.setSystemTime(new Date(NEW));
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${FRESH}`, project: PROJECT });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00.000Z"));
   });
 
-  it.fails("smart-search returns the newer Lesson ahead of the contradicted one", async () => {
+  it("smart-search returns the newer Lesson ahead of the contradicted one", async () => {
     const { lessons } = await smartSearch("rule indent tabs spaces");
     expect(lessons[0].content).toContain(FRESH);
   });
