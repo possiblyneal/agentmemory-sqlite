@@ -3,7 +3,7 @@ import type { Memory, CompressedObservation, Session } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
-import { deleteIndexed } from "./search.js";
+import { deleteIndexed, deindexSupersededMemory } from "./search.js";
 import { lowerObservationCounts } from "./observe.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { refersToDifferentDates } from "../state/memory-utils.js";
@@ -142,6 +142,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                     : memB;
                 older.isLatest = false;
                 await kv.set(KV.memories, older.id, older);
+                deindexSupersededMemory(older.id);
                 await recordAudit(kv, "forget", "mem::auto-forget", [older.id], {
                   resource: "memory",
                   reason: "auto-forget contradiction",

@@ -237,7 +237,7 @@ describe("supersession: Memory", () => {
     expect(context).not.toContain(LOW_OVERLAP_A);
   });
 
-  it.fails("smart-search hides a Memory that mem::evolve replaced", async () => {
+  it("smart-search hides a Memory that mem::evolve replaced", async () => {
     const stale = memory("mem_stale", NEAR_RESTATEMENT_A, OLD);
     await kv.set(KV.memories, stale.id, stale);
     getSearchIndex().add(memoryToIndexDoc(stale), "memory");
@@ -250,7 +250,7 @@ describe("supersession: Memory", () => {
     expect(results.map((r) => r.title)).toEqual([NEAR_RESTATEMENT_B]);
   });
 
-  it.fails("prompt-submit hides a Memory that mem::evolve replaced", async () => {
+  it("prompt-submit hides a Memory that mem::evolve replaced", async () => {
     const stale = memory("mem_stale", NEAR_RESTATEMENT_A, OLD);
     await kv.set(KV.memories, stale.id, stale);
     getSearchIndex().add(memoryToIndexDoc(stale), "memory");

@@ -5,6 +5,8 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerRelationsFunction } from "../src/functions/relations.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToIndexDoc } from "../src/state/memory-utils.js";
 import type { Memory } from "../src/types.js";
 
 function mockKV() {
@@ -146,6 +148,21 @@ describe("Relations Functions", () => {
 
       const old = await kv.get<Memory>("mem:memories", "mem_old");
       expect(old!.isLatest).toBe(false);
+    });
+
+    it("moves the live index from the replaced version to the new one", async () => {
+      getSearchIndex().clear();
+      const original = makeMemory({ id: "mem_old", version: 1 });
+      await kv.set("mem:memories", "mem_old", original);
+      getSearchIndex().add(memoryToIndexDoc(original), "memory");
+
+      const result = (await sdk.trigger("mem::evolve", {
+        memoryId: "mem_old",
+        newContent: "Updated content",
+      })) as { memory: Memory };
+
+      expect(getSearchIndex().has("mem_old")).toBe(false);
+      expect(getSearchIndex().has(result.memory.id)).toBe(true);
     });
 
     it("returns error when memory not found", async () => {

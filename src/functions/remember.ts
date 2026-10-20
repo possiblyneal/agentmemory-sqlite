@@ -11,7 +11,7 @@ import {
   MEMORY_SESSION,
 } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
-import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorIndexRemove, deleteIndexed } from "./search.js";
+import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, deindexSupersededMemory, deleteIndexed } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
@@ -259,20 +259,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         if (supersededMemory) {
           supersededMemory.isLatest = false;
           await kv.set(KV.memories, supersededMemory.id, supersededMemory);
-          // De-index the superseded version. rebuildIndex() already skips
-          // isLatest === false, but the live indexes keep serving the old
-          // row until the next full rebuild — so the stale text competes
-          // with its own replacement (and a memory-layer boost would
-          // amplify exactly that). Soft-fail: the save already committed.
-          try {
-            getSearchIndex().remove(supersededMemory.id);
-            vectorIndexRemove(supersededMemory.id);
-          } catch (err) {
-            logger.warn("Failed to de-index superseded memory", {
-              memId: supersededMemory.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          deindexSupersededMemory(supersededMemory.id);
         }
         await kv.set(KV.memories, memory.id, memory);
 

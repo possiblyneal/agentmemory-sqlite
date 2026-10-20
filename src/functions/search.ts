@@ -69,6 +69,44 @@ export function vectorIndexRemove(id: string): void {
   vectorIndex?.remove(id);
 }
 
+// The live indexes keep serving a row until the next rebuild, so a Memory
+// marked isLatest=false must leave them explicitly. Soft-fail: the row write
+// already committed and the boot rebuild skips non-latest Memories.
+export function deindexSupersededMemory(id: string): void {
+  try {
+    getSearchIndex().remove(id);
+    vectorIndexRemove(id);
+  } catch (err) {
+    logger.warn("Failed to de-index superseded memory", {
+      memId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// A Memory written outside mem::remember enters the live BM25 index here and
+// the vector index as one vector per chunk, which the fill pass backfills on
+// a provider failure.
+export async function indexNewMemoryVersion(memory: Memory): Promise<void> {
+  try {
+    getSearchIndex().add(memoryToIndexDoc(memory), "memory");
+  } catch (err) {
+    logger.warn("Failed to index new memory version into BM25", {
+      memId: memory.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  const sessionId = memory.sessionIds?.[0] ?? MEMORY_SESSION;
+  await vectorIndexAddBatchGuarded(
+    memoryChunkJobs(memory).map((job) => ({
+      id: job.id,
+      sessionId,
+      text: job.text,
+      context: { kind: "memory" as const, logId: job.id },
+    })),
+  );
+}
+
 // Eligibility and embed-input rules live in src/state/index-corpus.ts so the
 // live write paths, the inproc vector commit and the boot rebuild share one
 // definition. Re-exported here for the existing call sites.
