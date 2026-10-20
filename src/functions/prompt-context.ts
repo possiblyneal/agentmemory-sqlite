@@ -8,6 +8,7 @@ import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
+import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { cutDecision, summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
@@ -239,7 +240,12 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = (await Promise.all(strong.map((r) => candidateFor(kv, r)))).filter(
         ({ ref }) => !seen.has(refKey(ref)),
       );
-      const gated = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
+      const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
+      const shadowed = await shadowedMemoryIds(
+        kv,
+        passed.filter(({ ref }) => ref.kind === "memory").map(({ ref }) => ref.id),
+      );
+      const gated = newerAboveShadowed(passed, ({ ref }) => ref.id, shadowed);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 

@@ -12,7 +12,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 
 | Record kind | search | session start | prompt submit |
 |---|---|---|---|
-| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); **stale ranked first** for a contradiction with little shared wording (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale ranked first** or alone for a low-overlap contradiction (T4) |
+| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale given alone** when the contradiction scores below the relevance floor (T4) |
 | Semantic Fact | unkeyed: **stale ranked first** (T8); keyed: stale hidden (T8k) | unkeyed: **stale ranked first** (T9); keyed: stale hidden (T9k) | not reachable (T10) |
 | Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
@@ -28,8 +28,8 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 |---|---|---|
 | T1 | Memory: smart-search hides a Memory that a near-restatement saved later superseded | passes |
 | T2 | Memory: prompt-submit hides a Memory that a near-restatement saved later superseded | passes |
-| T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | `it.fails` |
-| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common and not the stale one | `it.fails` |
+| T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | passes |
+| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one | `it.fails` |
 | T5 | Memory: smart-search hides a Memory that mem::evolve replaced | passes |
 | T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | passes |
 | T7 | Memory: session start does not reach Memories, so a superseded one cannot appear | passes |
@@ -65,10 +65,19 @@ It compares the new content with existing Memories of the same project and scope
 Jaccard similarity, and above 0.7 sets the old one `isLatest: false` and removes it from the BM25
 and vector indexes, so search and both Injections stop returning it (T1, T2). It needs no LLM.
 It detects restatement, not contradiction: a reversal worded differently stays below 0.7 and
-both Memories stay live (T3, T4). An exact repeat (same `fingerprintId()` of the trimmed,
+both Memories stay live. An exact repeat (same `fingerprintId()` of the trimmed,
 lowercased content, same project and scope) is checked first and does not supersede: it raises
 the existing Memory's `strength` by 1 (cap 10), keeps its id, audits `reinforce` and returns
 that id. Only a near-restatement gets a new id.
+
+**Read-side shadowing (`shadowedMemoryIds`, `newerAboveShadowed`, `src/functions/memory-shadow.ts`).**
+Of the Memories one query returns, an older one is shadowed by a newer one of the same type and
+Global marker that shares at least 2 distinctive terms (3+ letters, not stop words) covering 0.3 of
+the smaller term set. The newer is moved directly above the older, which stays; nothing is marked,
+hidden or deleted, and no LLM or stored field is involved. `mem::smart-search` reorders the hits
+above its relevance floor (T3). `mem::prompt-context` reorders the hits that passed its floor and
+the gate, so it never adds a newer Memory that scored below the floor: in T4 only the stale
+Memory passes, it is given alone, and the test stays `it.fails` until the newer one is admitted.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
 `mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call
