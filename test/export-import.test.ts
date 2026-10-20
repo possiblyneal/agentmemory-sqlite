@@ -278,6 +278,17 @@ describe("Export/Import Functions", () => {
     }
   });
 
+  it("import indexes a Summary's decisions, and replace leaves no stale decision hit", async () => {
+    const decided = { ...testSummary, sessionId: "ses_dec", keyDecisions: ["Rollbacks restore the previous tarball"] };
+    const base = { version: "0.3.0" as const, exportedAt: new Date().toISOString(), sessions: [], observations: {}, memories: [] };
+
+    await sdk.trigger("mem::import", { exportData: { ...base, summaries: [decided] }, strategy: "merge" });
+    expect(getSearchIndex().search("rollbacks restore tarball").map((r) => r.sessionId)).toEqual(["ses_dec"]);
+
+    await sdk.trigger("mem::import", { exportData: { ...base, summaries: [] }, strategy: "replace" });
+    expect(getSearchIndex().search("rollbacks restore tarball")).toEqual([]);
+  });
+
   it("import with skip strategy does not overwrite existing", async () => {
     const exportData: ExportData = {
       version: "0.3.0",

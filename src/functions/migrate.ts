@@ -9,6 +9,7 @@ import type {
   CompressedObservation,
   SessionSummary,
 } from "../types.js";
+import { indexSummary } from "./search.js";
 import { logger } from "../logger.js";
 
 const ALLOWED_DIRS = [resolve(homedir(), ".agentmemory")];
@@ -212,6 +213,7 @@ export function registerMigrateFunction(sdk: ISdk, kv: StateKV): void {
             observationCount: row.observation_count || 0,
           };
           await kv.set(KV.summaries, row.session_id, summary);
+          indexSummary(summary);
           summaryCount++;
         }
 

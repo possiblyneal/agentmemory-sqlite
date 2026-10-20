@@ -14,6 +14,7 @@ import { searchLessons } from "./lessons.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
+import { isSummaryIndexId } from "../state/summary-index.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -80,7 +81,9 @@ function queryFor(prompt: string, reply: string | undefined): string {
 
 // mem::search returns Memories in the Observation shape, under the
 // Memory's own id, so only the Memory store can tell the two apart.
+// A hit on a Summary's decisions stands for that Summary.
 async function candidateFor(kv: StateKV, hit: NarratedHit): Promise<Candidate> {
+  if (isSummaryIndexId(hit.observation.id)) return { hit, ref: { kind: "summary", id: hit.sessionId } };
   const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
   const ref = withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
   return { hit, ref, ...(memory && { memoryAt: memory.updatedAt ?? memory.createdAt }) };
@@ -95,13 +98,17 @@ type Resolved = Candidate & { summary: SessionSummary | null };
 async function withCoveringSummaries(kv: StateKV, ranked: Candidate[]): Promise<Resolved[]> {
   const summaries = await Promise.all(
     ranked.map(({ hit, ref }) =>
-      ref.kind === "observation" ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null) : null,
+      ref.kind === "observation" || ref.kind === "summary"
+        ? kv.get<SessionSummary>(KV.summaries, hit.sessionId).catch(() => null)
+        : null,
     ),
   );
   return ranked.map((c, i) => {
     const summary = summaries[i];
     const { timestamp } = c.hit.observation;
-    const covers = !!summary?.keyDecisions?.length && !!timestamp && summaryCovers(summary, timestamp);
+    const covers =
+      !!summary?.keyDecisions?.length &&
+      (isSummaryIndexId(c.hit.observation.id) || (!!timestamp && summaryCovers(summary, timestamp)));
     return { ...c, summary: covers ? summary : null };
   });
 }
@@ -167,7 +174,7 @@ async function laterAmendment(
   project?: string,
 ): Promise<Resolved | null> {
   const ownId = given.hit.sessionId;
-  const { results } = await sdk.trigger<{ query: string; limit: number; project?: string }, { results: SearchHit[] }>({
+  const { results: hits } = await sdk.trigger<{ query: string; limit: number; project?: string }, { results: SearchHit[] }>({
     function_id: "mem::search",
     payload: {
       query: [given.summary.title, ...given.summary.keyDecisions.slice(0, MAX_DECISIONS)].join(" "),
@@ -175,6 +182,9 @@ async function laterAmendment(
       ...(project && { project }),
     },
   });
+  // The thresholds were measured on Observation scores; a Summary document
+  // queried with its own decisions would set `own` far above them.
+  const results = hits.filter((r) => !isSummaryIndexId(r.observation.id));
   const memories = await Promise.all(results.map((r) => kv.get<Memory>(KV.memories, r.observation.id).catch(() => null)));
   const bestPerSession = new Map<string, SearchHit>();
   results.forEach((r, i) => {

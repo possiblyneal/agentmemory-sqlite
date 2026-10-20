@@ -24,6 +24,7 @@ import {
 import { logger } from "../logger.js";
 import { getCounters } from "../telemetry/setup.js";
 import { graphReadable } from "../state/graph-indexes.js";
+import { isSummaryIndexId, loadSummaryHit } from "../state/summary-index.js";
 import { createProjectMatcher, getEmbeddingProvider } from "./search.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
 
@@ -503,6 +504,7 @@ async function findObservation(
   obsId: string,
   sessionIdHint?: string,
 ): Promise<CompressedObservation | null> {
+  if (isSummaryIndexId(obsId)) return loadSummaryHit(kv, obsId);
   if (sessionIdHint) {
     const obs = await kv
       .get<CompressedObservation>(KV.observations(sessionIdHint), obsId)

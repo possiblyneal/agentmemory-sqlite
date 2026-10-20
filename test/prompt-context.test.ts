@@ -6,6 +6,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerPromptContextFunction } from "../src/functions/prompt-context.js";
 import { KV } from "../src/state/schema.js";
+import { summaryIndexId } from "../src/state/summary-index.js";
 import type { InjectionRecord } from "../src/types.js";
 import { mockKV, mockSdk } from "./helpers/mocks.js";
 
@@ -410,6 +411,17 @@ describe("mem::prompt-context", () => {
       expect(result.context).toContain("- Keep the record with the most filled fields");
     });
 
+    it("judges the amendment on Observation scores, leaving Summary-layer hits out", async () => {
+      amendmentSearch([
+        { id: "summary:ses_rule", score: 200, sessionId: "ses_rule", timestamp: "2026-07-17T02:30:00.000Z" },
+        { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
+        { id: "summary:ses_decoy", score: 26, sessionId: "ses_decoy", timestamp: "2026-08-01T10:30:00.000Z" },
+        { id: "obs_a", score: 27, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
+      ]);
+      const result = await run("contact sync leaves duplicates behind");
+      expect(result.injected.map((r) => r.id)).toEqual(["ses_amend", "ses_rule"]);
+    });
+
     it("does not give an earlier Session or one that barely leads the rest", async () => {
       amendmentSearch([
         { id: "obs_r", score: 50, sessionId: "ses_rule", timestamp: "2026-07-17T02:13:00.000Z" },
@@ -676,5 +688,44 @@ describe("mem::prompt-context", () => {
       throw new Error("isolated scope without agent id");
     });
     await expect(run("staging auth fails when the token is unset")).rejects.toThrow("isolated scope");
+  });
+  describe("a Summary decision hit", () => {
+    const decided = (sessionId: string, title: string, decision: string, extra: object = {}) =>
+      kv.set(KV.summaries, sessionId, {
+        sessionId,
+        project: "shipctl",
+        createdAt: "2026-10-01T12:00:00.000Z",
+        title,
+        keyDecisions: [decision],
+        filesModified: ["src/rollback.rs"],
+        ...extra,
+      });
+
+    it("reaches the Session's decisions block when its Observations never matched", async () => {
+      await decided("ses_old", "Release tooling work", "Rollbacks restore the previous tarball first", {
+        coveredThrough: "2026-09-30T00:00:00.000Z",
+      });
+      hits = [{ id: summaryIndexId("ses_old"), score: 14, sessionId: "ses_old", narrative: "Rollbacks restore the previous tarball first" }];
+      const result = await run("how do rollbacks restore the previous tarball");
+      expect(result.context).toContain('Session "Release tooling work" (2026-09-30):');
+      expect(result.context).toContain("- Rollbacks restore the previous tarball first");
+      expect(result.injected).toEqual([{ kind: "summary", id: "ses_old", files: ["src/rollback.rs"] }]);
+    });
+
+    it("renders the Session once when its Observations hit as well, counted as one unit", async () => {
+      await decided("ses_old", "Release tooling work", "Rollbacks restore the previous tarball first", {
+        coveredThrough: "2026-10-01T13:00:00.000Z",
+      });
+      hits = [
+        { id: summaryIndexId("ses_old"), score: 15, sessionId: "ses_old", narrative: "Rollbacks restore the previous tarball first" },
+        { id: "obs_a", score: 14, sessionId: "ses_old" },
+        { id: "obs_b", score: 13, sessionId: "ses_b" },
+        { id: "obs_c", score: 12, sessionId: "ses_c" },
+        { id: "obs_d", score: 11, sessionId: "ses_d" },
+      ];
+      const result = await run("how do rollbacks restore the previous tarball");
+      expect(result.injected.map((r) => r.id)).toEqual(["ses_old", "obs_b", "obs_c"]);
+      expect(result.context.match(/Session "Release tooling work"/g)).toHaveLength(1);
+    });
   });
 });

@@ -12,7 +12,7 @@ import { registerRememberFunction } from "../src/functions/remember.js";
 import { registerGovernanceFunction } from "../src/functions/governance.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { registerMcpEndpoints } from "../src/mcp/server.js";
-import { getSearchIndex } from "../src/functions/search.js";
+import { getSearchIndex, indexSummary } from "../src/functions/search.js";
 import { memoryToObservation } from "../src/state/memory-utils.js";
 import { KV } from "../src/state/schema.js";
 import type { Memory } from "../src/types.js";
@@ -262,6 +262,22 @@ describe("mem::forget session branch", () => {
 
     // The session existed, its summary never did.
     expect(result.deleted).toBe(1);
+  });
+
+  it("leaves no decision hit for a forgotten Session's Summary", async () => {
+    const { kv, sdk } = surfaces();
+    const summary = {
+      sessionId: "ses_1", project: "p", createdAt: "2026-09-01T00:00:00Z", title: "Release tooling",
+      narrative: "n", keyDecisions: ["Rollbacks restore the previous tarball"], filesModified: [], concepts: [], observationCount: 1,
+    };
+    await kv.set(KV.sessions, "ses_1", { id: "ses_1" });
+    await kv.set(KV.summaries, "ses_1", summary);
+    indexSummary(summary);
+    expect(getSearchIndex().search("rollbacks restore tarball")).toHaveLength(1);
+
+    await sdk.trigger({ function_id: "mem::forget", payload: { sessionId: "ses_1" } });
+
+    expect(getSearchIndex().search("rollbacks restore tarball")).toEqual([]);
   });
 
   it("reports nothing removed for a session that does not exist", async () => {

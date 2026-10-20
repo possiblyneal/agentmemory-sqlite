@@ -26,7 +26,7 @@ import { MAX_PAYLOAD_BYTES, type OversizedPayload } from "../state/payload-bound
 import { StateKV } from "../state/kv.js";
 import { VERSION } from "../version.js";
 import { recordAudit } from "./audit.js";
-import { deleteIndexed, indexRecords } from "./search.js";
+import { deindexSummary, deleteIndexed, indexRecords, indexSummary } from "./search.js";
 import { resetLessonIndex } from "./lessons.js";
 import { logger } from "../logger.js";
 
@@ -332,7 +332,10 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         );
         await runChunked(
           await kv.list<SessionSummary>(KV.summaries),
-          (s) => kv.delete(KV.summaries, s.sessionId),
+          async (s) => {
+            await kv.delete(KV.summaries, s.sessionId);
+            deindexSummary(s.sessionId);
+          },
         );
         await runChunked(
           await kv.list<Signal>(KV.signals).catch(() => []),
@@ -453,6 +456,7 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           }
         }
         await kv.set(KV.summaries, summary.sessionId, summary);
+        indexSummary(summary);
         stats.summaries++;
       });
 

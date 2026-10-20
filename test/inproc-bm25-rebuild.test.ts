@@ -150,6 +150,27 @@ describe("inproc BM25 rebuild from content", () => {
     expect(getSearchIndex().search("zebras", 10).map((h) => h.obsId).sort()).toEqual(["mem_1", "obs_bare", "obs_numtool", "obs_odd"]);
   });
 
+  it("gives an existing store its Session Summary decisions, BM25 only", async () => {
+    seed();
+    state.set(KV.summaries, "ses_live", {
+      sessionId: "ses_live",
+      project: "p",
+      createdAt: "2026-09-07T00:00:00.000Z",
+      title: "Release tooling",
+      narrative: "n",
+      keyDecisions: ["Rollbacks restore the previous tarball"],
+      filesModified: [],
+      concepts: [],
+      observationCount: 2,
+    });
+    state.set(KV.summaries, "ses_bad", "not an object");
+    const r = await rebuildBm25FromContent(state.db);
+    expect(r.skipped).toBe(0);
+    const hits = getSearchIndex().search("rollbacks restore tarball", 10);
+    expect(hits.map((h) => [h.obsId, h.sessionId])).toEqual([["summary:ses_live", "ses_live"]]);
+    expect(Array.from(enumerateIndexCorpus(state.db)).some((i) => i.key === "ses_live")).toBe(false);
+  });
+
   it("is idempotent and yields an empty index on an empty store", async () => {
     const r = await rebuildBm25FromContent(state.db);
     expect(r).toMatchObject({ docs: 0, rows: 0 });
