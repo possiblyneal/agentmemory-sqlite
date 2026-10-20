@@ -6,6 +6,8 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerConsolidateFunction } from "../src/functions/consolidate.js";
 import { KV } from "../src/state/schema.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToIndexDoc } from "../src/state/memory-utils.js";
 import type { CompressedObservation, Memory, MemoryProvider, Session } from "../src/types.js";
 
 function makeMockKV() {
@@ -120,5 +122,18 @@ describe("mem::consolidate dedup", () => {
     ]);
     await run();
     expect(await latest()).toHaveLength(1);
+  });
+
+  it("moves the live index from the evolved Memory to its new version", async () => {
+    getSearchIndex().clear();
+    const { run, kv, latest } = await setup([["auth"], ["auth"], ["auth"]]);
+    await run();
+    const [first] = await latest();
+    getSearchIndex().add(memoryToIndexDoc(first), "memory");
+    await kv.set(KV.observations("s1"), "o3", obs("o3", ["auth"]));
+    await run();
+    const [second] = await latest();
+    expect(getSearchIndex().has(first.id)).toBe(false);
+    expect(getSearchIndex().has(second.id)).toBe(true);
   });
 });

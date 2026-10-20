@@ -12,7 +12,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 
 | Record kind | search | session start | prompt submit |
 |---|---|---|---|
-| Memory | stale hidden for a near-restatement (T1); **stale ranked first** for a contradiction with little shared wording (T3) or the only result when superseded by `mem::evolve` (T5) | not reachable (T7) | stale hidden for a near-restatement (T2); **stale ranked first** or alone for a low-overlap contradiction (T4) or `mem::evolve` (T6) |
+| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); **stale ranked first** for a contradiction with little shared wording (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale ranked first** or alone for a low-overlap contradiction (T4) |
 | Semantic Fact | **stale ranked first** (T8) | **stale ranked first** (T9) | not reachable (T10) |
 | Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
@@ -30,8 +30,8 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T2 | Memory: prompt-submit hides a Memory that a near-restatement saved later superseded | passes |
 | T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | `it.fails` |
 | T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common and not the stale one | `it.fails` |
-| T5 | Memory: smart-search hides a Memory that mem::evolve replaced | `it.fails` |
-| T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | `it.fails` |
+| T5 | Memory: smart-search hides a Memory that mem::evolve replaced | passes |
+| T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | passes |
 | T7 | Memory: session start does not reach Memories, so a superseded one cannot appear | passes |
 | T8 | Semantic Fact: smart-search returns the newer Semantic Fact ahead of the contradicted one | `it.fails` |
 | T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | `it.fails` |
@@ -67,13 +67,14 @@ both Memories stay live (T3, T4). Memories are not content-addressed here; `gene
 each save a new id, and `fingerprintId()` is used by Lessons.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
-`mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` in the store but do not remove the
-row from the live index. `mem::evolve` also never adds the new version to BM25, so until the next
-boot the stale Memory is the only BM25 hit (T5, T6 seed the stale Memory as `mem::remember`
-would, and leave the evolved one unindexed as production does). `mem::search` and `HybridSearch` drop such a row only when
-`AGENTMEMORY_NONLATEST_FILTER=true`; by default they count it as `nonlatestLeaked` and return it
-(T5, T6). A daemon restart rebuilds BM25 from content and skips non-latest Memories, so the leak
-lasts until the next boot. `mem::evict` deletes a non-latest Memory after `nonLatestMemoryMaxDays`.
+`mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call
+`deindexSupersededMemory()` (`src/functions/search.ts`, the helper `mem::remember` uses), which
+removes the row from BM25 and the vector index. `mem::evolve` and the evolve branch of
+`mem::consolidate` add the new version through `indexNewMemoryVersion()`, so a replaced Memory is
+neither returned nor the only hit (T5, T6). A Memory `mem::consolidate` creates fresh (no
+predecessor) is still not added to the live index until the next boot. A daemon restart rebuilds
+BM25 from content and skips non-latest Memories. `mem::evict` deletes a non-latest Memory after
+`nonLatestMemoryMaxDays`; `AGENTMEMORY_NONLATEST_FILTER` stays off by default.
 
 **Semantic Facts.** Consolidation merges a fact into an existing one only on exact
 case-insensitive text equality, then keeps the higher confidence. A contradicting fact is a new

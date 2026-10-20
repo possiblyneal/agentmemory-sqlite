@@ -8,7 +8,7 @@ import { registerAutoForgetFunction } from "../src/functions/auto-forget.js";
 import {
   getSearchIndex,
 } from "../src/functions/search.js";
-import { memoryToObservation } from "../src/state/memory-utils.js";
+import { memoryToObservation, memoryToIndexDoc } from "../src/state/memory-utils.js";
 import type { Memory, CompressedObservation, Session } from "../src/types.js";
 
 function mockKV() {
@@ -131,6 +131,22 @@ describe("Auto-Forget Function", () => {
     expect(result.contradictions.length).toBe(1);
     const older = await kv.get<Memory>("mem:memories", "mem_1");
     expect(older!.isLatest).toBe(false);
+  });
+
+  it("removes the older contradicted memory from the live index", async () => {
+    getSearchIndex().clear();
+    const content = "Use React hooks for state management in all components";
+    const mem1 = makeMemory({ id: "mem_1", content, createdAt: "2026-01-01T00:00:00Z" });
+    const mem2 = makeMemory({ id: "mem_2", content, createdAt: "2026-02-01T00:00:00Z" });
+    for (const m of [mem1, mem2]) {
+      await kv.set("mem:memories", m.id, m);
+      getSearchIndex().add(memoryToIndexDoc(m), "memory");
+    }
+
+    await sdk.trigger("mem::auto-forget", {});
+
+    expect(getSearchIndex().has("mem_1")).toBe(false);
+    expect(getSearchIndex().has("mem_2")).toBe(true);
   });
 
   it("evicts low-value old observations", async () => {
