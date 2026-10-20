@@ -4,6 +4,7 @@ import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
 import { SearchIndex, isSearchLayer } from '../state/search-index.js'
 import { CHARS_PER_TOKEN } from '../utils/tokens.js'
+import { isDurableRecord, recencyFactor } from '../state/hybrid-search.js'
 import { VectorIndex } from '../state/vector-index.js'
 import type { EmbeddingProvider } from '../types.js'
 import {
@@ -791,13 +792,19 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         // happens post-lookup. Wildcard ("*") and no-isolation paths
         // resolved filterAgentId=undefined upstream and pass through.
         if (filterAgentId !== undefined && obs.agentId !== filterAgentId) continue
-        if (enriched.length >= effectiveLimit) break
         enriched.push({
           observation: obs,
           score: candidates[i].score,
           sessionId: candidates[i].sessionId,
         })
       }
+      const now = Date.now()
+      for (const r of enriched) {
+        if (isDurableRecord(r.observation.id, r.sessionId)) continue
+        r.score *= recencyFactor(r.observation.timestamp, now)
+      }
+      enriched.sort((a, b) => b.score - a.score)
+      enriched.length = Math.min(enriched.length, effectiveLimit)
 
       const estimateTokens = (value: unknown): number =>
         Math.max(1, Math.ceil(JSON.stringify(value).length / CHARS_PER_TOKEN))

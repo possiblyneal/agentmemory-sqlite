@@ -270,3 +270,50 @@ describe("mem::search", () => {
     setEmbeddingProvider(null);
   });
 });
+
+describe("mem::search recency", () => {
+  const NOW = "2026-10-20T12:00:00.000Z";
+  const text = "Whitespace rule: indent in every source file of the repository";
+
+  function obs(id: string, timestamp: string, narrative = text): CompressedObservation {
+    return {
+      id, sessionId: "ses_r", timestamp, type: "decision", title: "Whitespace rule",
+      facts: [], narrative, concepts: [], files: [], importance: 6,
+    };
+  }
+
+  async function search(seed: CompressedObservation[], limit?: number) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(NOW));
+    const sdk = mockSdk();
+    const kv = mockKV();
+    registerSearchFunction(sdk as never, kv as never);
+    getSearchIndex().clear();
+    for (const o of seed) {
+      await kv.set(KV.observations("ses_r"), o.id, o);
+      getSearchIndex().add(o);
+    }
+    try {
+      const out = (await sdk.trigger("mem::search", { query: "whitespace rule indent source file", limit })) as { results: Array<{ observation: { id: string } }> };
+      return out.results.map((r) => r.observation.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("ranks the newer Observation first when two match equally", async () => {
+    const ids = await search([obs("obs_old", "2026-09-01T10:00:00.000Z"), obs("obs_new", "2026-10-10T10:00:00.000Z")]);
+    expect(ids).toEqual(["obs_new", "obs_old"]);
+  });
+
+  it("keeps a clearly stronger older match ahead of a newer weak one", async () => {
+    const strong = obs("obs_old", "2026-09-01T10:00:00.000Z", `${text} whitespace rule indent indent source file source file`);
+    const weak = obs("obs_new", "2026-10-10T10:00:00.000Z", "Whitespace note about a file");
+    expect(await search([weak, strong])).toEqual(["obs_old", "obs_new"]);
+  });
+
+  it("applies the limit after recency ranking", async () => {
+    const ids = await search([obs("obs_old", "2026-09-01T10:00:00.000Z"), obs("obs_new", "2026-10-10T10:00:00.000Z")], 1);
+    expect(ids).toEqual(["obs_new"]);
+  });
+});

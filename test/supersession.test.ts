@@ -415,7 +415,7 @@ describe("supersession: Observation", () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 
-  it.fails("prompt-submit gives the newer Observation ahead of the contradicted one", async () => {
+  it("prompt-submit gives the newer Observation ahead of the contradicted one", async () => {
     const context = await promptSubmit("what is the whitespace rule, should we indent with tabs or spaces in every source file of the repository");
     expect(ranksBefore(context, FRESH, STALE)).toBe(true);
   });

@@ -17,7 +17,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 | Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
-| Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | **stale ranked first** when it matches the prompt more strongly (T22) or equally (T23) |
+| Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | **stale ranked first** when it matches the prompt more strongly (T22); stale demoted when equal (T23) |
 
 "Hidden" means the stale record is absent. "Demoted" means both are returned and the newer
 one is first. "Ranked first" means the stale record leads, or is the only one returned.
@@ -48,7 +48,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T20 | Observation: smart-search ranks the newer Observation above the contradicted one | passes |
 | T21 | Observation: smart-search ranks the newer Observation above a contradicted one that matches the query more strongly | passes |
 | T22 | Observation: prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly | `it.fails` |
-| T23 | Observation: prompt-submit gives the newer Observation ahead of the contradicted one | `it.fails` |
+| T23 | Observation: prompt-submit gives the newer Observation ahead of the contradicted one | passes |
 | T24 | Observation: session start lists the newer Session's Observation ahead of the contradicted one | passes |
 
 The Semantic Fact, Lesson and Insight fixtures give A the higher confidence (0.8 against 0.7
@@ -103,9 +103,10 @@ and Observations follow the Sessions.
 
 **Observations.** Never superseded. `HybridSearch` multiplies Observation scores by a mild
 recency factor (half-life 180 days, floor 0.6), which lets a newer Observation beat an older one
-within that margin (T20, T21). `mem::search`, which prompt submit calls, has no recency term, so
-an older Observation that matches the prompt more strongly leads (T22), and an equal match ties
-and keeps insertion order, so the older one leads there too (T23). Session start lists Sessions newest first (T24).
+within that margin (T20, T21). `mem::search`, which prompt submit calls, applies the same factor to Observation scores
+(Memories are exempt) before it cuts to the limit, so the newer one leads on an equal match (T23).
+The factor separates the two fixtures by 5.8%, less than the 7% by which the older one's BM25
+score leads in T22, so it still ranks first there. Session start lists Sessions newest first (T24).
 
 ## Not covered
 
