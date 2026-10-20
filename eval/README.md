@@ -95,7 +95,7 @@ LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json \
   npm run eval:longmemeval -- --adapters grep,agentmemory --stratify 10
 ```
 
-The `agentmemory` adapter starts a fresh sandbox per question there, since every question brings its own haystack.
+The `agentmemory` adapter starts a fresh sandbox per question there, since every question brings its own haystack, and dates each stored Session by its `haystack_dates` entry, so a query that names a date can match it.
 
 ### Suite: iterate without overfitting
 

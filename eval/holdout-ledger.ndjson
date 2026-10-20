@@ -4,3 +4,9 @@
 {"at":"2026-10-19T20:55:11.234Z","bench":"coding-life","split":"holdout","label":"stop-hold-fast-holdout","commit":"e32ae98"}
 {"at":"2026-10-19T20:55:11.241Z","bench":"pmb","split":"holdout","label":"stop-hold-fast-holdout","commit":"e32ae98"}
 {"at":"2026-10-19T20:55:12.597Z","bench":"longmemeval","split":"holdout","label":"stop-hold-fast-holdout","commit":"e32ae98"}
+{"at":"2026-10-19T23:35:51.991Z","bench":"pmb","split":"holdout","label":"main-hold3-fast-holdout","commit":"22e2bc0"}
+{"at":"2026-10-19T23:35:52.057Z","bench":"coding-life","split":"holdout","label":"main-hold3-fast-holdout","commit":"22e2bc0"}
+{"at":"2026-10-19T23:35:55.530Z","bench":"longmemeval","split":"holdout","label":"main-hold3-fast-holdout","commit":"22e2bc0"}
+{"at":"2026-10-20T00:36:09.530Z","bench":"pmb","split":"holdout","label":"date-hold-fast-holdout","commit":"90d59de"}
+{"at":"2026-10-20T00:36:09.642Z","bench":"coding-life","split":"holdout","label":"date-hold-fast-holdout","commit":"90d59de"}
+{"at":"2026-10-20T00:36:11.845Z","bench":"longmemeval","split":"holdout","label":"date-hold-fast-holdout","commit":"90d59de"}

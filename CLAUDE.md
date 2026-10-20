@@ -227,6 +227,15 @@ has re-embedded. Query text is embedded through `embedQuery()`
 (`src/providers/embedding/index.ts`), which uses a provider's asymmetric query path when it has
 one — BGE v1.5 runs CLS pooling and prefixes its queries.
 
+### Date terms
+`SearchIndex.add()` gives each record `@date:YYYY-MM-DD`, `@month:YYYY-MM` and `@md:MM-DD`
+terms from its timestamp's local calendar day (`src/state/date-terms.ts`), in `termFreq` but
+not `termCount`, so a query with no date scores as before. `search()` appends at most 5 of the
+query's dates at weight 1.0: ISO dates (not inside a path or dated filename), month-day and
+day-month with an optional year, and month-year. A bare month is not matched; `may` and the
+short forms count only beside an ordinal, a year, or after "on". The in-process Engine rebuilds
+BM25 from content at boot, so there is no migration.
+
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
 only when it has content and `isReadOnlyObservation()` (`src/functions/observe.ts`) is false.
