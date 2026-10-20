@@ -367,7 +367,7 @@ describe("supersession: Session Summary decision", () => {
     expect(ranksBefore(await sessionStart(), `Rule: ${FRESH}`, `Rule: ${STALE}`)).toBe(true);
   });
 
-  it.fails("session start lists the Session whose work is newer first when its summary was written earlier", async () => {
+  it("session start lists the Session whose work is newer first when its summary was written earlier", async () => {
     await seedSessions(
       { createdAt: "2026-10-15T00:00:00.000Z", lastObservationAt: OLD },
       { createdAt: "2026-10-11T00:00:00.000Z", lastObservationAt: NEW },

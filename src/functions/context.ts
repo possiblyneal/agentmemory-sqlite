@@ -14,6 +14,7 @@ import type {
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAccessBatch } from "./access-tracker.js";
+import { decidedAt } from "./prompt-context.js";
 import { withFiles } from "./injections.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
 import { logger } from "../logger.js";
@@ -266,7 +267,7 @@ export function registerContextFunction(
             type: "summary",
             content,
             tokens: estimateTokens(content),
-            recency: new Date(summary.createdAt).getTime(),
+            recency: new Date(decidedAt(summary)).getTime(),
             sources: [withFiles({ kind: "summary", id: sessions[i].id }, summary.filesModified)],
           });
         } else {

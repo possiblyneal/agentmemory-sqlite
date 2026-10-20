@@ -89,7 +89,7 @@ function distinctUnits(ranked: Resolved[]): Resolved[] {
 // thing when choosing an amendment as when rendering it. coveredThrough is
 // when the Summary was written, so Sessions imported or summarized together
 // would be ordered by milliseconds of write time, not by when the work was done.
-const decidedAt = (summary: SessionSummary) =>
+export const decidedAt = (summary: SessionSummary) =>
   summary.lastObservationAt ?? summary.coveredThrough ?? summary.createdAt;
 
 // A Session that amends another's rules restates them, so a search on those
