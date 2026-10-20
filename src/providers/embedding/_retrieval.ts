@@ -31,3 +31,8 @@ const MODEL_RETRIEVAL: Array<[RegExp, RetrievalProfile]> = [
 export function retrievalProfileFor(modelId: string): RetrievalProfile {
   return MODEL_RETRIEVAL.find(([pattern]) => pattern.test(modelId))?.[1] ?? DEFAULT_RETRIEVAL;
 }
+
+// A document prefix changes every stored vector, so it is part of the space.
+export function withDocumentPrefix(vectorSpace: string, retrieval: RetrievalProfile): string {
+  return retrieval.documentPrefix ? `${vectorSpace}:doc=${retrieval.documentPrefix}` : vectorSpace;
+}

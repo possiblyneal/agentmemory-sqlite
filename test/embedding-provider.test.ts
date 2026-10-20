@@ -149,6 +149,8 @@ describe("OpenAIEmbeddingProvider", () => {
       ([, init]) => JSON.parse((init as RequestInit).body as string).input,
     );
     expect(inputs).toEqual([["title: none | text: a document"], ["task: search result | query: a query"]]);
+    expect(provider.vectorSpace).toBe("openai:embeddinggemma-2:768:doc=title: none | text: ");
+    expect(provider.minRelevantCosine).toBe(0.69);
 
     fetchSpy.mockRestore();
   });

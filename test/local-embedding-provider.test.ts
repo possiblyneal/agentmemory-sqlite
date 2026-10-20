@@ -149,6 +149,9 @@ describe("LocalEmbeddingProvider (with loaded pipeline)", () => {
       pooling: "mean",
       normalize: true,
     });
+    expect(provider.vectorSpace).toBe(
+      "local:onnx-community/embeddinggemma-2-ONNX:mean:768:doc=title: none | text: ",
+    );
     vi.unstubAllEnvs();
   });
 

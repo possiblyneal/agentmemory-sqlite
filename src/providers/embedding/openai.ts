@@ -9,7 +9,7 @@ import {
   normalizeBaseUrl,
 } from "../_openai-shared.js";
 import { requestedDimensions, resolveDimensions } from "./_dimensions.js";
-import { retrievalProfileFor, type RetrievalProfile } from "./_retrieval.js";
+import { retrievalProfileFor, withDocumentPrefix, type RetrievalProfile } from "./_retrieval.js";
 
 const DEFAULT_MODEL = "text-embedding-3-small";
 
@@ -57,8 +57,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private model: string;
   private isAzure: boolean;
   private azureApiVersion: string;
-  private retrieval: RetrievalProfile;
-  readonly minRelevantCosine: number | undefined;
+  private readonly retrieval: RetrievalProfile;
 
   constructor(apiKey?: string) {
     // Separate API key path: caller-passed wins, then OPENAI_EMBEDDING_API_KEY,
@@ -91,11 +90,14 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.azureApiVersion =
       getEnvVar("OPENAI_API_VERSION") || DEFAULT_AZURE_API_VERSION;
     this.retrieval = retrievalProfileFor(this.model);
-    this.minRelevantCosine = this.retrieval.minRelevantCosine;
   }
 
   get vectorSpace(): string {
-    return `openai:${this.model}:${this.dimensions}`;
+    return withDocumentPrefix(`openai:${this.model}:${this.dimensions}`, this.retrieval);
+  }
+
+  get minRelevantCosine(): number | undefined {
+    return this.retrieval.minRelevantCosine;
   }
 
   async embedQuery(text: string): Promise<Float32Array> {

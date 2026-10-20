@@ -2,7 +2,7 @@ import type { EmbeddingProvider } from "../../types.js";
 import { getEnvVar } from "../../config.js";
 import { configureTransformers } from "../transformers-env.js";
 import { resolveDimensions } from "./_dimensions.js";
-import { retrievalProfileFor, type RetrievalProfile } from "./_retrieval.js";
+import { retrievalProfileFor, withDocumentPrefix, type RetrievalProfile } from "./_retrieval.js";
 
 const DEFAULT_MODEL = "Xenova/all-MiniLM-L6-v2";
 const DEFAULT_DIMENSIONS = "384";
@@ -17,8 +17,8 @@ const DEFAULT_PROFILE: ModelProfile = { pooling: "mean", dtype: "q8" };
 // Pooling is what each model card prescribes: BGE v1.5 pools by CLS.
 // EmbeddingGemma runs q4 because q8 is four times slower per query on CPU.
 const MODEL_PROFILES: Array<[RegExp, ModelProfile]> = [
-  [/bge-(small|base|large)-en-v1\.5$/, { pooling: "cls", dtype: "q8" }],
-  [/embeddinggemma-2-ONNX$/, { pooling: "mean", dtype: "q4" }],
+  [/bge-(small|base|large)-en-v1\.5$/i, { pooling: "cls", dtype: "q8" }],
+  [/embeddinggemma-2/i, { pooling: "mean", dtype: "q4" }],
 ];
 
 function profileFor(modelId: string): ModelProfile {
@@ -37,7 +37,6 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private readonly modelId: string;
   private readonly profile: ModelProfile;
   private readonly retrieval: RetrievalProfile;
-  readonly minRelevantCosine: number | undefined;
   private extractor: Promise<FeatureExtractor> | null = null;
 
   constructor() {
@@ -50,8 +49,14 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     );
     this.profile = profileFor(this.modelId);
     this.retrieval = retrievalProfileFor(this.modelId);
-    this.minRelevantCosine = this.retrieval.minRelevantCosine;
-    this.vectorSpace = `local:${this.modelId}:${this.profile.pooling}:${this.dimensions}`;
+    this.vectorSpace = withDocumentPrefix(
+      `local:${this.modelId}:${this.profile.pooling}:${this.dimensions}`,
+      this.retrieval,
+    );
+  }
+
+  get minRelevantCosine(): number | undefined {
+    return this.retrieval.minRelevantCosine;
   }
 
   async embedQuery(text: string): Promise<Float32Array> {

@@ -230,7 +230,9 @@ OpenAI-compatible providers each model's query and document prefixes (BGE v1.5 p
 EmbeddingGemma 2 prefixes both) and, where its cosine scale differs from MiniLM's, its own
 `minRelevantCosine`, which smart-search uses in place of 0.3. Calibrate a new model's floor as the
 cosine that rejects the same share of random Observation pairs as MiniLM's 0.3, never against
-eval labels (`docs/benchmarks/2026-10-20-embeddinggemma-2.md`). BGE v1.5 also pools by CLS.
+eval labels (`docs/benchmarks/2026-10-20-embeddinggemma-2.md`). A non-empty document prefix is
+part of `vectorSpace` (`withDocumentPrefix()`), so changing one re-embeds. Locally, BGE v1.5 pools
+by CLS and EmbeddingGemma 2 runs q4.
 
 A Memory is embedded as one vector per chunk (`memoryChunkJobs()`, `src/state/memory-utils.ts`;
 on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char overlap, each

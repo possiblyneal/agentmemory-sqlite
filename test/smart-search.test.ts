@@ -169,9 +169,12 @@ describe("Smart Search Function", () => {
         embedBatch: async () => [],
         minRelevantCosine: 0.69,
       });
-      searchResults = [hit("lexical", 10), hit("paraphrase", 3.2, 0.72), hit("off-topic", 3.2, 0.62)];
-      expect(ids(await search())).toEqual(["lexical", "paraphrase"]);
-      setEmbeddingProvider(null);
+      try {
+        searchResults = [hit("lexical", 10), hit("paraphrase", 3.2, 0.72), hit("off-topic", 3.2, 0.62)];
+        expect(ids(await search())).toEqual(["lexical", "paraphrase"]);
+      } finally {
+        setEmbeddingProvider(null);
+      }
     });
 
     it("fills the page from hits past the limit when the floor drops ones inside it", async () => {

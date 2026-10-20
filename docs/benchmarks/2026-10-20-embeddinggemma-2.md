@@ -1,6 +1,6 @@
 # 2026-10-20 — EmbeddingGemma 2
 
-**Commit:** `feat/embeddinggemma` off `3973ca9`; control `mini431` is MiniLM on the same branch (transformers 4.3.1)
+**Commit:** PR #264 off `3973ca9`; control `mini431` is MiniLM on the same branch (transformers 4.3.1)
 **Bench:** `eval:suite --tier fast`: coding-agent-life-v2, PrecisionMemBench, LongMemEval `_s`
 **N:** dev only: coding-life 23 questions (4 no-answer), PMB 47 cases, LongMemEval 24 (4 per type)
 **K:** 5 (search only; an Injection is scored whole)
@@ -88,5 +88,9 @@ EMBEDDING_PROVIDER=openai OPENAI_EMBEDDING_BASE_URL=<llama.cpp --embeddings --po
 - **LongMemEval wall time on `main` rose from 129 s (`main2`) to 1,682 s (`main3`)** with
   scores unchanged; Memory chunking (#263), which multiplies the vectors per long Memory, is the
   likely cause and is not isolated here.
+- **No per-record-kind split** (#257): Gemma ties MiniLM overall, and none of the benches shows
+  it winning one record kind, so the split that would justify a second model per kind was not run.
+- **The document prefix is `title: none | text: `**, the model card's form for untitled text. A
+  Memory's title and concepts already lead each chunk's text, so the title slot is left empty.
 - **Qwen3-Embedding-0.6B was dropped before scoring.** On-device it is 2-3x slower than Gemma
   and its batched and single vectors disagree (cosine 0.96) under last-token pooling.
