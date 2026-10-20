@@ -27,13 +27,18 @@ export function summaryToObservation(summary: SessionSummary): CompressedObserva
   };
 }
 
-// The indexed text is the title and the decisions. Files and concepts stay
-// out so a Summary does not compete with the Observations that carry them.
+// The indexed text is the title, the decisions and the applies-when line.
+// Files and concepts stay out so a Summary does not compete with the Observations that carry them.
 // A Summary with no decisions has nothing to add: null, and the caller drops
 // any document it had.
 export function summaryToIndexDoc(summary: SessionSummary): CompressedObservation | null {
   if (!Array.isArray(summary.keyDecisions) || summary.keyDecisions.length === 0) return null;
-  return { ...summaryToObservation(summary), facts: [], concepts: [], files: [] };
+  return {
+    ...summaryToObservation(summary),
+    facts: summary.appliesWhen ? [summary.appliesWhen] : [],
+    concepts: [],
+    files: [],
+  };
 }
 
 // The result record for a decision hit, read from the Summary as stored now.
