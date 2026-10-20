@@ -68,7 +68,7 @@
     "zod": "^4.0.0"
   },
   "optionalDependencies": {
-    "@huggingface/transformers": "^4.2.0",
+    "@huggingface/transformers": "^4.3.1",
     "@node-rs/jieba": "^2.0.1",
     "tiny-segmenter": "^0.2.0"
   },
