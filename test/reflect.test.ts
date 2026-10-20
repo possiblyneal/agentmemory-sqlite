@@ -527,6 +527,29 @@ describe("Reflect", () => {
       expect(result.insights[0].title).toBe("Defense in Depth");
     });
 
+    it("ranks the newest Insight of a title ahead of an older, more confident one", async () => {
+      const day = 86400000;
+      const row = (id: string, content: string, confidence: number, ageDays: number) => {
+        const at = new Date(Date.now() - ageDays * day).toISOString();
+        return {
+          id, title: "Whitespace style", content, confidence, reinforcements: 0,
+          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+          tags: [], createdAt: at, updatedAt: at, decayRate: 0.05,
+        };
+      };
+      await kv.set("mem:insights", "ins_old", row("ins_old", "Team will indent with tabs", 0.8, 60));
+      await kv.set("mem:insights", "ins_new", row("ins_new", "Team will indent with spaces", 0.5, 1));
+      await kv.set("mem:insights", "ins_other", row("ins_other", "Whitespace is trimmed", 0.6, 30));
+
+      const result = (await sdk.trigger("mem::insight-search", {
+        query: "whitespace style indent",
+      })) as { insights: Array<Insight & { score: number }> };
+
+      const ids = result.insights.map((i) => i.id);
+      expect(ids.indexOf("ins_new")).toBeLessThan(ids.indexOf("ins_old"));
+      expect(ids).toContain("ins_other");
+    });
+
     it("rejects empty query", async () => {
       const result = (await sdk.trigger("mem::insight-search", { query: "" })) as { success: boolean };
       expect(result.success).toBe(false);

@@ -331,7 +331,7 @@ describe("supersession: Insight", () => {
     await kv.set(KV.insights, "ins_fresh", insight("ins_fresh", "Whitespace style", `Team will ${FRESH}`, 0.5, NEW));
   });
 
-  it.fails("smart-search returns the newer Insight ahead of the contradicted one", async () => {
+  it("smart-search returns the newer Insight ahead of the contradicted one", async () => {
     const { insights } = await smartSearch("whitespace style indent tabs spaces");
     expect(insights[0].insightId).toBe("ins_fresh");
   });
