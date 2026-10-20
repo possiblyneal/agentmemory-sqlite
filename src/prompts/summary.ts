@@ -14,6 +14,7 @@ Output EXACTLY this XML format with no additional text:
   <concepts>
     <concept>key concept from session</concept>
   </concepts>
+  <applies_when>comma-separated words a later task would use when these decisions apply</applies_when>
 </summary>
 
 Rules:
@@ -23,7 +24,8 @@ Rules:
 - When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
 - List all files that were created or modified
-- Concepts should be searchable terms for future context retrieval`
+- Concepts should be searchable terms for future context retrieval
+- applies_when is one short line of trigger words (max 200 chars): the terms, tools, files or situations in which a future task would need these decisions, in the words that task would use rather than the words of the decisions`
 
 export interface SummaryObservation {
   type: string
@@ -71,6 +73,7 @@ Output EXACTLY this XML format with no additional text:
   <concepts>
     <concept>key concept from session</concept>
   </concepts>
+  <applies_when>comma-separated words a later task would use when these decisions apply</applies_when>
 </summary>
 
 Rules:
@@ -79,6 +82,7 @@ Rules:
 - Keep every rule, requirement or constraint the user stated as its own decision, with its exact values (status codes, limits, thresholds, names) and conditions; never merge two of them or generalize a specific value away
 - When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - Union (deduplicate) all files and concepts
+- applies_when is one short line of trigger words (max 200 chars): the terms, tools, files or situations in which a future task would need these decisions, in the words that task would use rather than the words of the decisions
 - Title should capture the session's overall outcome`
 
 export interface ReducePartial {
@@ -87,6 +91,7 @@ export interface ReducePartial {
   keyDecisions: string[]
   filesModified: string[]
   concepts: string[]
+  appliesWhen?: string
   obsRangeStart: number
   obsRangeEnd: number
 }
@@ -103,7 +108,8 @@ Decisions:
 ${decisions}
 Files:
 ${files}
-Concepts: ${concepts}`
+Concepts: ${concepts}${p.appliesWhen ? `
+Applies when: ${p.appliesWhen}` : ''}`
   })
   return `Partial summaries (${partials.length} chunks of one session, chronological):\n\n${sections.join('\n\n---\n\n')}`
 }
@@ -124,6 +130,7 @@ Output EXACTLY this XML format with no additional text:
   <concepts>
     <concept>key concept from session</concept>
   </concepts>
+  <applies_when>comma-separated words a later task would use when these decisions apply</applies_when>
 </summary>
 
 Rules:
@@ -133,6 +140,7 @@ Rules:
 - When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
 - Union (deduplicate) all files and concepts
+- applies_when is one short line of trigger words (max 200 chars): the terms, tools, files or situations in which a future task would need these decisions, in the words that task would use rather than the words of the decisions
 - Title should capture the session's overall outcome so far`
 
 export interface FoldPrior {
@@ -141,6 +149,7 @@ export interface FoldPrior {
   keyDecisions: string[]
   filesModified: string[]
   concepts: string[]
+  appliesWhen?: string
 }
 
 export function buildFoldPrompt(
@@ -158,7 +167,8 @@ Decisions:
 ${decisions}
 Files:
 ${files}
-Concepts: ${prior.concepts.join(', ')}
+Concepts: ${prior.concepts.join(', ')}${prior.appliesWhen ? `
+Applies when: ${prior.appliesWhen}` : ''}
 
 New observations (${observations.length} total, ${priorObservationCount + 1}-${priorObservationCount + observations.length}):
 

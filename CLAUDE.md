@@ -232,8 +232,11 @@ the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Me
 Session and any Summary already given are dropped before ranking. A failed amendment lookup
 drops only that amendment.
 A Session Summary's decisions are also a BM25 layer of their own (`IndexLayer` `summary`,
-`src/state/summary-index.ts`): one document per Summary, its title and decisions, id
-`summary:<sessionId>`, BM25 only (never embedded). A prompt worded like a decision reaches its Session
+`src/state/summary-index.ts`): one document per Summary, its title, decisions and applies-when line, id
+`summary:<sessionId>`, BM25 only (never embedded). The summarize call writes `appliesWhen`, one line
+(max 200 chars) of trigger words a later task would use, parsed from `<applies_when>` and optional on
+`SessionSummary`: missing or blank is absent, never a failure. It is generated only at Summary time and
+carried through chunk, reduce and fold. A prompt worded like a decision reaches its Session
 through that document even when the Session's Observations used other words. The hit joins the
 other legs through the usual RRF in `HybridSearch`; `mem::search`, `HybridSearch` and
 `mem::smart-search` resolve it to the Summary in the Observation shape (`loadSummaryHit`; the

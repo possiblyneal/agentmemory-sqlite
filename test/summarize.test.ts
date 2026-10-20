@@ -28,6 +28,7 @@ import { renderSummaryObservation, SUMMARY_REPLY_MAX } from "../src/prompts/summ
 import type {
   CompressedObservation,
   Session,
+  SessionSummary,
   MemoryProvider,
 } from "../src/types.js";
 
@@ -116,6 +117,7 @@ function summaryXml(opts: {
   decisions?: string[];
   files?: string[];
   concepts?: string[];
+  appliesWhen?: string;
 }): string {
   const d = (opts.decisions ?? ["decision"]).map((x) => `<decision>${x}</decision>`).join("");
   const f = (opts.files ?? []).map((x) => `<file>${x}</file>`).join("");
@@ -125,7 +127,8 @@ function summaryXml(opts: {
 <narrative>${opts.narrative ?? VALID_NARRATIVE}</narrative>
 <decisions>${d}</decisions>
 <files>${f}</files>
-<concepts>${c}</concepts>
+<concepts>${c}</concepts>${opts.appliesWhen === undefined ? "" : `
+<applies_when>${opts.appliesWhen}</applies_when>`}
 </summary>`;
 }
 
@@ -1184,5 +1187,27 @@ describe("mem::summarize decision index", () => {
     await handler({ sessionId: "ses_idx", force: true });
     expect(search("rollbacks restore tarball")).toEqual([]);
     expect(search("releases signed manifest")).toEqual([["summary:ses_idx", "ses_idx"]]);
+  });
+
+  it("keeps the applies-when line, searchable, and leaves it absent when missing or blank", async () => {
+    const provider = makeProvider([
+      summaryXml({ title: "Deploys", decisions: ["Use signed manifests"], appliesWhen: "  release, rollback, tarball  " }),
+      summaryXml({ title: "Deploys", decisions: ["Use signed manifests"] }),
+      summaryXml({ title: "Deploys", decisions: ["Use signed manifests"], appliesWhen: "   " }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_aw", obsCount: 3, provider });
+    const stored = async () => (await kv.get<SessionSummary>("summaries", "ses_aw"))!;
+    const search = (q: string) => getSearchIndex().search(q).map((h) => h.obsId);
+
+    await handler({ sessionId: "ses_aw" });
+    expect((await stored()).appliesWhen).toBe("release, rollback, tarball");
+    expect(search("tarball")).toEqual(["summary:ses_aw"]);
+
+    await handler({ sessionId: "ses_aw", force: true });
+    expect("appliesWhen" in (await stored())).toBe(false);
+    expect(search("tarball")).toEqual([]);
+
+    await handler({ sessionId: "ses_aw", force: true });
+    expect("appliesWhen" in (await stored())).toBe(false);
   });
 });
