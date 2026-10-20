@@ -172,9 +172,9 @@ describe("mem::index-fill-missing", () => {
     vi.hydrate([...rows()].map((r) => ({ id: r.id, sessionId: r.id.startsWith("obs") ? "s1" : "memory", embedding: v(1, 1) })));
     const r = await createIndexFill(state, vectors, vi).run();
     // mem_l: one current job (short text, no chunks) -> its parent row is
-    // stale and the two chunk rows are orphans; obs_l stays legacy; mem_other
-    // is missing and gets embedded.
-    expect(r).toMatchObject({ expected: 3, present: 1, missing: 2, embedded: 2, pruned: 2 });
+    // stale, and re-embedding it removes the two orphaned chunk rows before
+    // the prune runs; obs_l stays legacy; mem_other is missing and gets embedded.
+    expect(r).toMatchObject({ expected: 3, present: 1, missing: 2, embedded: 2, pruned: 0 });
     const after = new Map(rows().map((r) => [r.id, r]));
     expect([...after.keys()].sort()).toEqual(["mem_l", "mem_other", "obs_l"]);
     const current = memory("mem_l", "rewritten text");
@@ -291,6 +291,30 @@ describe("mem::index-fill-missing", () => {
     // A string where the array should be is not indexed one character at a time.
     expect(memoryEmbedJobs(memory("mem_odd", "odd", { sessionIds: "abc" as never }))[0].sessionId).toBe("memory");
     expect(memoryEmbedJobs({ ...memory("mem_x", "x"), id: 5 as never })).toEqual([]);
+  });
+
+  it("keeps a Memory's bare-id vector when the pass that would replace it with chunks embeds nothing", async () => {
+    const long = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
+    state.set(KV.memories, "mem_long", memory("mem_long", long));
+    await createIndexFill(state, vectors, vi).run();
+    expect(rows().map((x) => x.id)).toEqual(["mem_long"]);
+
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    provider.failing = true;
+    const down = await createIndexFill(state, vectors, vi).run();
+    expect(down).toMatchObject({ embedded: 0, pruned: 0 });
+    expect(rows().map((x) => x.id)).toEqual(["mem_long"]);
+
+    provider.failing = false;
+    const up = await createIndexFill(state, vectors, vi).run();
+    expect(up.pruned).toBe(1);
+    expect(rows().every((x) => x.id.startsWith("mem_long#"))).toBe(true);
+  });
+
+  it("a Memory whose concepts is not a list still chunks", () => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    const jobs = memoryEmbedJobs(memory("mem_c", "content", { concepts: "a,b" as never }));
+    expect(jobs.map((j) => j.id)).toEqual(["mem_c"]);
   });
 
   it("aborts after three consecutive whole-batch failures and reports the remainder as failed", async () => {

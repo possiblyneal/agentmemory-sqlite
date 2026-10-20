@@ -51,12 +51,15 @@ LONGMEMEVAL_PATH=<longmemeval_s.json> npm run eval:suite -- --tier fast --holdou
 
 ## Notes
 
-- **Cost on the Operator's store is nil today.** The live store holds 3 current Memories and
-  73,902 vectors (113 MB), almost all Observations; none of the Memories passes 1200 chars, so
-  chunking adds no vector. A long Memory costs one extra vector per ~1050 chars past the first
-  chunk. Observations are not chunked.
+- **Cost on the Operator's store is three embeddings today.** The live store holds 3 current
+  Memories and 73,902 vectors (113 MB), almost all Observations; none of the Memories passes
+  1200 chars, so chunking adds no vector. Each chunk's text now carries a title-and-concepts
+  header, so every Memory, short ones included, re-embeds once on the first boot after merge.
+  A long Memory costs one extra vector per ~1050 chars past the first chunk. Observations are
+  not chunked.
 - **No migration.** A Memory that splits gets ids `<id>#<i>`; the next fill pass embeds the
-  chunks and prunes the bare-id vector as an orphan. `AGENTMEMORY_MEMORY_CHUNKING=false`
+  chunks, re-embeds any vector whose input text changed, and prunes the bare-id vector as an
+  orphan. `AGENTMEMORY_MEMORY_CHUNKING=false`
   restores one vector per Memory the same way.
 - **The gain is LongMemEval's.** A Session without Observations loads as one Memory
   (`ingestRemembered` in `eval/runner/adapters/agentmemory.ts`), and LongMemEval's haystack

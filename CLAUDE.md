@@ -230,8 +230,8 @@ one — BGE v1.5 runs CLS pooling and prefixes its queries.
 A Memory is embedded as one vector per chunk (`memoryChunkJobs()`, `src/state/memory-utils.ts`;
 on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char overlap, each
 prefixed with the title and concepts, under ids `<memoryId>#<i>` when there is more than one.
-BM25 still indexes the Memory whole. The fill pass embeds missing chunk ids and prunes the
-orphaned ones, so toggling it needs no migration. Observations are not chunked.
+BM25 still indexes the Memory whole. The fill pass embeds missing chunk ids, re-embeds any whose
+text changed and prunes the orphaned ones, so toggling it needs no migration. Observations are not chunked.
 
 ### Date terms
 `SearchIndex.add()` gives each record `@date:YYYY-MM-DD`, `@month:YYYY-MM` and `@md:MM-DD`

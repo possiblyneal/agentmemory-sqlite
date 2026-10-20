@@ -133,23 +133,6 @@ export function createIndexFill(
     }
     report.missing = missing.length;
 
-    // Prune rows nothing claims. Each delete re-reads the vector row (its
-    // session id may have moved with a rewrite) and the content behind it
-    // inside its own transaction: a save that raced the enumeration wins.
-    // Exact removal only - a stale bare-parent row must not cascade into the
-    // memory's current chunk rows.
-    const liveRow = state.db.prepare("SELECT session_id FROM vectors WHERE id = ?");
-    for (const id of rows.keys()) {
-      if (expectedIds.has(id)) continue;
-      const removed = state.transaction(() => {
-        const live = liveRow.get(id) as { session_id: string } | undefined;
-        if (!live || claimedNow(state, live.session_id, id)) return false;
-        index.remove(id, true);
-        return true;
-      });
-      if (removed) report.pruned++;
-    }
-
     if (missing.length > 0 && getEmbeddingProvider()) {
       let consecutiveFailures = 0;
       for (let i = 0; i < missing.length; i += BATCH) {
@@ -173,6 +156,28 @@ export function createIndexFill(
       }
     } else if (missing.length > 0) {
       report.failed = missing.length;
+    }
+
+    // Prune rows nothing claims. It runs after embedding, so a row being
+    // replaced (a Memory's bare-id vector by its chunks) stays searchable until
+    // its replacement exists, and a pass that embedded nothing prunes nothing.
+    // Each delete re-reads the vector row (its session id may have moved with
+    // a rewrite) and the content behind it inside its own transaction: a save
+    // that raced the enumeration wins. Exact removal only - a stale
+    // bare-parent row must not cascade into the memory's current chunk rows.
+    const embedderDown = report.aborted || (missing.length > 0 && report.embedded === 0);
+    if (!embedderDown) {
+      const liveRow = state.db.prepare("SELECT session_id FROM vectors WHERE id = ?");
+      for (const id of rows.keys()) {
+        if (expectedIds.has(id)) continue;
+        const removed = state.transaction(() => {
+          const live = liveRow.get(id) as { session_id: string } | undefined;
+          if (!live || claimedNow(state, live.session_id, id)) return false;
+          index.remove(id, true);
+          return true;
+        });
+        if (removed) report.pruned++;
+      }
     }
 
     report.durationMs = Math.round(performance.now() - t0);
