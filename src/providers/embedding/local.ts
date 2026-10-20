@@ -2,7 +2,13 @@ import type { EmbeddingProvider } from "../../types.js";
 import { getEnvVar } from "../../config.js";
 import { configureTransformers } from "../transformers-env.js";
 import { resolveDimensions } from "./_dimensions.js";
-import { retrievalProfileFor, withDocumentPrefix, type RetrievalProfile } from "./_retrieval.js";
+import {
+  BGE_V1_5,
+  EMBEDDING_GEMMA_2,
+  retrievalProfileFor,
+  withDocumentPrefix,
+  type RetrievalProfile,
+} from "./_retrieval.js";
 
 const DEFAULT_MODEL = "Xenova/all-MiniLM-L6-v2";
 const DEFAULT_DIMENSIONS = "384";
@@ -17,8 +23,8 @@ const DEFAULT_PROFILE: ModelProfile = { pooling: "mean", dtype: "q8" };
 // Pooling is what each model card prescribes: BGE v1.5 pools by CLS.
 // EmbeddingGemma runs q4 because q8 is four times slower per query on CPU.
 const MODEL_PROFILES: Array<[RegExp, ModelProfile]> = [
-  [/bge-(small|base|large)-en-v1\.5$/i, { pooling: "cls", dtype: "q8" }],
-  [/embeddinggemma-2/i, { pooling: "mean", dtype: "q4" }],
+  [BGE_V1_5, { pooling: "cls", dtype: "q8" }],
+  [EMBEDDING_GEMMA_2, { pooling: "mean", dtype: "q4" }],
 ];
 
 function profileFor(modelId: string): ModelProfile {
