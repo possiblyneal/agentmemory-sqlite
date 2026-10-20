@@ -9,6 +9,8 @@ Four benches, run together by `eval:suite`:
 - **PrecisionMemBench** — public 77-case benchmark asserting exactly which of 35 beliefs a search must and must not return; noise fails a case.
 - **Replay** — the Operator's own Claude Code transcripts, replayed in order and scored per Goal line. Private; never published beyond aggregates.
 
+`eval:supersession` runs on its own, outside the suite: it scores whether a newer, contradicting claim outranks the older one (see Supersession below).
+
 ## Paths
 
 A question names the path it exercises, and each path is scored on its own:
@@ -124,6 +126,16 @@ npm run build && npm run eval:pmb -- --split dev
 
 `runner/pmb.ts` stores each of the 35 seed beliefs with one `/remember` under its user as the project, then runs each of the 77 cases through `smart-search` (project = the case's user, limit = its belief budget, 20 by default). `runner/pmb-score.ts` ports upstream's scoring: pinned facts, open questions and the persona prelude come from the seed, so only `relevantBeliefs` measures the daemon. `activePass` counts the 43 cases that need the right beliefs back; 34 cases pass when nothing comes back, which is why a precision miss (an extra belief) fails a case. Fixtures and license: `data/precisionmembench/`.
 
+### Supersession
+
+```sh
+npm run build && npm run eval:supersession -- --instance N
+```
+
+`runner/supersession.ts` scores the stale-first rate: when a newer claim contradicts an older one, how often the older one leads in what the surface returns. The cells are the ones in `docs/supersession.md`: record kind (Memory restated, contradicted or replaced by `mem::evolve`; Semantic Fact; Lesson; Insight; Session Summary decision; Observation) by surface (`smart-search`, `context`, `prompt-context`). `runner/supersession-cases.ts` gives each cell eight lexical pairs (tabs/spaces, yarn/pnpm, jest/vitest, ...), each case in its own project. Rows that have no write route (Semantic Facts, Insights, Observations, Session Summaries) are written into the store file before the daemon boots, dated 50 and 10 days before the run; Memories and Lessons go through `/remember`, `/evolve` and `/lessons`, so their save-time supersession runs. `runner/supersession-score.ts` finds each claim by its stored text and classifies a case as `stale-first` (stale leads or is alone), `fresh-first`, `stale-hidden` (only the newer came back) or `neither`; the rate is `stale-first` over cases where a claim came back, per cell and rolled up per kind and surface.
+
+It runs BM25-only by default (`--embeddings local` adds vectors), is not part of `eval:suite`, and takes `--split dev` unless the holdout is named through `AGENTMEMORY_EVAL_HOLDOUT`, like every runner. `--instance` defaults to 5; give each concurrent run its own.
+
 ### Replay (the Operator's own transcripts)
 
 ```sh
@@ -233,6 +245,9 @@ eval/
 │   ├── longmemeval.ts             public benchmark runner (--concurrency N: one sandbox per worker)
 │   ├── pmb.ts                     PrecisionMemBench runner
 │   ├── pmb-score.ts               PrecisionMemBench case scoring, ported from upstream
+│   ├── supersession.ts            supersession runner: stale-first rate per record kind and surface
+│   ├── supersession-cases.ts      its fixtures: eight lexical pairs per docs/supersession.md cell
+│   ├── supersession-score.ts      its per-case classification and per-cell rates
 │   ├── split.ts                   dev/holdout split, the holdout seal and ledger
 │   ├── suite.ts                   eval:suite: tiers, parallel benches, comparison
 │   ├── suite-stats.ts             pooled ratios and the paired bootstrap
