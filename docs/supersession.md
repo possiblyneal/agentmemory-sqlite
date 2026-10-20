@@ -13,7 +13,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 | Record kind | search | session start | prompt submit |
 |---|---|---|---|
 | Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); **stale ranked first** for a contradiction with little shared wording (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale ranked first** or alone for a low-overlap contradiction (T4) |
-| Semantic Fact | unkeyed: **stale ranked first** (T8); keyed: stale hidden (T8k) | unkeyed: **stale ranked first** (T9); keyed: stale hidden (T9k) | not reachable (T10) |
+| Semantic Fact | unkeyed: stale capped behind the newer fact (T8); keyed: stale hidden (T8k) | unkeyed: stale demoted by the recency factor (T9); keyed: stale hidden (T9k) | not reachable (T10) |
 | Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
@@ -33,8 +33,8 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T5 | Memory: smart-search hides a Memory that mem::evolve replaced | passes |
 | T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | passes |
 | T7 | Memory: session start does not reach Memories, so a superseded one cannot appear | passes |
-| T8 | Semantic Fact: smart-search returns the newer Semantic Fact ahead of the contradicted one | `it.fails` |
-| T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | `it.fails` |
+| T8 | Semantic Fact: smart-search returns the newer Semantic Fact ahead of the contradicted one | passes |
+| T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | passes |
 | T8k | Semantic Fact (keyed, `test/semantic-supersession.test.ts`): consolidation closes the live fact on a new object under the same key, and `recallSemanticFacts` (smart-search) leaves it out; a different subject, relation or project does not supersede; an unkeyed fact is untouched | passes |
 | T9k | Semantic Fact (keyed, same file): session start reads the same `recallSemanticFacts`, so it shares T8k's filter | passes |
 | T10 | prompt-submit does not reach Semantic Facts, Lessons or Insights: prompt-submit gives none of them | passes |
@@ -55,8 +55,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 
 The Semantic Fact, Lesson and Insight fixtures give A the higher confidence (0.8 against 0.7
 or 0.5, or three saves of the same Lesson against one), since A has had time to be reinforced
-and A′ is new. With equal confidence, Lesson and Insight search fall to their recency term and Semantic Facts
-to wording alone.
+and A′ is new. With equal confidence, Lesson and Insight search fall to their recency term.
 
 ## Mechanisms
 
@@ -88,8 +87,12 @@ and audits it (`evolve`, `semantic.supersede`); the same key and object reinforc
 does. Facts are not in BM25 or the vector index, so closing one has nothing to de-index; the
 filter is on the read side: `recallSemanticFacts` (smart-search, session start) and the facts
 Reflect reads skip `isLatest === false`. An unkeyed fact (old rows, or the LLM omitted the key)
-behaves as before: exact-text merge only, no recency term in recall, so a reinforced stale
-unkeyed fact still leads (T8, T9). There is no backfill.
+merges on exact text only, and recall ranks it by recency instead (`recallSemanticFacts`, the
+same cap as Lessons, shared as `capBehindNewer` in `src/functions/recency-cap.ts`): on a search, a hit whose
+text overlaps another hit's by Jaccard 0.5 or more and was last touched (`updatedAt`, which a
+reinforcement sets) earlier is capped just below that newer hit (T8); at session start, with no
+query, confidence is divided by 1 + 0.01 x days since `updatedAt` (T9). The cap runs after the project filter, so another project's fact never demotes this one's. A stale unkeyed fact reinforced
+after the newer one still leads. There is no backfill.
 
 **Lessons.** Saved under a fingerprint of the lowercased content, so only an identical lesson
 strengthens one. A contradicting lesson is a new row. Recall ranks by `confidence x relevance x

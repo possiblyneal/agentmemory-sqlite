@@ -149,3 +149,23 @@ describe("Semantic Fact keyed supersession", () => {
     expect(((await kv.get(KV.semantic, "sem_other")) as SemanticMemory).isLatest).toBeUndefined();
   });
 });
+
+describe("recallSemanticFacts project scope", () => {
+  it("a newer overlapping fact in another project does not demote this project's fact", async () => {
+    const kv = mockKV();
+    const session = (id: string, project: string) =>
+      kv.set(KV.sessions, id, { id, project, startedAt: "2026-09-01T00:00:00.000Z", status: "completed", observationCount: 0 });
+    await session("ses_mine", "proj-a");
+    await session("ses_other", "proj-b");
+    const fact = (id: string, text: string, ses: string, at: string): SemanticMemory => ({
+      id, fact: text, confidence: 0.8, sourceSessionIds: [ses], sourceMemoryIds: [],
+      accessCount: 1, lastAccessedAt: at, strength: 0.8, createdAt: at, updatedAt: at,
+    });
+    await kv.set(KV.semantic, "sem_mine", fact("sem_mine", "The team agreed to indent with tabs", "ses_mine", "2026-09-01T10:00:00.000Z"));
+    await kv.set(KV.semantic, "sem_other", fact("sem_other", "The team agreed to indent with spaces", "ses_other", "2026-10-10T10:00:00.000Z"));
+
+    const recalled = await recallSemanticFacts(kv as never, 10, { query: "agreed indent", project: "proj-a" });
+    expect(recalled.map((r) => r.fact.id)).toEqual(["sem_mine"]);
+    expect(recalled[0].score).toBeCloseTo(0.8);
+  });
+});

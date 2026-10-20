@@ -280,12 +280,12 @@ describe("supersession: Semantic Fact", () => {
     await kv.set(KV.semantic, "sem_fresh", semanticFact("sem_fresh", `The team agreed to ${FRESH}`, 0.7, NEW));
   });
 
-  it.fails("smart-search returns the newer Semantic Fact ahead of the contradicted one", async () => {
+  it("smart-search returns the newer Semantic Fact ahead of the contradicted one", async () => {
     const { semanticFacts } = await smartSearch("agreed indent tabs spaces");
     expect(semanticFacts[0].fact).toContain(FRESH);
   });
 
-  it.fails("session start lists the newer Semantic Fact ahead of the contradicted one", async () => {
+  it("session start lists the newer Semantic Fact ahead of the contradicted one", async () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });

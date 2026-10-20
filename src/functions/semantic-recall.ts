@@ -1,11 +1,18 @@
 import type { SemanticMemory } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
+import { capBehindNewer } from "./recency-cap.js";
 import { createSessionLoader } from "./search.js";
 
 export interface RecalledFact {
   fact: SemanticMemory;
   score: number;
+}
+
+const DAILY_RECENCY_DECAY = 0.01;
+
+function lastActiveAt(fact: SemanticMemory): number {
+  return new Date(fact.updatedAt).getTime();
 }
 
 // A Semantic Fact carries no project of its own: consolidation derives it
@@ -27,19 +34,23 @@ export async function recallSemanticFacts(
     const matched = terms.filter((t) => text.includes(t)).length;
     if (terms.length > 0 && matched === 0) continue;
     const relevance = terms.length > 0 ? matched / terms.length : 1;
-    scored.push({ fact, score: fact.confidence * relevance });
+    const days = terms.length > 0 ? 0 : (Date.now() - lastActiveAt(fact)) / 86_400_000;
+    scored.push({ fact, score: (fact.confidence * relevance) / (1 + days * DAILY_RECENCY_DECAY) });
   }
-  scored.sort((a, b) => b.score - a.score);
 
   const { project } = options;
-  if (!project) return scored.slice(0, limit);
-
-  const loadSession = createSessionLoader(kv);
-  const recalled: RecalledFact[] = [];
-  for (const candidate of scored) {
-    if (recalled.length >= limit) break;
-    const sessions = await Promise.all(candidate.fact.sourceSessionIds.map(loadSession));
-    if (sessions.some((s) => s?.project === project)) recalled.push(candidate);
+  let candidates = scored;
+  if (project) {
+    const loadSession = createSessionLoader(kv);
+    const inProject = await Promise.all(
+      scored.map(async ({ fact }) => {
+        const sessions = await Promise.all(fact.sourceSessionIds.map(loadSession));
+        return sessions.some((s) => s?.project === project);
+      }),
+    );
+    candidates = scored.filter((_, i) => inProject[i]);
   }
-  return recalled;
+  capBehindNewer(candidates, (s) => s.fact.fact, (s) => lastActiveAt(s.fact));
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates.slice(0, limit);
 }
