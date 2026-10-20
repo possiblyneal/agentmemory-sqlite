@@ -37,6 +37,25 @@ export function decayedStrength(base: number, periods: number): number {
 // Periods count from the later of the last access and the last decay, and
 // lastDecayedAt advances by the whole periods applied, so each idle period
 // lowers strength once however often the tier runs.
+function normalizeKeyPart(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function parseFactAttributes(raw: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  for (const m of raw.matchAll(/(\w+)="([^"]*)"/g)) attrs[m[1]] = m[2];
+  return attrs;
+}
+
+function factKey(
+  attrs: Record<string, string>,
+): { subject: string; relation: string; object: string } | null {
+  const subject = normalizeKeyPart(attrs.subject);
+  const relation = normalizeKeyPart(attrs.relation);
+  const object = normalizeKeyPart(attrs.object);
+  return subject && relation && object ? { subject, relation, object } : null;
+}
+
 function applyDecay<
   T extends {
     strength: number;
@@ -139,7 +158,7 @@ export function registerConsolidationPipelineFunction(
     };
   }
 
-  async function consolidateSemantic(summaries: SessionSummary[]) {
+  async function consolidateSemantic(project: string, summaries: SessionSummary[]) {
     if (summaries.length < 5) {
       return { skipped: true, reason: "fewer than 5 summaries" };
     }
@@ -166,26 +185,39 @@ export function registerConsolidationPipelineFunction(
         prompt,
       );
 
-      const factRegex = /<fact\s+confidence="([^"]+)">([^<]+)<\/fact>/g;
+      const factRegex = /<fact\s+([^>]*)>([^<]+)<\/fact>/g;
       let match;
       let newFacts = 0;
+      let superseded = 0;
       const now = new Date().toISOString();
+      const sessionIds = recentSummaries.map((s) => s.sessionId);
 
       while ((match = factRegex.exec(response)) !== null) {
-        const parsedConf = parseFloat(match[1]);
+        const attrs = parseFactAttributes(match[1]);
+        const parsedConf = parseFloat(attrs.confidence ?? "");
         const confidence = Number.isNaN(parsedConf) ? 0.5 : parsedConf;
         const fact = match[2].trim();
+        const key = factKey(attrs);
 
-        const existing = existingSemantic.find(
-          (s) => s.fact.toLowerCase() === fact.toLowerCase(),
-        );
+        const live = existingSemantic.filter((s) => s.isLatest !== false);
+        const sameKey = key
+          ? live.filter(
+              (s) =>
+                s.project === project &&
+                s.subject === key.subject &&
+                s.relation === key.relation,
+            )
+          : [];
+        const existing =
+          live.find((s) => s.fact.toLowerCase() === fact.toLowerCase()) ??
+          sameKey.find((s) => s.object === key!.object);
         if (existing) {
           existing.accessCount++;
           existing.lastAccessedAt = now;
           existing.updatedAt = now;
           existing.confidence = Math.max(existing.confidence, confidence);
           existing.sourceSessionIds = capSourceIds(
-            [...existing.sourceSessionIds, ...recentSummaries.map((s) => s.sessionId)],
+            [...existing.sourceSessionIds, ...sessionIds],
             MAX_SOURCE_LIST_IDS,
           );
           await kv.set(KV.semantic, existing.id, existing);
@@ -194,19 +226,43 @@ export function registerConsolidationPipelineFunction(
             id: generateId("sem"),
             fact,
             confidence,
-            sourceSessionIds: recentSummaries.map((s) => s.sessionId),
+            sourceSessionIds: sessionIds,
             sourceMemoryIds: [],
             accessCount: 1,
             lastAccessedAt: now,
             strength: confidence,
             createdAt: now,
             updatedAt: now,
+            ...(key ? { project, ...key } : {}),
           };
           await kv.set(KV.semantic, sem.id, sem);
+          existingSemantic.push(sem);
           newFacts++;
+          for (const old of sameKey) {
+            old.isLatest = false;
+            old.supersededBy = sem.id;
+            old.updatedAt = now;
+            await kv.set(KV.semantic, old.id, old);
+            superseded++;
+          }
+          if (sameKey.length > 0) {
+            await recordAudit(kv, "evolve", "mem::consolidate-pipeline", [
+              ...sameKey.map((s) => s.id),
+              sem.id,
+            ], {
+              event: "semantic.supersede",
+              project,
+              subject: key!.subject,
+              relation: key!.relation,
+              supersededIds: sameKey.map((s) => s.id),
+              supersededBy: sem.id,
+            });
+          }
         }
       }
-      return { newFacts, totalSummaries: summaries.length };
+      return superseded > 0
+        ? { newFacts, superseded, totalSummaries: summaries.length }
+        : { newFacts, totalSummaries: summaries.length };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error("Semantic consolidation failed", { error: msg });
@@ -252,6 +308,7 @@ export function registerConsolidationPipelineFunction(
       for (const project of projects) {
         if (runsSemantic) {
           semanticByProject[project] = await consolidateSemantic(
+            project,
             summaries.filter((s) => s.project === project),
           );
         }

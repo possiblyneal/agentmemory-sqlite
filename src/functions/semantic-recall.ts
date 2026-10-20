@@ -22,6 +22,7 @@ export async function recallSemanticFacts(
 
   const scored: RecalledFact[] = [];
   for (const fact of facts) {
+    if (fact.isLatest === false) continue;
     const text = fact.fact.toLowerCase();
     const matched = terms.filter((t) => text.includes(t)).length;
     if (terms.length > 0 && matched === 0) continue;

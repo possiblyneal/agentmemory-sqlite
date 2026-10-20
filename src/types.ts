@@ -651,6 +651,12 @@ export interface SemanticMemory {
   strength: number;
   createdAt: string;
   updatedAt: string;
+  project?: string;
+  subject?: string;
+  relation?: string;
+  object?: string;
+  isLatest?: boolean;
+  supersededBy?: string;
 }
 
 export interface ProceduralMemory {
