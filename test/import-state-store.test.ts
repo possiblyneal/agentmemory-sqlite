@@ -94,12 +94,16 @@ describe("import-state-store", () => {
   let out: string;
 
   beforeEach(() => {
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
     root = mkdtempSync(join(tmpdir(), "am-import-"));
     src = join(root, "state_store.db");
     mkdirSync(src);
     out = join(root, "agentmemory.sqlite");
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    rmSync(root, { recursive: true, force: true });
+  });
 
   it("decodes the rkyv string layout strictly, inline and out of line", () => {
     for (const text of ["{}", '{"a":1}', '{"k":"' + "x".repeat(37) + '"}', "{" + '"k":"é✓"'.repeat(50) + "}"]) {

@@ -70,7 +70,7 @@ describe("inproc vector store", () => {
     store = new SqliteVectorStore(state);
     vi = new VectorIndex();
     vi.attachStore(store);
-    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
     delete process.env.AGENTMEMORY_CHUNK_MAX_CHARS;
   });
 
@@ -177,6 +177,33 @@ describe("inproc vector store", () => {
     restarted.clear();
     expect(rows()).toEqual([]);
     expect(restarted.size).toBe(0);
+  });
+
+  const tailMemory = () =>
+    memory("mem_t", Array.from({ length: 40 }, (_, i) => `Sentence number ${i} about chunked memories, long enough to need splitting.`).join(" "));
+
+  it("by default a long memory is found once by a query matching only its tail passage", async () => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    const mem = tailMemory();
+    state.set(KV.memories, "mem_t", mem);
+    const jobs = memoryEmbedJobs(mem);
+    expect(jobs.length).toBeGreaterThan(1);
+    jobs.forEach((job, i) => {
+      expect(store.commitEmbedding(vi, job, i === jobs.length - 1 ? v(1, 0) : v(0, 1))).toBe(true);
+    });
+    const hits = await vi.search(v(1, 0), 10);
+    expect(hits.map((h) => h.obsId)).toEqual(["mem_t"]);
+    expect(hits[0].score).toBeCloseTo(1, 6);
+  });
+
+  it("with chunking set to false a long memory keeps a single bare-id vector", () => {
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
+    const mem = tailMemory();
+    state.set(KV.memories, "mem_t", mem);
+    const jobs = memoryEmbedJobs(mem);
+    expect(jobs.map((j) => j.id)).toEqual(["mem_t"]);
+    expect(store.commitEmbedding(vi, jobs[0], v(1, 0))).toBe(true);
+    expect(rows().map((r) => r.id)).toEqual(["mem_t"]);
   });
 
   it("keeps a row's seq on re-embed and refuses a blob that is not dims*4", () => {
