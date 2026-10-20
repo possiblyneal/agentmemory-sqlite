@@ -97,6 +97,20 @@ LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json \
 
 The `agentmemory` adapter starts a fresh sandbox per question there, since every question brings its own haystack, and dates each stored Session by its `haystack_dates` entry, so a query that names a date can match it.
 
+### DolphinBench (public, 3.2MB download, run once)
+
+```sh
+D=~/datasets/dolphinbench
+for f in facts/train messages/train tests/test; do
+  mkdir -p $D/$(dirname $f)
+  curl -Lo $D/$f.parquet https://huggingface.co/datasets/mem0ai/dolphinbench/resolve/main/$f.parquet
+done
+
+DOLPHINBENCH_PATH=$D npm run eval:dolphinbench -- --instance 21
+```
+
+A retrieval-only derivative of Mem0's benchmark (Apache-2.0; never commit the data): no answerer, no judge, and not comparable with Mem0's published scores. Each test's `request` is the query, and the gold is every message in `source_message_ids` of the facts the test requires. `runner/dolphinbench-load.ts` turns each persona's whole history into one Session per message, ingested as a prompt Observation. The runner ingests a persona once, queries all its tests against that store, runs Alex first, and scores each adapter on `search` and `prompt-submit` (`--paths`; `vector` only does search and needs an OpenAI key, so it is opt-in through `--adapters`). It splits through `selectSplit("dolphinbench", ...)` by persona, so it scores the dev share unless the holdout is named. It needs Node >=22.15 (zstd parquet through `node:zlib`). About 500K tokens per persona, and ingestion takes 20 to 30 minutes each, so it is a one-off, outside every tier.
+
 ### Suite: iterate without overfitting
 
 ```sh
@@ -230,6 +244,8 @@ eval/
 │   │   ├── grep.ts                tokenized substring baseline
 │   │   ├── random.ts              seeded random control
 │   │   └── vector.ts              OpenAI embeddings + cosine
+│   ├── dolphinbench.ts            DolphinBench retrieval runner (eval:dolphinbench)
+│   ├── dolphinbench-load.ts       DolphinBench parquet → Question[] (gold = establishing messages)
 │   ├── longmemeval.ts             public benchmark runner (--concurrency N: one sandbox per worker)
 │   ├── pmb.ts                     PrecisionMemBench runner
 │   ├── pmb-score.ts               PrecisionMemBench case scoring, ported from upstream
