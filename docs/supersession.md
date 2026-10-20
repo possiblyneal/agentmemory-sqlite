@@ -14,7 +14,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 |---|---|---|---|
 | Memory | stale hidden for a near-restatement (T1); **stale ranked first** for a contradiction with little shared wording (T3) or the only result when superseded by `mem::evolve` (T5) | not reachable (T7) | stale hidden for a near-restatement (T2); **stale ranked first** or alone for a low-overlap contradiction (T4) or `mem::evolve` (T6) |
 | Semantic Fact | **stale ranked first** (T8) | **stale ranked first** (T9) | not reachable (T10) |
-| Lesson | **newer ranked first** (T11) | **stale ranked first** (T12) | not reachable (T10) |
+| Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
 | Insight | **stale ranked first** (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); **stale ranked first** when the newer work was summarized first (T18) | stale demoted, newest Session first (T16); **stale ranked first** against a contradicting Memory (T19) |
 | Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | **stale ranked first** when it matches the prompt more strongly (T22) or equally (T23) |
@@ -37,7 +37,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | `it.fails` |
 | T10 | prompt-submit does not reach Semantic Facts, Lessons or Insights: prompt-submit gives none of them | passes |
 | T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | passes |
-| T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | `it.fails` |
+| T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | passes |
 | T13 | Insight: smart-search returns the newer Insight ahead of the contradicted one | `it.fails` |
 | T14 | Insight: session start lists the newer Insight ahead of the contradicted one | passes |
 | T15 | Session Summary decision: smart-search never returns a Session Summary decision on its own | passes |
@@ -84,8 +84,9 @@ confidence alone, so the reinforced stale fact leads (T8, T9).
 strengthens one. A contradicting lesson is a new row. Recall ranks by `confidence x relevance x
 recency`, where the recency boost decays 1% per day; a hit whose content overlaps another hit's by
 Jaccard 0.5 or more and was last reinforced (else created) earlier is capped just below that newer
-hit, so reinforcement cannot outvote a correction (T11). Session start still orders by confidence
-(T12).
+hit, so reinforcement cannot outvote a correction (T11). Session start ranks by project-weighted
+confidence over the same boost, from `lastReinforcedAt` else `createdAt`, so a stale Lesson not
+reinforced since the newer one was saved is demoted (T12); a stale Lesson reinforced after it still leads.
 
 **Insights.** Written by `mem::reflect` from concept clusters and never compared with earlier
 Insights. Search ranks like Lessons by confidence (T13). Session start picks the top 5 by

@@ -19,6 +19,7 @@ import type {
   CompactSearchResult,
   CompressedObservation,
   Insight,
+  Lesson,
   Memory,
   SemanticMemory,
   Session,
@@ -315,7 +316,11 @@ describe("supersession: Lesson", () => {
     expect(lessons[0].content).toContain(FRESH);
   });
 
-  it.fails("session start lists the newer Lesson ahead of the contradicted one", async () => {
+  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
+    for (const lesson of await kv.list<Lesson>(KV.lessons)) {
+      const stamp = lesson.content.includes(STALE) ? OLD : NEW;
+      await kv.set(KV.lessons, lesson.id, { ...lesson, createdAt: stamp, updatedAt: stamp, lastReinforcedAt: lesson.reinforcements ? stamp : undefined });
+    }
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });

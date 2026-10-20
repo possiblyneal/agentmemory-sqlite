@@ -136,6 +136,29 @@ describe("mem::context — lessons auto-injection (#457)", () => {
     expect(projectIdx).toBeLessThan(globalIdx);
   });
 
+  it("ranks a newer lesson above an older, more confident one last reinforced long ago", async () => {
+    await seedLesson(kv, {
+      id: "lesson_old",
+      content: "old-lesson-marker",
+      project: "/tmp/proj",
+      confidence: 0.6,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastReinforcedAt: "2026-01-02T00:00:00.000Z",
+    });
+    await seedLesson(kv, {
+      id: "lesson_new",
+      content: "new-lesson-marker",
+      project: "/tmp/proj",
+      confidence: 0.5,
+    });
+
+    const result = await handler({ sessionId: "ses_recent", project: "/tmp/proj" });
+
+    expect(result.context.indexOf("new-lesson-marker")).toBeLessThan(
+      result.context.indexOf("old-lesson-marker"),
+    );
+  });
+
   it("excludes lessons scoped to a different project", async () => {
     await seedLesson(kv, {
       id: "lesson_other",
