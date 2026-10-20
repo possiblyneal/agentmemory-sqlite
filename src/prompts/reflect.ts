@@ -14,7 +14,8 @@ Rules:
 - Content should be the actual observation (1-3 sentences)
 - Prefer actionable insights over abstract summaries
 - Skip insights that merely restate a single source item
-- Always emit confidence attribute before title attribute`;
+- Always emit confidence attribute before title attribute
+- A cluster may list "Existing Insights", each with an id. When an insight you would write restates one of them, add reinforces="<that id>" after the title attribute instead of writing it as new: <insight confidence="0.8" title="..." reinforces="ins_...">. Use only ids from that list, and write a new insight only for a claim none of them makes`;
 
 export function formatScoredLine(confidence: number, text: string): string {
   return `- [confidence=${confidence}] ${text}`;
@@ -24,11 +25,29 @@ export function formatNarrativeLine(narrative: string): string {
   return `- ${narrative}`;
 }
 
+// Existing Insights shown to the model, strongest first.
+export const EXISTING_INSIGHT_LIMIT = 10;
+const EXISTING_INSIGHT_CHARS = 300;
+
+export function formatExistingInsightLine(insight: {
+  id: string;
+  confidence: number;
+  title: string;
+  content: string;
+}): string {
+  const content =
+    insight.content.length > EXISTING_INSIGHT_CHARS
+      ? `${insight.content.slice(0, EXISTING_INSIGHT_CHARS)}…`
+      : insight.content;
+  return `- [id=${insight.id}] [confidence=${insight.confidence}] ${insight.title}: ${content}`;
+}
+
 export function buildReflectPrompt(cluster: {
   concepts: string[];
   facts: Array<{ fact: string; confidence: number }>;
   lessons: Array<{ content: string; confidence: number }>;
   crystalNarratives: string[];
+  existingInsights?: Array<{ id: string; confidence: number; title: string; content: string }>;
 }): string {
   const sections: string[] = [];
 
@@ -52,6 +71,13 @@ export function buildReflectPrompt(cluster: {
     sections.push(
       "\n## Completed Work Summaries",
       ...cluster.crystalNarratives.map(formatNarrativeLine),
+    );
+  }
+
+  if (cluster.existingInsights && cluster.existingInsights.length > 0) {
+    sections.push(
+      "\n## Existing Insights",
+      ...cluster.existingInsights.map(formatExistingInsightLine),
     );
   }
 

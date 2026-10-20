@@ -91,8 +91,9 @@ hit, so reinforcement cannot outvote a correction (T11). Session start ranks by 
 confidence over the same boost, from `lastReinforcedAt` else `createdAt`, so a stale Lesson not
 reinforced since the newer one was saved is demoted (T12); a stale Lesson reinforced after it still leads.
 
-**Insights.** Written by `mem::reflect` from concept clusters and never compared with earlier
-Insights. Search ranks like Lessons, but `mem::insight-search` gives Insights of one project and title the same slots in newest-first order (by `lastReinforcedAt`, else `createdAt`), so a restated claim leads; a contradiction under a different title is not detected (T13). Session start picks the top 5 by
+**Insights.** Written by `mem::reflect` from concept clusters. The reflect prompt lists the cluster's
+existing Insights, and the model may answer one as `reinforces="<id>"`, which reinforces that Insight
+instead of writing a row (#271); a contradiction is not detected. Search ranks like Lessons, but `mem::insight-search` gives Insights of one project and title the same slots in newest-first order (by `lastReinforcedAt`, else `createdAt`), so a restated claim leads; a contradiction under a different title is not detected (T13). Session start picks the top 5 by
 confidence and lists them newest `createdAt` first (T14).
 
 **Session Summary decisions.** Prompt submit renders covered Sessions newest first by
