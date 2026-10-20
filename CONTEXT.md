@@ -44,7 +44,9 @@ _Avoid_: notification (alone)
 
 **Memory**:
 A durable distilled record derived from Observations, intended to be recalled later. Memories
-are content-addressed, so the same content captured twice is one Memory.
+are not content-addressed by id, but an exact repeat (same project and scope, content equal after
+trim and lowercasing) reinforces the existing Memory instead of storing a second one, and a
+near-restatement (Jaccard > 0.7) supersedes it.
 _Avoid_: note, fact, item
 
 **Global Memory**:
@@ -82,8 +84,8 @@ saved by an Agent.
 _Avoid_: fact, knowledge
 
 **Insight**:
-A higher-order conclusion synthesized from a cluster of related Memories, Lessons and Crystals
-that share concepts in the graph. Its confidence rises when reinforced and decays when unused.
+A higher-order conclusion that `mem::reflect` synthesizes from Semantic Facts (field
+`sourceMemoryIds` holds fact ids). Its confidence rises when reinforced and decays when unused.
 _Avoid_: reflection, takeaway, pattern
 
 **Entity**:

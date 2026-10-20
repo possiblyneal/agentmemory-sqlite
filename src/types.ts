@@ -708,6 +708,7 @@ export interface AuditEntry {
     | "observe"
     | "compress"
     | "remember"
+    | "reinforce"
     | "forget"
     | "evolve"
     | "consolidate"

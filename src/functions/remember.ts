@@ -1,6 +1,6 @@
 import { TriggerAction, type ISdk } from "../engine/types.js";
 import type { Memory } from "../types.js";
-import { KV, generateId, jaccardSimilarity } from "../state/schema.js";
+import { KV, generateId, jaccardSimilarity, fingerprintId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import {
@@ -174,6 +174,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         // consolidate. Reported back as a hint; never acted on here.
         let nearMatch: { id: string; title: string; similarity: number } | undefined;
         const lowerContent = data.content.toLowerCase();
+        const fingerprint = fingerprintId("mem", data.content.trim().toLowerCase());
         for (const existing of candidateMemories) {
           if (existing.isLatest === false) continue;
           // Never supersede a memory that belongs to a different project.
@@ -186,6 +187,23 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           // A Global Memory and a scoped one never replace each other, so
           // supersession can neither strip the marker nor hand it to a project.
           if ((existing.global === true) !== (data.global === true)) continue;
+          if (
+            existing.project === project &&
+            fingerprintId("mem", existing.content.trim().toLowerCase()) ===
+              fingerprint
+          ) {
+            existing.strength = Math.min(10, existing.strength + 1);
+            existing.updatedAt = now;
+            await kv.set(KV.memories, existing.id, existing);
+            await recordAudit(kv, "reinforce", "mem::remember", [existing.id], {
+              strength: existing.strength,
+            });
+            logger.info("Memory reinforced", {
+              memId: existing.id,
+              project: existing.project,
+            });
+            return { success: true, memory: existing, reinforced: true };
+          }
           const similarity = jaccardSimilarity(
             lowerContent,
             existing.content.toLowerCase(),
@@ -329,6 +347,8 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             : {}),
         };
       });
+
+      if ("reinforced" in saved) return saved;
 
       // Outside the lock: a slow embedder must not queue other saves. A
       // Memory rewritten meanwhile has its stale completion dropped by the
