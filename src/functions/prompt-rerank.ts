@@ -151,8 +151,10 @@ export async function gateByRelevance<T>(
   query: string,
   items: T[],
   observationOf: (item: T) => Parameters<typeof rerankDocument>[0],
+  pool = items.length,
 ): Promise<T[]> {
   if (items.length === 0) return items;
-  const order = await relevantOrder(query, items.map((item) => rerankDocument(observationOf(item))));
-  return order ? order.map((index) => items[index]) : items;
+  const pooled = items.slice(0, pool);
+  const order = await relevantOrder(query, pooled.map((item) => rerankDocument(observationOf(item))));
+  return order ? order.map((index) => pooled[index]) : items;
 }

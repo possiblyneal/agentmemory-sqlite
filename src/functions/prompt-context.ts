@@ -21,6 +21,7 @@ const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
 const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 30;
+const GATE_POOL = 10;
 const AMENDMENT_MIN_RATIO = 0.35;
 const AMENDMENT_MIN_LEAD = 1.25;
 
@@ -223,7 +224,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = strong
         .map((hit, i) => ({ hit, ref: refs[i] }))
         .filter(({ ref }) => !seen.has(refKey(ref)));
-      const gated = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
+      const gated = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation, GATE_POOL);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
