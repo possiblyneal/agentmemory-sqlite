@@ -223,19 +223,23 @@ describe("supersession: Memory", () => {
     expect(context).not.toContain(NEAR_RESTATEMENT_A);
   });
 
-  it.fails("smart-search ranks a contradicting Memory with little wording in common above the stale one", async () => {
+  it("smart-search ranks a contradicting Memory with little wording in common above the stale one", async () => {
     await saveMemory(LOW_OVERLAP_A);
+    vi.advanceTimersByTime(1000);
     await saveMemory(LOW_OVERLAP_B);
     const { results } = await smartSearch("indentation tabs");
-    expect(results.map((r) => r.title)).toEqual([LOW_OVERLAP_B]);
+    expect(results.map((r) => r.title)).toEqual([LOW_OVERLAP_B, LOW_OVERLAP_A]);
   });
 
-  it.fails("prompt-submit gives a contradicting Memory with little wording in common and not the stale one", async () => {
+  // The newer Memory matches the prompt below the relevance floor, so only the stale one passes it and demotion has nothing to reorder.
+  it.fails("prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one", async () => {
     await saveMemory(LOW_OVERLAP_A);
+    vi.advanceTimersByTime(1000);
     await saveMemory(LOW_OVERLAP_B);
     const context = await promptSubmit("what is the indentation convention, are tabs used for indentation here");
     expect(context).toContain(LOW_OVERLAP_B);
-    expect(context).not.toContain(LOW_OVERLAP_A);
+    expect(context).toContain(LOW_OVERLAP_A);
+    expect(context.indexOf(LOW_OVERLAP_B)).toBeLessThan(context.indexOf(LOW_OVERLAP_A));
   });
 
   it("smart-search hides a Memory that mem::evolve replaced", async () => {

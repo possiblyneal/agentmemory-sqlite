@@ -12,6 +12,7 @@ import type {
 } from "../types.js";
 import { KV } from "../state/schema.js";
 import { memoryToObservation } from "../state/memory-utils.js";
+import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAccessBatch } from "./access-tracker.js";
@@ -274,7 +275,12 @@ export function registerSmartSearchFunction(
         if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
         inScope.push(r);
       }
-      const filteredHybrid = aboveRelevanceFloor(inScope).slice(0, limit);
+      const aboveFloor = aboveRelevanceFloor(inScope);
+      const shadowed = await shadowedMemoryIds(
+        kv,
+        aboveFloor.filter((r) => r.observation.id.startsWith("mem_")).map((r) => r.observation.id),
+      );
+      const filteredHybrid = newerAboveShadowed(aboveFloor, (r) => r.observation.id, shadowed).slice(0, limit);
 
       const compact: CompactSearchResult[] = filteredHybrid.map((r) => ({
         obsId: r.observation.id,
