@@ -17,6 +17,7 @@ import {
   buildReflectPrompt,
   formatNarrativeLine,
   formatScoredLine,
+  EXISTING_INSIGHT_LIMIT,
 } from "../prompts/reflect.js";
 import { graphLegDisabled, readBoundedGraphSnapshot } from "../state/graph-indexes.js";
 import { loadProjectTime } from "../state/project-time.js";
@@ -24,7 +25,7 @@ import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { logger } from "../logger.js";
 import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 import { getInsightMaxIdleWeeks } from "../config.js";
-import { insightClusterKey, restatesInsight } from "./insight-merge.js";
+import { insightClusterKey, compareShown } from "./insight-merge.js";
 
 const MIN_CLUSTER_ITEMS = 3;
 // Nodes one reflect pass reads from the graph indexes.
@@ -41,6 +42,7 @@ interface ConceptCluster {
   factIds: string[];
   lessonIds: string[];
   crystalIds: string[];
+  existingInsights: Insight[];
 }
 
 // Lessons and crystals are the more durable record, so they fill the budget
@@ -51,6 +53,7 @@ function fitClusterToBudget(
   lessons: Lesson[],
   crystals: Crystal[],
   facts: SemanticMemory[],
+  existingInsights: Insight[],
 ): { lessons: Lesson[]; crystals: Crystal[]; facts: SemanticMemory[] } {
   // Rendering every section with an empty item reserves the intro, concept
   // header and section headings before any item is counted.
@@ -59,6 +62,7 @@ function fitClusterToBudget(
     facts: [{ fact: "", confidence: 0 }],
     lessons: [{ content: "", confidence: 0 }],
     crystalNarratives: [""],
+    existingInsights,
   });
   let remaining = CONSOLIDATION_PROMPT_CHARS - header.length;
   const take = <T>(items: T[], line: (item: T) => string): T[] =>
@@ -370,11 +374,19 @@ export function registerReflectFunctions(
           continue;
         }
 
+        const clusterKey = insightClusterKey(data?.project, conceptNames);
+        const siblings = clusterInsights.get(clusterKey) ?? [];
+        // Strongest first, so the prompt carries the Insights most worth reinforcing.
+        const shownInsights = [...siblings]
+          .sort(compareShown)
+          .slice(0, EXISTING_INSIGHT_LIMIT);
+
         const fitted = fitClusterToBudget(
           conceptNames,
           clusterLessons,
           clusterCrystals,
           clusterFacts,
+          shownInsights,
         );
         const keptItems =
           fitted.facts.length + fitted.lessons.length + fitted.crystals.length;
@@ -391,7 +403,6 @@ export function registerReflectFunctions(
           continue;
         }
 
-        const clusterKey = insightClusterKey(data?.project, conceptNames);
         const inputsKey = reflectInputsKey(clusterKey);
         const inputsHash = fingerprintId(
           "inputs",
@@ -423,6 +434,7 @@ export function registerReflectFunctions(
           factIds: fitted.facts.map((f) => f.id),
           lessonIds: fitted.lessons.map((l) => l.id),
           crystalIds: fitted.crystals.map((c) => c.id),
+          existingInsights: shownInsights,
         };
 
         try {
@@ -430,7 +442,7 @@ export function registerReflectFunctions(
           const response = await provider.summarize(REFLECT_SYSTEM, prompt);
 
           const insightRegex =
-            /<insight\s+confidence="([^"]+)"\s+title="([^"]+)">([\s\S]*?)<\/insight>/g;
+            /<insight\s+confidence="([^"]+)"\s+title="([^"]+)"([^>]*)>([\s\S]*?)<\/insight>/g;
           let match;
           let clusterCount = 0;
 
@@ -444,17 +456,19 @@ export function registerReflectFunctions(
               ? 0.5
               : Math.max(0, Math.min(1, parsedConf));
             const title = match[2].trim();
-            const content = match[3].trim();
+            const reinforcesId = /reinforces="([^"]*)"/.exec(match[3])?.[1]?.trim();
+            const content = match[4].trim();
 
             if (!content) continue;
 
             const fp = fingerprintId("ins", content.trim().toLowerCase());
             const existing = await kv.get<Insight>(KV.insights, fp);
-            const siblings = clusterInsights.get(clusterKey) ?? [];
+            // The id must name an Insight of this cluster and project; any
+            // other id is the model inventing one, so the Insight is new.
             const restated =
               existing && !existing.deleted
                 ? existing
-                : siblings.find((i) => restatesInsight(i.content, content));
+                : siblings.find((i) => i.id === reinforcesId);
 
             if (restated) {
               reinforceInsight(restated);
@@ -479,7 +493,7 @@ export function registerReflectFunctions(
                 decayRate: 0.05,
               };
               await kv.set(KV.insights, insight.id, insight);
-              clusterInsights.set(clusterKey, [...siblings, insight]);
+              clusterInsights.set(clusterKey, [...(clusterInsights.get(clusterKey) ?? []), insight]);
               newInsights++;
             }
 

@@ -460,9 +460,20 @@ describe("startup maintenance: Insight collapse (#271)", () => {
     };
   }
 
-  const LAYERED = "Layered protection for security means input validation safe APIs and deny lists applied together";
-  const LAYERED_AGAIN = "Security needs layered protection with input validation safe APIs and deny lists applied together";
-  const FUZZING = "Randomised payload generation surfaces parser crashes nobody wrote cases for";
+  // Five distinct claims, each with a word family of its own.
+  const CLAIMS = [
+    "alpha bravo charlie delta echo foxtrot",
+    "golf hotel india juliet kilo lima",
+    "mike november oscar papa quebec romeo",
+    "sierra tango uniform victor whiskey xray",
+    "yankee zulu amber basalt cobalt dusk",
+  ];
+
+  function seedFive() {
+    CLAIMS.forEach((c, i) =>
+      store.set(KV.insights, `top${i}`, insight(`top${i}`, c, { reinforcements: 10 - i })),
+    );
+  }
 
   beforeEach(() => {
     store = new SqliteState(":memory:");
@@ -470,62 +481,84 @@ describe("startup maintenance: Insight collapse (#271)", () => {
 
   afterEach(() => store.close());
 
-  it("merges restating Insights of a cluster into one survivor", async () => {
-    store.set(KV.insights, "a", insight("a", LAYERED, { reinforcements: 2, confidence: 0.6, lastReinforcedAt: "2026-10-05T00:00:00.000Z" }));
-    store.set(KV.insights, "b", insight("b", LAYERED_AGAIN, { reinforcements: 1, confidence: 0.9 }));
-    store.set(KV.insights, "c", insight("c", LAYERED_AGAIN + " today", { reinforcements: 0, confidence: 0.4 }));
+  it("keeps the top 5 of a cluster and folds each overflow Insight into its nearest survivor", async () => {
+    seedFive();
+    store.set(KV.insights, "x", insight("x", CLAIMS[2] + " extra", { reinforcements: 2, confidence: 0.9, lastReinforcedAt: "2026-10-05T00:00:00.000Z" }));
+    store.set(KV.insights, "y", insight("y", CLAIMS[2] + " more", { reinforcements: 1, confidence: 0.4 }));
+    store.set(KV.insights, "z", insight("z", CLAIMS[0] + " tail", { reinforcements: 0 }));
 
     const result = await runStartupMaintenance(store);
 
-    expect(result.insightsCollapsed).toBe(2);
-    expect(store.list(KV.insights)).toHaveLength(1);
-    const survivor = store.get(KV.insights, "a") as {
+    expect(result.insightsCollapsed).toBe(3);
+    expect((store.list(KV.insights) as Array<{ id: string }>).map((i) => i.id).sort()).toEqual(
+      ["top0", "top1", "top2", "top3", "top4"],
+    );
+    const folded = store.get(KV.insights, "top2") as {
       reinforcements: number;
       confidence: number;
       sourceMemoryIds: string[];
       lastReinforcedAt: string;
     };
-    expect(survivor.reinforcements).toBe(3);
-    expect(survivor.confidence).toBe(0.9);
-    expect([...survivor.sourceMemoryIds].sort()).toEqual(["a-fact", "b-fact", "c-fact"]);
-    expect(survivor.lastReinforcedAt).toBe("2026-10-05T00:00:00.000Z");
+    expect(folded.reinforcements).toBe(8 + 2 + 1);
+    expect(folded.confidence).toBe(0.9);
+    expect([...folded.sourceMemoryIds].sort()).toEqual(["top2-fact", "x-fact", "y-fact"]);
+    expect(folded.lastReinforcedAt).toBe("2026-10-05T00:00:00.000Z");
+    expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(10);
   });
 
-  it("keeps Insights that say different things, and Insights of other clusters or projects", async () => {
-    store.set(KV.insights, "a", insight("a", LAYERED));
-    store.set(KV.insights, "fuzz", insight("fuzz", FUZZING));
-    store.set(KV.insights, "other-project", insight("other-project", LAYERED_AGAIN, { project: "elsewhere" }));
-    store.set(KV.insights, "other-cluster", insight("other-cluster", LAYERED_AGAIN, { sourceConceptCluster: ["testing", "mocks"] }));
+  it("ranks survivors by reinforcements, then confidence, then recency", async () => {
+    for (let i = 0; i < 5; i++) {
+      store.set(KV.insights, `r${i}`, insight(`r${i}`, CLAIMS[i], { reinforcements: 1 }));
+    }
+    store.set(KV.insights, "conf", insight("conf", "conf-only words here", { reinforcements: 1, confidence: 0.9 }));
+    store.set(KV.insights, "recent", insight("recent", "recent-only words here", { reinforcements: 1, confidence: 0.5, createdAt: "2026-10-15T00:00:00.000Z" }));
+    store.set(KV.insights, "old", insight("old", "old-only words here", { reinforcements: 0, confidence: 1 }));
+
+    await runStartupMaintenance(store);
+
+    const kept = (store.list(KV.insights) as Array<{ id: string }>).map((i) => i.id);
+    expect(kept).toContain("conf");
+    expect(kept).toContain("recent");
+    expect(kept).not.toContain("old");
+    expect(kept).toHaveLength(5);
+  });
+
+  it("leaves a cluster of 5 or fewer, and clusters of other projects, alone", async () => {
+    seedFive();
+    for (let i = 0; i < 5; i++) {
+      store.set(KV.insights, `p${i}`, insight(`p${i}`, CLAIMS[i], { project: "elsewhere" }));
+    }
+    store.set(KV.insights, "lone", insight("lone", CLAIMS[0], { sourceConceptCluster: ["testing", "mocks"] }));
 
     const result = await runStartupMaintenance(store);
 
     expect(result.insightsCollapsed).toBe(0);
-    expect(store.list(KV.insights)).toHaveLength(4);
+    expect(store.list(KV.insights)).toHaveLength(11);
   });
 
-  it("audits each merge, marks itself done in KV.config, and runs once", async () => {
-    store.set(KV.insights, "a", insight("a", LAYERED));
-    store.set(KV.insights, "b", insight("b", LAYERED_AGAIN));
+  it("audits each survivor's merge, marks itself done in KV.config, and runs once", async () => {
+    seedFive();
+    store.set(KV.insights, "x", insight("x", CLAIMS[1] + " extra"));
 
     await runStartupMaintenance(store);
 
     expect(store.get(KV.config, "insight-collapse:done")).toBeTruthy();
     const audits = store.list(KV.audit) as Array<{ operation: string; targetIds: string[]; details: { event: string; survivor: string } }>;
     expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ operation: "delete", targetIds: ["b"] });
-    expect(audits[0].details).toMatchObject({ event: "insight.collapse", survivor: "a" });
+    expect(audits[0]).toMatchObject({ operation: "delete", targetIds: ["x"] });
+    expect(audits[0].details).toMatchObject({ event: "insight.collapse", survivor: "top1" });
 
-    store.set(KV.insights, "c", insight("c", LAYERED_AGAIN + " again"));
+    store.set(KV.insights, "late", insight("late", CLAIMS[3] + " late"));
     store.set(KV.state, "system:startupMaintenanceVersion", 0);
     const second = await runStartupMaintenance(store);
 
     expect(second.insightsCollapsed).toBe(0);
-    expect(store.get(KV.insights, "c")).toBeTruthy();
+    expect(store.get(KV.insights, "late")).toBeTruthy();
   });
 
   it("applies a cluster's merge and deletions together, so a rerun never double-counts", async () => {
-    store.set(KV.insights, "a", insight("a", LAYERED, { reinforcements: 1 }));
-    store.set(KV.insights, "b", insight("b", LAYERED_AGAIN, { reinforcements: 1 }));
+    seedFive();
+    store.set(KV.insights, "x", insight("x", CLAIMS[0] + " extra", { reinforcements: 1 }));
     const realDelete = store.delete.bind(store);
     let failed = false;
     store.delete = ((scope: string, key: string) => {
@@ -539,13 +572,13 @@ describe("startup maintenance: Insight collapse (#271)", () => {
     await expect(runStartupMaintenance(store)).rejects.toThrow("interrupted");
 
     expect(store.get(KV.config, "insight-collapse:done")).toBeNull();
-    expect((store.get(KV.insights, "a") as { reinforcements: number }).reinforcements).toBe(1);
-    expect(store.list(KV.insights)).toHaveLength(2);
+    expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(10);
+    expect(store.list(KV.insights)).toHaveLength(6);
 
     store.delete = realDelete as typeof store.delete;
     await runStartupMaintenance(store);
 
-    expect((store.get(KV.insights, "a") as { reinforcements: number }).reinforcements).toBe(2);
-    expect(store.list(KV.insights)).toHaveLength(1);
+    expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(11);
+    expect(store.list(KV.insights)).toHaveLength(5);
   });
 });

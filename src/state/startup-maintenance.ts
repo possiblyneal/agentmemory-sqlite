@@ -10,7 +10,8 @@ import {
   absorbInsight,
   compareSurvivor,
   insightClusterKey,
-  restatesInsight,
+  INSIGHTS_PER_CLUSTER,
+  nearestInsight,
 } from "../functions/insight-merge.js";
 import type { Insight, SemanticMemory, Session, StateScope } from "../types.js";
 
@@ -232,9 +233,9 @@ async function repairDecay(state: SqliteState): Promise<number> {
 }
 
 // mem::reflect once minted a paraphrase of a cluster's Insight as a new row
-// every run. Merge each cluster's restating Insights into the strongest one
-// (reinforcements summed, highest confidence, source ids unioned) and delete
-// the rest. A cluster's merge, its deletions and its audit row commit in one
+// every run. Keep each cluster's strongest INSIGHTS_PER_CLUSTER Insights and
+// fold every other into the survivor it overlaps most (reinforcements summed,
+// highest confidence, source ids unioned), then delete it. A cluster's merge, its deletions and its audit row commit in one
 // transaction, so an interrupted pass leaves that cluster untouched and the
 // marker unset: the next boot redoes it without counting anything twice.
 // Insights have no search index of their own, so deleting the row is all the
@@ -268,18 +269,19 @@ async function collapseInsights(state: SqliteState): Promise<number> {
 
   let collapsed = 0;
   for (const keys of clusters.values()) {
-    if (keys.length < 2) continue;
+    if (keys.length <= INSIGHTS_PER_CLUSTER) continue;
     const insights = keys
       .slice(0, COLLAPSE_CLUSTER_ROWS)
       .map((key) => state.get(KV.insights, key) as Insight | null)
       .filter((i): i is Insight => i !== null)
       .sort(compareSurvivor);
 
-    const survivors: Array<{ insight: Insight; merged: Insight[] }> = [];
-    for (const insight of insights) {
-      const home = survivors.find((s) => restatesInsight(s.insight.content, insight.content));
-      if (home) home.merged.push(insight);
-      else survivors.push({ insight, merged: [] });
+    const survivors = insights
+      .slice(0, INSIGHTS_PER_CLUSTER)
+      .map((insight) => ({ insight, merged: [] as Insight[] }));
+    for (const overflow of insights.slice(INSIGHTS_PER_CLUSTER)) {
+      const nearest = nearestInsight(overflow, survivors.map((s) => s.insight));
+      survivors.find((s) => s.insight === nearest)!.merged.push(overflow);
     }
 
     const at = new Date().toISOString();

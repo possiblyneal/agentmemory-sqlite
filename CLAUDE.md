@@ -179,11 +179,14 @@ call it.
 ### Reflect
 `mem::reflect` (`src/functions/reflect.ts`) records a hash of each cluster's inputs in
 `KV.config` (`reflect:inputs_…`) after a successful pass and makes no LLM call for a cluster
-whose hash is unchanged. A new Insight that restates a live Insight of the same project and
-concept set (`restatesInsight()`, token Jaccard 0.3, `src/functions/insight-merge.ts`)
-reinforces it instead of adding a row. `collapseInsights` in `src/state/startup-maintenance.ts`
-merged existing copies once (`KV.config` `insight-collapse:done`). The threshold and its basis
-are in `docs/research/record-kind-counts.md`.
+whose hash is unchanged. The prompt lists the cluster's top 10 existing Insights with ids
+(`EXISTING_INSIGHT_LIMIT`, reserved out of the prompt budget); the model may mark a new
+Insight `reinforces="<id>"`, which reinforces that Insight when the id is a live Insight of the
+same project and concept set (`insightClusterKey()`, `src/functions/insight-merge.ts`) and
+otherwise writes a new one. No lexical similarity is involved. `collapseInsights` in
+`src/state/startup-maintenance.ts` ran once (`KV.config` `insight-collapse:done`), keeping the
+top `INSIGHTS_PER_CLUSTER` (5) per cluster and folding the rest into their nearest survivor.
+Measurements and rationale are in `docs/research/record-kind-counts.md`.
 
 ### MCP Tool Handler
 ```typescript

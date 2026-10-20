@@ -144,8 +144,8 @@ Insights per cluster, or merge by similarity), because it changes what is retain
 
 ## Decision for #271 (2026-10-20)
 
-Operator chose all three of: skip unchanged clusters, reinforce paraphrases, and collapse
-existing copies once.
+Operator chose: skip unchanged clusters, let the reflect call itself name the Insight a new
+one restates, and shrink the existing 12.6k once to the top 5 per cluster.
 
 - **Skip unchanged.** After a cluster's reflect succeeds, `mem::reflect` records a hash of the
   cluster's fitted inputs (fact, Lesson and Crystal ids and text) in `KV.config` under
@@ -153,27 +153,31 @@ existing copies once.
   same hash makes no LLM call and adds nothing (`clustersUnchanged` in the result and audit).
   Decay does not touch the hash, since it reads text, not strength. A failed reflect records
   nothing and is retried.
-- **Reinforce paraphrases.** A new Insight whose content has token Jaccard of 0.3 or more
-  (`jaccardSimilarity`, the helper `mem::remember` uses, lowercased) against a live Insight of
-  the same project and concept set reinforces that Insight instead of adding a row. No LLM
-  call is added.
-- **Threshold 0.3, and why.** `mem::remember`'s 0.7 would match nothing here. Measured
-  read-only on the live Insights (first 120 per cluster, 258,420 same-cluster pairs, 9,907
-  Insights with an earlier sibling): the share of Insights with an earlier same-cluster match
-  at or above 0.7 / 0.6 / 0.5 / 0.4 / 0.35 / 0.3 / 0.25 / 0.2 is 0 / 1 / 13 / 81 / 231 / 634 /
-  1,615 / 3,235 (0 / 0.01 / 0.1 / 0.8 / 2.3 / 6.4 / 16 / 33 percent). Insights are paraphrases that
-  share little vocabulary, so the metric cannot reach most of the redundancy. 0.3 is the
-  lowest threshold where a match is still the same claim reworded; at 0.25 and below a pair
-  shares a quarter of its words and the merge starts to fold distinct angles. The cost of
-  this choice: most of the 12.6k existing copies survive the collapse, and growth is stopped
-  mainly by skipping unchanged clusters, not by the merge.
+- **Reinforce by id, no new call.** The existing reflect prompt gains an "Existing Insights"
+  section: up to 10 Insights of the same project and concept set, strongest by confidence then
+  recency, each as `[id=…] [confidence=…] title: content` with content cut to 300 chars. The
+  section is reserved out of the 24k-char cluster budget before facts are fitted, so the prompt
+  stays bounded. The model may answer `<insight confidence=".." title=".." reinforces="<id>">`;
+  the id must name a live Insight of that project and concept set (any, not only the ones
+  shown), and then that Insight is reinforced and no row is written. An unknown id, or one
+  from another cluster or project, writes a new Insight. Exact-text matches still reinforce
+  by fingerprint.
+- **No Jaccard paraphrase path.** A lexical test earns nothing here. Measured read-only on the
+  live Insights (first 120 per cluster, 258,420 same-cluster pairs, 9,907 Insights with an
+  earlier sibling), the share with an earlier same-cluster match at Jaccard >= 0.7 / 0.5 / 0.4 /
+  0.3 / 0.25 is 0 / 0.1 / 0.8 / 6.4 / 16 percent: Insights of one cluster share little
+  vocabulary, so the metric can neither find paraphrases nor tell them from distinct claims.
+  Whether those copies are one claim reworded or different claims was not measured.
 - **Collapse once.** `collapseInsights` (`src/state/startup-maintenance.ts`) runs at boot, marks
-  itself in `KV.config` `insight-collapse:done`, and per cluster keeps the Insight with the most
-  reinforcements (then confidence, then oldest), folds each restating Insight into it (sum
-  reinforcements, max confidence, union of source ids), deletes the rest and writes one
-  `delete` audit row per survivor. Each cluster commits in one transaction, so an interrupted
-  boot leaves it untouched and reruns it. Insights have no search index, so the row delete is
-  the whole de-indexing.
+  itself in `KV.config` `insight-collapse:done`, and per cluster (740 live) keeps the 5 Insights
+  with the most reinforcements, then confidence, then most recent `lastReinforcedAt` (else
+  `createdAt`). Each other Insight is folded into the survivor it overlaps most by Jaccard (sum
+  reinforcements, max confidence, union source ids), deleted, and audited as one `delete` row per
+  survivor. Each cluster commits in one transaction, so an interrupted boot leaves it untouched
+  and reruns it. Insights have no search index, so the row delete is the whole de-indexing. K=5
+  is what one reflect pass writes per cluster. Expect at most 740 x 5 = 3,700 Insights left,
+  likely 2,000 to 2,500 since many clusters hold fewer than 5. Folding is lossy: a cluster that
+  held more than 5 distinct claims loses the weakest as separate rows.
 
 ## Fixed here
 
