@@ -15,14 +15,14 @@ evidence below comes from its abstract and method/results on arXiv unless the ro
 
 - **Enumeration.** `curl` of `/sitemap.xml` lists 453 `/papers/<slug>` URLs. The same 453 are
   embedded in the Next.js HTML of `/papers/page/1` to `/papers/page/19` plus the home page, each
-  with title, arXiv id and a summary paragraph; parsed into `tmp/papers.json` (gitignored; every
-  paper has an arXiv id). The two sources agree exactly (453 of 453). There are no per-paper
+  with title, arXiv id and a summary paragraph; parsing either reproduces the list (every paper
+  has an arXiv id). The two sources agree exactly (453 of 453). There are no per-paper
   explainer fetches; arXiv was the source of record.
 - **Screen.** All 453 titles read by hand; summaries of 126 keyword hits
   (coding, SWE, supersede, stale, conflict, rerank, BM25, temporal, forget, admission, ...) and
-  58 shortlisted papers read in full summary. 22 had their arXiv HTML fetched for
-  method and results (21 read; 1 of the 22, LifeFuse-Mem, was then excluded as latent memory); Threader had its abstract only because no HTML exists.
-- **Result.** 24 kept in the tables (20 read on arXiv, 1 abstract only, 3 site summary only); 429 excluded.
+  58 shortlisted papers read in full summary. 22 had their arXiv HTML read for
+  method and results (1 of the 22, LifeFuse-Mem, was then excluded as latent memory); Threader had its abstract only because no HTML exists.
+- **Result.** 24 kept in the tables (21 read on arXiv, 1 abstract only, 2 site summary only); 429 excluded.
   Per-category counts of the exclusions were not tallied; categories and reasons follow.
 - **Baseline check.** Most conversational results (LoCoMo, LongMemEval) are against Mem0-style
   extraction, MemGPT-style summaries, full context or the paper's own earlier version, not a
