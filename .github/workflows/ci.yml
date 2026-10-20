@@ -28,18 +28,14 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    # Linux only: the one Operator runs the daemon on Linux, so macOS and
+    # Windows legs cost CI time without covering a host anyone uses.
+    runs-on: ubuntu-latest
     strategy:
       # Don't bail the whole matrix on one cell's failure — we want to
-      # see whether the same failure reproduces across OSes (e.g.
-      # whether a flake is platform-specific or universal).
+      # see whether a failure reproduces across Node versions.
       fail-fast: false
       matrix:
-        # Windows held back: test/obsidian-export.test.ts has hardcoded
-        # POSIX paths (`/tmp/...`) that fail on D:\ drive runners.
-        # src/functions/obsidian-export.ts needs os.tmpdir() + path.join
-        # rework before Windows can be added back. Tracked as follow-up.
-        os: [ubuntu-latest, macos-latest]
         # Node 20 dropped: the Engine imports node:sqlite (ADR 0001), which
         # only exists from 22.5 and is unflagged from 22.13, so every inproc
         # test fails at import on 20.
@@ -59,9 +55,9 @@ jobs:
       - run: npm run skills:check
       - run: npm run typecheck
       - run: npm test
-      # One leg is enough because the numbers do not depend on OS or Node
+      # One leg is enough because the numbers do not depend on the Node
       # version. It runs even when unit tests fail, so a ranking change shows
       # its Recall cost alongside them, but not when install or build failed.
       - name: Recall quality gate
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.os == 'ubuntu-latest' && matrix.node-version == 22 }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.node-version == 22 }}
         run: npm run eval:gate

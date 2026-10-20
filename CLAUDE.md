@@ -42,7 +42,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
 - **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
-- **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
+- **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu only: the daemon runs on the Operator's Linux machine, so do not add a macOS or Windows leg, nor re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
 
@@ -319,7 +319,7 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - Iterate on Recall with `npm run eval:suite -- --tier fast --against <label>` (~2 min: coding-life, PrecisionMemBench, LongMemEval sample; `full` adds replay). Every eval runner scores only the dev split by default; `--split holdout` or `all` (a published scorecard) needs `AGENTMEMORY_EVAL_HOLDOUT=<label>` and logs the look in `eval/holdout-ledger.ndjson`, which `eval:suite --holdout` does for you. Never change the split salt or share in `eval/runner/split.ts`; see `eval/README.md`
 - sdebench (AMB harness, boltons) results go in `docs/benchmarks/2026-10-18-sdebench.md`: one row per arm, rejected levers included, with dev and holdout totals. Read it before choosing a lever, so a tried one is not rerun
 - `test/supersession.test.ts` records, per record kind and Recall surface, whether a newer claim beats the stale one; `docs/supersession.md` maps each cell to its test and follow-up issue. A cell where the stale claim still wins is `it.fails`: a fix flips it to `it` and updates its row in that table
-- CI gates Recall quality with `npm run eval:gate` (ubuntu / Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why
+- CI gates Recall quality with `npm run eval:gate` (Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why
 
 ## Supported hosts
 

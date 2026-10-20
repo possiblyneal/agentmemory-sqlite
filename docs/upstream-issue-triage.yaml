@@ -208,7 +208,7 @@ issues:
     kind: bug
     note: "Viewer .tab-bar collapses vertically on Windows/Chromium."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/422
   - number: 429
     title: "How to move Agentmemory storage to another disk(e.g D or E)?"
@@ -441,7 +441,7 @@ issues:
     kind: bug
     note: "iii console installer rejects MINGW64 on Windows 11."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/557
   - number: 559
     title: "agentmemory Graph empty"
@@ -569,7 +569,7 @@ issues:
     kind: bug
     note: "mem::summarize 500s on any character above U+00FF on Windows (ByteString conversion)."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/637
   - number: 645
     title: "安装时有一些警告，虽然不影响使用，但我觉得对新用户体验很差"
@@ -1250,7 +1250,7 @@ issues:
     kind: bug
     note: "Windows scheduled-task CWD makes the engine run in-memory; total data loss per restart."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/913
   - number: 915
     title: "\"/recall\" slash command fails: HTTP 404 on memory_lesson_recall endpoint"
@@ -1732,7 +1732,7 @@ issues:
     kind: bug
     note: "Dashboard does not reflect sessions renamed in Codex on Windows."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1054
     mentioned_by_prs: [1403, 1430]
   - number: 1058
@@ -2084,7 +2084,7 @@ issues:
     kind: bug
     note: "Disabled slot tools 500, diagnostics misclassify global memories, tests are not Windows-portable."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1148
     fix_prs: [1149]
     mentioned_by_prs: [1352]
@@ -2291,7 +2291,7 @@ issues:
     kind: feature
     note: "Grab bag: Windows connect support, Antigravity variants, doctor checks."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1183
   - number: 1184
     title: "opencode plugin: auto-title generation consumes the once-per-session memory injection — main conversation never gets context"
@@ -2602,7 +2602,7 @@ issues:
     kind: bug
     note: "30 Windows test failures, all test-side platform assumptions."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1264
     mentioned_by_prs: [1265, 1266, 1267]
   - number: 1270
@@ -2781,7 +2781,7 @@ issues:
     kind: bug
     note: "Windows never loads ~/.agentmemory/.env, so every authenticated request 401s while reporting healthy."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1331
   - number: 1333
     title: "Pinned slot block is silently dropped whole when it exceeds TOKEN_BUDGET (continue, not truncate)"
@@ -2870,7 +2870,7 @@ issues:
     kind: chore
     note: "Windows build script portability, test normalization and audit split."
     disposition: wont-fix
-    wont_fix_reason: "Windows — CI runs ubuntu and macos only"
+    wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1361
     fix_prs: [1362]
   - number: 1364
