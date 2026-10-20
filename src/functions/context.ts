@@ -197,7 +197,8 @@ export function registerContextFunction(
       const relevantInsights = insights
         .filter((i) => !i.deleted && i.project === data.project)
         .sort((a, b) => projectWeighted(b, data.project) - projectWeighted(a, data.project))
-        .slice(0, 5);
+        .slice(0, 5)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
       if (relevantInsights.length > 0) {
         const items = relevantInsights
