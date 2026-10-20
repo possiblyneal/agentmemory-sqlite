@@ -130,7 +130,7 @@ function envNumber(key: string, fallback: number): number {
 }
 
 export function isMemoryChunkingEnabled(): boolean {
-  return process.env.AGENTMEMORY_MEMORY_CHUNKING === "true";
+  return process.env.AGENTMEMORY_MEMORY_CHUNKING !== "false";
 }
 
 /**
@@ -138,8 +138,7 @@ export function isMemoryChunkingEnabled(): boolean {
  *
  * Chunk ids are `${memoryId}#${i}` and are only used when the memory
  * actually produced more than one chunk, so single-chunk memories keep
- * their bare id and stay wire-identical to the unchunked path. `#` is
- * collision-free against generateId's `prefix_base36_hex`.
+ * their bare id. `#` is collision-free against generateId's `prefix_base36_hex`.
  *
  * Every chunk is prefixed with the title and the concepts. Concepts are
  * the hand-curated tags and are invisible to the vector leg otherwise —
@@ -153,7 +152,7 @@ export function memoryChunkJobs(
   const flat = memory.title + " " + memory.content;
   if (!isMemoryChunkingEnabled()) return [{ id: memory.id, text: flat }];
 
-  const header = [memory.title, (memory.concepts ?? []).join(", ")]
+  const header = [memory.title, (Array.isArray(memory.concepts) ? memory.concepts : []).join(", ")]
     .filter((p) => p.length > 0)
     .join(" | ");
   const chunks = chunkText(

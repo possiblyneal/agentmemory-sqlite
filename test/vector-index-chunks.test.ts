@@ -1,7 +1,38 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { VectorIndex, parentIdOf } from "../src/state/vector-index.js";
+import { isMemoryChunkingEnabled, memoryChunkJobs } from "../src/state/memory-utils.js";
+import type { Memory } from "../src/types.js";
 
 const v = (...xs: number[]) => new Float32Array(xs);
+
+const longMemory = {
+  id: "mem_long",
+  title: "Long note",
+  concepts: [],
+  content: Array.from({ length: 40 }, (_, i) => `Sentence number ${i} about chunked memories, long enough to need splitting.`).join(" "),
+} as unknown as Memory;
+
+describe("memory chunking default", () => {
+  const saved = process.env.AGENTMEMORY_MEMORY_CHUNKING;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    else process.env.AGENTMEMORY_MEMORY_CHUNKING = saved;
+  });
+
+  it("is on when the variable is unset", () => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    expect(isMemoryChunkingEnabled()).toBe(true);
+    const jobs = memoryChunkJobs(longMemory);
+    expect(jobs.length).toBeGreaterThan(1);
+    expect(jobs.every((j) => j.id.startsWith("mem_long#"))).toBe(true);
+  });
+
+  it("is off only for the literal false, giving one bare-id vector", () => {
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
+    expect(isMemoryChunkingEnabled()).toBe(false);
+    expect(memoryChunkJobs(longMemory).map((j) => j.id)).toEqual(["mem_long"]);
+  });
+});
 
 describe("VectorIndex chunk handling", () => {
   const saved = process.env.AGENTMEMORY_MEMORY_CHUNKING;
