@@ -84,6 +84,7 @@ describe("mem::index-fill-missing", () => {
       .all() as Array<{ id: string; input_hash: string; hash_state: string }>;
 
   beforeEach(() => {
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
     dir = mkdtempSync(join(tmpdir(), "am-inproc-fill-"));
     state = new SqliteState(join(dir, "state.sqlite"));
     vectors = new SqliteVectorStore(state);
@@ -96,6 +97,7 @@ describe("mem::index-fill-missing", () => {
   });
 
   afterEach(() => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
     setInprocStores(null, null);
     setEmbeddingProvider(null);
     setVectorIndex(null);
@@ -205,7 +207,7 @@ describe("mem::index-fill-missing", () => {
       expect((await vi.search(v(1, 0), 5)).map((h) => h.obsId)).toEqual(["mem_c"]);
       expect(provider.calls).toHaveLength(0);
     } finally {
-      delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+      process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
     }
   });
 

@@ -130,7 +130,7 @@ function envNumber(key: string, fallback: number): number {
 }
 
 export function isMemoryChunkingEnabled(): boolean {
-  return process.env.AGENTMEMORY_MEMORY_CHUNKING === "true";
+  return process.env.AGENTMEMORY_MEMORY_CHUNKING !== "false";
 }
 
 /**

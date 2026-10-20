@@ -70,7 +70,7 @@ describe("vector index population on remember", () => {
   const savedChunking = process.env.AGENTMEMORY_MEMORY_CHUNKING;
 
   beforeEach(() => {
-    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    process.env.AGENTMEMORY_MEMORY_CHUNKING = "false";
     vectorIndex = new VectorIndex();
     setVectorIndex(vectorIndex);
     setEmbeddingProvider(mockEmbedder);
