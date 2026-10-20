@@ -5,6 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerSmartSearchFunction } from "../src/functions/smart-search.js";
+import { setEmbeddingProvider } from "../src/functions/search.js";
 import type {
   CompressedObservation,
   HybridSearchResult,
@@ -158,6 +159,19 @@ describe("Smart Search Function", () => {
     it("keeps a vector-only hit with a strong match only when BM25 also saw it", async () => {
       searchResults = [hit("lexical", 10), hit("paraphrase", 3.2, 0.33), hit("vector-only", 0, 0.9), hit("weak-cosine", 3.2, 0.2)];
       expect(ids(await search())).toEqual(["lexical", "paraphrase"]);
+    });
+
+    it("rescues by the embedding model's own cosine floor when it names one", async () => {
+      setEmbeddingProvider({
+        name: "gemma",
+        dimensions: 3,
+        embed: async () => new Float32Array(3),
+        embedBatch: async () => [],
+        minRelevantCosine: 0.69,
+      });
+      searchResults = [hit("lexical", 10), hit("paraphrase", 3.2, 0.72), hit("off-topic", 3.2, 0.62)];
+      expect(ids(await search())).toEqual(["lexical", "paraphrase"]);
+      setEmbeddingProvider(null);
     });
 
     it("fills the page from hits past the limit when the floor drops ones inside it", async () => {

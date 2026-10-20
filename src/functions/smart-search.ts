@@ -23,7 +23,7 @@ import {
 import { logger } from "../logger.js";
 import { getCounters } from "../telemetry/setup.js";
 import { graphReadable } from "../state/graph-indexes.js";
-import { createProjectMatcher } from "./search.js";
+import { createProjectMatcher, getEmbeddingProvider } from "./search.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
 
 // Chosen against the search path of eval/data/coding-agent-life-v2 (the
@@ -35,7 +35,8 @@ import { recallSemanticFacts } from "./semantic-recall.js";
 // lexical overlap reach 0.58, so cosine alone never admits a hit: it only
 // rescues one that BM25 already matched. These cosines are MiniLM's: BGE-small
 // scores off-topic pairs at 0.5-0.6, so it admits nearly every hit here
-// (docs/benchmarks/2026-10-19-embedding-model.md).
+// (docs/benchmarks/2026-10-19-embedding-model.md); a provider whose model has
+// its own scale names its floor in minRelevantCosine.
 const MIN_BM25_SCORE = 3.5;
 const MIN_BM25_RATIO_TO_BEST = 0.5;
 const MIN_COSINE_SCORE = 0.3;
@@ -43,10 +44,11 @@ const MIN_COSINE_SCORE = 0.3;
 function aboveRelevanceFloor(hits: HybridSearchResult[]): HybridSearchResult[] {
   const best = Math.max(0, ...hits.map((h) => h.bm25Score));
   const bm25Floor = Math.max(MIN_BM25_SCORE, best * MIN_BM25_RATIO_TO_BEST);
+  const cosineFloor = getEmbeddingProvider()?.minRelevantCosine ?? MIN_COSINE_SCORE;
   return hits.filter(
     (h) =>
       h.bm25Score >= bm25Floor ||
-      (h.bm25Score > 0 && h.vectorScore >= MIN_COSINE_SCORE),
+      (h.bm25Score > 0 && h.vectorScore >= cosineFloor),
   );
 }
 

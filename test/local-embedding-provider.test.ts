@@ -126,6 +126,32 @@ describe("LocalEmbeddingProvider (with loaded pipeline)", () => {
     vi.unstubAllEnvs();
   });
 
+  it("runs EmbeddingGemma 2 at q4 with its search-task prefix on both sides", async () => {
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "onnx-community/embeddinggemma-2-ONNX");
+    vi.stubEnv("AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", "768");
+    const { pipeline, extractor } = mockSuccessModule();
+    const { LocalEmbeddingProvider: Fresh } = await import(
+      "../src/providers/embedding/local.js"
+    );
+    const provider = new Fresh();
+    await provider.embedBatch(["a document"]);
+    await provider.embedQuery("a query");
+    expect(pipeline).toHaveBeenCalledWith(
+      "feature-extraction",
+      "onnx-community/embeddinggemma-2-ONNX",
+      { dtype: "q4" },
+    );
+    expect(extractor).toHaveBeenNthCalledWith(1, ["title: none | text: a document"], {
+      pooling: "mean",
+      normalize: true,
+    });
+    expect(extractor).toHaveBeenNthCalledWith(2, ["task: search result | query: a query"], {
+      pooling: "mean",
+      normalize: true,
+    });
+    vi.unstubAllEnvs();
+  });
+
   it("keeps mean pooling and unprefixed queries for other models", async () => {
     const { extractor } = mockSuccessModule();
     const { LocalEmbeddingProvider: Fresh } = await import(

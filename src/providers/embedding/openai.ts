@@ -9,6 +9,7 @@ import {
   normalizeBaseUrl,
 } from "../_openai-shared.js";
 import { requestedDimensions, resolveDimensions } from "./_dimensions.js";
+import { retrievalProfileFor, type RetrievalProfile } from "./_retrieval.js";
 
 const DEFAULT_MODEL = "text-embedding-3-small";
 
@@ -56,6 +57,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private model: string;
   private isAzure: boolean;
   private azureApiVersion: string;
+  private retrieval: RetrievalProfile;
+  readonly minRelevantCosine: number | undefined;
 
   constructor(apiKey?: string) {
     // Separate API key path: caller-passed wins, then OPENAI_EMBEDDING_API_KEY,
@@ -87,10 +90,17 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.isAzure = detectAzure(this.baseUrl);
     this.azureApiVersion =
       getEnvVar("OPENAI_API_VERSION") || DEFAULT_AZURE_API_VERSION;
+    this.retrieval = retrievalProfileFor(this.model);
+    this.minRelevantCosine = this.retrieval.minRelevantCosine;
   }
 
   get vectorSpace(): string {
     return `openai:${this.model}:${this.dimensions}`;
+  }
+
+  async embedQuery(text: string): Promise<Float32Array> {
+    const [result] = await this.request([this.retrieval.queryPrefix + text]);
+    return result;
   }
 
   async embed(text: string): Promise<Float32Array> {
@@ -99,6 +109,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    return this.request(texts.map((text) => this.retrieval.documentPrefix + text));
+  }
+
+  private async request(texts: string[]): Promise<Float32Array[]> {
     const url = buildEmbeddingUrl(
       this.baseUrl,
       this.isAzure,

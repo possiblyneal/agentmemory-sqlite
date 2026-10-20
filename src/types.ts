@@ -349,6 +349,9 @@ export interface EmbeddingProvider {
   // Names the vector space this provider writes into: two providers with the
   // same value produce comparable vectors. Defaults to `${name}:${dimensions}`.
   vectorSpace?: string;
+  // The cosine at or above which smart-search counts a BM25-matched hit as
+  // relevant, when this model's similarity scale differs from MiniLM's.
+  minRelevantCosine?: number;
 }
 
 export interface MemoryRelation {

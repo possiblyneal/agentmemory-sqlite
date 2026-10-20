@@ -225,7 +225,12 @@ recorded, drops every vector so the fill pass re-embeds them (`dropMismatchedVec
 `src/functions/index-fill.ts`); until it finishes, the vector leg of Recall covers only what it
 has re-embedded. Query text is embedded through `embedQuery()`
 (`src/providers/embedding/index.ts`), which uses a provider's asymmetric query path when it has
-one — BGE v1.5 runs CLS pooling and prefixes its queries.
+one. `retrievalProfileFor()` (`src/providers/embedding/_retrieval.ts`) gives the local and
+OpenAI-compatible providers each model's query and document prefixes (BGE v1.5 prefixes queries;
+EmbeddingGemma 2 prefixes both) and, where its cosine scale differs from MiniLM's, its own
+`minRelevantCosine`, which smart-search uses in place of 0.3. Calibrate a new model's floor as the
+cosine that rejects the same share of random Observation pairs as MiniLM's 0.3, never against
+eval labels (`docs/benchmarks/2026-10-20-embeddinggemma-2.md`). BGE v1.5 also pools by CLS.
 
 A Memory is embedded as one vector per chunk (`memoryChunkJobs()`, `src/state/memory-utils.ts`;
 on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char overlap, each
