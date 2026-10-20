@@ -16,7 +16,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 | Semantic Fact | **stale ranked first** (T8) | **stale ranked first** (T9) | not reachable (T10) |
 | Lesson | **stale ranked first** (T11) | **stale ranked first** (T12) | not reachable (T10) |
 | Insight | **stale ranked first** (T13) | **stale ranked first** (T14) | not reachable (T10) |
-| Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); **stale ranked first** when the newer work was summarized first (T18) | stale demoted, newest Session first (T16); **stale ranked first** against a contradicting Memory (T19) |
+| Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); **stale ranked first** when the newer work was summarized first (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
 | Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | **stale ranked first** when it matches the prompt more strongly (T22) or equally (T23) |
 
 "Hidden" means the stale record is absent. "Demoted" means both are returned and the newer
@@ -44,7 +44,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T16 | Session Summary decision: prompt-submit gives the newer Session's decisions ahead of the older one's | passes |
 | T17 | Session Summary decision: session start lists the Session whose work is newer first when summaries were written in work order | passes |
 | T18 | Session Summary decision: session start lists the Session whose work is newer first when its summary was written earlier | `it.fails` |
-| T19 | Session Summary decision: prompt-submit puts a Memory that contradicts a Session decision ahead of that decision | `it.fails` |
+| T19 | Session Summary decision: prompt-submit puts a Memory that contradicts a Session decision ahead of that decision | passes |
 | T20 | Observation: smart-search ranks the newer Observation above the contradicted one | passes |
 | T21 | Observation: smart-search ranks the newer Observation above a contradicted one that matches the query more strongly | passes |
 | T22 | Observation: prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly | `it.fails` |
@@ -91,8 +91,9 @@ Insights. Search ranks like Lessons and session start by confidence (T13, T14).
 `lastObservationAt`, under a header saying the newer of two conflicting rules holds, and adds a
 later Session that amends a given one (`laterAmendment`) (T16). Session start orders Summary
 blocks by `createdAt`, the write time, so a Session whose work is newer but was summarized first
-sorts after the older work (T18). Prompt submit also renders every Summary decision before any
-Memory fragment, so a Memory that supersedes a decision comes second (T19).
+sorts after the older work (T18). A Memory whose `updatedAt` is later than a rendered Session's date takes its place among the
+Sessions by date, so it is not rendered after a decision it may supersede (T19); older Memories
+and Observations follow the Sessions.
 
 **Observations.** Never superseded. `HybridSearch` multiplies Observation scores by a mild
 recency factor (half-life 180 days, floor 0.6), which lets a newer Observation beat an older one

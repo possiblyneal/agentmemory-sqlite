@@ -46,12 +46,13 @@ function wordCount(prompt: string): number {
 
 // mem::search returns Memories in the Observation shape, under the
 // Memory's own id, so only the Memory store can tell the two apart.
-async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
+async function candidateFor(kv: StateKV, hit: NarratedHit): Promise<Candidate> {
   const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
-  return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
+  const ref = withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
+  return { hit, ref, ...(memory && { memoryAt: memory.updatedAt ?? memory.createdAt }) };
 }
 
-type Candidate = { hit: NarratedHit; ref: InjectedRef };
+type Candidate = { hit: NarratedHit; ref: InjectedRef; memoryAt?: string };
 type Resolved = Candidate & { summary: SessionSummary | null };
 
 // An Observation a Session Summary covers is a fragment of a conversation
@@ -159,36 +160,52 @@ async function withLaterAmendments(
 }
 
 // Decisions lead, newest Session first, so a later Session that amends a
-// rule is read before the rule it replaces.
+// rule is read before the rule it replaces. A Memory dated after a Session
+// is not placed behind it, since it may be the claim that replaced a decision:
+// those Memories take their place among the Sessions by date.
 function renderWithSessionDecisions(chosen: Resolved[]) {
+  type Entry =
+    | { at: string; session: { sessionId: string; summary: SessionSummary } }
+    | { at: string; memory: { text: string; ref: InjectedRef } };
   const fragments: string[] = [];
   const fragmentRefs: InjectedRef[] = [];
-  const sessions: Array<{ sessionId: string; summary: SessionSummary; at: string }> = [];
-  for (const { hit, ref, summary } of chosen) {
-    if (!summary) {
-      fragments.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
+  const sessions: Entry[] = [];
+  for (const { hit, summary } of chosen) {
+    if (!summary) continue;
+    sessions.push({ at: decidedAt(summary), session: { sessionId: hit.sessionId, summary } });
+  }
+  const oldestAt = sessions.reduce((min, e) => (e.at < min ? e.at : min), "\uffff");
+  const timeline: Entry[] = [...sessions];
+  for (const { hit, ref, summary, memoryAt } of chosen) {
+    if (summary) continue;
+    const text = escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS));
+    if (memoryAt && memoryAt > oldestAt) {
+      timeline.push({ at: memoryAt, memory: { text, ref } });
+    } else {
+      fragments.push(text);
       fragmentRefs.push(ref);
+    }
+  }
+  timeline.sort((a, b) => b.at.localeCompare(a.at));
+  const lines: string[] = [];
+  const injected: InjectedRef[] = [];
+  for (const entry of timeline) {
+    if ("memory" in entry) {
+      lines.push(entry.memory.text);
+      injected.push(entry.memory.ref);
       continue;
     }
-    sessions.push({ sessionId: hit.sessionId, summary, at: decidedAt(summary) });
-  }
-  const newestFirst = sessions.sort((a, b) => b.at.localeCompare(a.at));
-  const lines = newestFirst.length
-    ? ["Requirements the user settled in past Sessions of this project. They still hold: where the task touches what a rule governs, apply it with its exact values, even where the current code does not follow it yet. Newest Session first; where two of these conflict, the newer one holds."]
-    : [];
-  for (const { summary, at } of newestFirst) {
+    const { sessionId, summary } = entry.session;
+    if (!lines.length || !injected.some((r) => r.kind === "summary")) {
+      lines.push("Requirements the user settled in past Sessions of this project. They still hold: where the task touches what a rule governs, apply it with its exact values, even where the current code does not follow it yet. Newest Session first; where two of these conflict, the newer one holds.");
+    }
     lines.push(
-      `Session "${escapeXml(summary.title)}" (${at.slice(0, 10)}):`,
+      `Session "${escapeXml(summary.title)}" (${entry.at.slice(0, 10)}):`,
       ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(cutDecision(d))}`),
     );
+    injected.push(withFiles({ kind: "summary", id: sessionId }, summary.filesModified));
   }
-  return {
-    lines: [...lines, ...fragments],
-    injected: [
-      ...newestFirst.map(({ sessionId, summary }) => withFiles({ kind: "summary", id: sessionId }, summary.filesModified)),
-      ...fragmentRefs,
-    ],
-  };
+  return { lines: [...lines, ...fragments], injected: [...injected, ...fragmentRefs] };
 }
 
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
@@ -219,10 +236,9 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
         (r): r is NarratedHit =>
           r.score >= floor && !!r.observation.narrative && !seen.has(refKey({ kind: "summary", id: r.sessionId })),
       );
-      const refs = await Promise.all(strong.map((r) => refFor(kv, r)));
-      const candidates = strong
-        .map((hit, i) => ({ hit, ref: refs[i] }))
-        .filter(({ ref }) => !seen.has(refKey(ref)));
+      const candidates = (await Promise.all(strong.map((r) => candidateFor(kv, r)))).filter(
+        ({ ref }) => !seen.has(refKey(ref)),
+      );
       const gated = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;

@@ -205,7 +205,10 @@ else `createdAt`; never write time alone, which is milliseconds apart for Sessio
 together; a Summary written before the field existed keeps the fallback until its Session is
 summarized again), and ordered newest first, under a header telling the Agent the rules still
 hold, with their exact values, even where the current code does not follow them yet, and that
-the newer of two conflicting rules holds. The top 3 are counted in rendered units from a 30-hit
+the newer of two conflicting rules holds. A Memory hit dated (`updatedAt`) after the oldest
+rendered Session takes its place among the Sessions by date, so it is not rendered behind a
+decision it may supersede; the header sits before the first Session block. Older Memories and
+Observations follow the Sessions. The top 3 are counted in rendered units from a 30-hit
 search: a covered Session is one unit however many of its Observations hit.
 Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
 when the best-scoring other Session there scores at least 0.35 of the given Session's own best

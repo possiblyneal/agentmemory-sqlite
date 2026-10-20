@@ -354,7 +354,7 @@ describe("supersession: Session Summary decision", () => {
     expect(ranksBefore(context, `Rule: ${FRESH}`, `Rule: ${STALE}`)).toBe(true);
   });
 
-  it.fails("prompt-submit puts a Memory that contradicts a Session decision ahead of that decision", async () => {
+  it("prompt-submit puts a Memory that contradicts a Session decision ahead of that decision", async () => {
     await seedObservation(observation("obs_a", "ses_a", OLD, `Settled the whitespace rule: ${STALE} everywhere in the repository`));
     await kv.set(KV.summaries, "ses_a", summary("ses_a", { keyDecisions: [`Rule: ${STALE}`], createdAt: AFTER_OLD, coveredThrough: AFTER_OLD, lastObservationAt: OLD }));
     await saveMemory(`Whitespace rule reversed, ${FRESH} everywhere in the repository`);
