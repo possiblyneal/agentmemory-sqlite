@@ -215,7 +215,7 @@ Session and any Summary already given are dropped before ranking. A failed amend
 drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
 (each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
-out the rest of the budget; its `summary` ref keeps every file.
+out the rest of the budget; its `summary` ref keeps every file. Summary blocks are ordered newest work first by the same date prompt submit uses (`decidedAt`), not by write time.
 
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
