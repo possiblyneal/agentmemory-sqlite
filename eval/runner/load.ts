@@ -12,11 +12,11 @@ interface LongMemEvalRaw {
   haystack_dates?: string[];
 }
 
-// "2023/05/20 (Sat) 02:21" -> "2023-05-20T02:21:00.000Z"
 function haystackTimestamp(date: string | undefined): string | undefined {
   const m = date?.match(/^(\d{4})\/(\d{2})\/(\d{2})\b.*?(\d{2}):(\d{2})/);
   if (!m) return undefined;
-  const time = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00.000Z`);
+  const [year, month, day, hour, minute] = m.slice(1).map(Number);
+  const time = new Date(year, month - 1, day, hour, minute);
   return Number.isNaN(time.getTime()) ? undefined : time.toISOString();
 }
 

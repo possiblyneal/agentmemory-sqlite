@@ -25,6 +25,7 @@ export function isSearchLayer(value: unknown): value is SearchLayer {
 const TITLE_WEIGHT = 3;
 const SUBTITLE_WEIGHT = 2;
 const MAX_QUERY_TERMS = 25;
+const MAX_QUERY_DATE_TERMS = 5;
 const EDGE_PUNCTUATION = /^[/.\\_-]+|[/.\\_-]+$/g;
 
 export class SearchIndex {
@@ -129,7 +130,7 @@ export class SearchIndex {
     layer?: IndexLayer,
   ): Array<{ obsId: string; sessionId: string; score: number }> {
     const rawTerms = this.tokenize(query.toLowerCase(), STOP_WORDS);
-    const dateTerms = dateTermsForQuery(query);
+    const dateTerms = dateTermsForQuery(query).slice(0, MAX_QUERY_DATE_TERMS);
     if (rawTerms.length === 0 && dateTerms.length === 0) return [];
 
     const N = this.entries.size;

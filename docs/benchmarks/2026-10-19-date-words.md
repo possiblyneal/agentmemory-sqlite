@@ -1,6 +1,7 @@
 # 2026-10-19 — searchable record dates
 
-**Commit:** `f8af46b` against control `22e2bc0` (`main2`, `main-hold3`)
+**Commit:** `f8af46b` against control `22e2bc0` (`main2`, `main-hold3`). The `date-hold` ledger
+line records `90d59de`, the same source and eval code before a rebase onto `4103219`
 **Bench:** `eval:suite --tier fast`: coding-agent-life-v2, PrecisionMemBench, LongMemEval `_s`
 **N:** dev: coding-life 23 questions (4 no-answer), PMB 47 cases, LongMemEval 24 (4 per type);
 holdout: coding-life 15, PMB 30, LongMemEval 112
@@ -18,14 +19,20 @@ the query-stopwords lever had lost it. The difference is ≈ at 99.7% Bonferroni
 
 ## Per bench
 
+The rows are metrics and the columns are dev and holdout before/after, unlike the per-path
+table in `TEMPLATE.md`, because a single lever is judged on both splits. The n per split is in
+the header.
+
 | Metric | Dev before | Dev after | Holdout before | Holdout after |
 |---|---|---|---|---|
 | coding-life search recall | 1.000 | 1.000 | 0.917 | 1.000 |
 | coding-life search precision | 0.708 | 0.708 | 0.556 | 0.556 |
 | coding-life prompt-submit recall / precision | 0.861 / 0.889 | 0.861 / 0.889 | 1.000 / 0.722 | 1.000 / 0.722 |
-| coding-life session-start recall | 0.625 | 0.625 | 1.000 | 1.000 |
+| coding-life session-start recall / precision | 0.625 / 1.000 | 0.625 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 |
 | PMB pass | 0.447 | 0.447 | 0.367 | 0.367 |
 | PMB precision | 0.440 | 0.440 | 0.521 | 0.521 |
+| PMB active pass | 0.391 | 0.391 | 0.350 | 0.350 |
+| PMB recall | 0.942 | 0.942 | 0.961 | 0.961 |
 | LongMemEval recall@5 | 0.865 | 0.865 | 0.917 | 0.917 |
 | LongMemEval hit | 0.958 | 0.958 | 0.964 | 0.964 |
 
@@ -38,6 +45,12 @@ moves to the new search recall.
 As in `eval/README.md`. The LongMemEval loader now gives each haystack Session its dataset
 date, so its records carry real timestamps. The holdout looks are `main-hold3` and
 `date-hold` in `eval/holdout-ledger.ndjson`.
+
+The suite figures predate the review fixes: records are now dated by the Operator's local
+calendar day rather than UTC, and query parsing became stricter. Those fixes ran no further
+holdout look. At the final head, `eval:gate` reproduces every number above, and `q-015` still
+returns both gold Sessions. The LongMemEval loader builds each timestamp from local fields, so a
+stored Session keeps its dataset day on any time zone.
 
 ## Reproduce
 

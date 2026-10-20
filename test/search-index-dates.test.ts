@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SearchIndex } from "../src/state/search-index.js";
+import { dateTermsForQuery } from "../src/state/date-terms.js";
 import type { CompressedObservation } from "../src/types.js";
 
 function shipped(id: string, timestamp: string): CompressedObservation {
@@ -82,5 +83,50 @@ describe("SearchIndex record dates", () => {
     const index = new SearchIndex();
     index.add(shipped("bad", "yesterday"));
     expect(ids(index, "2026-04-08")).toEqual([]);
+  });
+
+  it("dates a record by the Operator's local calendar day", () => {
+    const index = new SearchIndex();
+    index.add(shipped("late_evening", new Date(2026, 3, 8, 23, 30).toISOString()));
+    expect(ids(index, "2026-04-08")).toEqual(["late_evening"]);
+  });
+
+  it("uses at most five of a query's dates", () => {
+    const index = new SearchIndex();
+    const days = Array.from({ length: 10 }, (_, i) => `2026-04-${String(i + 10)}`);
+    for (const day of days) index.add(shipped(day, `${day}T12:00:00.000Z`));
+    expect(ids(index, days.join(" "))).toHaveLength(5);
+  });
+});
+
+describe("dateTermsForQuery", () => {
+  it.each([
+    "options 1 and 2 may conflict",
+    "we may 3 times retry",
+    "version 1.2 dec 5 hex",
+    "edit docs/benchmarks/2026-10-18-sdebench.md",
+    "open 2026-10-18-sdebench.md",
+  ])("finds no date in %s", (q) => {
+    expect(dateTermsForQuery(q)).toEqual([]);
+  });
+
+  it.each([
+    ["shipped may 2nd", "@md:05-02"],
+    ["shipped on may 2", "@md:05-02"],
+    ["shipped dec 5 2025", "@date:2025-12-05"],
+    ["shipped 2nd of may", "@md:05-02"],
+    ["failed at 2026-04-08T10:00:00Z", "@date:2026-04-08"],
+  ])("reads %s as %s", (q, expected) => {
+    expect(dateTermsForQuery(q)).toEqual([expected]);
+  });
+
+  it("reads a zoned timestamp as its local calendar day", () => {
+    const lateEvening = new Date(2026, 3, 8, 22, 0).toISOString();
+    expect(dateTermsForQuery(`failed at ${lateEvening}`)).toEqual(["@date:2026-04-08"]);
+  });
+
+  it("gives a day-month-year phrase only its day", () => {
+    expect(dateTermsForQuery("8 April 2026")).toEqual(["@date:2026-04-08"]);
+    expect(dateTermsForQuery("April 8th 2026")).toEqual(["@date:2026-04-08"]);
   });
 });

@@ -21,7 +21,7 @@ afterEach(() => {
 const turn = (content: string) => [{ role: "user", content }];
 
 describe("loadLongMemEval haystack dates", () => {
-  it("carries each haystack date onto its Session as an ISO timestamp", () => {
+  it("carries each haystack date onto its Session as an ISO timestamp of that local time", () => {
     const [q] = loadLongMemEval(
       write([
         {
@@ -36,8 +36,8 @@ describe("loadLongMemEval haystack dates", () => {
       ]),
     );
     expect(q.haystack.map((s) => s.timestamp)).toEqual([
-      "2023-05-20T02:21:00.000Z",
-      "2023-05-21T23:59:00.000Z",
+      new Date(2023, 4, 20, 2, 21).toISOString(),
+      new Date(2023, 4, 21, 23, 59).toISOString(),
     ]);
   });
 
@@ -56,7 +56,7 @@ describe("loadLongMemEval haystack dates", () => {
       ]),
     );
     expect(q.haystack.map((s) => [s.id, s.timestamp])).toEqual([
-      ["kept", "2023-06-01T10:00:00.000Z"],
+      ["kept", new Date(2023, 5, 1, 10, 0).toISOString()],
     ]);
   });
 
