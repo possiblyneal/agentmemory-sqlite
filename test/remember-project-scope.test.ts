@@ -176,7 +176,7 @@ describe("mem::remember — cross-project dedup isolation", () => {
     const second = await sdk.trigger({
       function_id: "mem::remember",
       payload: {
-        content: "always use express-jwt middleware for token validation in this project",
+        content: "always use express-jwt middleware for token validation in this project today",
         type: "pattern",
         project: "api",
       },

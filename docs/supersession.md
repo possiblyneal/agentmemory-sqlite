@@ -63,8 +63,10 @@ It compares the new content with existing Memories of the same project and scope
 Jaccard similarity, and above 0.7 sets the old one `isLatest: false` and removes it from the BM25
 and vector indexes, so search and both Injections stop returning it (T1, T2). It needs no LLM.
 It detects restatement, not contradiction: a reversal worded differently stays below 0.7 and
-both Memories stay live (T3, T4). Memories are not content-addressed here; `generateId()` gives
-each save a new id, and `fingerprintId()` is used by Lessons.
+both Memories stay live (T3, T4). An exact repeat (same `fingerprintId()` of the trimmed,
+lowercased content, same project and scope) is checked first and does not supersede: it raises
+the existing Memory's `strength` by 1 (cap 10), keeps its id, audits `reinforce` and returns
+that id. Only a near-restatement gets a new id.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
 `mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call
