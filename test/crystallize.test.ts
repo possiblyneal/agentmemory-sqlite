@@ -248,6 +248,30 @@ describe("Crystallize Functions", () => {
     });
   });
 
+  describe("mem::crystal-list total", () => {
+    it("counts every matching Crystal, not just the returned page", async () => {
+      for (let i = 0; i < 25; i++) {
+        const crystal: Crystal = {
+          id: `crys_${i}`,
+          narrative: `Crystal ${i}`,
+          keyOutcomes: [],
+          filesAffected: [],
+          lessons: [],
+          sourceActionIds: [],
+          createdAt: new Date(2025, 0, i + 1).toISOString(),
+        };
+        await kv.set("mem:crystals", crystal.id, crystal);
+      }
+      const result = (await sdk.trigger("mem::crystal-list", {})) as {
+        crystals: Crystal[];
+        total: number;
+      };
+
+      expect(result.crystals.length).toBe(20);
+      expect(result.total).toBe(25);
+    });
+  });
+
   describe("mem::crystal-list", () => {
     beforeEach(async () => {
       const c1: Crystal = {

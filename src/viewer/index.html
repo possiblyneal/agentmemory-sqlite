@@ -1501,6 +1501,8 @@
         state.dashboard.semantic = (results[5] && results[5].facts) || (results[5] && results[5].semantic) || [];
         state.dashboard.semanticTotal = results[5] && results[5].total;
         state.dashboard.insightTotal = results[10] && results[10].total;
+        state.dashboard.lessonTotal = results[8] && results[8].total;
+        state.dashboard.crystalTotal = results[9] && results[9].total;
         // A failed request resolves to null; the count cards show a dash for
         // it so the Operator can tell an unreachable count from an empty one.
         state.dashboard.failed = {
@@ -1598,8 +1600,8 @@
       html += '<div class="stats-grid">';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="sessions" role="link" tabindex="0"><div class="label">Sessions</div><div class="value">' + valueOrDash(d.sessions.length, failed.sessions) + '</div><div class="sub">' + valueOrDash(activeSessions, failed.sessions) + ' active</div></div>';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="memories" role="link" tabindex="0"><div class="label">Memories</div><div class="value">' + valueOrDash(d.memoriesTotal !== undefined ? d.memoriesTotal : d.memories.length, failed.memories) + '</div><div class="sub">latest versions</div></div>';
-      var lessonCount = (d.lessons || []).length;
-      var crystalCount = (d.crystals || []).length;
+      var lessonCount = d.lessonTotal !== undefined ? d.lessonTotal : (d.lessons || []).length;
+      var crystalCount = d.crystalTotal !== undefined ? d.crystalTotal : (d.crystals || []).length;
       html += '<div class="stat-card" data-action="goto-tab" data-tab="lessons" role="link" tabindex="0"><div class="label">Lessons</div><div class="value">' + valueOrDash(lessonCount, failed.lessons) + '</div><div class="sub">confidence-scored</div></div>';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="crystals" role="link" tabindex="0"><div class="label">Crystals</div><div class="value">' + valueOrDash(crystalCount, failed.crystals) + '</div><div class="sub">action digests</div></div>';
       html += '<div class="stat-card"><div class="label">Semantic Facts</div><div class="value">' + valueOrDash(d.semanticTotal || 0, failed.semantic) + '</div><div class="sub">consolidated</div></div>';

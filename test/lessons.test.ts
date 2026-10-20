@@ -242,6 +242,18 @@ describe("Lessons", () => {
     });
   });
 
+  describe("mem::lesson-list total", () => {
+    it("counts every matching Lesson, not just the returned page", async () => {
+      for (let i = 0; i < 60; i++) {
+        await sdk.trigger("mem::lesson-save", { content: `Lesson number ${i}`, project: "/app" });
+      }
+      const result = (await sdk.trigger("mem::lesson-list", {})) as { lessons: Lesson[]; total: number };
+
+      expect(result.lessons.length).toBe(50);
+      expect(result.total).toBe(60);
+    });
+  });
+
   describe("mem::lesson-list", () => {
     beforeEach(async () => {
       await sdk.trigger("mem::lesson-save", { content: "Lesson A", confidence: 0.9, project: "/app" });
