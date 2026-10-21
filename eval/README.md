@@ -6,6 +6,7 @@ Four benches, run together by `eval:suite`:
 
 - **coding-agent-life-v2** — in-house corpus of 22 fictional Claude Code Sessions across two projects (`shipctl`, a Rust CLI, and `ledger-api`, which shares filenames with it), with 38 hand-graded questions split by the path that would answer them. Runs offline in about 30 seconds.
 - **LongMemEval** — public 500-question long-term memory benchmark over multi-session chat, search path only.
+- **BEAM** — 100K and 500K long-conversation splits, scored on Recall alone from each question's `source_chat_ids` (`npm run eval:beam`).
 - **PrecisionMemBench** — public 77-case benchmark asserting exactly which of 35 beliefs a search must and must not return; noise fails a case.
 - **Replay** — the Operator's own Claude Code transcripts, replayed in order and scored per Goal line. Private; never published beyond aggregates.
 
@@ -112,6 +113,21 @@ DOLPHINBENCH_PATH=$D npm run eval:dolphinbench -- --instance 21
 ```
 
 A retrieval-only derivative of Mem0's benchmark (Apache-2.0; never commit the data): no answerer, no judge, and not comparable with Mem0's published scores. Each test's `request` is the query, and the gold is every message in `source_message_ids` of the facts the test requires. `runner/dolphinbench-load.ts` turns each persona's whole history into one Session per message, ingested as a prompt Observation. The runner ingests a persona once, queries all its tests against that store, runs Alex first, and scores each adapter on `search` and `prompt-submit` (`--paths`; `vector` only does search and needs an OpenAI key, so it is opt-in through `--adapters`). It splits through `selectSplit("dolphinbench", ...)` by persona, so it scores the dev share unless the holdout is named. It needs Node >=22.15 (zstd parquet through `node:zlib`). About 500K tokens per persona, and ingestion takes 20 to 30 minutes each, so it is a one-off, outside every tier.
+
+### BEAM (public, 100K and 500K splits, retrieval only)
+
+BEAM (arXiv 2510.27246) is scored on Recall alone: no answerer, no judge. Each probing question's `source_chat_ids` are the gold; abstention has none and is skipped, as is any probe without ids. The dataset is CC-BY-SA-4.0 (share-alike), so it is fetched into the gitignored, shared `tmp/datasets/beam/` and never committed. Fetch each split as one datasets-server page (about 15 MB and 90 MB):
+
+```sh
+mkdir -p /path/to/repo/tmp/datasets/beam && cd /path/to/repo/tmp/datasets/beam
+for s in 100K 500K; do
+  curl -so $s.json "https://datasets-server.huggingface.co/rows?dataset=Mohammadta/BEAM&config=default&split=$s&offset=0&length=100"
+done
+
+BEAM_PATH=/path/to/repo/tmp/datasets/beam npm run eval:beam -- --size 100K --adapters grep,agentmemory-bm25
+```
+
+`beam-load.ts` turns a conversation into one Session per Turn (a user message and the replies to it, dated by its batch's `time_anchor`), because a batch is 60 to 100 messages and `k=15` over 3 to 10 batches would return the whole chat. A chat id maps to the Turn that holds it. The `agentmemory` adapter ingests one conversation once and answers all its Questions from that sandbox, rather than one sandbox per question. `type` is the BEAM ability; `--k` (default 15, the paper's best budget, §5) is the primary cut and `--sweep` (default 5,10,20) rescoring the same retrieval at other cuts. `--conversations N` samples every Nth conversation, for a split too slow to run whole (the `agentmemory` adapter embeds each Turn, about 6 s per Turn on a loaded machine). `--split` works as for the other runners, and `--out` receives `scores.ndjson`, `ingest.ndjson` and `summary.json`.
 
 ### Suite: iterate without overfitting
 
@@ -251,6 +267,7 @@ eval/
 │   ├── score.ts                   per-question scoring, per adapter × path aggregation, baseline gate
 │   ├── sandbox.ts                 throwaway daemon under tmp/eval-sandbox/
 │   ├── load.ts                    LongMemEval JSON → Question[]
+│   ├── beam-load.ts               BEAM rows → Question[] (Turns as Sessions, source_chat_ids as gold)
 │   ├── adapters/
 │   │   ├── agentmemory.ts         capture path in; smart-search, session/start, prompt-context out
 │   │   ├── grep.ts                tokenized substring baseline
@@ -259,6 +276,7 @@ eval/
 │   ├── dolphinbench.ts            DolphinBench retrieval runner (eval:dolphinbench)
 │   ├── dolphinbench-load.ts       DolphinBench parquet → Question[] (gold = establishing messages)
 │   ├── longmemeval.ts             public benchmark runner (--concurrency N: one sandbox per worker)
+│   ├── beam.ts                    BEAM retrieval-only runner (one sandbox per conversation)
 │   ├── pmb.ts                     PrecisionMemBench runner
 │   ├── pmb-score.ts               PrecisionMemBench case scoring, ported from upstream
 │   ├── supersession.ts            supersession runner: stale-first rate per record kind and surface
