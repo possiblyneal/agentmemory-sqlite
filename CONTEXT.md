@@ -46,7 +46,9 @@ _Avoid_: notification (alone)
 A durable distilled record derived from Observations, intended to be recalled later. Memories
 are not content-addressed by id, but an exact repeat (same project and scope, content equal after
 trim and lowercasing) reinforces the existing Memory instead of storing a second one, and a
-near-restatement (Jaccard > 0.7) supersedes it.
+near-restatement (Jaccard > 0.7) supersedes it. Its type is one of pattern, preference,
+architecture, bug, workflow, fact or rule; a **rule** is an instruction the Operator gave that
+must keep holding, and session start and pre-compact pin the latest ones ahead of relevance.
 _Avoid_: note, fact, item
 
 **Global Memory**:

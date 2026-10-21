@@ -75,7 +75,7 @@ export const ContextInputSchema = z.object({
 export const RememberInputSchema = z.object({
   content: z.string().min(1),
   type: z
-    .enum(["pattern", "preference", "architecture", "bug", "workflow", "fact"])
+    .enum(["pattern", "preference", "architecture", "bug", "workflow", "fact", "rule"])
     .optional(),
   concepts: z.array(z.string()).optional(),
   files: z.array(z.string()).optional(),

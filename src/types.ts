@@ -127,7 +127,7 @@ export interface Memory {
   id: string;
   createdAt: string;
   updatedAt: string;
-  type: "pattern" | "preference" | "architecture" | "bug" | "workflow" | "fact";
+  type: "pattern" | "preference" | "architecture" | "bug" | "workflow" | "fact" | "rule";
   title: string;
   content: string;
   concepts: string[];

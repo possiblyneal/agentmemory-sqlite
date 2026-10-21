@@ -111,6 +111,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         "bug",
         "workflow",
         "fact",
+        "rule",
       ]);
       const memType = validTypes.has(data.type || "")
         ? (data.type as Memory["type"])

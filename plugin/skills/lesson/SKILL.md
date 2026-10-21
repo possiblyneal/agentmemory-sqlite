@@ -26,7 +26,7 @@ Lesson saved (confidence 0.7). Duplicate content will strengthen it.
 
 ## Why
 
-Memories store facts; lessons store behavior. A lesson carries a confidence score that strengthens each time the same content is saved again and decays when unused, so repeated corrections rise and one-off noise fades. That only works if the content is a rule, not a story.
+Memories store facts; lessons store behavior. An instruction the Operator gave that must keep holding can also be saved as a `memory_save` with `type: "rule"`; both are pinned at session start and pre-compact. A lesson carries a confidence score that strengthens each time the same content is saved again and decays when unused, so repeated corrections rise and one-off noise fades. That only works if the content is a rule, not a story.
 
 ## Workflow
 
