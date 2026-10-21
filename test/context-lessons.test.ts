@@ -136,6 +136,29 @@ describe("mem::context — lessons auto-injection (#457)", () => {
     expect(projectIdx).toBeLessThan(globalIdx);
   });
 
+  it("ranks a newer lesson above an older, more confident one last reinforced long ago", async () => {
+    await seedLesson(kv, {
+      id: "lesson_old",
+      content: "old-lesson-marker",
+      project: "/tmp/proj",
+      confidence: 0.6,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastReinforcedAt: "2026-01-02T00:00:00.000Z",
+    });
+    await seedLesson(kv, {
+      id: "lesson_new",
+      content: "new-lesson-marker",
+      project: "/tmp/proj",
+      confidence: 0.5,
+    });
+
+    const result = await handler({ sessionId: "ses_recent", project: "/tmp/proj" });
+
+    expect(result.context.indexOf("new-lesson-marker")).toBeLessThan(
+      result.context.indexOf("old-lesson-marker"),
+    );
+  });
+
   it("excludes lessons scoped to a different project", async () => {
     await seedLesson(kv, {
       id: "lesson_other",
@@ -276,6 +299,23 @@ describe("mem::context — insights auto-injection (upstream PR #615)", () => {
     expect(result.context).not.toContain("content-global");
     expect(result.context).not.toContain("content-theirs");
     expect(result.context).not.toContain("content-gone");
+  });
+
+  it("keeps the five most confident Insights and lists them newest first", async () => {
+    for (let i = 0; i < 5; i++) {
+      await seedInsight(`ins${i}`, { project: "/proj", confidence: 0.9 - i / 100, createdAt: `2026-03-0${i + 1}T00:00:00Z` });
+    }
+    await seedInsight("weak", { project: "/proj", confidence: 0.1, createdAt: "2026-04-01T00:00:00Z" });
+
+    const { context } = await handler({ sessionId: "ses_i", project: "/proj" });
+
+    expect(context).not.toContain("content-weak");
+    const at = (i: number) => context.indexOf(`content-ins${i}`);
+    expect(at(4)).toBeGreaterThan(-1);
+    expect(at(4)).toBeLessThan(at(3));
+    expect(at(3)).toBeLessThan(at(2));
+    expect(at(2)).toBeLessThan(at(1));
+    expect(at(1)).toBeLessThan(at(0));
   });
 });
 

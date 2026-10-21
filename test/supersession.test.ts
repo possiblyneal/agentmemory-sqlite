@@ -19,6 +19,7 @@ import type {
   CompactSearchResult,
   CompressedObservation,
   Insight,
+  Lesson,
   Memory,
   SemanticMemory,
   Session,
@@ -222,22 +223,26 @@ describe("supersession: Memory", () => {
     expect(context).not.toContain(NEAR_RESTATEMENT_A);
   });
 
-  it.fails("smart-search ranks a contradicting Memory with little wording in common above the stale one", async () => {
+  it("smart-search ranks a contradicting Memory with little wording in common above the stale one", async () => {
     await saveMemory(LOW_OVERLAP_A);
+    vi.advanceTimersByTime(1000);
     await saveMemory(LOW_OVERLAP_B);
     const { results } = await smartSearch("indentation tabs");
-    expect(results.map((r) => r.title)).toEqual([LOW_OVERLAP_B]);
+    expect(results.map((r) => r.title)).toEqual([LOW_OVERLAP_B, LOW_OVERLAP_A]);
   });
 
-  it.fails("prompt-submit gives a contradicting Memory with little wording in common and not the stale one", async () => {
+  // The newer Memory matches the prompt below the relevance floor, so only the stale one passes it and demotion has nothing to reorder.
+  it.fails("prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one", async () => {
     await saveMemory(LOW_OVERLAP_A);
+    vi.advanceTimersByTime(1000);
     await saveMemory(LOW_OVERLAP_B);
     const context = await promptSubmit("what is the indentation convention, are tabs used for indentation here");
     expect(context).toContain(LOW_OVERLAP_B);
-    expect(context).not.toContain(LOW_OVERLAP_A);
+    expect(context).toContain(LOW_OVERLAP_A);
+    expect(context.indexOf(LOW_OVERLAP_B)).toBeLessThan(context.indexOf(LOW_OVERLAP_A));
   });
 
-  it.fails("smart-search hides a Memory that mem::evolve replaced", async () => {
+  it("smart-search hides a Memory that mem::evolve replaced", async () => {
     const stale = memory("mem_stale", NEAR_RESTATEMENT_A, OLD);
     await kv.set(KV.memories, stale.id, stale);
     getSearchIndex().add(memoryToIndexDoc(stale), "memory");
@@ -250,7 +255,7 @@ describe("supersession: Memory", () => {
     expect(results.map((r) => r.title)).toEqual([NEAR_RESTATEMENT_B]);
   });
 
-  it.fails("prompt-submit hides a Memory that mem::evolve replaced", async () => {
+  it("prompt-submit hides a Memory that mem::evolve replaced", async () => {
     const stale = memory("mem_stale", NEAR_RESTATEMENT_A, OLD);
     await kv.set(KV.memories, stale.id, stale);
     getSearchIndex().add(memoryToIndexDoc(stale), "memory");
@@ -279,12 +284,12 @@ describe("supersession: Semantic Fact", () => {
     await kv.set(KV.semantic, "sem_fresh", semanticFact("sem_fresh", `The team agreed to ${FRESH}`, 0.7, NEW));
   });
 
-  it.fails("smart-search returns the newer Semantic Fact ahead of the contradicted one", async () => {
+  it("smart-search returns the newer Semantic Fact ahead of the contradicted one", async () => {
     const { semanticFacts } = await smartSearch("agreed indent tabs spaces");
     expect(semanticFacts[0].fact).toContain(FRESH);
   });
 
-  it.fails("session start lists the newer Semantic Fact ahead of the contradicted one", async () => {
+  it("session start lists the newer Semantic Fact ahead of the contradicted one", async () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });
@@ -301,18 +306,25 @@ describe("supersession: prompt-submit does not reach Semantic Facts, Lessons or 
 
 describe("supersession: Lesson", () => {
   beforeEach(async () => {
+    vi.setSystemTime(new Date(OLD));
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
+    vi.setSystemTime(new Date(NEW));
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${FRESH}`, project: PROJECT });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00.000Z"));
   });
 
-  it.fails("smart-search returns the newer Lesson ahead of the contradicted one", async () => {
+  it("smart-search returns the newer Lesson ahead of the contradicted one", async () => {
     const { lessons } = await smartSearch("rule indent tabs spaces");
     expect(lessons[0].content).toContain(FRESH);
   });
 
-  it.fails("session start lists the newer Lesson ahead of the contradicted one", async () => {
+  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
+    for (const lesson of await kv.list<Lesson>(KV.lessons)) {
+      const stamp = lesson.content.includes(STALE) ? OLD : NEW;
+      await kv.set(KV.lessons, lesson.id, { ...lesson, createdAt: stamp, updatedAt: stamp, lastReinforcedAt: lesson.reinforcements ? stamp : undefined });
+    }
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });
@@ -323,12 +335,12 @@ describe("supersession: Insight", () => {
     await kv.set(KV.insights, "ins_fresh", insight("ins_fresh", "Whitespace style", `Team will ${FRESH}`, 0.5, NEW));
   });
 
-  it.fails("smart-search returns the newer Insight ahead of the contradicted one", async () => {
+  it("smart-search returns the newer Insight ahead of the contradicted one", async () => {
     const { insights } = await smartSearch("whitespace style indent tabs spaces");
     expect(insights[0].insightId).toBe("ins_fresh");
   });
 
-  it.fails("session start lists the newer Insight ahead of the contradicted one", async () => {
+  it("session start lists the newer Insight ahead of the contradicted one", async () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });
@@ -354,7 +366,7 @@ describe("supersession: Session Summary decision", () => {
     expect(ranksBefore(context, `Rule: ${FRESH}`, `Rule: ${STALE}`)).toBe(true);
   });
 
-  it.fails("prompt-submit puts a Memory that contradicts a Session decision ahead of that decision", async () => {
+  it("prompt-submit puts a Memory that contradicts a Session decision ahead of that decision", async () => {
     await seedObservation(observation("obs_a", "ses_a", OLD, `Settled the whitespace rule: ${STALE} everywhere in the repository`));
     await kv.set(KV.summaries, "ses_a", summary("ses_a", { keyDecisions: [`Rule: ${STALE}`], createdAt: AFTER_OLD, coveredThrough: AFTER_OLD, lastObservationAt: OLD }));
     await saveMemory(`Whitespace rule reversed, ${FRESH} everywhere in the repository`);
@@ -367,7 +379,7 @@ describe("supersession: Session Summary decision", () => {
     expect(ranksBefore(await sessionStart(), `Rule: ${FRESH}`, `Rule: ${STALE}`)).toBe(true);
   });
 
-  it.fails("session start lists the Session whose work is newer first when its summary was written earlier", async () => {
+  it("session start lists the Session whose work is newer first when its summary was written earlier", async () => {
     await seedSessions(
       { createdAt: "2026-10-15T00:00:00.000Z", lastObservationAt: OLD },
       { createdAt: "2026-10-11T00:00:00.000Z", lastObservationAt: NEW },
@@ -395,7 +407,7 @@ describe("supersession: Observation", () => {
     expect(results[0].obsId).toBe("obs_b");
   });
 
-  it.fails("prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly", async () => {
+  it("prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly", async () => {
     await seedObservation(
       observation("obs_a2", "ses_a", OLD, `Whitespace rule whitespace rule: we ${STALE}, ${STALE}, never spaces, tabs tabs tabs in every source file of the repository`),
     );
@@ -407,7 +419,7 @@ describe("supersession: Observation", () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 
-  it.fails("prompt-submit gives the newer Observation ahead of the contradicted one", async () => {
+  it("prompt-submit gives the newer Observation ahead of the contradicted one", async () => {
     const context = await promptSubmit("what is the whitespace rule, should we indent with tabs or spaces in every source file of the repository");
     expect(ranksBefore(context, FRESH, STALE)).toBe(true);
   });

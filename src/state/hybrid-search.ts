@@ -46,7 +46,7 @@ const RECENCY_HALF_LIFE_DAYS = 180;
 const RECENCY_FLOOR = 0.6;
 const DAY_MS = 86_400_000;
 
-function isDurableRecord(obsId: string, sessionId: string): boolean {
+export function isDurableRecord(obsId: string, sessionId: string): boolean {
   return (
     obsId.startsWith("mem_") ||
     obsId.startsWith("lsn_") ||

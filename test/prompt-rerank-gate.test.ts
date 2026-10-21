@@ -148,6 +148,20 @@ describe("mem::prompt-context reranker gate", () => {
     expect((await run()).injected.map((r) => r.id)).toEqual(["obs_d", "obs_c", "obs_b"]);
   });
 
+  it("sends only the best ten BM25 candidates to the reranker", async () => {
+    hits = Array.from({ length: 14 }, (_, i) => ({ id: `obs_${i}`, score: 20 - i * 0.1 }));
+    reply = scoring({ obs_9: 0.8, obs_12: 0.99 });
+    const result = await run();
+    expect(requests[0].documents).toEqual(hits.slice(0, 10).map((h) => `narrative of ${h.id}`));
+    expect(result.injected.map((r) => r.id)).toEqual(["obs_9"]);
+  });
+
+  it("falls back to every BM25 candidate when the gate fails", async () => {
+    hits = Array.from({ length: 14 }, (_, i) => ({ id: `obs_${i}`, score: 20 - i * 0.1 }));
+    reply = () => ({ status: 500, body: "boom" });
+    expect((await run()).injected.map((r) => r.id)).toEqual(["obs_0", "obs_1", "obs_2"]);
+  });
+
   it("bounds the request: query to 500 chars, narrative to 400, title prefixed", async () => {
     hits = [{ id: "obs_a", score: 16, title: "Auth fix", narrative: "n".repeat(900) }];
     reply = scoring({});

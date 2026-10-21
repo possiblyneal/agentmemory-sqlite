@@ -23,12 +23,32 @@ import {
 import { logger } from "../logger.js";
 import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
+import { createSessionLoader } from "./search.js";
 
 export const DECAY_FLOOR = 0.1;
 const DAY_MS = 1000 * 60 * 60 * 24;
 
 export function decayedStrength(base: number, periods: number): number {
   return Math.max(DECAY_FLOOR, base * Math.pow(0.9, periods));
+}
+
+function normalizeKeyPart(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function parseFactAttributes(raw: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  for (const m of raw.matchAll(/(\w+)="([^"]*)"/g)) attrs[m[1]] = m[2];
+  return attrs;
+}
+
+function factKey(
+  attrs: Record<string, string>,
+): { subject: string; relation: string; object: string } | null {
+  const subject = normalizeKeyPart(attrs.subject);
+  const relation = normalizeKeyPart(attrs.relation);
+  const object = normalizeKeyPart(attrs.object);
+  return subject && relation && object ? { subject, relation, object } : null;
 }
 
 // Returns the rows whose strength changed, so the caller writes only those. A
@@ -139,11 +159,18 @@ export function registerConsolidationPipelineFunction(
     };
   }
 
-  async function consolidateSemantic(summaries: SessionSummary[]) {
+  async function consolidateSemantic(project: string, summaries: SessionSummary[]) {
     if (summaries.length < 5) {
       return { skipped: true, reason: "fewer than 5 summaries" };
     }
     const existingSemantic = await kv.list<SemanticMemory>(KV.semantic);
+    const loadSession = createSessionLoader(kv);
+    // An unkeyed fact has no project of its own; keying it for this project is
+    // safe only when every Session it cites is this project's.
+    const citesOnlyProject = async (fact: SemanticMemory, project: string) =>
+      (await Promise.all(fact.sourceSessionIds.map(loadSession))).every(
+        (session) => session?.project === project,
+      );
     const recentSummaries = summaries
       .sort(
         (a, b) =>
@@ -166,47 +193,96 @@ export function registerConsolidationPipelineFunction(
         prompt,
       );
 
-      const factRegex = /<fact\s+confidence="([^"]+)">([^<]+)<\/fact>/g;
+      const factRegex = /<fact\s+([^>]*)>([^<]+)<\/fact>/g;
       let match;
       let newFacts = 0;
+      let superseded = 0;
       const now = new Date().toISOString();
+      const sessionIds = recentSummaries.map((s) => s.sessionId);
 
       while ((match = factRegex.exec(response)) !== null) {
-        const parsedConf = parseFloat(match[1]);
+        const attrs = parseFactAttributes(match[1]);
+        const parsedConf = parseFloat(attrs.confidence ?? "");
         const confidence = Number.isNaN(parsedConf) ? 0.5 : parsedConf;
         const fact = match[2].trim();
+        const key = factKey(attrs);
 
-        const existing = existingSemantic.find(
-          (s) => s.fact.toLowerCase() === fact.toLowerCase(),
+        const live = existingSemantic.filter((s) => s.isLatest !== false);
+        const sameKey = key
+          ? live.filter(
+              (s) =>
+                s.project === project &&
+                s.subject === key.subject &&
+                s.relation === key.relation,
+            )
+          : [];
+        let textMatch = live.find(
+          (s) =>
+            s.fact.toLowerCase() === fact.toLowerCase() &&
+            (s.project === undefined || s.project === project),
         );
+        if (textMatch && key && !textMatch.subject && !(await citesOnlyProject(textMatch, project))) {
+          textMatch = undefined;
+        }
+        const existing = textMatch ?? sameKey.find((s) => s.object === key!.object);
+        let target: SemanticMemory;
         if (existing) {
           existing.accessCount++;
           existing.lastAccessedAt = now;
           existing.updatedAt = now;
           existing.confidence = Math.max(existing.confidence, confidence);
           existing.sourceSessionIds = capSourceIds(
-            [...existing.sourceSessionIds, ...recentSummaries.map((s) => s.sessionId)],
+            [...existing.sourceSessionIds, ...sessionIds],
             MAX_SOURCE_LIST_IDS,
           );
+          if (key && !existing.subject) Object.assign(existing, { project, ...key });
           await kv.set(KV.semantic, existing.id, existing);
+          target = existing;
         } else {
-          const sem: SemanticMemory = {
+          target = {
             id: generateId("sem"),
             fact,
             confidence,
-            sourceSessionIds: recentSummaries.map((s) => s.sessionId),
+            sourceSessionIds: sessionIds,
             sourceMemoryIds: [],
             accessCount: 1,
             lastAccessedAt: now,
             strength: confidence,
             createdAt: now,
             updatedAt: now,
+            ...(key ? { project, ...key } : {}),
           };
-          await kv.set(KV.semantic, sem.id, sem);
+          await kv.set(KV.semantic, target.id, target);
+          existingSemantic.push(target);
           newFacts++;
         }
+        const closed = key
+          ? sameKey.filter((s) => s !== target && s.object !== key.object)
+          : [];
+        for (const old of closed) {
+          old.isLatest = false;
+          old.supersededBy = target.id;
+          old.updatedAt = now;
+          await kv.set(KV.semantic, old.id, old);
+          superseded++;
+        }
+        if (closed.length > 0) {
+          await recordAudit(kv, "evolve", "mem::consolidate-pipeline", [
+            ...closed.map((s) => s.id),
+            target.id,
+          ], {
+            event: "semantic.supersede",
+            project,
+            subject: key!.subject,
+            relation: key!.relation,
+            supersededIds: closed.map((s) => s.id),
+            supersededBy: target.id,
+          });
+        }
       }
-      return { newFacts, totalSummaries: summaries.length };
+      return superseded > 0
+        ? { newFacts, superseded, totalSummaries: summaries.length }
+        : { newFacts, totalSummaries: summaries.length };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error("Semantic consolidation failed", { error: msg });
@@ -252,6 +328,7 @@ export function registerConsolidationPipelineFunction(
       for (const project of projects) {
         if (runsSemantic) {
           semanticByProject[project] = await consolidateSemantic(
+            project,
             summaries.filter((s) => s.project === project),
           );
         }

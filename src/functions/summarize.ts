@@ -434,6 +434,13 @@ export function cutDecision(decision: string): string {
     : decision;
 }
 
+// The date a Session's decisions are ordered by, so "later" means the same
+// thing when choosing an amendment as when rendering it. coveredThrough is
+// when the Summary was written, so Sessions imported or summarized together
+// would be ordered by milliseconds of write time, not by when the work was done.
+export const decidedAt = (summary: SessionSummary) =>
+  summary.lastObservationAt ?? summary.coveredThrough ?? summary.createdAt;
+
 export function summaryCovers(summary: SessionSummary, timestamp: string): boolean {
   return summary.coveredThrough ? timestamp < summary.coveredThrough : timestamp <= summary.createdAt;
 }

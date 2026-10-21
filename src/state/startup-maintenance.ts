@@ -6,7 +6,14 @@ import { mergeDuplicateFileNodes } from "./merge-file-nodes.js";
 import { getConsolidationDecayDays, getMaxSourceObservationIds } from "../config.js";
 import { decayedStrength } from "../functions/consolidation-pipeline.js";
 import { logger } from "../logger.js";
-import type { SemanticMemory, Session, StateScope } from "../types.js";
+import {
+  absorbInsight,
+  compareSurvivor,
+  insightClusterKey,
+  INSIGHTS_PER_CLUSTER,
+  nearestInsight,
+} from "../functions/insight-merge.js";
+import type { Insight, SemanticMemory, Session, StateScope } from "../types.js";
 
 // Bump when the pass gains a job that has to run against a store an earlier
 // version already marked as done.
@@ -37,9 +44,12 @@ export type StartupMaintenanceResult = {
   deadIndexRowsDeleted: number;
   /** Semantic Facts whose strength was recomputed from their idle periods. */
   decayRepaired: number;
+  /** Near-duplicate Insights merged into a survivor and deleted. */
+  insightsCollapsed: number;
 };
 
 const DECAY_REPAIR_MARKER = "decay-repair:done";
+const INSIGHT_COLLAPSE_MARKER = "insight-collapse:done";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function alreadyRan(state: SqliteState): boolean {
@@ -220,6 +230,86 @@ async function repairDecay(state: SqliteState): Promise<number> {
   return repairedIds.length;
 }
 
+// mem::reflect once minted a paraphrase of a cluster's Insight as a new row
+// every run. Keep each cluster's strongest INSIGHTS_PER_CLUSTER Insights and
+// fold every other into the survivor it overlaps most (reinforcements summed,
+// highest confidence, source ids unioned), then delete it. A cluster's merge,
+// its deletions and its audit row commit in one transaction, so an
+// interrupted pass leaves that cluster untouched and the marker unset: the
+// next boot redoes it without counting anything twice. Insights have no
+// search index of their own, so deleting the row is all the de-indexing
+// there is. Gated by its own marker, not MAINTENANCE_VERSION.
+async function collapseInsights(state: SqliteState): Promise<number> {
+  if (state.get(KV.config, INSIGHT_COLLAPSE_MARKER) !== null) return 0;
+
+  const page = state.db.prepare(
+    "SELECT seq, key, value FROM kv WHERE scope = ? AND seq > ? ORDER BY seq LIMIT ?",
+  );
+  const clusters = new Map<string, string[]>();
+  await inChunks(
+    (after) =>
+      page.all(KV.insights, after, CHUNK_ROWS) as Array<{ seq: number; key: string; value: string }>,
+    (rows) => {
+      for (const row of rows) {
+        let insight: Insight;
+        try {
+          insight = JSON.parse(row.value) as Insight;
+        } catch {
+          continue;
+        }
+        if (insight.deleted || !Array.isArray(insight.sourceConceptCluster)) continue;
+        const key = insightClusterKey(insight.project, insight.sourceConceptCluster);
+        const keys = clusters.get(key);
+        if (keys) keys.push(row.key);
+        else clusters.set(key, [row.key]);
+      }
+    },
+  );
+
+  let collapsed = 0;
+  for (const keys of clusters.values()) {
+    if (keys.length <= INSIGHTS_PER_CLUSTER) continue;
+    const insights = keys
+      .map((key) => state.get(KV.insights, key) as Insight | null)
+      .filter((i): i is Insight => i !== null)
+      .sort(compareSurvivor);
+
+    const survivors = insights
+      .slice(0, INSIGHTS_PER_CLUSTER)
+      .map((insight) => ({ insight, merged: [] as Insight[] }));
+    for (const overflow of insights.slice(INSIGHTS_PER_CLUSTER)) {
+      const nearest = nearestInsight(overflow, survivors.map((s) => s.insight));
+      survivors.find((s) => s.insight === nearest)!.merged.push(overflow);
+    }
+
+    const at = new Date().toISOString();
+    state.transaction(() => {
+      for (const { insight, merged } of survivors) {
+        if (merged.length === 0) continue;
+        for (const other of merged) absorbInsight(insight, other);
+        insight.updatedAt = at;
+        state.set(KV.insights, insight.id, insight);
+        for (const other of merged) state.delete(KV.insights, other.id);
+        const id = generateId("aud");
+        state.set(KV.audit, id, {
+          id,
+          timestamp: at,
+          operation: "delete",
+          functionId: "startup-maintenance",
+          targetIds: merged.map((m) => m.id),
+          details: { event: "insight.collapse", survivor: insight.id, merged: merged.length },
+        });
+        collapsed += merged.length;
+      }
+    });
+    await yieldToEventLoop();
+  }
+
+  state.set(KV.config, INSIGHT_COLLAPSE_MARKER, { at: new Date().toISOString(), count: collapsed });
+  if (collapsed > 0) logger.info("Insights collapsed", { count: collapsed });
+  return collapsed;
+}
+
 async function sessionCheckoutRoots(state: SqliteState): Promise<string[]> {
   const roots = new Set<string>();
   const cwds = new Set(
@@ -246,6 +336,7 @@ export async function runStartupMaintenance(
   state: SqliteState,
 ): Promise<StartupMaintenanceResult> {
   const decayRepaired = await repairDecay(state);
+  const insightsCollapsed = await collapseInsights(state);
 
   if (alreadyRan(state)) {
     return {
@@ -256,6 +347,7 @@ export async function runStartupMaintenance(
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
       decayRepaired,
+      insightsCollapsed,
     };
   }
 
@@ -281,6 +373,7 @@ export async function runStartupMaintenance(
     edgesChanged: merged.edgesChanged,
     deadIndexRowsDeleted,
     decayRepaired,
+    insightsCollapsed,
   };
 
   if (

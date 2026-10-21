@@ -1,6 +1,6 @@
 import { TriggerAction, type ISdk } from "../engine/types.js";
 import type { Memory } from "../types.js";
-import { KV, generateId, jaccardSimilarity } from "../state/schema.js";
+import { KV, generateId, jaccardSimilarity, fingerprintId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import {
@@ -11,7 +11,7 @@ import {
   MEMORY_SESSION,
 } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
-import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, vectorIndexRemove, deleteIndexed } from "./search.js";
+import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, deindexSupersededMemory, deleteIndexed } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
@@ -111,6 +111,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         "bug",
         "workflow",
         "fact",
+        "rule",
       ]);
       const memType = validTypes.has(data.type || "")
         ? (data.type as Memory["type"])
@@ -174,6 +175,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         // consolidate. Reported back as a hint; never acted on here.
         let nearMatch: { id: string; title: string; similarity: number } | undefined;
         const lowerContent = data.content.toLowerCase();
+        const fingerprint = fingerprintId("mem", data.content.trim().toLowerCase());
         for (const existing of candidateMemories) {
           if (existing.isLatest === false) continue;
           // Never supersede a memory that belongs to a different project.
@@ -186,6 +188,24 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
           // A Global Memory and a scoped one never replace each other, so
           // supersession can neither strip the marker nor hand it to a project.
           if ((existing.global === true) !== (data.global === true)) continue;
+          if (
+            existing.project === project &&
+            fingerprintId("mem", existing.content.trim().toLowerCase()) ===
+              fingerprint
+          ) {
+            existing.strength = Math.min(10, existing.strength + 1);
+            if (validTypes.has(data.type ?? "")) existing.type = memType;
+            existing.updatedAt = now;
+            await kv.set(KV.memories, existing.id, existing);
+            await recordAudit(kv, "reinforce", "mem::remember", [existing.id], {
+              strength: existing.strength,
+            });
+            logger.info("Memory reinforced", {
+              memId: existing.id,
+              project: existing.project,
+            });
+            return { success: true, memory: existing, reinforced: true };
+          }
           const similarity = jaccardSimilarity(
             lowerContent,
             existing.content.toLowerCase(),
@@ -259,20 +279,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         if (supersededMemory) {
           supersededMemory.isLatest = false;
           await kv.set(KV.memories, supersededMemory.id, supersededMemory);
-          // De-index the superseded version. rebuildIndex() already skips
-          // isLatest === false, but the live indexes keep serving the old
-          // row until the next full rebuild — so the stale text competes
-          // with its own replacement (and a memory-layer boost would
-          // amplify exactly that). Soft-fail: the save already committed.
-          try {
-            getSearchIndex().remove(supersededMemory.id);
-            vectorIndexRemove(supersededMemory.id);
-          } catch (err) {
-            logger.warn("Failed to de-index superseded memory", {
-              memId: supersededMemory.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          deindexSupersededMemory(supersededMemory.id);
         }
         await kv.set(KV.memories, memory.id, memory);
 
@@ -342,6 +349,8 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
             : {}),
         };
       });
+
+      if ("reinforced" in saved) return saved;
 
       // Outside the lock: a slow embedder must not queue other saves. A
       // Memory rewritten meanwhile has its stale completion dropped by the

@@ -136,6 +136,7 @@ describe("startup maintenance", () => {
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
       decayRepaired: 0,
+      insightsCollapsed: 0,
     });
     expect(
       (store.get(KV.graphNodes, "node-2") as { sourceObservationIds: string[] })
@@ -433,5 +434,163 @@ describe("startup maintenance: decay repair", () => {
     expect(second.decayRepaired).toBe(0);
     expect((store.get(KV.semantic, "c") as { strength: number }).strength).toBe(0.1);
     expect(store.list(KV.audit)).toHaveLength(1);
+  });
+});
+
+describe("startup maintenance: Insight collapse (#271)", () => {
+  let store: SqliteState;
+
+  function insight(id: string, content: string, over: Record<string, unknown> = {}) {
+    return {
+      id,
+      title: id,
+      content,
+      confidence: 0.5,
+      reinforcements: 0,
+      sourceConceptCluster: ["Security", "validation"],
+      sourceMemoryIds: [`${id}-fact`],
+      sourceLessonIds: [],
+      sourceCrystalIds: [],
+      project: "app",
+      tags: [],
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      decayRate: 0.05,
+      ...over,
+    };
+  }
+
+  // Five distinct claims, each with a word family of its own.
+  const CLAIMS = [
+    "alpha bravo charlie delta echo foxtrot",
+    "golf hotel india juliet kilo lima",
+    "mike november oscar papa quebec romeo",
+    "sierra tango uniform victor whiskey xray",
+    "yankee zulu amber basalt cobalt dusk",
+  ];
+
+  function seedFive() {
+    CLAIMS.forEach((c, i) =>
+      store.set(KV.insights, `top${i}`, insight(`top${i}`, c, { reinforcements: 10 - i })),
+    );
+  }
+
+  beforeEach(() => {
+    store = new SqliteState(":memory:");
+  });
+
+  afterEach(() => store.close());
+
+  it("keeps the top 5 of a cluster and folds each overflow Insight into its nearest survivor", async () => {
+    seedFive();
+    store.set(KV.insights, "x", insight("x", CLAIMS[2] + " extra", { reinforcements: 2, confidence: 0.9, lastReinforcedAt: "2026-10-05T00:00:00.000Z" }));
+    store.set(KV.insights, "y", insight("y", CLAIMS[2] + " more", { reinforcements: 1, confidence: 0.4 }));
+    store.set(KV.insights, "z", insight("z", CLAIMS[0] + " tail", { reinforcements: 0 }));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsCollapsed).toBe(3);
+    expect((store.list(KV.insights) as Array<{ id: string }>).map((i) => i.id).sort()).toEqual(
+      ["top0", "top1", "top2", "top3", "top4"],
+    );
+    const folded = store.get(KV.insights, "top2") as {
+      reinforcements: number;
+      confidence: number;
+      sourceMemoryIds: string[];
+      lastReinforcedAt: string;
+    };
+    expect(folded.reinforcements).toBe(8 + 2 + 1);
+    expect(folded.confidence).toBe(0.9);
+    expect([...folded.sourceMemoryIds].sort()).toEqual(["top2-fact", "x-fact", "y-fact"]);
+    expect(folded.lastReinforcedAt).toBe("2026-10-05T00:00:00.000Z");
+    expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(10);
+  });
+
+  it("collapses every row of a cluster larger than one read page", async () => {
+    seedFive();
+    for (let i = 0; i < 1200; i++) {
+      store.set(KV.insights, `o${i}`, insight(`o${i}`, `${CLAIMS[i % 5]} n${i}`));
+    }
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsCollapsed).toBe(1200);
+    expect(store.list(KV.insights)).toHaveLength(5);
+  });
+
+  it("ranks survivors by reinforcements, then confidence, then recency", async () => {
+    for (let i = 0; i < 5; i++) {
+      store.set(KV.insights, `r${i}`, insight(`r${i}`, CLAIMS[i], { reinforcements: 1 }));
+    }
+    store.set(KV.insights, "conf", insight("conf", "conf-only words here", { reinforcements: 1, confidence: 0.9 }));
+    store.set(KV.insights, "recent", insight("recent", "recent-only words here", { reinforcements: 1, confidence: 0.5, createdAt: "2026-10-15T00:00:00.000Z" }));
+    store.set(KV.insights, "old", insight("old", "old-only words here", { reinforcements: 0, confidence: 1 }));
+
+    await runStartupMaintenance(store);
+
+    const kept = (store.list(KV.insights) as Array<{ id: string }>).map((i) => i.id);
+    expect(kept).toContain("conf");
+    expect(kept).toContain("recent");
+    expect(kept).not.toContain("old");
+    expect(kept).toHaveLength(5);
+  });
+
+  it("leaves a cluster of 5 or fewer, and clusters of other projects, alone", async () => {
+    seedFive();
+    for (let i = 0; i < 5; i++) {
+      store.set(KV.insights, `p${i}`, insight(`p${i}`, CLAIMS[i], { project: "elsewhere" }));
+    }
+    store.set(KV.insights, "lone", insight("lone", CLAIMS[0], { sourceConceptCluster: ["testing", "mocks"] }));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsCollapsed).toBe(0);
+    expect(store.list(KV.insights)).toHaveLength(11);
+  });
+
+  it("audits each survivor's merge, marks itself done in KV.config, and runs once", async () => {
+    seedFive();
+    store.set(KV.insights, "x", insight("x", CLAIMS[1] + " extra"));
+
+    await runStartupMaintenance(store);
+
+    expect(store.get(KV.config, "insight-collapse:done")).toBeTruthy();
+    const audits = store.list(KV.audit) as Array<{ operation: string; targetIds: string[]; details: { event: string; survivor: string } }>;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ operation: "delete", targetIds: ["x"] });
+    expect(audits[0].details).toMatchObject({ event: "insight.collapse", survivor: "top1" });
+
+    store.set(KV.insights, "late", insight("late", CLAIMS[3] + " late"));
+    store.set(KV.state, "system:startupMaintenanceVersion", 0);
+    const second = await runStartupMaintenance(store);
+
+    expect(second.insightsCollapsed).toBe(0);
+    expect(store.get(KV.insights, "late")).toBeTruthy();
+  });
+
+  it("applies a cluster's merge and deletions together, so a rerun never double-counts", async () => {
+    seedFive();
+    store.set(KV.insights, "x", insight("x", CLAIMS[0] + " extra", { reinforcements: 1 }));
+    const realDelete = store.delete.bind(store);
+    let failed = false;
+    store.delete = ((scope: string, key: string) => {
+      if (scope === KV.insights && !failed) {
+        failed = true;
+        throw new Error("interrupted");
+      }
+      return realDelete(scope, key);
+    }) as typeof store.delete;
+
+    await expect(runStartupMaintenance(store)).rejects.toThrow("interrupted");
+
+    expect(store.get(KV.config, "insight-collapse:done")).toBeNull();
+    expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(10);
+    expect(store.list(KV.insights)).toHaveLength(6);
+
+    store.delete = realDelete as typeof store.delete;
+    await runStartupMaintenance(store);
+
+    expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(11);
+    expect(store.list(KV.insights)).toHaveLength(5);
   });
 });

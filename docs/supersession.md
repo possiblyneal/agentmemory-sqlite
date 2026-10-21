@@ -12,12 +12,12 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 
 | Record kind | search | session start | prompt submit |
 |---|---|---|---|
-| Memory | stale hidden for a near-restatement (T1); **stale ranked first** for a contradiction with little shared wording (T3) or the only result when superseded by `mem::evolve` (T5) | not reachable (T7) | stale hidden for a near-restatement (T2); **stale ranked first** or alone for a low-overlap contradiction (T4) or `mem::evolve` (T6) |
-| Semantic Fact | **stale ranked first** (T8) | **stale ranked first** (T9) | not reachable (T10) |
-| Lesson | **stale ranked first** (T11) | **stale ranked first** (T12) | not reachable (T10) |
-| Insight | **stale ranked first** (T13) | **stale ranked first** (T14) | not reachable (T10) |
-| Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); **stale ranked first** when the newer work was summarized first (T18) | stale demoted, newest Session first (T16); **stale ranked first** against a contradicting Memory (T19) |
-| Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | **stale ranked first** when it matches the prompt more strongly (T22) or equally (T23) |
+| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale given alone** when the contradiction scores below the relevance floor (T4) |
+| Semantic Fact | unkeyed: stale capped behind the newer fact (T8); keyed: stale hidden (T8k) | unkeyed: stale demoted by the recency factor (T9); keyed: stale hidden (T9k) | not reachable (T10) |
+| Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
+| Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
+| Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
+| Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
 
 "Hidden" means the stale record is absent. "Demoted" means both are returned and the newer
 one is first. "Ranked first" means the stale record leads, or is the only one returned.
@@ -28,33 +28,34 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 |---|---|---|
 | T1 | Memory: smart-search hides a Memory that a near-restatement saved later superseded | passes |
 | T2 | Memory: prompt-submit hides a Memory that a near-restatement saved later superseded | passes |
-| T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | `it.fails` |
-| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common and not the stale one | `it.fails` |
-| T5 | Memory: smart-search hides a Memory that mem::evolve replaced | `it.fails` |
-| T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | `it.fails` |
+| T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | passes |
+| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one | `it.fails` |
+| T5 | Memory: smart-search hides a Memory that mem::evolve replaced | passes |
+| T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | passes |
 | T7 | Memory: session start does not reach Memories, so a superseded one cannot appear | passes |
-| T8 | Semantic Fact: smart-search returns the newer Semantic Fact ahead of the contradicted one | `it.fails` |
-| T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | `it.fails` |
+| T8 | Semantic Fact: smart-search returns the newer Semantic Fact ahead of the contradicted one | passes |
+| T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | passes |
+| T8k | Semantic Fact (keyed, `test/semantic-supersession.test.ts`): consolidation closes the live fact on a new object under the same key, and `recallSemanticFacts` (smart-search) leaves it out; a different subject, relation or project does not supersede; an unkeyed fact is untouched | passes |
+| T9k | Semantic Fact (keyed, same file): session start reads the same `recallSemanticFacts`, so it shares T8k's filter | passes |
 | T10 | prompt-submit does not reach Semantic Facts, Lessons or Insights: prompt-submit gives none of them | passes |
-| T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | `it.fails` |
-| T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | `it.fails` |
-| T13 | Insight: smart-search returns the newer Insight ahead of the contradicted one | `it.fails` |
-| T14 | Insight: session start lists the newer Insight ahead of the contradicted one | `it.fails` |
+| T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | passes |
+| T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | passes |
+| T13 | Insight: smart-search returns the newer Insight ahead of the contradicted one | passes |
+| T14 | Insight: session start lists the newer Insight ahead of the contradicted one | passes |
 | T15 | Session Summary decision: smart-search never returns a Session Summary decision on its own | passes |
 | T16 | Session Summary decision: prompt-submit gives the newer Session's decisions ahead of the older one's | passes |
 | T17 | Session Summary decision: session start lists the Session whose work is newer first when summaries were written in work order | passes |
-| T18 | Session Summary decision: session start lists the Session whose work is newer first when its summary was written earlier | `it.fails` |
-| T19 | Session Summary decision: prompt-submit puts a Memory that contradicts a Session decision ahead of that decision | `it.fails` |
+| T18 | Session Summary decision: session start lists the Session whose work is newer first when its summary was written earlier | passes |
+| T19 | Session Summary decision: prompt-submit puts a Memory that contradicts a Session decision ahead of that decision | passes |
 | T20 | Observation: smart-search ranks the newer Observation above the contradicted one | passes |
 | T21 | Observation: smart-search ranks the newer Observation above a contradicted one that matches the query more strongly | passes |
-| T22 | Observation: prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly | `it.fails` |
-| T23 | Observation: prompt-submit gives the newer Observation ahead of the contradicted one | `it.fails` |
+| T22 | Observation: prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly | passes |
+| T23 | Observation: prompt-submit gives the newer Observation ahead of the contradicted one | passes |
 | T24 | Observation: session start lists the newer Session's Observation ahead of the contradicted one | passes |
 
 The Semantic Fact, Lesson and Insight fixtures give A the higher confidence (0.8 against 0.7
 or 0.5, or three saves of the same Lesson against one), since A has had time to be reinforced
-and A′ is new. With equal confidence, Lesson and Insight search fall to their recency term and Semantic Facts
-to wording alone.
+and A′ is new. With equal confidence, Lesson and Insight search fall to their recency term.
 
 ## Mechanisms
 
@@ -63,42 +64,80 @@ It compares the new content with existing Memories of the same project and scope
 Jaccard similarity, and above 0.7 sets the old one `isLatest: false` and removes it from the BM25
 and vector indexes, so search and both Injections stop returning it (T1, T2). It needs no LLM.
 It detects restatement, not contradiction: a reversal worded differently stays below 0.7 and
-both Memories stay live (T3, T4). Memories are not content-addressed here; `generateId()` gives
-each save a new id, and `fingerprintId()` is used by Lessons.
+both Memories stay live. An exact repeat (same `fingerprintId()` of the trimmed,
+lowercased content, same project and scope) is checked first and does not supersede: it raises
+the existing Memory's `strength` by 1 (cap 10), keeps its id, audits `reinforce` and returns
+that id; a valid `type` on the repeat replaces the stored one, so re-saving a Memory as a rule
+promotes it. Only a near-restatement gets a new id.
+
+**Read-side shadowing (`shadowedMemoryIds`, `newerAboveShadowed`, `src/functions/memory-shadow.ts`).**
+Of the Memories one query returns, an older one is shadowed by a newer one of the same type and
+Global marker that shares at least 2 distinctive terms (3+ letters, not stop words) covering 0.3 of
+the smaller term set. The newer is moved directly above the older, which stays; nothing is marked,
+hidden or deleted, and no LLM or stored field is involved. `mem::smart-search` reorders the hits
+above its relevance floor (T3). `mem::prompt-context` reorders the hits that passed its floor and
+the gate, so it never adds a newer Memory that scored below the floor: in T4 only the stale
+Memory passes, it is given alone, and the test stays `it.fails` until the newer one is admitted.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
-`mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` in the store but do not remove the
-row from the live index. `mem::evolve` also never adds the new version to BM25, so until the next
-boot the stale Memory is the only BM25 hit (T5, T6 seed the stale Memory as `mem::remember`
-would, and leave the evolved one unindexed as production does). `mem::search` and `HybridSearch` drop such a row only when
-`AGENTMEMORY_NONLATEST_FILTER=true`; by default they count it as `nonlatestLeaked` and return it
-(T5, T6). A daemon restart rebuilds BM25 from content and skips non-latest Memories, so the leak
-lasts until the next boot. `mem::evict` deletes a non-latest Memory after `nonLatestMemoryMaxDays`.
+`mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call
+`deindexSupersededMemory()` (`src/functions/search.ts`, the helper `mem::remember` uses), which
+removes the row from BM25 and the vector index. `mem::evolve` and the evolve branch of
+`mem::consolidate` add the new version through `indexNewMemoryVersion()`, so a replaced Memory is
+neither returned nor the only hit (T5, T6). A Memory `mem::consolidate` creates fresh (no
+predecessor) is still not added to the live index until the next boot. A daemon restart rebuilds
+BM25 from content and skips non-latest Memories. `mem::evict` deletes a non-latest Memory after
+`nonLatestMemoryMaxDays`; `AGENTMEMORY_NONLATEST_FILTER` stays off by default.
 
-**Semantic Facts.** Consolidation merges a fact into an existing one only on exact
-case-insensitive text equality, then keeps the higher confidence. A contradicting fact is a new
-row. Recall ranks by `confidence x term match` with no recency term, and session start by
-confidence alone, so the reinforced stale fact leads (T8, T9).
+**Semantic Facts.** Consolidation's one LLM call per project returns each fact with an optional
+key: `subject`, `relation`, `object`. All three present, stored lowercased and trimmed with the
+project, make a keyed fact. A new keyed fact whose (subject, relation) matches a live keyed fact
+of the same project but whose object differs closes that fact (`isLatest: false`, `supersededBy`)
+and audits it (`evolve`, `semantic.supersede`); the same key and object reinforces, as exact text
+does. A keyed fact whose text matches a live unkeyed fact whose cited Sessions are all this project's
+reinforces it and gives it the key (otherwise a new keyed fact is written), so a fact written before keys existed can be closed later. Facts are not in BM25 or the vector index, so closing one has nothing to de-index; the
+filter is on the read side: `recallSemanticFacts` (smart-search, session start) and the facts
+Reflect reads skip `isLatest === false`. An unkeyed fact (old rows, or the LLM omitted the key)
+merges on exact text only, and recall ranks it by recency instead (`recallSemanticFacts`, the
+same cap as Lessons, shared as `capBehindNewer` in `src/functions/recency-cap.ts`): on a search, a hit whose
+text overlaps another hit's by Jaccard 0.5 or more and was first stated (`createdAt`) earlier is
+capped just below that newer hit, however recently consolidation reinforced it (T8); at session
+start, with no query, confidence is also divided by 1 + 0.01 x days since `updatedAt` (T9). The
+cap runs after the project filter, so another project's fact never demotes this one's. There is
+no backfill.
 
 **Lessons.** Saved under a fingerprint of the lowercased content, so only an identical lesson
 strengthens one. A contradicting lesson is a new row. Recall ranks by `confidence x relevance x
-recency`, where the recency boost decays 1% per day, and session start by confidence (T11, T12).
+recency`, where the recency boost decays 1% per day; a hit whose content overlaps another hit's by
+Jaccard 0.5 or more and was last reinforced (else created) earlier is capped just below that newer
+hit, so reinforcement cannot outvote a correction (T11). Lessons date by reinforcement, since only
+an explicit save reinforces one. Session start ranks by project-weighted
+confidence over the same boost, from `lastReinforcedAt` else `createdAt`, so a stale Lesson not
+reinforced since the newer one was saved is demoted (T12); a stale Lesson reinforced after it still leads.
 
-**Insights.** Written by `mem::reflect` from concept clusters and never compared with earlier
-Insights. Search ranks like Lessons and session start by confidence (T13, T14).
+**Insights.** Written by `mem::reflect` from concept clusters. The reflect prompt lists the cluster's
+existing Insights, and the model may answer one as `reinforces="<id>"`, which reinforces that Insight
+instead of writing a row (#271); a contradiction is not detected. Search ranks like Lessons, but `mem::insight-search` gives Insights of one project and title the same slots in newest-first order (by `lastReinforcedAt`, else `createdAt`), so a restated claim leads; a contradiction under a different title is not detected (T13). Session start picks the top 5 by
+confidence and lists them newest `createdAt` first (T14).
 
 **Session Summary decisions.** Prompt submit renders covered Sessions newest first by
 `lastObservationAt`, under a header saying the newer of two conflicting rules holds, and adds a
 later Session that amends a given one (`laterAmendment`) (T16). Session start orders Summary
-blocks by `createdAt`, the write time, so a Session whose work is newer but was summarized first
-sorts after the older work (T18). Prompt submit also renders every Summary decision before any
-Memory fragment, so a Memory that supersedes a decision comes second (T19).
+blocks by the same date (`decidedAt`), so a Session whose work is newer sorts first even when it was
+summarized earlier (T18). A Memory whose `updatedAt` is later than a rendered Session's date takes its place among the
+Sessions by date, so it is not rendered after a decision it may supersede (T19); older Memories
+and Observations follow the Sessions.
 
 **Observations.** Never superseded. `HybridSearch` multiplies Observation scores by a mild
 recency factor (half-life 180 days, floor 0.6), which lets a newer Observation beat an older one
-within that margin (T20, T21). `mem::search`, which prompt submit calls, has no recency term, so
-an older Observation that matches the prompt more strongly leads (T22), and an equal match ties
-and keeps insertion order, so the older one leads there too (T23). Session start lists Sessions newest first (T24).
+within that margin (T20, T21). `mem::search`, which prompt submit calls, applies the same factor to Observation scores
+(Memories are exempt) before it cuts to the limit, so the newer one leads on an equal match (T23).
+The factor separates the two fixtures by 5.8%, less than the 7% by which the older one's BM25
+score leads in T22, so `mem::search` also applies the near-twin rule Lessons use: among the
+Observation hits scored for the query, an older Observation whose title and narrative overlap a
+newer one's by word-set Jaccard of at least 0.5 (`jaccardSimilarity`) is capped at 0.99 of the
+newer one's score, by Observation timestamp, before the cut to the limit (T22). Other Observations
+keep their scores. Session start lists Sessions newest first (T24).
 
 ## Not covered
 

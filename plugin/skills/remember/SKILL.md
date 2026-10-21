@@ -37,7 +37,10 @@ out and record where they live instead.
    (`jwt-refresh-rotation` beats `auth`).
 3. Extract referenced file paths (absolute or repo-relative). Empty if none.
 4. Call `memory_save` with `content`, `concepts` (comma-separated string), and
-   `files` (comma-separated string). In a multi-agent setup pass `agentId` so
+   `files` (comma-separated string). Add `type` when it is not a plain fact:
+   `pattern`, `preference`, `architecture`, `bug`, `workflow`, `fact` (default),
+   or `rule`. Use `rule` for an instruction the Operator gave that must keep
+   holding; rules are pinned at session start and pre-compact. In a multi-agent setup pass `agentId` so
    the memory lands in the right agent's scope.
 5. Confirm the save and echo the concepts so the user knows the retrieval terms.
 6. To update a fact, save the corrected version outright: near-duplicate content

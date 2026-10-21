@@ -30,10 +30,13 @@
     "skills:check": "tsx scripts/skills/generate.ts --check && tsx scripts/skills/check.ts",
     "bench:load": "node --import tsx benchmark/load-100k.ts",
     "eval:longmemeval": "tsx eval/runner/longmemeval.ts",
+    "eval:dolphinbench": "tsx eval/runner/dolphinbench.ts",
     "eval:coding-life": "tsx eval/runner/coding-life.ts",
     "eval:replay": "tsx eval/runner/replay.ts",
+    "eval:beam": "tsx eval/runner/beam.ts",
     "eval:pmb": "tsx eval/runner/pmb.ts",
     "eval:suite": "tsx eval/runner/suite.ts",
+    "eval:supersession": "tsx eval/runner/supersession.ts",
     "eval:gate": "tsx eval/runner/coding-life.ts --gate eval/baselines/coding-agent-life-v2.json"
   },
   "keywords": [
@@ -75,6 +78,7 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
+    "hyparquet": "^1.31.5",
     "tsdown": "^0.21.10",
     "tsx": "^4.19.0",
     "typescript": "^6.0.3",

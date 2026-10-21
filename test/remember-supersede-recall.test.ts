@@ -82,4 +82,35 @@ describe("mem::remember supersession and recall hygiene", () => {
     expect(update.memory.supersedes).toContain(target.memory.id);
     expect(update.memory.version).toBe(2);
   });
+
+  it("reinforces the existing Memory on an exact repeat", async () => {
+    const { sdk, kv } = await setup();
+    const first = (await sdk.trigger("mem::remember", {
+      content: "The deploy pipeline uses blue green rollout with health gates",
+      type: "architecture",
+    })) as { memory: { id: string; strength: number } };
+    const strengthBefore = first.memory.strength;
+    const second = (await sdk.trigger("mem::remember", {
+      content: "  the deploy pipeline uses BLUE green rollout with health gates ",
+      type: "architecture",
+    })) as { memory: { id: string; strength: number; version: number } };
+
+    expect(second.memory.id).toBe(first.memory.id);
+    expect(second.memory.version).toBe(1);
+    expect(second.memory.strength).toBeGreaterThan(strengthBefore);
+    const rows = (await kv.list("mem:memories")) as { isLatest: boolean }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isLatest).toBe(true);
+  });
+
+  it("an exact repeat saved as a rule makes the existing Memory a rule", async () => {
+    const { sdk, kv } = await setup();
+    await sdk.trigger("mem::remember", { content: "Never push to main without asking", type: "preference" });
+    await sdk.trigger("mem::remember", { content: "Never push to main without asking", type: "rule" });
+    await sdk.trigger("mem::remember", { content: "Never push to main without asking", type: "bogus" });
+
+    const rows = (await kv.list("mem:memories")) as { type: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe("rule");
+  });
 });

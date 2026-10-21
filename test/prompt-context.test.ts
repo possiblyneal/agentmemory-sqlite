@@ -532,6 +532,65 @@ describe("mem::prompt-context", () => {
     ]);
   });
 
+  describe("a Memory dated against a Session's decisions", () => {
+    const summaryAt = (id: string, lastObservationAt: string, decision: string) =>
+      kv.set(KV.summaries, id, {
+        sessionId: id,
+        project: "shipctl",
+        createdAt: lastObservationAt,
+        lastObservationAt,
+        coveredThrough: lastObservationAt,
+        title: `Work of ${id}`,
+        keyDecisions: [decision],
+        filesModified: [],
+      });
+    const memoryAt = (id: string, updatedAt: string) =>
+      kv.set(KV.memories, id, { id, title: "t", content: "c", createdAt: updatedAt, updatedAt });
+    const prompt = "what is the token rule when SHIPCTL_TOKEN is unset";
+
+    it("renders a Memory newer than the Session ahead of its decisions", async () => {
+      await summaryAt("ses_old", "2026-10-01T12:00:00.000Z", "Rule: fail closed");
+      await memoryAt("mem_new", "2026-10-05T12:00:00.000Z");
+      hits = [
+        { id: "obs_a", score: 16, timestamp: "2026-10-01T10:00:00.000Z" },
+        { id: "mem_new", score: 14, sessionId: "memory", narrative: "Rule reversed: fail open" },
+      ];
+      const result = await run(prompt);
+      expect(result.context.indexOf("Rule reversed: fail open")).toBeLessThan(result.context.indexOf("Rule: fail closed"));
+      expect(result.context.indexOf("Rule reversed")).toBeLessThan(result.context.indexOf("Requirements the user settled"));
+      expect(result.injected).toEqual([
+        { kind: "memory", id: "mem_new" },
+        { kind: "summary", id: "ses_old" },
+      ]);
+    });
+
+    it("keeps a Memory older than the Session behind its decisions", async () => {
+      await summaryAt("ses_old", "2026-10-05T12:00:00.000Z", "Rule: fail closed");
+      await memoryAt("mem_old", "2026-10-01T12:00:00.000Z");
+      hits = [
+        { id: "obs_a", score: 16, timestamp: "2026-10-05T10:00:00.000Z" },
+        { id: "mem_old", score: 14, sessionId: "memory", narrative: "Rule was: fail open" },
+      ];
+      const result = await run(prompt);
+      expect(result.context.indexOf("Rule: fail closed")).toBeLessThan(result.context.indexOf("Rule was: fail open"));
+    });
+
+    it("places a Memory between two Sessions by date", async () => {
+      await summaryAt("ses_a", "2026-10-01T12:00:00.000Z", "Rule: A");
+      await summaryAt("ses_b", "2026-10-09T12:00:00.000Z", "Rule: B");
+      await memoryAt("mem_mid", "2026-10-05T12:00:00.000Z");
+      hits = [
+        { id: "obs_a", score: 16, sessionId: "ses_a", timestamp: "2026-10-01T10:00:00.000Z" },
+        { id: "obs_b", score: 15, sessionId: "ses_b", timestamp: "2026-10-09T10:00:00.000Z" },
+        { id: "mem_mid", score: 14, sessionId: "memory", narrative: "Rule between" },
+      ];
+      const { context } = await run(prompt);
+      const at = (s: string) => context.indexOf(s);
+      expect(at("Rule: B")).toBeLessThan(at("Rule between"));
+      expect(at("Rule between")).toBeLessThan(at("Rule: A"));
+    });
+  });
+
   it("fails instead of answering empty when search fails", async () => {
     sdk.registerFunction("mem::search", async () => {
       throw new Error("isolated scope without agent id");

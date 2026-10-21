@@ -402,6 +402,7 @@ describe("Reflect", () => {
       await sdk.trigger("mem::reflect", {});
       const first = await kv.list<Insight>("mem:insights");
       expect(first.length).toBe(2);
+      await kv.set("mem:semantic", "sem_4", makeSemantic("Fuzzing finds validation gaps"));
 
       const result = (await sdk.trigger("mem::reflect", {})) as {
         reinforced: number;
@@ -414,6 +415,163 @@ describe("Reflect", () => {
       const after = await kv.list<Insight>("mem:insights");
       expect(after.length).toBe(2);
       expect(after[0].reinforcements).toBe(1);
+    });
+
+    describe("unchanged clusters and reinforcing named Insights (#271)", () => {
+      const PARAPHRASE_RESPONSE = `<insights>
+<insight confidence="0.8" title="Layered Defence">
+Layered protection for security means input validation, safe APIs and deny-lists applied together.
+</insight>
+</insights>`;
+
+      async function seedCluster(): Promise<void> {
+        await seedNode(kv, makeConceptNode("security"));
+        await seedNode(kv, makeConceptNode("validation"));
+        await seedEdge(kv, makeEdge("security", "validation"));
+        await kv.set("mem:semantic", "sem_1", makeSemantic("Always validate security inputs"));
+        await kv.set("mem:semantic", "sem_2", makeSemantic("Testing improves security coverage"));
+        await kv.set("mem:semantic", "sem_3", makeSemantic("Validation prevents injection"));
+      }
+
+      it("adds nothing to a cluster whose facts have not changed since its last reflect", async () => {
+        await seedCluster();
+        await sdk.trigger("mem::reflect", {});
+        provider.summarize.mockResolvedValue(PARAPHRASE_RESPONSE);
+
+        const result = (await sdk.trigger("mem::reflect", {})) as {
+          newInsights: number;
+          reinforced: number;
+          clustersUnchanged: number;
+          clustersProcessed: number;
+        };
+
+        expect(provider.summarize).toHaveBeenCalledTimes(1);
+        expect(result).toMatchObject({ newInsights: 0, reinforced: 0, clustersUnchanged: 1, clustersProcessed: 0 });
+        expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
+      });
+
+      it("reflects a cluster again once one of its facts changes", async () => {
+        await seedCluster();
+        await sdk.trigger("mem::reflect", {});
+        await kv.set("mem:semantic", "sem_1", makeSemantic("Never skip validating security inputs", "sem_1"));
+
+        await sdk.trigger("mem::reflect", {});
+
+        expect(provider.summarize).toHaveBeenCalledTimes(2);
+      });
+
+      it("retries a cluster whose reflect failed", async () => {
+        await seedCluster();
+        provider.summarize.mockRejectedValueOnce(new Error("LLM timeout"));
+        await sdk.trigger("mem::reflect", {});
+
+        await sdk.trigger("mem::reflect", {});
+
+        expect(provider.summarize).toHaveBeenCalledTimes(2);
+        expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
+      });
+
+      it("retries a cluster whose reply held no Insight", async () => {
+        await seedCluster();
+        provider.summarize.mockResolvedValueOnce("");
+        await sdk.trigger("mem::reflect", {});
+
+        await sdk.trigger("mem::reflect", {});
+
+        expect(provider.summarize).toHaveBeenCalledTimes(2);
+        expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
+      });
+
+      const OTHER_INSIGHT = {
+        id: "ins_known",
+        title: "Layered Defence",
+        content: "Layered protection for security means input validation, safe APIs and deny-lists applied together.",
+        confidence: 0.8,
+        reinforcements: 0,
+        sourceConceptCluster: ["security", "validation"],
+        sourceMemoryIds: [],
+        sourceLessonIds: [],
+        sourceCrystalIds: [],
+        tags: [],
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:00Z",
+        decayRate: 0.05,
+      } satisfies Insight;
+
+      const reinforcing = (id: string) =>
+        `<insights><insight confidence="0.8" title="Layered Defence" reinforces="${id}">Security wants several overlapping protections (${id}).</insight></insights>`;
+
+      it("shows the model the cluster's existing Insights with their ids, strongest first, bounded", async () => {
+        await seedCluster();
+        for (let i = 0; i < 15; i++) {
+          await kv.set("mem:insights", `ins_${i}`, {
+            ...OTHER_INSIGHT,
+            id: `ins_${i}`,
+            confidence: i / 20,
+            content: `claim ${i} ${"y".repeat(1000)}`,
+          });
+        }
+        await kv.set("mem:insights", "ins_elsewhere", { ...OTHER_INSIGHT, id: "ins_elsewhere", project: "other" });
+
+        await sdk.trigger("mem::reflect", {});
+
+        const prompt = String(provider.summarize.mock.calls[0]![1]);
+        expect(prompt).toContain("## Existing Insights");
+        expect(prompt).toContain("[id=ins_14]");
+        expect(prompt).toContain("[id=ins_5]");
+        expect(prompt).not.toContain("[id=ins_4]");
+        expect(prompt).not.toContain("[id=ins_elsewhere]");
+        expect(prompt).not.toContain("y".repeat(400));
+        expect(prompt.length).toBeLessThanOrEqual(24_000);
+      });
+
+      it("reinforces the named Insight instead of adding a row", async () => {
+        await seedCluster();
+        await kv.set("mem:insights", "ins_known", OTHER_INSIGHT);
+        provider.summarize.mockResolvedValue(reinforcing("ins_known"));
+
+        const result = (await sdk.trigger("mem::reflect", {})) as { newInsights: number; reinforced: number };
+
+        expect(result).toMatchObject({ newInsights: 0, reinforced: 1 });
+        const insights = await kv.list<Insight>("mem:insights");
+        expect(insights).toHaveLength(1);
+        expect(insights[0].reinforcements).toBe(1);
+        expect(insights[0].lastReinforcedAt).toBeTruthy();
+        expect(insights[0].confidence).toBeGreaterThan(0.8);
+      });
+
+      it("writes a new Insight when the named id does not exist", async () => {
+        await seedCluster();
+        await kv.set("mem:insights", "ins_known", OTHER_INSIGHT);
+        provider.summarize.mockResolvedValue(reinforcing("ins_made_up"));
+
+        const result = (await sdk.trigger("mem::reflect", {})) as { newInsights: number; reinforced: number };
+
+        expect(result).toMatchObject({ newInsights: 1, reinforced: 0 });
+        expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
+      });
+
+      it("writes a new Insight when the named id belongs to another project or cluster", async () => {
+        await seedCluster();
+        await kv.set("mem:insights", "ins_other_project", { ...OTHER_INSIGHT, id: "ins_other_project", project: "other" });
+        await kv.set("mem:insights", "ins_other_cluster", { ...OTHER_INSIGHT, id: "ins_other_cluster", sourceConceptCluster: ["testing", "mocks"] });
+
+        for (const id of ["ins_other_project", "ins_other_cluster"]) {
+          provider.summarize.mockResolvedValue(reinforcing(id));
+          const result = (await sdk.trigger("mem::reflect", {})) as { newInsights: number; reinforced: number };
+          expect(result).toMatchObject({ newInsights: 1, reinforced: 0 });
+          await kv.set("mem:semantic", `sem_${id}`, makeSemantic(`extra ${id} security fact`));
+        }
+      });
+
+      it("adds an Insight that names no id as before", async () => {
+        await seedCluster();
+        await kv.set("mem:insights", "ins_known", OTHER_INSIGHT);
+
+        const result = (await sdk.trigger("mem::reflect", {})) as { newInsights: number; reinforced: number };
+
+        expect(result).toMatchObject({ newInsights: 2, reinforced: 0 });
+      });
     });
 
     it("falls back to Jaccard grouping when graph is empty", async () => {
@@ -525,6 +683,29 @@ describe("Reflect", () => {
 
       expect(result.insights.length).toBe(1);
       expect(result.insights[0].title).toBe("Defense in Depth");
+    });
+
+    it("ranks the newest Insight of a title ahead of an older, more confident one", async () => {
+      const day = 86400000;
+      const row = (id: string, content: string, confidence: number, ageDays: number) => {
+        const at = new Date(Date.now() - ageDays * day).toISOString();
+        return {
+          id, title: "Whitespace style", content, confidence, reinforcements: 0,
+          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+          tags: [], createdAt: at, updatedAt: at, decayRate: 0.05,
+        };
+      };
+      await kv.set("mem:insights", "ins_old", row("ins_old", "Team will indent with tabs", 0.8, 60));
+      await kv.set("mem:insights", "ins_new", row("ins_new", "Team will indent with spaces", 0.5, 1));
+      await kv.set("mem:insights", "ins_other", row("ins_other", "Whitespace is trimmed", 0.6, 30));
+
+      const result = (await sdk.trigger("mem::insight-search", {
+        query: "whitespace style indent",
+      })) as { insights: Array<Insight & { score: number }> };
+
+      const ids = result.insights.map((i) => i.id);
+      expect(ids.indexOf("ins_new")).toBeLessThan(ids.indexOf("ins_old"));
+      expect(ids).toContain("ins_other");
     });
 
     it("rejects empty query", async () => {

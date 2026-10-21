@@ -1,6 +1,7 @@
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, fingerprintId } from "../state/schema.js";
+import { capBehindNewer } from "./recency-cap.js";
 import type { Lesson } from "../types.js";
 import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
@@ -50,6 +51,10 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
   }
   await lessonIndexBuild;
   return lessonIndex ?? ensureLessonIndex(kv);
+}
+
+function lastActiveAt(lesson: Lesson): number {
+  return new Date(lesson.lastReinforcedAt ?? lesson.createdAt).getTime();
 }
 
 export function reinforceLesson(lesson: Lesson): void {
@@ -186,6 +191,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         scored.push({ lesson: l, score: l.confidence * relevance * recencyBoost });
       }
 
+      capBehindNewer(scored, (s) => s.lesson.content, (s) => lastActiveAt(s.lesson));
       scored.sort(
         (a, b) =>
           b.score - a.score ||

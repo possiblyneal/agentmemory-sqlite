@@ -127,7 +127,7 @@ export interface Memory {
   id: string;
   createdAt: string;
   updatedAt: string;
-  type: "pattern" | "preference" | "architecture" | "bug" | "workflow" | "fact";
+  type: "pattern" | "preference" | "architecture" | "bug" | "workflow" | "fact" | "rule";
   title: string;
   content: string;
   concepts: string[];
@@ -654,6 +654,12 @@ export interface SemanticMemory {
   strength: number;
   createdAt: string;
   updatedAt: string;
+  project?: string;
+  subject?: string;
+  relation?: string;
+  object?: string;
+  isLatest?: boolean;
+  supersededBy?: string;
 }
 
 export interface ProceduralMemory {
@@ -711,6 +717,7 @@ export interface AuditEntry {
     | "observe"
     | "compress"
     | "remember"
+    | "reinforce"
     | "forget"
     | "evolve"
     | "consolidate"

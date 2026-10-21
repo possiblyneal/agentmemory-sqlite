@@ -81,3 +81,57 @@ describe("session-start Summary block is bounded", () => {
     expect(context).not.toContain("more)");
   });
 });
+
+describe("session-start Summary blocks are ordered by when the work happened", () => {
+  async function order(summaries: Array<[string, Partial<SessionSummary>]>) {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    registerContextFunction(sdk as never, kv as never, 100000);
+    for (const [id, extra] of summaries) {
+      await kv.set(KV.sessions, id, {
+        id,
+        project: "/p",
+        cwd: "/p",
+        startedAt: "2026-10-01T00:00:00.000Z",
+        status: "completed",
+        observationCount: 1,
+      } satisfies Session);
+      await kv.set(KV.summaries, id, {
+        sessionId: id,
+        project: "/p",
+        createdAt: "2026-10-20T00:00:00.000Z",
+        title: `title-${id}`,
+        narrative: "n",
+        keyDecisions: [],
+        filesModified: [],
+        concepts: [],
+        observationCount: 1,
+        ...extra,
+      } satisfies SessionSummary);
+    }
+    const { context } = (await sdk.trigger("mem::context", { sessionId: "ses_now", project: "/p" })) as {
+      context: string;
+    };
+    return summaries
+      .map(([id]) => [id, context.indexOf(`title-${id}`)] as const)
+      .sort((a, b) => a[1] - b[1])
+      .map(([id]) => id);
+  }
+
+  it("falls back from lastObservationAt to coveredThrough to createdAt", async () => {
+    expect(
+      await order([
+        ["created", { createdAt: "2026-10-05T00:00:00.000Z" }],
+        ["covered", { createdAt: "2026-10-01T00:00:00.000Z", coveredThrough: "2026-10-06T00:00:00.000Z" }],
+        [
+          "worked",
+          {
+            createdAt: "2026-10-02T00:00:00.000Z",
+            coveredThrough: "2026-10-03T00:00:00.000Z",
+            lastObservationAt: "2026-10-07T00:00:00.000Z",
+          },
+        ],
+      ]),
+    ).toEqual(["worked", "covered", "created"]);
+  });
+});

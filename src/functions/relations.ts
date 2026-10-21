@@ -6,6 +6,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { safeAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
 import { recordAccessBatch } from "./access-tracker.js";
+import { deindexSupersededMemory, indexNewMemoryVersion } from "./search.js";
 import { logger } from "../logger.js";
 
 function computeConfidence(
@@ -161,7 +162,9 @@ export function registerRelationsFunction(sdk: ISdk, kv: StateKV): void {
         newId: evolved.id,
       });
 
+      deindexSupersededMemory(existing.id);
       await kv.set(KV.memories, evolved.id, evolved);
+      await indexNewMemoryVersion(evolved);
       await safeAudit(kv, "evolve", "mem::evolve", [evolved.id], {
         operation: "evolve",
         oldId: existing.id,

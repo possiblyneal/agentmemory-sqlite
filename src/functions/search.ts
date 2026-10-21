@@ -1,9 +1,11 @@
 import type { ISdk } from '../engine/types.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
+import { capBehindNewer } from './recency-cap.js'
 import { StateKV } from '../state/kv.js'
 import { SearchIndex, isSearchLayer } from '../state/search-index.js'
 import { CHARS_PER_TOKEN } from '../utils/tokens.js'
+import { isDurableRecord, recencyFactor } from '../state/hybrid-search.js'
 import { VectorIndex } from '../state/vector-index.js'
 import type { EmbeddingProvider } from '../types.js'
 import {
@@ -25,6 +27,18 @@ import {
   isNonLatestFilterEnabled,
 } from "../config.js";
 import { getCounters } from "../telemetry/setup.js";
+
+const observationText = (o: CompressedObservation): string => `${o.title} ${o.narrative}`
+
+// An Observation that restates an older one's topic in nearly the same words
+// supersedes it, as for Lessons. Memories keep their score, and the pass is
+// pairwise over the hits already scored for the query.
+function capOlderNearTwins(hits: SearchResult[]): void {
+  const observations = hits.filter(
+    (h) => !isDurableRecord(h.observation.id, h.sessionId) && Number.isFinite(Date.parse(h.observation.timestamp)),
+  )
+  capBehindNewer(observations, (h) => observationText(h.observation), (h) => Date.parse(h.observation.timestamp))
+}
 
 let index: SearchIndex | null = null
 let vectorIndex: VectorIndex | null = null
@@ -67,6 +81,44 @@ export function getEmbeddingProvider(): EmbeddingProvider | null {
 
 export function vectorIndexRemove(id: string): void {
   vectorIndex?.remove(id);
+}
+
+// The live indexes keep serving a row until the next rebuild, so a Memory
+// marked isLatest=false must leave them explicitly. Soft-fail: the row write
+// already committed and the boot rebuild skips non-latest Memories.
+export function deindexSupersededMemory(id: string): void {
+  try {
+    getSearchIndex().remove(id);
+    vectorIndexRemove(id);
+  } catch (err) {
+    logger.warn("Failed to de-index superseded memory", {
+      memId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// A Memory written outside mem::remember enters the live BM25 index here and
+// the vector index as one vector per chunk, which the fill pass backfills on
+// a provider failure.
+export async function indexNewMemoryVersion(memory: Memory): Promise<void> {
+  try {
+    getSearchIndex().add(memoryToIndexDoc(memory), "memory");
+  } catch (err) {
+    logger.warn("Failed to index new memory version into BM25", {
+      memId: memory.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  const sessionId = memory.sessionIds?.[0] ?? MEMORY_SESSION;
+  await vectorIndexAddBatchGuarded(
+    memoryChunkJobs(memory).map((job) => ({
+      id: job.id,
+      sessionId,
+      text: job.text,
+      context: { kind: "memory" as const, logId: job.id },
+    })),
+  );
 }
 
 // Eligibility and embed-input rules live in src/state/index-corpus.ts so the
@@ -753,13 +805,20 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         // happens post-lookup. Wildcard ("*") and no-isolation paths
         // resolved filterAgentId=undefined upstream and pass through.
         if (filterAgentId !== undefined && obs.agentId !== filterAgentId) continue
-        if (enriched.length >= effectiveLimit) break
         enriched.push({
           observation: obs,
           score: candidates[i].score,
           sessionId: candidates[i].sessionId,
         })
       }
+      const now = Date.now()
+      for (const r of enriched) {
+        if (isDurableRecord(r.observation.id, r.sessionId)) continue
+        r.score *= recencyFactor(r.observation.timestamp, now)
+      }
+      capOlderNearTwins(enriched)
+      enriched.sort((a, b) => b.score - a.score)
+      enriched.length = Math.min(enriched.length, effectiveLimit)
 
       const estimateTokens = (value: unknown): number =>
         Math.max(1, Math.ceil(JSON.stringify(value).length / CHARS_PER_TOKEN))

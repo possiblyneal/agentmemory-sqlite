@@ -92,7 +92,7 @@ export const CORE_TOOLS: McpToolDef[] = [
         type: {
           type: "string",
           description:
-            "Memory type: pattern, preference, architecture, bug, workflow, or fact",
+            "Memory type: pattern, preference, architecture, bug, workflow, fact, or rule (an instruction the Operator gave that must keep holding; pinned at session start and pre-compact)",
         },
         concepts: {
           type: "string",

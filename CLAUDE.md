@@ -74,6 +74,8 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 1. `src/state/schema.ts` — add to the KV object
 2. `src/types.ts` — add the corresponding interface
 
+**When adding a field to `SemanticMemory`:** keep the XML shape in `SEMANTIC_MERGE_SYSTEM` (`src/prompts/consolidation.ts`) and the parser in `consolidateSemantic` (`src/functions/consolidation-pipeline.ts`) in step, and make `recallSemanticFacts` (`src/functions/semantic-recall.ts`) honour it. A keyed fact (`subject`, `relation`, `object`, `project`) closes a live same-key fact of the same project whose object differs (`isLatest: false`, `supersededBy`); recall and Reflect skip closed facts.
+
 **When adding a field that Decay reads or writes (strength, lastAccessedAt, lastDecayedAt):**
 1. `src/types.ts` — `SemanticMemory` and `ProceduralMemory`
 2. `applyDecay` in `src/functions/consolidation-pipeline.ts` and `repairDecay` in `src/state/startup-maintenance.ts`, which must agree on the period count
@@ -176,6 +178,19 @@ sources' obs-node rows: there is no sweep, so records orphaned before this exist
 disk. Import `replace` and snapshot restore rewrite the graph from their own file and do not
 call it.
 
+### Reflect
+`mem::reflect` (`src/functions/reflect.ts`) records a hash of each cluster's inputs in
+`KV.config` (`reflect:inputs_…`) after a pass whose reply yielded at least one Insight and was
+not cut short by the run's 50-Insight cap, and makes no LLM call for a cluster whose hash is
+unchanged; an empty or unparseable reply (the noop provider's included) leaves it to retry. The prompt lists the cluster's top 10 existing Insights with ids
+(`EXISTING_INSIGHT_LIMIT`, reserved out of the prompt budget); the model may mark a new
+Insight `reinforces="<id>"`, which reinforces that Insight when the id is a live Insight of the
+same project and concept set (`insightClusterKey()`, `src/functions/insight-merge.ts`) and
+otherwise writes a new one. No lexical similarity is involved. `collapseInsights` in
+`src/state/startup-maintenance.ts` ran once (`KV.config` `insight-collapse:done`), keeping the
+top `INSIGHTS_PER_CLUSTER` (5) per cluster and folding the rest into their nearest survivor.
+Measurements and rationale are in `docs/research/record-kind-counts.md`.
+
 ### MCP Tool Handler
 ```typescript
 case "memory_your_tool": {
@@ -190,7 +205,7 @@ case "memory_your_tool": {
 ```
 
 ### Injection Gate
-Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
+Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated. The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
 ### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
@@ -205,7 +220,10 @@ else `createdAt`; never write time alone, which is milliseconds apart for Sessio
 together; a Summary written before the field existed keeps the fallback until its Session is
 summarized again), and ordered newest first, under a header telling the Agent the rules still
 hold, with their exact values, even where the current code does not follow them yet, and that
-the newer of two conflicting rules holds. The top 3 are counted in rendered units from a 30-hit
+the newer of two conflicting rules holds. A Memory hit dated (`updatedAt`) after the oldest
+rendered Session takes its place among the Sessions by date, so it is not rendered behind a
+decision it may supersede; the header sits before the first Session block. Older Memories and
+Observations follow the Sessions. The top 3 are counted in rendered units from a 30-hit
 search: a covered Session is one unit however many of its Observations hit.
 Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
 when the best-scoring other Session there scores at least 0.35 of the given Session's own best
@@ -215,7 +233,39 @@ Session and any Summary already given are dropped before ranking. A failed amend
 drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
 (each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
-out the rest of the budget; its `summary` ref keeps every file.
+out the rest of the budget; its `summary` ref keeps every file. Summary blocks are ordered newest work first by the same date prompt submit uses (`decidedAt`), not by write time.
+
+### Pinned rules
+`mem::context` (session start; pre-compact posts the same `/agentmemory/context` at budget 1500)
+places a `## Rules` block first, after pinned slots: this project's `type: "rule"` Memories
+(`isLatest` only, newest first by `updatedAt`; a rule is an instruction the Operator gave that must
+keep holding). Rule-typed Memories are the only Memories `mem::context` adds, and a Global Memory
+or another project's rule is not shown. The Lessons Learned block follows it, still in its own
+rank order. Together they hold at most 40% of the budget (`RULEBOOK_BUDGET_SHARE`, 600 tokens at
+1500): rules fill it first, a rule too long for what is left being skipped, then the top-ranked
+Lessons that fit; a Lesson that does not fit the share leaves the pinned prefix and sorts by
+recency with the other blocks. A Semantic Fact whose text equals a rule actually pinned is
+dropped. An exact-repeat save with a valid `type` (`mem::remember`) sets the existing Memory's
+type, so re-saving a Memory as a rule pins it.
+
+### Supersession in Recall
+`docs/supersession.md` maps each record kind and surface to its fixture; the rules it describes:
+- **Near-twin cap** — `capBehindNewer` (`src/functions/recency-cap.ts`): of two hits whose text
+  overlaps by word-set Jaccard ≥ 0.5, the older is capped at 0.99 of the newer's score. Lessons
+  date by `lastReinforcedAt` else `createdAt` (an explicit re-save is the Operator restating it),
+  Semantic Facts by `createdAt` (consolidation re-emits stale claims), Observations in
+  `mem::search` by timestamp. `HybridSearch` (`mem::smart-search`) has only the Observation
+  recency factor, not this cap.
+- **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
+  in smart-search and prompt-context after their floors: an older Memory of the same type and
+  Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly
+  below the newer one. Nothing is hidden.
+- **De-indexing** — every path that sets a Memory `isLatest: false` (`mem::remember`, `mem::evolve`,
+  `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
+  consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).
+- **Keyed Semantic Facts** — see the `SemanticMemory` consistency rule; a keyed fact whose text
+  matches an unkeyed one keys it when every Session that fact cites is this project's, so the
+  corpus written before keys can be superseded without one project closing another's fact.
 
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
@@ -319,6 +369,7 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - Iterate on Recall with `npm run eval:suite -- --tier fast --against <label>` (~2 min: coding-life, PrecisionMemBench, LongMemEval sample; `full` adds replay). Every eval runner scores only the dev split by default; `--split holdout` or `all` (a published scorecard) needs `AGENTMEMORY_EVAL_HOLDOUT=<label>` and logs the look in `eval/holdout-ledger.ndjson`, which `eval:suite --holdout` does for you. Never change the split salt or share in `eval/runner/split.ts`; see `eval/README.md`
 - sdebench (AMB harness, boltons) results go in `docs/benchmarks/2026-10-18-sdebench.md`: one row per arm, rejected levers included, with dev and holdout totals. Read it before choosing a lever, so a tried one is not rerun
 - `test/supersession.test.ts` records, per record kind and Recall surface, whether a newer claim beats the stale one; `docs/supersession.md` maps each cell to its test and follow-up issue. A cell where the stale claim still wins is `it.fails`: a fix flips it to `it` and updates its row in that table
+- `npm run eval:supersession -- --instance <N>` (after `npm run build`) scores the stale-first rate per record kind and surface, the cells of `docs/supersession.md`, against a throwaway daemon; dev split only, outside `eval:suite`. A change that fixes a supersession cell reruns it and publishes a new dated scorecard in `docs/benchmarks/` (`2026-10-20-supersession.md` is the baseline); `eval/README.md` (Supersession) describes it
 - CI gates Recall quality with `npm run eval:gate` (Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why
 
 ## Supported hosts

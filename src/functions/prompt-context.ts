@@ -8,7 +8,8 @@ import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
-import { cutDecision, summaryCovers } from "./summarize.js";
+import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
+import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -21,6 +22,7 @@ const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
 const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 30;
+const GATE_POOL = 10;
 const AMENDMENT_MIN_RATIO = 0.35;
 const AMENDMENT_MIN_LEAD = 1.25;
 
@@ -46,12 +48,13 @@ function wordCount(prompt: string): number {
 
 // mem::search returns Memories in the Observation shape, under the
 // Memory's own id, so only the Memory store can tell the two apart.
-async function refFor(kv: StateKV, hit: NarratedHit): Promise<InjectedRef> {
+async function candidateFor(kv: StateKV, hit: NarratedHit): Promise<Candidate> {
   const memory = await kv.get<Memory>(KV.memories, hit.observation.id).catch(() => null);
-  return withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
+  const ref = withFiles({ kind: memory ? "memory" : "observation", id: hit.observation.id }, hit.observation.files);
+  return { hit, ref, ...(memory && { memoryAt: memory.updatedAt ?? memory.createdAt }) };
 }
 
-type Candidate = { hit: NarratedHit; ref: InjectedRef };
+type Candidate = { hit: NarratedHit; ref: InjectedRef; memoryAt?: string };
 type Resolved = Candidate & { summary: SessionSummary | null };
 
 // An Observation a Session Summary covers is a fragment of a conversation
@@ -84,13 +87,6 @@ function distinctUnits(ranked: Resolved[]): Resolved[] {
   }
   return units;
 }
-
-// The date a Session's decisions are ordered by, so "later" means the same
-// thing when choosing an amendment as when rendering it. coveredThrough is
-// when the Summary was written, so Sessions imported or summarized together
-// would be ordered by milliseconds of write time, not by when the work was done.
-const decidedAt = (summary: SessionSummary) =>
-  summary.lastObservationAt ?? summary.coveredThrough ?? summary.createdAt;
 
 // A Session that amends another's rules restates them, so a search on those
 // rules finds it. Measured on sdebench's amended tasks against 140 decoys: the
@@ -159,36 +155,52 @@ async function withLaterAmendments(
 }
 
 // Decisions lead, newest Session first, so a later Session that amends a
-// rule is read before the rule it replaces.
+// rule is read before the rule it replaces. A Memory dated after a Session
+// is not placed behind it, since it may be the claim that replaced a decision:
+// those Memories take their place among the Sessions by date.
 function renderWithSessionDecisions(chosen: Resolved[]) {
+  type Entry =
+    | { at: string; session: { sessionId: string; summary: SessionSummary } }
+    | { at: string; memory: { text: string; ref: InjectedRef } };
   const fragments: string[] = [];
   const fragmentRefs: InjectedRef[] = [];
-  const sessions: Array<{ sessionId: string; summary: SessionSummary; at: string }> = [];
-  for (const { hit, ref, summary } of chosen) {
-    if (!summary) {
-      fragments.push(escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS)));
+  const sessions: Entry[] = [];
+  for (const { hit, summary } of chosen) {
+    if (!summary) continue;
+    sessions.push({ at: decidedAt(summary), session: { sessionId: hit.sessionId, summary } });
+  }
+  const oldestAt = sessions.reduce((min, e) => (e.at < min ? e.at : min), "\uffff");
+  const timeline: Entry[] = [...sessions];
+  for (const { hit, ref, summary, memoryAt } of chosen) {
+    if (summary) continue;
+    const text = escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS));
+    if (memoryAt && memoryAt > oldestAt) {
+      timeline.push({ at: memoryAt, memory: { text, ref } });
+    } else {
+      fragments.push(text);
       fragmentRefs.push(ref);
+    }
+  }
+  timeline.sort((a, b) => b.at.localeCompare(a.at));
+  const lines: string[] = [];
+  const injected: InjectedRef[] = [];
+  for (const entry of timeline) {
+    if ("memory" in entry) {
+      lines.push(entry.memory.text);
+      injected.push(entry.memory.ref);
       continue;
     }
-    sessions.push({ sessionId: hit.sessionId, summary, at: decidedAt(summary) });
-  }
-  const newestFirst = sessions.sort((a, b) => b.at.localeCompare(a.at));
-  const lines = newestFirst.length
-    ? ["Requirements the user settled in past Sessions of this project. They still hold: where the task touches what a rule governs, apply it with its exact values, even where the current code does not follow it yet. Newest Session first; where two of these conflict, the newer one holds."]
-    : [];
-  for (const { summary, at } of newestFirst) {
+    const { sessionId, summary } = entry.session;
+    if (!lines.length || !injected.some((r) => r.kind === "summary")) {
+      lines.push("Requirements the user settled in past Sessions of this project. They still hold: where the task touches what a rule governs, apply it with its exact values, even where the current code does not follow it yet. Newest Session first; where two of these conflict, the newer one holds.");
+    }
     lines.push(
-      `Session "${escapeXml(summary.title)}" (${at.slice(0, 10)}):`,
+      `Session "${escapeXml(summary.title)}" (${entry.at.slice(0, 10)}):`,
       ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(cutDecision(d))}`),
     );
+    injected.push(withFiles({ kind: "summary", id: sessionId }, summary.filesModified));
   }
-  return {
-    lines: [...lines, ...fragments],
-    injected: [
-      ...newestFirst.map(({ sessionId, summary }) => withFiles({ kind: "summary", id: sessionId }, summary.filesModified)),
-      ...fragmentRefs,
-    ],
-  };
+  return { lines: [...lines, ...fragments], injected: [...injected, ...fragmentRefs] };
 }
 
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
@@ -219,11 +231,15 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
         (r): r is NarratedHit =>
           r.score >= floor && !!r.observation.narrative && !seen.has(refKey({ kind: "summary", id: r.sessionId })),
       );
-      const refs = await Promise.all(strong.map((r) => refFor(kv, r)));
-      const candidates = strong
-        .map((hit, i) => ({ hit, ref: refs[i] }))
-        .filter(({ ref }) => !seen.has(refKey(ref)));
-      const gated = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation);
+      const candidates = (await Promise.all(strong.map((r) => candidateFor(kv, r)))).filter(
+        ({ ref }) => !seen.has(refKey(ref)),
+      );
+      const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation, GATE_POOL);
+      const shadowed = await shadowedMemoryIds(
+        kv,
+        passed.filter(({ ref }) => ref.kind === "memory").map(({ ref }) => ref.id),
+      );
+      const gated = newerAboveShadowed(passed, ({ ref }) => ref.id, shadowed);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
