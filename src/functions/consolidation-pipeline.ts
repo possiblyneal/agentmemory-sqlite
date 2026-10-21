@@ -23,6 +23,7 @@ import {
 import { logger } from "../logger.js";
 import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
+import { createSessionLoader } from "./search.js";
 
 export const DECAY_FLOOR = 0.1;
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -163,6 +164,13 @@ export function registerConsolidationPipelineFunction(
       return { skipped: true, reason: "fewer than 5 summaries" };
     }
     const existingSemantic = await kv.list<SemanticMemory>(KV.semantic);
+    const loadSession = createSessionLoader(kv);
+    // An unkeyed fact has no project of its own; keying it for this project is
+    // safe only when every Session it cites is this project's.
+    const citesOnlyProject = async (fact: SemanticMemory, project: string) =>
+      (await Promise.all(fact.sourceSessionIds.map(loadSession))).every(
+        (session) => session?.project === project,
+      );
     const recentSummaries = summaries
       .sort(
         (a, b) =>
@@ -208,12 +216,15 @@ export function registerConsolidationPipelineFunction(
                 s.relation === key.relation,
             )
           : [];
-        const existing =
-          live.find(
-            (s) =>
-              s.fact.toLowerCase() === fact.toLowerCase() &&
-              (s.project === undefined || s.project === project),
-          ) ?? sameKey.find((s) => s.object === key!.object);
+        let textMatch = live.find(
+          (s) =>
+            s.fact.toLowerCase() === fact.toLowerCase() &&
+            (s.project === undefined || s.project === project),
+        );
+        if (textMatch && key && !textMatch.subject && !(await citesOnlyProject(textMatch, project))) {
+          textMatch = undefined;
+        }
+        const existing = textMatch ?? sameKey.find((s) => s.object === key!.object);
         let target: SemanticMemory;
         if (existing) {
           existing.accessCount++;

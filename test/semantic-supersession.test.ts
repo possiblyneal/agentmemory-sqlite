@@ -74,7 +74,10 @@ describe("Semantic Fact keyed supersession", () => {
     sdk = mockSdk();
     const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
     registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
-    for (let i = 0; i < 5; i++) await kv.set(KV.summaries, `ses_${i}`, summary(i));
+    for (let i = 0; i < 5; i++) {
+      await kv.set(KV.summaries, `ses_${i}`, summary(i));
+      await kv.set(KV.sessions, `ses_${i}`, { id: `ses_${i}`, project: "proj", startedAt: summary(i).createdAt, status: "completed", observationCount: 3 });
+    }
   });
 
   it("closes a live fact when the same subject and relation arrive with a different object", async () => {
@@ -136,6 +139,21 @@ describe("Semantic Fact keyed supersession", () => {
     const stale = all.find((f) => f.fact.includes("tabs"))!;
     expect(stale).toMatchObject({ subject: "indentation", project: "proj", isLatest: false });
     expect(all).toHaveLength(2);
+  });
+
+  it("does not key an unkeyed fact another project's Sessions cite", async () => {
+    await kv.set(KV.sessions, "ses_other", { id: "ses_other", project: "other", startedAt: "2026-09-01T00:00:00.000Z", status: "completed", observationCount: 0 });
+    const theirs: SemanticMemory = {
+      id: "sem_theirs", fact: "The team indents with tabs", confidence: 0.8,
+      sourceSessionIds: ["ses_other"], sourceMemoryIds: [], accessCount: 1, lastAccessedAt: "",
+      strength: 0.8, createdAt: "", updatedAt: "",
+    };
+    await kv.set(KV.semantic, "sem_theirs", { ...theirs });
+    await consolidate(keyed(`subject="indentation" relation="style" object="tabs"`, "The team indents with tabs"));
+    await consolidate(keyed(`subject="indentation" relation="style" object="spaces"`, "The team indents with spaces"));
+
+    expect(await kv.get(KV.semantic, "sem_theirs")).toEqual(theirs);
+    expect((await facts()).filter((f) => f.project === "proj")).toHaveLength(2);
   });
 
   it("does not supersede a fact from another project", async () => {

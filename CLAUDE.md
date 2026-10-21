@@ -264,7 +264,8 @@ type, so re-saving a Memory as a rule pins it.
   `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
   consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).
 - **Keyed Semantic Facts** — see the `SemanticMemory` consistency rule; a keyed fact whose text
-  matches an unkeyed one keys it, so the corpus written before keys can be superseded.
+  matches an unkeyed one keys it when every Session that fact cites is this project's, so the
+  corpus written before keys can be superseded without one project closing another's fact.
 
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
