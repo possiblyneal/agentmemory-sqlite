@@ -135,6 +135,26 @@ describe("OpenAIEmbeddingProvider", () => {
     fetchSpy.mockRestore();
   });
 
+  it("sends a served EmbeddingGemma its search-task prefix on both sides", async () => {
+    process.env["OPENAI_EMBEDDING_MODEL"] = "embeddinggemma-2";
+    process.env["OPENAI_EMBEDDING_DIMENSIONS"] = "768";
+    const provider = new OpenAIEmbeddingProvider("test-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 }),
+    );
+
+    await provider.embedBatch(["a document"]);
+    await provider.embedQuery("a query");
+    const inputs = fetchSpy.mock.calls.map(
+      ([, init]) => JSON.parse((init as RequestInit).body as string).input,
+    );
+    expect(inputs).toEqual([["title: none | text: a document"], ["task: search result | query: a query"]]);
+    expect(provider.vectorSpace).toBe("openai:embeddinggemma-2:768:doc=title: none | text: ");
+    expect(provider.minRelevantCosine).toBe(0.69);
+
+    fetchSpy.mockRestore();
+  });
+
   it("derives dimensions from model in the known-models table", () => {
     process.env["OPENAI_EMBEDDING_MODEL"] = "text-embedding-3-large";
     const large = new OpenAIEmbeddingProvider("test-key");

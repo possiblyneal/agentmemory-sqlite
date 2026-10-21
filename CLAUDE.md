@@ -42,7 +42,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
 - **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
-- **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu + macos; do not re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
+- **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu only: the daemon runs on the Operator's Linux machine, so do not add a macOS or Windows leg, nor re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
 
@@ -275,7 +275,14 @@ recorded, drops every vector so the fill pass re-embeds them (`dropMismatchedVec
 `src/functions/index-fill.ts`); until it finishes, the vector leg of Recall covers only what it
 has re-embedded. Query text is embedded through `embedQuery()`
 (`src/providers/embedding/index.ts`), which uses a provider's asymmetric query path when it has
-one — BGE v1.5 runs CLS pooling and prefixes its queries.
+one. `retrievalProfileFor()` (`src/providers/embedding/_retrieval.ts`) gives the local and
+OpenAI-compatible providers each model's query and document prefixes (BGE v1.5 prefixes queries;
+EmbeddingGemma 2 prefixes both) and, where its cosine scale differs from MiniLM's, its own
+`minRelevantCosine`, which smart-search uses in place of 0.3. Calibrate a new model's floor as the
+cosine that rejects the same share of random Observation pairs as MiniLM's 0.3, never against
+eval labels (`docs/benchmarks/2026-10-20-embeddinggemma-2.md`). A non-empty document prefix is
+part of `vectorSpace` (`withDocumentPrefix()`), so changing one re-embeds. Locally, BGE v1.5 pools
+by CLS and EmbeddingGemma 2 runs q4.
 
 A Memory is embedded as one vector per chunk (`memoryChunkJobs()`, `src/state/memory-utils.ts`;
 on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char overlap, each
@@ -363,7 +370,7 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - sdebench (AMB harness, boltons) results go in `docs/benchmarks/2026-10-18-sdebench.md`: one row per arm, rejected levers included, with dev and holdout totals. Read it before choosing a lever, so a tried one is not rerun
 - `test/supersession.test.ts` records, per record kind and Recall surface, whether a newer claim beats the stale one; `docs/supersession.md` maps each cell to its test and follow-up issue. A cell where the stale claim still wins is `it.fails`: a fix flips it to `it` and updates its row in that table
 - `npm run eval:supersession -- --instance <N>` (after `npm run build`) scores the stale-first rate per record kind and surface, the cells of `docs/supersession.md`, against a throwaway daemon; dev split only, outside `eval:suite`. A change that fixes a supersession cell reruns it and publishes a new dated scorecard in `docs/benchmarks/` (`2026-10-20-supersession.md` is the baseline); `eval/README.md` (Supersession) describes it
-- CI gates Recall quality with `npm run eval:gate` (ubuntu / Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why
+- CI gates Recall quality with `npm run eval:gate` (Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why
 
 ## Supported hosts
 
