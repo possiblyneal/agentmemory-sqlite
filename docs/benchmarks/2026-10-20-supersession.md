@@ -1,6 +1,6 @@
-# 2026-10-20 — supersession (baseline)
+# 2026-10-20 — supersession (before and after #271–#290)
 
-**Commit:** `a0de1e3` (main, before any of the concurrent supersession fixes)
+**Commit:** `a0de1e3` (main, before any of the concurrent supersession fixes); after: `53a9958` (`fix/recall-supersession-followups`)
 **Bench:** supersession, dev split (`runner/supersession.ts`)
 **N:** 110 cases: 22 cells, 5 dev pairs each of 8 (3 held out per cell)
 **K:** none; the whole surface is read (search: the record kind's own list)
@@ -54,6 +54,35 @@ Rolled up per kind and surface (all variants, in `eval/reports/supersession/summ
 
 Not reachable: Memory at session start, Semantic Facts, Lessons and Insights at prompt-submit, and a Session Summary decision through search (T7, T10, T15). The rollup for Memory mixes the restated variant, which the save-time Jaccard check already hides, with the two that leak, so read the variant rows.
 
+## After #271–#290
+
+Rerun on `53a9958`, same command and cases. 20 of 22 cells are at 0.00; stale-first fell from 68 of 110 cases to 9.
+
+| Kind | Variant | Surface | Before | After | docs/supersession.md |
+|---|---|---|---|---|---|
+| Memory | contradicted | search | 0.80 | 0.00 | T3 |
+| Memory | contradicted | prompt-submit | 0.80 | 0.00 | T4 |
+| Memory | evolved | search | 1.00 | 0.00 (hidden) | T5 |
+| Memory | evolved | prompt-submit | 1.00 | 0.00 (hidden) | T6 |
+| Semantic Fact | reinforced | search | 1.00 | 0.00 | T8 |
+| Semantic Fact | reinforced | session-start | 1.00 | 0.00 | T9 |
+| Lesson | reinforced | search | 1.00 | 0.00 | T11 |
+| Lesson | reinforced | session-start | 1.00 | **1.00** | T12 |
+| Insight | reinforced | search | 1.00 | 0.00 | T13 |
+| Insight | reinforced | session-start | 1.00 | 0.00 | T14 |
+| Session Summary decision | written early | session-start | 1.00 | 0.00 | T18 |
+| Session Summary decision | against a Memory | prompt-submit | 1.00 | 0.00 | T19 |
+| Observation | equal match | prompt-submit | 0.20 | 0.00 | T23 |
+| Observation | stale matches more | search | 0.80 | **0.80** | T21 |
+| Observation | stale matches more | prompt-submit | 1.00 | 0.00 | T22 |
+
+Cells already at 0.00 before stay there. The two that did not move:
+
+- **Lesson, session start (T12).** The bench saves its Lessons through REST at run time, so the stale Lesson's three saves and the newer Lesson's one are milliseconds apart; the recency divisor cannot separate them and confidence decides. The fixture dates them 40 days apart and passes. Session start has no near-twin cap, so a stale Lesson reinforced as recently as the newer one still leads.
+- **Observation, stronger stale match, search (T21).** The near-twin cap (#287) is in `mem::search` (prompt submit), not in `HybridSearch` (`mem::smart-search`), which still has only the recency factor. The fixture's margin is inside that factor; four of five bench pairs are not.
+
+T4 passes here but stays `it.fails` in the fixture, where the newer Memory falls below the prompt-submit relevance floor.
+
 ## Methodology
 
 - **Cells and pairs.** The cells are the ones `docs/supersession.md` names, plus its variants. Each has eight lexical pairs (tabs/spaces, yarn/pnpm, jest/vitest, merging/squashing, postgres/redis, camelCase/snake_case, eslint/biome, axios/undici) rather than the single tabs/spaces pair of `test/supersession.test.ts`. A case is one pair in one cell, in its own project, in one shared sandbox.
@@ -66,7 +95,7 @@ Not reachable: Memory at session start, Semantic Facts, Lessons and Insights at 
 ## Reproduce
 
 ```sh
-git checkout a0de1e3
+git checkout a0de1e3   # or 53a9958 for the after run
 npm ci && npm run build
 npm run eval:supersession -- --instance 33
 ```
@@ -77,5 +106,4 @@ Per-case results: `eval/reports/supersession/scores.ndjson`.
 
 - Every cell agrees with the status in `docs/supersession.md` (`it.fails` cells are the rows with a high stale-first rate; passing ones sit at 0.00), which supports the single-pair fixtures; the new information is how steady each cell is across pairs.
 - Cells that are not all-or-nothing: Memory contradicted (one pair in each of search and prompt-submit had the newer Memory first because its wording matched the query better), Observation search with a stronger stale match (0.80), and Observation prompt-submit with an equal match (0.20, one pair where the older Observation matched slightly more).
-- The numbers are the before for the concurrent fixes. A fix to a cell should move its rate to 0.00 without moving the neighbouring cells; rerun the same command and publish a new dated card.
 - Scoring is deterministic given the commit; the seeded dates shift with the run date, which only affects the recency-dependent cells (Observation search, Lesson recall) at the margin.
