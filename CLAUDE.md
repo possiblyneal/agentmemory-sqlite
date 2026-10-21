@@ -392,6 +392,8 @@ This fork is deliberately divergent: `rohitg00/agentmemory` is where the code ca
 nothing more. Do not merge, rebase or cherry-pick from it, and do not restore a branch, tag or
 file merely because upstream still carries it. `origin` carries `main` plus the branches of
 live PRs — an inherited upstream branch is deleted, never tracked.
+`main` changes only by merging a pull request: the GitHub ruleset `main` refuses direct pushes,
+force-pushes and deletion.
 
 In PR bodies, issues, comments and commit messages, write an upstream issue or PR as
 `rohitg00/agentmemory#N`. A bare `#N` links to this fork, so it must only ever mean this
