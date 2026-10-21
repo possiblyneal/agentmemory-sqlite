@@ -11,7 +11,7 @@ import {
   MEMORY_SESSION,
 } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
-import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, deindexSupersededMemory, deleteIndexed } from "./search.js";
+import { deindexSummary, getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, deindexSupersededMemory, deleteIndexed } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
@@ -457,6 +457,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         }
         if (summary) {
           await kv.delete(KV.summaries, data.sessionId);
+          deindexSummary(data.sessionId);
           deleted++;
         }
       }

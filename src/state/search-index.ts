@@ -13,7 +13,7 @@ interface IndexEntry {
   layer?: IndexLayer;
 }
 
-export type IndexLayer = "memory" | "observation";
+export type IndexLayer = "memory" | "observation" | "summary";
 
 export const SEARCH_LAYERS = ["memory", "observation", "all"] as const;
 export type SearchLayer = (typeof SEARCH_LAYERS)[number];

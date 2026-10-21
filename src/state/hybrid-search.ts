@@ -15,6 +15,7 @@ import {
 } from "./memory-utils.js";
 import { isNonLatestFilterEnabled } from "../config.js";
 import { probeCapture } from "./probe-capture.js";
+import { isSummaryIndexId, loadSummaryHit } from "./summary-index.js";
 import { getCounters } from "../telemetry/setup.js";
 import type { StateKV } from "./kv.js";
 import { KV } from "./schema.js";
@@ -563,6 +564,7 @@ export class HybridSearch {
     r: { obsId: string; sessionId: string },
     filterNonLatest: boolean,
   ): Promise<CompressedObservation | null> {
+    if (isSummaryIndexId(r.obsId)) return loadSummaryHit(this.kv, r.obsId);
     const obs = await this.kv
       .get<CompressedObservation>(KV.observations(r.sessionId), r.obsId)
       .catch(() => null);

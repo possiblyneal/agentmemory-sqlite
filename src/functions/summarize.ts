@@ -19,6 +19,7 @@ import {
 } from "../prompts/summary.js";
 import { getXmlPayload, getXmlTag, getXmlChildren } from "../prompts/xml.js";
 import { isAwaitingCompression } from "./compress-synthetic.js";
+import { indexSummary } from "./search.js";
 import { SummaryOutputSchema } from "../eval/schemas.js";
 import { validateOutput } from "../eval/validator.js";
 import { scoreSummary } from "../eval/quality.js";
@@ -311,6 +312,7 @@ function toReducePartial(
     keyDecisions: summary.keyDecisions,
     filesModified: summary.filesModified,
     concepts: summary.concepts,
+    appliesWhen: summary.appliesWhen,
     obsRangeStart,
     obsRangeEnd,
   };
@@ -403,6 +405,8 @@ function stripXmlWrappers(raw: string): string {
   return cleaned;
 }
 
+const MAX_APPLIES_WHEN_CHARS = 200;
+
 function parseSummaryXml(
   xml: string,
   sessionId: string,
@@ -413,6 +417,7 @@ function parseSummaryXml(
   const title = getXmlTag(cleaned, "title");
   if (!title) return null;
 
+  const appliesWhen = getXmlTag(cleaned, "applies_when").trim().slice(0, MAX_APPLIES_WHEN_CHARS);
   return {
     sessionId,
     project,
@@ -422,6 +427,7 @@ function parseSummaryXml(
     keyDecisions: getXmlChildren(cleaned, "decisions", "decision"),
     filesModified: getXmlChildren(cleaned, "files", "file"),
     concepts: getXmlChildren(cleaned, "concepts", "concept"),
+    ...(appliesWhen ? { appliesWhen } : {}),
     observationCount: obsCount,
   };
 }
@@ -661,6 +667,7 @@ export function registerSummarizeFunction(
         const qualityScore = scoreSummary(summary);
 
         await kv.set(KV.summaries, sessionId, summary);
+        indexSummary(summary);
         await safeAudit(kv, "compress", "mem::summarize", [sessionId], {
           title: summary.title,
           observationCount: compressed.length,

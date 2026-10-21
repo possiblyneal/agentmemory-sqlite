@@ -158,6 +158,7 @@ export interface SessionSummary {
   keyDecisions: string[];
   filesModified: string[];
   concepts: string[];
+  appliesWhen?: string;
   observationCount: number;
   lastObservationId?: string;
   lastObservationAt?: string;

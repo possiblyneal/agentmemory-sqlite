@@ -231,6 +231,22 @@ hit, leads the runner-up by 1.25x and its Summary dates later, its decisions are
 the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Memory hits, this
 Session and any Summary already given are dropped before ranking. A failed amendment lookup
 drops only that amendment.
+A Session Summary's decisions are also a BM25 layer of their own (`IndexLayer` `summary`,
+`src/state/summary-index.ts`): one document per Summary, its title, decisions and applies-when line, id
+`summary:<sessionId>`, BM25 only (never embedded). The summarize call writes `appliesWhen`, one line
+(max 200 chars) of trigger words a later task would use, parsed from `<applies_when>` and optional on
+`SessionSummary`: missing or blank is absent, never a failure. It is generated only at Summary time and
+carried through chunk, reduce and fold. A prompt worded like a decision reaches its Session
+through that document even when the Session's Observations used other words. The hit joins the
+other legs through the usual RRF in `HybridSearch`; `mem::search`, `HybridSearch` and
+`mem::smart-search` resolve it to the Summary in the Observation shape (`loadSummaryHit`; the
+Session is `sessionId`, and a stale hit with no Summary or no decisions resolves to nothing). In
+`mem::prompt-context` it is a `summary` ref for its Session and counts as one covered Session
+however many Observations also hit; the layer filters `memory` and `observation` leave it out.
+`indexSummary()`/`deindexSummary()` (`src/functions/search.ts`) keep it current: `mem::summarize`,
+import and migrate write it; `mem::forget` of a Session and an import `replace` remove it; a
+Summary with no decisions has none; `rebuildBm25FromContent` reads `KV.summaries` after the
+content walk, so an existing store gains it on restart.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
 (each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
 out the rest of the budget; its `summary` ref keeps every file. Summary blocks are ordered newest work first by the same date prompt submit uses (`decidedAt`), not by write time.
