@@ -50,8 +50,6 @@ export type StartupMaintenanceResult = {
 
 const DECAY_REPAIR_MARKER = "decay-repair:done";
 const INSIGHT_COLLAPSE_MARKER = "insight-collapse:done";
-// Rows of one cluster compared against each other; the cost is quadratic.
-const COLLAPSE_CLUSTER_ROWS = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function alreadyRan(state: SqliteState): boolean {
@@ -235,11 +233,12 @@ async function repairDecay(state: SqliteState): Promise<number> {
 // mem::reflect once minted a paraphrase of a cluster's Insight as a new row
 // every run. Keep each cluster's strongest INSIGHTS_PER_CLUSTER Insights and
 // fold every other into the survivor it overlaps most (reinforcements summed,
-// highest confidence, source ids unioned), then delete it. A cluster's merge, its deletions and its audit row commit in one
-// transaction, so an interrupted pass leaves that cluster untouched and the
-// marker unset: the next boot redoes it without counting anything twice.
-// Insights have no search index of their own, so deleting the row is all the
-// de-indexing there is. Runs once, whatever the maintenance version.
+// highest confidence, source ids unioned), then delete it. A cluster's merge,
+// its deletions and its audit row commit in one transaction, so an
+// interrupted pass leaves that cluster untouched and the marker unset: the
+// next boot redoes it without counting anything twice. Insights have no
+// search index of their own, so deleting the row is all the de-indexing
+// there is. Gated by its own marker, not MAINTENANCE_VERSION.
 async function collapseInsights(state: SqliteState): Promise<number> {
   if (state.get(KV.config, INSIGHT_COLLAPSE_MARKER) !== null) return 0;
 
@@ -271,7 +270,6 @@ async function collapseInsights(state: SqliteState): Promise<number> {
   for (const keys of clusters.values()) {
     if (keys.length <= INSIGHTS_PER_CLUSTER) continue;
     const insights = keys
-      .slice(0, COLLAPSE_CLUSTER_ROWS)
       .map((key) => state.get(KV.insights, key) as Insight | null)
       .filter((i): i is Insight => i !== null)
       .sort(compareSurvivor);

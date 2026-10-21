@@ -102,4 +102,15 @@ describe("mem::remember supersession and recall hygiene", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].isLatest).toBe(true);
   });
+
+  it("an exact repeat saved as a rule makes the existing Memory a rule", async () => {
+    const { sdk, kv } = await setup();
+    await sdk.trigger("mem::remember", { content: "Never push to main without asking", type: "preference" });
+    await sdk.trigger("mem::remember", { content: "Never push to main without asking", type: "rule" });
+    await sdk.trigger("mem::remember", { content: "Never push to main without asking", type: "bogus" });
+
+    const rows = (await kv.list("mem:memories")) as { type: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe("rule");
+  });
 });

@@ -506,6 +506,18 @@ describe("startup maintenance: Insight collapse (#271)", () => {
     expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(10);
   });
 
+  it("collapses every row of a cluster larger than one read page", async () => {
+    seedFive();
+    for (let i = 0; i < 1200; i++) {
+      store.set(KV.insights, `o${i}`, insight(`o${i}`, `${CLAIMS[i % 5]} n${i}`));
+    }
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsCollapsed).toBe(1200);
+    expect(store.list(KV.insights)).toHaveLength(5);
+  });
+
   it("ranks survivors by reinforcements, then confidence, then recency", async () => {
     for (let i = 0; i < 5; i++) {
       store.set(KV.insights, `r${i}`, insight(`r${i}`, CLAIMS[i], { reinforcements: 1 }));

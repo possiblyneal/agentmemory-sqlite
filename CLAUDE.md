@@ -180,8 +180,9 @@ call it.
 
 ### Reflect
 `mem::reflect` (`src/functions/reflect.ts`) records a hash of each cluster's inputs in
-`KV.config` (`reflect:inputs_…`) after a successful pass and makes no LLM call for a cluster
-whose hash is unchanged. The prompt lists the cluster's top 10 existing Insights with ids
+`KV.config` (`reflect:inputs_…`) after a pass whose reply yielded at least one Insight and was
+not cut short by the run's 50-Insight cap, and makes no LLM call for a cluster whose hash is
+unchanged; an empty or unparseable reply (the noop provider's included) leaves it to retry. The prompt lists the cluster's top 10 existing Insights with ids
 (`EXISTING_INSIGHT_LIMIT`, reserved out of the prompt budget); the model may mark a new
 Insight `reinforces="<id>"`, which reinforces that Insight when the id is a live Insight of the
 same project and concept set (`insightClusterKey()`, `src/functions/insight-merge.ts`) and
@@ -241,9 +242,29 @@ places a `## Rules` block first, after pinned slots: this project's `type: "rule
 keep holding). Rule-typed Memories are the only Memories `mem::context` adds, and a Global Memory
 or another project's rule is not shown. The Lessons Learned block follows it, still in its own
 rank order. Together they hold at most 40% of the budget (`RULEBOOK_BUDGET_SHARE`, 600 tokens at
-1500): rules fill it first, then the top-ranked Lessons that fit; a Lesson that does not fit the
-share leaves the pinned prefix and sorts by recency with the other blocks. A Semantic Fact whose
-text equals a pinned rule is dropped.
+1500): rules fill it first, a rule too long for what is left being skipped, then the top-ranked
+Lessons that fit; a Lesson that does not fit the share leaves the pinned prefix and sorts by
+recency with the other blocks. A Semantic Fact whose text equals a rule actually pinned is
+dropped. An exact-repeat save with a valid `type` (`mem::remember`) sets the existing Memory's
+type, so re-saving a Memory as a rule pins it.
+
+### Supersession in Recall
+`docs/supersession.md` maps each record kind and surface to its fixture; the rules it describes:
+- **Near-twin cap** — `capBehindNewer` (`src/functions/recency-cap.ts`): of two hits whose text
+  overlaps by word-set Jaccard ≥ 0.5, the older is capped at 0.99 of the newer's score. Lessons
+  date by `lastReinforcedAt` else `createdAt` (an explicit re-save is the Operator restating it),
+  Semantic Facts by `createdAt` (consolidation re-emits stale claims), Observations in
+  `mem::search` by timestamp. `HybridSearch` (`mem::smart-search`) has only the Observation
+  recency factor, not this cap.
+- **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
+  in smart-search and prompt-context after their floors: an older Memory of the same type and
+  Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly
+  below the newer one. Nothing is hidden.
+- **De-indexing** — every path that sets a Memory `isLatest: false` (`mem::remember`, `mem::evolve`,
+  `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
+  consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).
+- **Keyed Semantic Facts** — see the `SemanticMemory` consistency rule; a keyed fact whose text
+  matches an unkeyed one keys it, so the corpus written before keys can be superseded.
 
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default

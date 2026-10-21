@@ -194,6 +194,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
               fingerprint
           ) {
             existing.strength = Math.min(10, existing.strength + 1);
+            if (validTypes.has(data.type ?? "")) existing.type = memType;
             existing.updatedAt = now;
             await kv.set(KV.memories, existing.id, existing);
             await recordAudit(kv, "reinforce", "mem::remember", [existing.id], {

@@ -31,12 +31,6 @@ export function decayedStrength(base: number, periods: number): number {
   return Math.max(DECAY_FLOOR, base * Math.pow(0.9, periods));
 }
 
-// Returns the rows whose strength changed, so the caller writes only those. A
-// row inside its decay window or already at the 0.1 floor is left alone: the
-// old "rewrite every row" tier was 45k fsyncs per run (day-0 soak finding).
-// Periods count from the later of the last access and the last decay, and
-// lastDecayedAt advances by the whole periods applied, so each idle period
-// lowers strength once however often the tier runs.
 function normalizeKeyPart(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
@@ -56,6 +50,12 @@ function factKey(
   return subject && relation && object ? { subject, relation, object } : null;
 }
 
+// Returns the rows whose strength changed, so the caller writes only those. A
+// row inside its decay window or already at the 0.1 floor is left alone: the
+// old "rewrite every row" tier was 45k fsyncs per run (day-0 soak finding).
+// Periods count from the later of the last access and the last decay, and
+// lastDecayedAt advances by the whole periods applied, so each idle period
+// lowers strength once however often the tier runs.
 function applyDecay<
   T extends {
     strength: number;
@@ -209,8 +209,12 @@ export function registerConsolidationPipelineFunction(
             )
           : [];
         const existing =
-          live.find((s) => s.fact.toLowerCase() === fact.toLowerCase()) ??
-          sameKey.find((s) => s.object === key!.object);
+          live.find(
+            (s) =>
+              s.fact.toLowerCase() === fact.toLowerCase() &&
+              (s.project === undefined || s.project === project),
+          ) ?? sameKey.find((s) => s.object === key!.object);
+        let target: SemanticMemory;
         if (existing) {
           existing.accessCount++;
           existing.lastAccessedAt = now;
@@ -220,9 +224,11 @@ export function registerConsolidationPipelineFunction(
             [...existing.sourceSessionIds, ...sessionIds],
             MAX_SOURCE_LIST_IDS,
           );
+          if (key && !existing.subject) Object.assign(existing, { project, ...key });
           await kv.set(KV.semantic, existing.id, existing);
+          target = existing;
         } else {
-          const sem: SemanticMemory = {
+          target = {
             id: generateId("sem"),
             fact,
             confidence,
@@ -235,29 +241,32 @@ export function registerConsolidationPipelineFunction(
             updatedAt: now,
             ...(key ? { project, ...key } : {}),
           };
-          await kv.set(KV.semantic, sem.id, sem);
-          existingSemantic.push(sem);
+          await kv.set(KV.semantic, target.id, target);
+          existingSemantic.push(target);
           newFacts++;
-          for (const old of sameKey) {
-            old.isLatest = false;
-            old.supersededBy = sem.id;
-            old.updatedAt = now;
-            await kv.set(KV.semantic, old.id, old);
-            superseded++;
-          }
-          if (sameKey.length > 0) {
-            await recordAudit(kv, "evolve", "mem::consolidate-pipeline", [
-              ...sameKey.map((s) => s.id),
-              sem.id,
-            ], {
-              event: "semantic.supersede",
-              project,
-              subject: key!.subject,
-              relation: key!.relation,
-              supersededIds: sameKey.map((s) => s.id),
-              supersededBy: sem.id,
-            });
-          }
+        }
+        const closed = key
+          ? sameKey.filter((s) => s !== target && s.object !== key.object)
+          : [];
+        for (const old of closed) {
+          old.isLatest = false;
+          old.supersededBy = target.id;
+          old.updatedAt = now;
+          await kv.set(KV.semantic, old.id, old);
+          superseded++;
+        }
+        if (closed.length > 0) {
+          await recordAudit(kv, "evolve", "mem::consolidate-pipeline", [
+            ...closed.map((s) => s.id),
+            target.id,
+          ], {
+            event: "semantic.supersede",
+            project,
+            subject: key!.subject,
+            relation: key!.relation,
+            supersededIds: closed.map((s) => s.id),
+            supersededBy: target.id,
+          });
         }
       }
       return superseded > 0

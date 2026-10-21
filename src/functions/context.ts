@@ -1,5 +1,5 @@
 import type { ISdk } from "../engine/types.js";
-import { cutDecision } from "./summarize.js";
+import { cutDecision, decidedAt } from "./summarize.js";
 import type {
   Session,
   CompressedObservation,
@@ -15,7 +15,6 @@ import type {
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAccessBatch } from "./access-tracker.js";
-import { decidedAt } from "./prompt-context.js";
 import { withFiles } from "./injections.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
 import { logger } from "../logger.js";
@@ -54,7 +53,6 @@ const MAX_RULE_CANDIDATES = 100;
 const RULEBOOK_HEADING =
   "## Rules\nStanding rules from earlier Sessions, newest first. They still hold until the Operator changes them.";
 
-
 const PINNED_TRUNCATION_MARKER = "\n[pinned slots truncated to fit the context budget]";
 
 function truncatePinned(content: string, tokens: number): string {
@@ -89,7 +87,7 @@ function buildRulebook(rules: Memory[], capTokens: number): ContextBlock | undef
   for (const m of newestFirst) {
     const line = `- ${oneLine(m.content)}`;
     const cost = estimateTokens(line) + 1;
-    if (tokens + cost > capTokens) break;
+    if (tokens + cost > capTokens) continue;
     lines.push(line);
     sources.push({ kind: "memory", id: m.id });
     tokens += cost;
@@ -212,8 +210,11 @@ export function registerContextFunction(
       // below will drop the whole block if it doesn't fit. #457.
       const pinnedCap = Math.floor(budget * RULEBOOK_BUDGET_SHARE);
       const rulebook = buildRulebook(ruleMemories.filter((m) => m.isLatest), pinnedCap);
+      const pinnedRuleIds = new Set(rulebook?.sources?.map((s) => s.id));
       const ruleTexts = new Set(
-        ruleMemories.filter((m) => m.isLatest).map((m) => oneLine(m.content).toLowerCase()),
+        ruleMemories
+          .filter((m) => pinnedRuleIds.has(m.id))
+          .map((m) => oneLine(m.content).toLowerCase()),
       );
 
       const relevantLessons = lessons

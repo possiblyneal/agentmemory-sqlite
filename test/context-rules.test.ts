@@ -118,6 +118,13 @@ describe("mem::context pins rule-typed Memories", () => {
     expect(context.split("pinned lesson text")).toHaveLength(2);
   });
 
+  it("skips a rule too long for the pinned share and pins the older ones", async () => {
+    await save(memory({ id: "long", updatedAt: "2026-03-01T00:00:00.000Z", content: `long rule ${"w".repeat(4000)}` }));
+    await save(memory({ id: "short", updatedAt: "2026-02-01T00:00:00.000Z", content: "short older rule" }));
+    const { context } = await start(PRE_COMPACT_BUDGET);
+    expect(context).toContain("short older rule");
+  });
+
   it("caps the pinned share of the budget at 40%", async () => {
     for (let i = 0; i < 30; i++) {
       const day = String(i + 1).padStart(2, "0");

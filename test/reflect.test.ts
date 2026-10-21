@@ -471,6 +471,17 @@ Layered protection for security means input validation, safe APIs and deny-lists
         expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
       });
 
+      it("retries a cluster whose reply held no Insight", async () => {
+        await seedCluster();
+        provider.summarize.mockResolvedValueOnce("");
+        await sdk.trigger("mem::reflect", {});
+
+        await sdk.trigger("mem::reflect", {});
+
+        expect(provider.summarize).toHaveBeenCalledTimes(2);
+        expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
+      });
+
       const OTHER_INSIGHT = {
         id: "ins_known",
         title: "Layered Defence",

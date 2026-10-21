@@ -57,10 +57,6 @@ function lastActiveAt(lesson: Lesson): number {
   return new Date(lesson.lastReinforcedAt ?? lesson.createdAt).getTime();
 }
 
-function ranksBehindNewerLessons(scored: Array<{ lesson: Lesson; score: number }>): void {
-  capBehindNewer(scored, (s) => s.lesson.content, (s) => lastActiveAt(s.lesson));
-}
-
 export function reinforceLesson(lesson: Lesson): void {
   const now = new Date().toISOString();
   lesson.reinforcements++;
@@ -195,7 +191,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         scored.push({ lesson: l, score: l.confidence * relevance * recencyBoost });
       }
 
-      ranksBehindNewerLessons(scored);
+      capBehindNewer(scored, (s) => s.lesson.content, (s) => lastActiveAt(s.lesson));
       scored.sort(
         (a, b) =>
           b.score - a.score ||

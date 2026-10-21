@@ -67,7 +67,8 @@ It detects restatement, not contradiction: a reversal worded differently stays b
 both Memories stay live. An exact repeat (same `fingerprintId()` of the trimmed,
 lowercased content, same project and scope) is checked first and does not supersede: it raises
 the existing Memory's `strength` by 1 (cap 10), keeps its id, audits `reinforce` and returns
-that id. Only a near-restatement gets a new id.
+that id; a valid `type` on the repeat replaces the stored one, so re-saving a Memory as a rule
+promotes it. Only a near-restatement gets a new id.
 
 **Read-side shadowing (`shadowedMemoryIds`, `newerAboveShadowed`, `src/functions/memory-shadow.ts`).**
 Of the Memories one query returns, an older one is shadowed by a newer one of the same type and
@@ -93,21 +94,24 @@ key: `subject`, `relation`, `object`. All three present, stored lowercased and t
 project, make a keyed fact. A new keyed fact whose (subject, relation) matches a live keyed fact
 of the same project but whose object differs closes that fact (`isLatest: false`, `supersededBy`)
 and audits it (`evolve`, `semantic.supersede`); the same key and object reinforces, as exact text
-does. Facts are not in BM25 or the vector index, so closing one has nothing to de-index; the
+does. A keyed fact whose text matches a live unkeyed fact of this project (or of none) reinforces
+it and gives it the key, so a fact written before keys existed can be closed later. Facts are not in BM25 or the vector index, so closing one has nothing to de-index; the
 filter is on the read side: `recallSemanticFacts` (smart-search, session start) and the facts
 Reflect reads skip `isLatest === false`. An unkeyed fact (old rows, or the LLM omitted the key)
 merges on exact text only, and recall ranks it by recency instead (`recallSemanticFacts`, the
 same cap as Lessons, shared as `capBehindNewer` in `src/functions/recency-cap.ts`): on a search, a hit whose
-text overlaps another hit's by Jaccard 0.5 or more and was last touched (`updatedAt`, which a
-reinforcement sets) earlier is capped just below that newer hit (T8); at session start, with no
-query, confidence is divided by 1 + 0.01 x days since `updatedAt` (T9). The cap runs after the project filter, so another project's fact never demotes this one's. A stale unkeyed fact reinforced
-after the newer one still leads. There is no backfill.
+text overlaps another hit's by Jaccard 0.5 or more and was first stated (`createdAt`) earlier is
+capped just below that newer hit, however recently consolidation reinforced it (T8); at session
+start, with no query, confidence is also divided by 1 + 0.01 x days since `updatedAt` (T9). The
+cap runs after the project filter, so another project's fact never demotes this one's. There is
+no backfill.
 
 **Lessons.** Saved under a fingerprint of the lowercased content, so only an identical lesson
 strengthens one. A contradicting lesson is a new row. Recall ranks by `confidence x relevance x
 recency`, where the recency boost decays 1% per day; a hit whose content overlaps another hit's by
 Jaccard 0.5 or more and was last reinforced (else created) earlier is capped just below that newer
-hit, so reinforcement cannot outvote a correction (T11). Session start ranks by project-weighted
+hit, so reinforcement cannot outvote a correction (T11). Lessons date by reinforcement, since only
+an explicit save reinforces one. Session start ranks by project-weighted
 confidence over the same boost, from `lastReinforcedAt` else `createdAt`, so a stale Lesson not
 reinforced since the newer one was saved is demoted (T12); a stale Lesson reinforced after it still leads.
 

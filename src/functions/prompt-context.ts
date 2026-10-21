@@ -9,7 +9,7 @@ import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
-import { cutDecision, summaryCovers } from "./summarize.js";
+import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -87,13 +87,6 @@ function distinctUnits(ranked: Resolved[]): Resolved[] {
   }
   return units;
 }
-
-// The date a Session's decisions are ordered by, so "later" means the same
-// thing when choosing an amendment as when rendering it. coveredThrough is
-// when the Summary was written, so Sessions imported or summarized together
-// would be ordered by milliseconds of write time, not by when the work was done.
-export const decidedAt = (summary: SessionSummary) =>
-  summary.lastObservationAt ?? summary.coveredThrough ?? summary.createdAt;
 
 // A Session that amends another's rules restates them, so a search on those
 // rules finds it. Measured on sdebench's amended tasks against 140 decoys: the

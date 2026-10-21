@@ -50,7 +50,7 @@ export async function recallSemanticFacts(
     );
     candidates = scored.filter((_, i) => inProject[i]);
   }
-  capBehindNewer(candidates, (s) => s.fact.fact, (s) => lastActiveAt(s.fact));
+  capBehindNewer(candidates, (s) => s.fact.fact, (s) => new Date(s.fact.createdAt).getTime());
   candidates.sort((a, b) => b.score - a.score);
   return candidates.slice(0, limit);
 }

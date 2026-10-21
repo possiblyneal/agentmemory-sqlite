@@ -500,7 +500,10 @@ export function registerReflectFunctions(
             clusterCount++;
             totalInsights++;
           }
-          await kv.set(KV.config, inputsKey, { hash: inputsHash, at: new Date().toISOString() });
+          const cutByTotal = match !== null && totalInsights >= maxTotal;
+          if (clusterCount > 0 && !cutByTotal) {
+            await kv.set(KV.config, inputsKey, { hash: inputsHash, at: new Date().toISOString() });
+          }
         } catch {
           continue;
         }

@@ -1,6 +1,7 @@
 import type { ISdk } from '../engine/types.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
-import { KV, jaccardSimilarity } from '../state/schema.js'
+import { KV } from '../state/schema.js'
+import { capBehindNewer } from './recency-cap.js'
 import { StateKV } from '../state/kv.js'
 import { SearchIndex, isSearchLayer } from '../state/search-index.js'
 import { CHARS_PER_TOKEN } from '../utils/tokens.js'
@@ -27,29 +28,16 @@ import {
 } from "../config.js";
 import { getCounters } from "../telemetry/setup.js";
 
-const NEAR_TWIN_OVERLAP = 0.5
-
 const observationText = (o: CompressedObservation): string => `${o.title} ${o.narrative}`
 
 // An Observation that restates an older one's topic in nearly the same words
-// supersedes it: rank the older just behind the newer so a stronger wording
-// match cannot outvote the later claim. Memories keep their score, and the
-// pass is pairwise over the hits already scored for the query.
+// supersedes it, as for Lessons. Memories keep their score, and the pass is
+// pairwise over the hits already scored for the query.
 function capOlderNearTwins(hits: SearchResult[]): void {
-  const byAge = hits
-    .filter((h) => !isDurableRecord(h.observation.id, h.sessionId))
-    .map((h) => ({ hit: h, at: Date.parse(h.observation.timestamp) }))
-    .filter((h) => Number.isFinite(h.at))
-    .sort((a, b) => b.at - a.at)
-  for (let i = 1; i < byAge.length; i++) {
-    const older = byAge[i]
-    for (let j = 0; j < i; j++) {
-      const newer = byAge[j]
-      if (newer.at === older.at) continue
-      if (jaccardSimilarity(observationText(newer.hit.observation), observationText(older.hit.observation)) < NEAR_TWIN_OVERLAP) continue
-      older.hit.score = Math.min(older.hit.score, newer.hit.score * 0.99)
-    }
-  }
+  const observations = hits.filter(
+    (h) => !isDurableRecord(h.observation.id, h.sessionId) && Number.isFinite(Date.parse(h.observation.timestamp)),
+  )
+  capBehindNewer(observations, (h) => observationText(h.observation), (h) => Date.parse(h.observation.timestamp))
 }
 
 let index: SearchIndex | null = null

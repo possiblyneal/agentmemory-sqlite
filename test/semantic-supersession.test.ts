@@ -127,6 +127,17 @@ describe("Semantic Fact keyed supersession", () => {
     expect(all.every((f) => f.isLatest !== false)).toBe(true);
   });
 
+  it("keys an unkeyed fact its text matches, so a later object closes it", async () => {
+    await consolidate(`<facts><fact confidence="0.8">The team indents with tabs</fact></facts>`);
+    await consolidate(keyed(`subject="indentation" relation="style" object="tabs"`, "The team indents with tabs"));
+    await consolidate(keyed(`subject="indentation" relation="style" object="spaces"`, "The team indents with spaces"));
+
+    const all = await facts();
+    const stale = all.find((f) => f.fact.includes("tabs"))!;
+    expect(stale).toMatchObject({ subject: "indentation", project: "proj", isLatest: false });
+    expect(all).toHaveLength(2);
+  });
+
   it("does not supersede a fact from another project", async () => {
     const other: SemanticMemory = {
       id: "sem_other",
@@ -167,5 +178,19 @@ describe("recallSemanticFacts project scope", () => {
     const recalled = await recallSemanticFacts(kv as never, 10, { query: "agreed indent", project: "proj-a" });
     expect(recalled.map((r) => r.fact.id)).toEqual(["sem_mine"]);
     expect(recalled[0].score).toBeCloseTo(0.8);
+  });
+
+  it("a stale fact reinforced after the correction still ranks behind it", async () => {
+    const kv = mockKV();
+    await kv.set(KV.sessions, "ses", { id: "ses", project: "proj-a", startedAt: "2026-09-01T00:00:00.000Z", status: "completed", observationCount: 0 });
+    const fact = (id: string, text: string, created: string, updated: string, confidence: number): SemanticMemory => ({
+      id, fact: text, confidence, sourceSessionIds: ["ses"], sourceMemoryIds: [],
+      accessCount: 1, lastAccessedAt: updated, strength: confidence, createdAt: created, updatedAt: updated,
+    });
+    await kv.set(KV.semantic, "stale", fact("stale", "The team agreed to indent with tabs", "2026-09-01T10:00:00.000Z", "2026-10-15T10:00:00.000Z", 0.9));
+    await kv.set(KV.semantic, "fresh", fact("fresh", "The team agreed to indent with spaces", "2026-10-10T10:00:00.000Z", "2026-10-10T10:00:00.000Z", 0.7));
+
+    const recalled = await recallSemanticFacts(kv as never, 10, { query: "agreed indent", project: "proj-a" });
+    expect(recalled.map((r) => r.fact.id)).toEqual(["fresh", "stale"]);
   });
 });
