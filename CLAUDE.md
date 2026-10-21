@@ -234,6 +234,17 @@ At session start (`mem::context`) a Session Summary's block carries at most its 
 (each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
 out the rest of the budget; its `summary` ref keeps every file. Summary blocks are ordered newest work first by the same date prompt submit uses (`decidedAt`), not by write time.
 
+### Pinned rules
+`mem::context` (session start; pre-compact posts the same `/agentmemory/context` at budget 1500)
+places a `## Rules` block first, after pinned slots: this project's `type: "rule"` Memories
+(`isLatest` only, newest first by `updatedAt`; a rule is an instruction the Operator gave that must
+keep holding). Rule-typed Memories are the only Memories `mem::context` adds, and a Global Memory
+or another project's rule is not shown. The Lessons Learned block follows it, still in its own
+rank order. Together they hold at most 40% of the budget (`RULEBOOK_BUDGET_SHARE`, 600 tokens at
+1500): rules fill it first, then the top-ranked Lessons that fit; a Lesson that does not fit the
+share leaves the pinned prefix and sorts by recency with the other blocks. A Semantic Fact whose
+text equals a pinned rule is dropped.
+
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
 `${name}:${dimensions}`; the local provider adds model and pooling). Boot compares it with the
