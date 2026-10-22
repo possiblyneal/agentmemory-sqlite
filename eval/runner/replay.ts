@@ -63,6 +63,7 @@ interface Options {
   split: Split;
   keyedOnly: boolean;
   saveCheckpoints: boolean;
+  resume: boolean;
   fromCheckpoints?: string;
   maintenance?: MaintenancePass;
 }
@@ -84,6 +85,7 @@ function parseOptions(): Options {
       split: { type: "string" },
       "keyed-only": { type: "boolean", default: false },
       "save-checkpoints": { type: "boolean", default: false },
+      resume: { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
       maintenance: { type: "string" },
     },
@@ -129,6 +131,10 @@ function parseOptions(): Options {
     console.error("--save-checkpoints and --from-checkpoints are separate passes; pass one");
     process.exit(2);
   }
+  if (values.resume && !values["save-checkpoints"]) {
+    console.error("--resume continues a save pass; pass --save-checkpoints");
+    process.exit(2);
+  }
   if ((values["save-checkpoints"] || values["from-checkpoints"]) && values.backend === "hindsight") {
     console.error("checkpoints copy agentmemory's SQLite store; drop --backend hindsight");
     process.exit(2);
@@ -161,6 +167,7 @@ function parseOptions(): Options {
     split: openSplit(values.split, "replay"),
     keyedOnly: values["keyed-only"] === true,
     saveCheckpoints: values["save-checkpoints"] === true,
+    resume: values.resume === true,
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
     maintenance,
   };
@@ -382,17 +389,17 @@ async function probeSession(
 }
 
 // Compression runs after /observe has answered, so an Observation is stored
-// raw first and gains its narrative when its compression lands (a failed one
-// degrades to the synthetic record, which has one too).
+// synthetic first, marked awaitingCompression, until its compression lands (a
+// failed one degrades to the synthetic record). Mirrors isAwaitingCompression().
 async function compressionDrained(baseUrl: string, sessionId: string): Promise<void> {
   let pending = Infinity;
   let progressAt = Date.now();
   for (;;) {
-    const { body } = await get<{ observations?: Array<{ narrative?: unknown }> }>(
+    const { body } = await get<{ observations?: Array<{ title?: unknown; awaitingCompression?: unknown }> }>(
       baseUrl,
       `observations?sessionId=${encodeURIComponent(sessionId)}`,
     );
-    const now = (body.observations ?? []).filter((o) => typeof o.narrative !== "string").length;
+    const now = (body.observations ?? []).filter((o) => !o.title || o.awaitingCompression === true).length;
     if (now === 0) return;
     if (now < pending) progressAt = Date.now();
     pending = now;
@@ -619,12 +626,12 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
   });
 }
 
-async function startAgentmemory(opts: Options): Promise<Backend> {
+async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> {
   // The Operator's live daemon injects; without this the sandbox's session
   // start writes no Injection record and delivers nothing to score.
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   if (opts.llm) process.env.AGENTMEMORY_AUTO_COMPRESS ??= "true";
-  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm });
+  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm, seed });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
   let drainMsTotal = 0;
   let summarizedSessions = 0;
@@ -674,27 +681,49 @@ async function main(): Promise<void> {
   if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson);
 
   const checkpointDir = join(opts.out, "checkpoints");
-  const checkpoints: Checkpoint[] = [];
-  if (opts.saveCheckpoints) {
+  const manifestPath = join(checkpointDir, MANIFEST);
+  let checkpoints: Checkpoint[] = [];
+  let ingested: ReplaySession[] = [];
+  let resumeAt = 0;
+  let seed: string | undefined;
+  if (opts.resume) {
+    // An interrupted save pass restarts from its last checkpoint: that store
+    // holds every Session ingested before it, so only the rest are replayed.
+    if (!existsSync(manifestPath)) throw new Error(`${checkpointDir} holds no save pass to resume`);
+    checkpoints = JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[];
+    const last = checkpoints.at(-1);
+    if (!last) throw new Error(`${manifestPath} lists no checkpoint to resume from`);
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    resumeAt = sessions.findIndex((s) => s.id === last.sessionId);
+    const missing = [last.sessionId, ...last.ingested].filter((id) => !byId.has(id));
+    if (resumeAt < 0 || missing.length > 0) {
+      throw new Error(`${manifestPath} names Sessions these options did not load (${missing.join(", ")}); pass the save pass's own options`);
+    }
+    ingested = last.ingested.map((id) => byId.get(id)!);
+    seed = join(checkpointDir, last.file);
+    console.log(`--resume: from ${last.file}, ${ingested.length} Sessions already ingested`);
+  } else if (opts.saveCheckpoints) {
     // A save pass takes hours of LLM time; never let a rerun mix its stores
     // with, or silently stand behind, an earlier pass's manifest.
-    if (existsSync(join(checkpointDir, MANIFEST))) throw new Error(`${checkpointDir} already holds a save pass; pass a fresh --out`);
+    if (existsSync(manifestPath)) throw new Error(`${checkpointDir} already holds a save pass; pass a fresh --out, or --resume`);
     mkdirSync(checkpointDir, { recursive: true });
   }
-  const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts);
-  const ingested: ReplaySession[] = [];
+  const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts, seed);
   const scores: SessionScore[] = [];
   const t0 = Date.now();
   try {
     const bytesStart = await backend.storeBytes();
     for (const [i, session] of sessions.entries()) {
+      if (i < resumeAt) continue;
       const probeStart = Date.now();
       let score: SessionScore | undefined;
       const checkpointing = scored.has(session.id) && opts.saveCheckpoints;
-      if (checkpointing) {
+      // The store a resumed pass starts from is its first Session's checkpoint.
+      const alreadySaved = opts.resume && i === resumeAt;
+      if (checkpointing && !alreadySaved) {
         checkpoints.push(await backend.checkpoint!(checkpointDir, i, session.id, ingested));
-        writeFileSync(join(checkpointDir, MANIFEST), JSON.stringify(checkpoints, null, 2));
-      } else if (scored.has(session.id)) {
+        writeFileSync(manifestPath, JSON.stringify(checkpoints, null, 2));
+      } else if (scored.has(session.id) && !opts.saveCheckpoints) {
         const probes = await backend.probe(session, opts.maxPrompts);
         score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
         scores.push(score);
