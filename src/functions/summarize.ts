@@ -27,6 +27,7 @@ import { safeAudit } from "./audit.js";
 import { isNoopProvider } from "../providers/noop.js";
 import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
+import { SearchIndex } from "../state/search-index.js";
 
 // Per-chunk prompt budget in tokens when a Session is too large to fit in
 // one LLM call. On the Operator's broker a 49k-token prefill starved graph
@@ -220,8 +221,9 @@ interface ChunkPartials {
 // Returns the final summary XML string. A single chunk is one LLM call.
 // Several are processed in parallel batches, each chunk retried once on
 // parse failure, persistently-bad chunks skipped, and the remaining
-// partials merged via a reduce call. The partials land in `chunkPartials`, so a
-// retry of a rejected merge re-runs the reduce alone.
+// partials merged via a reduce call, whose decisions are `keyDecisions` rather
+// than the model's. The partials land in `chunkPartials`, so a retry of a
+// rejected merge re-runs the reduce alone.
 async function produceSummaryXml(
   provider: MemoryProvider,
   chunks: CompressedObservation[][],
@@ -234,6 +236,7 @@ async function produceSummaryXml(
   mode: "single" | "chunked";
   chunks: number;
   skipped?: number;
+  keyDecisions?: string[];
 }> {
   if (chunks.length === 1) {
     const response = await provider.summarize(
@@ -245,14 +248,14 @@ async function produceSummaryXml(
 
   chunkPartials.partials ??= await summarizeChunks(provider, chunks, sessionId, project, concurrency);
   const { reduceInput, skipped } = chunkPartials.partials;
-  const response = await reducePartials(
+  const { response, keyDecisions } = await reducePartials(
     provider,
     reduceInput,
     sessionId,
     project,
     concurrency,
   );
-  return { response, mode: "chunked", chunks: chunks.length, skipped };
+  return { response, mode: "chunked", chunks: chunks.length, skipped, keyDecisions };
 }
 
 async function summarizeChunks(
@@ -333,6 +336,12 @@ function groupPartials(partials: ReducePartial[], budget: number): ReducePartial
   return groups;
 }
 
+// Asked to rewrite the decision list, the model kept 11 of 70 chunk decisions
+// (#300), so a merge keeps every partial's decisions in order, an exact repeat once.
+function mergeDecisions(partials: ReducePartial[]): string[] {
+  return [...new Set(partials.flatMap((p) => p.keyDecisions.map((d) => d.trim())))];
+}
+
 // Merges partials in rounds of budget-sized groups until one prompt holds them
 // all, so the merge prefill is never longer than a chunk's: a long one starves
 // graph extraction on the Operator's broker just as a long chunk does.
@@ -342,7 +351,7 @@ async function reducePartials(
   sessionId: string,
   project: string,
   concurrency: number,
-): Promise<string> {
+): Promise<{ response: string; keyDecisions: string[] }> {
   const budget = getChunkTokens() - PROMPT_OVERHEAD_TOKENS;
   let groups = groupPartials(partials, budget);
   while (groups.length > 1) {
@@ -351,7 +360,8 @@ async function reducePartials(
     );
     groups = groupPartials(merged, budget);
   }
-  return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!));
+  const response = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!));
+  return { response, keyDecisions: mergeDecisions(groups[0]!) };
 }
 
 // An intermediate merge gets the same second try as a chunk, so one malformed
@@ -368,6 +378,7 @@ async function mergeGroupWithRetry(
       const xml = await provider.summarize(REDUCE_SYSTEM, buildReducePrompt(group));
       const parsed = parseSummaryXml(xml, sessionId, project, 0);
       if (parsed) {
+        parsed.keyDecisions = mergeDecisions(group);
         return toReducePartial(parsed, group[0]!.obsRangeStart, group[group.length - 1]!.obsRangeEnd);
       }
       failure = new Error("reduce_parse_failed: an intermediate merge did not parse");
@@ -432,6 +443,37 @@ export function cutDecision(decision: string): string {
   return decision.length > MAX_INJECTED_DECISION_CHARS
     ? `${decision.slice(0, MAX_INJECTED_DECISION_CHARS)}…`
     : decision;
+}
+
+// The `max` decisions that best match the prompt by BM25, ties going to the
+// newer, filled with the newest when too few match; given in Session order.
+export function decisionsMatching(decisions: string[], prompt: string, max: number): string[] {
+  if (decisions.length <= max) return decisions;
+  const index = new SearchIndex();
+  decisions.forEach((narrative, i) =>
+    index.add({
+      id: String(i),
+      sessionId: "",
+      timestamp: "",
+      type: "other",
+      title: "",
+      facts: [],
+      narrative,
+      concepts: [],
+      files: [],
+      importance: 0,
+    }),
+  );
+  const picked = new Set(
+    index
+      .search(prompt, decisions.length)
+      .map((r) => ({ i: Number(r.obsId), score: r.score }))
+      .sort((a, b) => b.score - a.score || b.i - a.i)
+      .slice(0, max)
+      .map((r) => r.i),
+  );
+  for (let i = decisions.length - 1; picked.size < max; i--) picked.add(i);
+  return [...picked].sort((a, b) => a - b).map((i) => decisions[i]!);
 }
 
 // The date a Session's decisions are ordered by, so "later" means the same
@@ -554,7 +596,12 @@ export function registerSummarizeFunction(
         }
         for (let attempt = 1; attempt <= 2; attempt++) {
           const fold = attempt === 1 ? foldPrompt : null;
-          let produced: { response: string; mode: "single" | "chunked" | "folded"; chunks: number };
+          let produced: {
+            response: string;
+            mode: "single" | "chunked" | "folded";
+            chunks: number;
+            keyDecisions?: string[];
+          };
           try {
             if (!fold) planned ??= await planChunks(provider, compressed, sessionId, concurrency);
             produced = fold
@@ -605,6 +652,7 @@ export function registerSummarizeFunction(
             logger.warn("Failed to parse summary XML", { sessionId, attempt });
             continue;
           }
+          if (produced.keyDecisions) parsed.keyDecisions = produced.keyDecisions;
           const validation = validateOutput(
             SummaryOutputSchema,
             {

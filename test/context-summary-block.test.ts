@@ -50,10 +50,10 @@ describe("session-start Summary block is bounded", () => {
     };
   }
 
-  it("renders only the first 10 of 12 decisions", async () => {
+  it("renders only the newest 10 of 12 decisions, oldest of them first", async () => {
     const { context } = await start({ keyDecisions: numbered("d", 12) });
-    expect(context).toContain("Decisions: d1; d2; d3; d4; d5; d6; d7; d8; d9; d10\n");
-    expect(context).not.toContain("d11");
+    expect(context).toContain("Decisions: d3; d4; d5; d6; d7; d8; d9; d10; d11; d12\n");
+    expect(context).not.toMatch(/d1;|d2;/);
   });
 
   it("carries a 500-character decision whole", async () => {

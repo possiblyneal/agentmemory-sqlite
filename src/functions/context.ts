@@ -320,8 +320,9 @@ export function registerContextFunction(
       for (let i = 0; i < sessions.length; i++) {
         const summary = summariesPerSession[i];
         if (summary) {
+          // The newest, since a later decision may replace an earlier one.
           const decisions = summary.keyDecisions
-            .slice(0, MAX_SUMMARY_DECISIONS)
+            .slice(-MAX_SUMMARY_DECISIONS)
             .map(cutDecision);
           const unlistedFiles = summary.filesModified.length - MAX_SUMMARY_FILES;
           const files = summary.filesModified.slice(0, MAX_SUMMARY_FILES).join(", ") +

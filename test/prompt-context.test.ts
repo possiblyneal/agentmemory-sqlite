@@ -492,7 +492,7 @@ describe("mem::prompt-context", () => {
     expect(result.injected).toEqual([{ kind: "observation", id: "obs_late" }]);
   });
 
-  it("gives at most 10 of a Session Summary's decisions", async () => {
+  it("gives the newest 10 of a Session Summary's decisions when none matches the prompt", async () => {
     await kv.set(KV.summaries, "ses_old", {
       sessionId: "ses_old",
       createdAt: "2026-10-01T12:00:00.000Z",
@@ -502,8 +502,30 @@ describe("mem::prompt-context", () => {
     });
     hits = [{ id: "obs_a", score: 16 }];
     const { context } = await run("staging auth fails when the token is unset");
-    expect(context).toContain("- decision 10.");
-    expect(context).not.toContain("- decision 11.");
+    expect(context).toContain("- decision 3.\n- decision 4.");
+    expect(context).toContain("- decision 12.");
+    expect(context).not.toContain("- decision 2.");
+  });
+
+  it("gives the decisions that match the prompt, filled with the newest, in Session order", async () => {
+    const keyDecisions = Array.from({ length: 40 }, (_, i) => `decision ${i + 1}: keep the defaults`);
+    keyDecisions[29] = "decision 30: the retry queue caps at 64 MiB";
+    keyDecisions[4] = "decision 5: the retry queue replays every 30 s";
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      createdAt: "2026-10-01T12:00:00.000Z",
+      title: "t",
+      keyDecisions,
+      filesModified: [],
+    });
+    hits = [{ id: "obs_a", score: 16 }];
+    const { context } = await run("how big can the retry queue grow before it caps");
+    const shown = context.split("\n").filter((l) => l.startsWith("- decision"));
+    expect(shown).toEqual([
+      "- decision 5: the retry queue replays every 30 s",
+      "- decision 30: the retry queue caps at 64 MiB",
+      ...Array.from({ length: 8 }, (_, i) => `- decision ${i + 33}: keep the defaults`),
+    ]);
   });
 
   it("gives the Observation when its Session Summary cannot be read", async () => {

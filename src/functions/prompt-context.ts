@@ -9,7 +9,7 @@ import { isHarnessMessage } from "../utils/harness-message.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
-import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
+import { cutDecision, decidedAt, decisionsMatching, summaryCovers } from "./summarize.js";
 
 // Chosen against the prompt-submit path of eval/data/coding-agent-life-v2
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
@@ -41,6 +41,12 @@ export interface PromptContextResult {
 }
 
 const EMPTY: PromptContextResult = { context: "", tokens: 0, injected: [] };
+
+// A long Session's Summary holds dozens of decisions; the ones the prompt is
+// about are the ones worth its slot.
+function shownDecisions(summary: SessionSummary, prompt: string): string[] {
+  return decisionsMatching(summary.keyDecisions, prompt, MAX_DECISIONS);
+}
 
 function wordCount(prompt: string): number {
   return prompt.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
@@ -99,6 +105,7 @@ async function laterAmendment(
   sdk: ISdk,
   kv: StateKV,
   given: Resolved & { summary: SessionSummary },
+  prompt: string,
   skip: (sessionId: string) => boolean,
   project?: string,
 ): Promise<Resolved | null> {
@@ -106,7 +113,7 @@ async function laterAmendment(
   const { results } = await sdk.trigger<{ query: string; limit: number; project?: string }, { results: SearchHit[] }>({
     function_id: "mem::search",
     payload: {
-      query: [given.summary.title, ...given.summary.keyDecisions.slice(0, MAX_DECISIONS)].join(" "),
+      query: [given.summary.title, ...shownDecisions(given.summary, prompt)].join(" "),
       limit: SEARCH_LIMIT,
       ...(project && { project }),
     },
@@ -134,6 +141,7 @@ async function withLaterAmendments(
   sdk: ISdk,
   kv: StateKV,
   chosen: Resolved[],
+  prompt: string,
   skip: (sessionId: string) => boolean,
   project?: string,
 ): Promise<Resolved[]> {
@@ -141,7 +149,7 @@ async function withLaterAmendments(
   const amendments = await Promise.all(
     chosen.map((c) =>
       c.summary
-        ? laterAmendment(sdk, kv, { ...c, summary: c.summary }, (id) => given.has(id) || skip(id), project).catch(() => null)
+        ? laterAmendment(sdk, kv, { ...c, summary: c.summary }, prompt, (id) => given.has(id) || skip(id), project).catch(() => null)
         : null,
     ),
   );
@@ -158,7 +166,7 @@ async function withLaterAmendments(
 // rule is read before the rule it replaces. A Memory dated after a Session
 // is not placed behind it, since it may be the claim that replaced a decision:
 // those Memories take their place among the Sessions by date.
-function renderWithSessionDecisions(chosen: Resolved[]) {
+function renderWithSessionDecisions(chosen: Resolved[], prompt: string) {
   type Entry =
     | { at: string; session: { sessionId: string; summary: SessionSummary } }
     | { at: string; memory: { text: string; ref: InjectedRef } };
@@ -196,7 +204,7 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
     }
     lines.push(
       `Session "${escapeXml(summary.title)}" (${entry.at.slice(0, 10)}):`,
-      ...summary.keyDecisions.slice(0, MAX_DECISIONS).map((d) => `- ${escapeXml(cutDecision(d))}`),
+      ...shownDecisions(summary, prompt).map((d) => `- ${escapeXml(cutDecision(d))}`),
     );
     injected.push(withFiles({ kind: "summary", id: sessionId }, summary.filesModified));
   }
@@ -247,10 +255,11 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
         sdk,
         kv,
         chosen,
+        prompt,
         (id) => id === data.sessionId || seen.has(refKey({ kind: "summary", id })),
         data.project,
       );
-      const { lines, injected } = renderWithSessionDecisions(withAmendments);
+      const { lines, injected } = renderWithSessionDecisions(withAmendments, prompt);
       const context = `<agentmemory-relevant-context>\n${lines.join("\n")}\n</agentmemory-relevant-context>`;
 
       logger.info("Prompt context built", {

@@ -285,6 +285,54 @@ describe("mem::summarize chunking", () => {
     expect(merges).toBeGreaterThan(2);
   });
 
+  it("keeps every chunk decision in order, an exact repeat once, whatever the merge reply lists", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "Chunk 1", decisions: ["d1", "d2", "shared rule"] }),
+      summaryXml({ title: "Chunk 2", decisions: ["d3", " shared rule ", "d4"] }),
+      summaryXml({ title: "Chunk 3", decisions: ["d5", "d2"] }),
+      summaryXml({ title: "Merged", decisions: ["d1"] }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_keep", obsCount: 250, provider });
+
+    const result: any = await handler({ sessionId: "ses_keep" });
+
+    expect(result.success).toBe(true);
+    expect(provider.calls[3].system).not.toContain("<decisions>");
+    expect(provider.calls[3].user).toContain("  - d5");
+    const stored: any = await kv.get("summaries", "ses_keep");
+    expect(stored.title).toBe("Merged");
+    expect(stored.keyDecisions).toEqual(["d1", "d2", "shared rule", "d3", "d4", "d5"]);
+  });
+
+  it("keeps every chunk decision through intermediate merge rounds", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = String(PROMPT_OVERHEAD + 300);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    let chunk = 0;
+    const merges: string[] = [];
+    const provider = makeProvider([]);
+    provider.summarize = async (system: string, user: string) => {
+      const narrative = "Long partial narrative. ".repeat(12);
+      if (system.includes("merging multiple partial summaries")) {
+        merges.push(user);
+        return summaryXml({ title: "Merged", narrative, decisions: [] });
+      }
+      chunk += 1;
+      return summaryXml({ title: `Part ${chunk}`, narrative, decisions: [`chunk ${chunk} rule`] });
+    };
+    const { handler, kv } = await setupHandler({ sessionId: "ses_rounds", obsCount: 105, provider });
+
+    const result: any = await handler({ sessionId: "ses_rounds" });
+
+    expect(result.success).toBe(true);
+    expect(merges.length).toBeGreaterThan(1);
+    const all = Array.from({ length: chunk }, (_, i) => `chunk ${i + 1} rule`);
+    for (const rule of all) expect(merges.at(-1)).toContain(`  - ${rule}`);
+    const stored: any = await kv.get("summaries", "ses_rounds");
+    expect(stored.keyDecisions).toEqual(all);
+  });
+
   it("SUMMARIZE_CHUNK_TOKENS env override is respected", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(50);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";

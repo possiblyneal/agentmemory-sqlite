@@ -62,9 +62,6 @@ Output EXACTLY this XML format with no additional text:
 <summary>
   <title>Short session title (max 100 chars)</title>
   <narrative>3-5 sentence narrative covering the whole session</narrative>
-  <decisions>
-    <decision>Key technical decision made</decision>
-  </decisions>
   <files>
     <file>path/to/modified/file</file>
   </files>
@@ -75,9 +72,7 @@ Output EXACTLY this XML format with no additional text:
 
 Rules:
 - Synthesize a single narrative that reflects the whole arc, not a chunk-by-chunk recap
-- Preserve every distinct decision across chunks
-- Keep every rule, requirement or constraint the user stated as its own decision, with its exact values (status codes, limits, thresholds, names) and conditions; never merge two of them or generalize a specific value away
-- When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
+- Do not list the decisions: they are kept from the chunks as they are
 - Union (deduplicate) all files and concepts
 - Title should capture the session's overall outcome`
 

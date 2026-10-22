@@ -208,10 +208,15 @@ case "memory_your_tool": {
 Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated. The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
 ### Session Summaries in Injection
+A Session summarized in chunks keeps every chunk's decisions in Session order, an exact
+(trimmed) repeat once, in the final and the intermediate merges (`mergeDecisions`,
+`src/functions/summarize.ts`); the merge call (`REDUCE_SYSTEM`) writes only the title,
+narrative, files and concepts. A fold (`FOLD_SYSTEM`) still has the model rewrite the list.
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
-test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
-`summary` ref. Each decision is cut to 600 chars with a trailing `…` (`cutDecision()` in
+test Eviction uses) as 10 of that Summary's decisions, once per Session and recorded as a
+`summary` ref: the 10 that score best against the prompt by BM25 (ties to the newer), filled
+with the newest when fewer match, in Session order (`decisionsMatching()`). Each decision is cut to 600 chars with a trailing `…` (`cutDecision()` in
 `src/functions/summarize.ts`, shared with session start). A Memory hit, an Observation the
 Summary does not cover, and one whose Summary is missing, unreadable or has no decisions are
 given as themselves. The decisions come first, one block per Session dated by its Summary's
@@ -225,14 +230,14 @@ rendered Session takes its place among the Sessions by date, so it is not render
 decision it may supersede; the header sits before the first Session block. Older Memories and
 Observations follow the Sessions. The top 3 are counted in rendered units from a 30-hit
 search: a covered Session is one unit however many of its Observations hit.
-Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
+Each covered Session given also triggers a search on its Summary's title and the decisions it shows:
 when the best-scoring other Session there scores at least 0.35 of the given Session's own best
 hit, leads the runner-up by 1.25x and its Summary dates later, its decisions are given too, as
 the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Memory hits, this
 Session and any Summary already given are dropped before ranking. A failed amendment lookup
 drops only that amendment.
-At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
-(each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
+At session start (`mem::context`) a Session Summary's block carries at most its newest 10 decisions
+(in Session order, each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
 out the rest of the budget; its `summary` ref keeps every file. Summary blocks are ordered newest work first by the same date prompt submit uses (`decidedAt`), not by write time.
 
 ### Pinned rules
