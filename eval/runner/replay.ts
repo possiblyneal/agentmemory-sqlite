@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +14,8 @@ import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { isAwaitingCompression } from "../../src/functions/compress-synthetic.js";
+import type { CompressedObservation } from "../../src/types.js";
 import { deriveAnswerKey, keyedSubset } from "./replay-answer-key.js";
 import {
   scoreSession,
@@ -390,16 +393,16 @@ async function probeSession(
 
 // Compression runs after /observe has answered, so an Observation is stored
 // synthetic first, marked awaitingCompression, until its compression lands (a
-// failed one degrades to the synthetic record). Mirrors isAwaitingCompression().
+// failed one degrades to the synthetic record).
 async function compressionDrained(baseUrl: string, sessionId: string): Promise<void> {
   let pending = Infinity;
   let progressAt = Date.now();
   for (;;) {
-    const { body } = await get<{ observations?: Array<{ title?: unknown; awaitingCompression?: unknown }> }>(
+    const { body } = await get<{ observations?: CompressedObservation[] }>(
       baseUrl,
       `observations?sessionId=${encodeURIComponent(sessionId)}`,
     );
-    const now = (body.observations ?? []).filter((o) => !o.title || o.awaitingCompression === true).length;
+    const now = (body.observations ?? []).filter(isAwaitingCompression).length;
     if (now === 0) return;
     if (now < pending) progressAt = Date.now();
     pending = now;
@@ -551,6 +554,9 @@ async function saveCheckpoint(
 ): Promise<Checkpoint> {
   const file = `${String(index).padStart(3, "0")}-${sessionId}.sqlite`;
   // VACUUM INTO, not sqlite.backup, which needs Node 22.16 against the 22.13 floor.
+  // It refuses an existing file, which a pass interrupted mid-write leaves
+  // behind unlisted for the resume to write again.
+  rmSync(join(dir, file), { force: true });
   const db = new DatabaseSync(sqlitePath, { readOnly: true });
   try {
     db.prepare("VACUUM INTO ?").run(join(dir, file));
@@ -690,14 +696,22 @@ async function main(): Promise<void> {
     // An interrupted save pass restarts from its last checkpoint: that store
     // holds every Session ingested before it, so only the rest are replayed.
     if (!existsSync(manifestPath)) throw new Error(`${checkpointDir} holds no save pass to resume`);
+    if (existsSync(join(checkpointDir, "run.json"))) throw new Error(`${checkpointDir} holds a finished save pass; nothing to resume`);
     checkpoints = JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[];
     const last = checkpoints.at(-1);
     if (!last) throw new Error(`${manifestPath} lists no checkpoint to resume from`);
     const byId = new Map(sessions.map((s) => [s.id, s]));
     resumeAt = sessions.findIndex((s) => s.id === last.sessionId);
-    const missing = [last.sessionId, ...last.ingested].filter((id) => !byId.has(id));
-    if (resumeAt < 0 || missing.length > 0) {
-      throw new Error(`${manifestPath} names Sessions these options did not load (${missing.join(", ")}); pass the save pass's own options`);
+    // The same options load the same Sessions in the same order and split, so
+    // the last checkpoint sits at the index its file name records, and every
+    // Session it ingested comes before it.
+    const before = new Set(sessions.slice(0, Math.max(resumeAt, 0)).map((s) => s.id));
+    const sameCorpus =
+      resumeAt === Number.parseInt(last.file, 10) &&
+      last.ingested.every((id) => before.has(id)) &&
+      checkpoints.every((c) => scored.has(c.sessionId));
+    if (!sameCorpus) {
+      throw new Error(`${manifestPath} was saved from other Sessions than these options load; pass the save pass's own options`);
     }
     ingested = last.ingested.map((id) => byId.get(id)!);
     seed = join(checkpointDir, last.file);
