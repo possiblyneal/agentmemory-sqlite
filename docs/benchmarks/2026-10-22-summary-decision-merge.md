@@ -2,7 +2,7 @@
 
 **Commit:** control `73cfcb80` (main), fix `b9ebc987` (closed PR #301, branch `fix/summary-merge-decisions`), each with the #303 fetch fix applied
 **Bench:** force-summarize of the 10 longest Sessions in the #259 replay store, one run per arm; then `eval:replay --from-checkpoints` over that store, dev split (holdout not opened)
-**N:** 10 Sessions of 389 to 654 Observations; replay 38 probed checkpoints, 357 prompts, 37 key items (28 file, 7 correction, 2 decision)
+**N:** 10 Sessions of 389 to 654 Observations; replay 38 probed checkpoints, 357 prompts, 37 key items (28 file, 7 correction, 2 decision) plus 13 terse file needs, scored separately
 **K:** 5 (search only; an Injection is scored whole)
 **Hardware:** linux x86_64, 8 cores, Node v22.23.2, both arms run in parallel on one host
 **Embeddings:** none for the count; on-device (replay default) for the replay
@@ -11,9 +11,11 @@
 ## Headline
 
 Building the merged decision list in code keeps 510 decisions where the model's rewrite kept
-212 (2.4x), with no repeats and the same length per decision, but no replay metric improves:
-every hit is equal except one terse file key that the fix loses (10/13 against 11/13). The fix
-fails #300's acceptance (no drop, at least one gain) and was not merged.
+212 (2.4x), with no repeats and the same length per decision, but no replay metric improves.
+Every total is equal except the terse file need, which the fix loses (Injection 10/13 against
+11/13, Either 12/13 against 13/13), and Used items (51 against 52); per key, one other file hit
+moved between Sessions. The fix fails #300's acceptance (no drop, at least one gain) and was not
+merged.
 
 ## Decisions kept per Session
 
@@ -33,7 +35,7 @@ fails #300's acceptance (no drop, at least one gain) and was not merged.
 
 | Arm | Decision chars | Mean chars per decision | Longest | Near-repeats (word Jaccard >= 0.6) |
 |---|---|---|---|---|
-| main | 26,695 | 126 | — | 0 |
+| main | 26,695 | 126 | 304 | 0 |
 | #301 | 64,377 | 126 | 338 | 0 |
 
 ## Replay
@@ -57,6 +59,20 @@ two lost, the terse loss among them. Latency is not attributable: the two probes
 - The fix bounds what an Agent is shown at 10 decisions per Session: the 10 that best match the
   prompt at prompt submit, the newest 10 at session start. Keeping more decisions changes which
   10 are shown, not how many.
+
+## Reproduce
+
+```sh
+# per arm, from the repaired last checkpoint of the #259 save pass
+git checkout <arm sha> && npm ci && npm run build   # 73cfcb80 (main), b9ebc987 (fix), each with the #303 fix applied
+# start a daemon on a copy of that store, then for each of the 10 longest Sessions:
+curl -s -X POST localhost:<port>/agentmemory/summarize -H 'Content-Type: application/json' \
+  -d '{"sessionId":"<id>","force":true}'
+# patch the 10 new Summaries into a copy of every #259 checkpoint that holds their Session
+# (one-off scripts, not committed), then probe that copy with the same build:
+npm run eval:replay -- --from-checkpoints <patched copy> --keyed-only --cap 1000 --min-turns 2 \
+  --max-prompts 40 --split dev --root <frozen copy> --projects=<list>
+```
 
 ## Notes
 
