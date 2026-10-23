@@ -166,6 +166,10 @@ npm run build && npm run eval:supersession -- --instance N
 
 It runs BM25-only by default (`--embeddings local` adds vectors), is not part of `eval:suite`, and takes `--split dev` unless the holdout is named through `AGENTMEMORY_EVAL_HOLDOUT`, like every runner. `--instance` defaults to 5; give each concurrent run its own.
 
+### Fold drift
+
+`npm run eval:fold-drift -- --store <replay checkpoint .sqlite> (--sessions id,... | --longest N) [--batch N]` measures whether folding new Observations into a Session Summary (`FOLD_SYSTEM`) loses decisions. Per Session it runs the daemon's own `mem::summarize` twice over a throwaway in-memory store: once over all Observations, and once as a sequence of growing prefixes, `--batch` Observations apart (default 50), so every step after the first folds into the previous Summary. Stop boundaries are not recorded on stored Observations, so batches are fixed-size. It reports decisions after the full pass, after the fold sequence, and full-pass decisions that no fold-sequence decision matches: by normalized exact text, and by word-set Jaccard >= 0.5 as a looser view. The provider is the daemon's own (`~/.agentmemory/.env`), so it spends real LLM calls; run it deliberately. Output goes to `tmp/eval-fold-drift/*.json`, which quotes private Observations and is never committed. The logic is `eval/runner/fold-drift-core.ts`, tested with a fake provider in `test/fold-drift.test.ts`.
+
 ### Replay (the Operator's own transcripts)
 
 ```sh
@@ -287,6 +291,8 @@ eval/
 │   ├── suite-stats.ts             pooled ratios and the paired bootstrap
 │   ├── coding-life.ts             in-house benchmark runner
 │   ├── replay.ts                  replay runner over ~/.claude/projects transcripts (daemon glue)
+│   ├── fold-drift.ts              eval:fold-drift CLI: store → providers → table and JSON
+│   ├── fold-drift-core.ts         full pass vs fold sequence over mem::summarize, decision matching
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
 │   ├── replay-checkpoints.ts      save-pass manifest, --resume checks, checkpoint write
