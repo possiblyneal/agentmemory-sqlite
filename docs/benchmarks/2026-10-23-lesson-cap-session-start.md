@@ -1,6 +1,6 @@
 # 2026-10-23 — Lesson near-twin cap at session start (#294)
 
-**Commit:** before `444bb900` (main); after: `fix/lesson-cap-session-start` (same base, the cap in `mem::context`)
+**Commit:** before `444bb900` (main); after `2172bd5` (`fix/lesson-cap-session-start`, the cap in `mem::context`)
 **Bench:** supersession, dev split (`runner/supersession.ts`); `eval:suite --tier fast` (coding-life, PrecisionMemBench, LongMemEval sample); `eval:gate`
 **N:** supersession 110 cases (5 per Lesson cell); suite as listed below
 **K:** 5 (search); an Injection is scored whole
@@ -36,7 +36,11 @@ Every other cell is 0.00 before and after.
 | PMB pass / activePass / precision / recall | 0.447 / 0.391 / 0.440 / 0.942 | same |
 | LongMemEval recall@5 / hit | 0.896 / 0.958 | same |
 
-All Δ 0.000. No suite fixture holds two Lessons that restate each other, so the cap does not fire there.
+All Δ 0.000: the cap changed no suite result.
+
+## Methodology
+
+As in `eval/README.md`: dev split only (holdout not opened), supersession BM25-only on instance 25, the fast suite on its default instances with the baseline labelled `base-294` from `444bb900`.
 
 ## Reproduce
 
@@ -49,5 +53,5 @@ npm run eval:gate
 
 ## Notes
 
-- The cap compares every pair of the project's Lessons, O(n²) Jaccard on short texts, the same work `mem::lesson-recall` does on up to 100 hits. Session start latency in the gate is unchanged.
+- The cap compares every pair of the project's Lessons. `capBehindNewer` now tokenizes each text once (`jaccardText`/`jaccardOverlap`, `src/state/schema.ts`) instead of once per pair; on synthetic 14-word texts the cap alone takes 6 / 37 / 139 / 452 ms at 100 / 500 / 1000 / 2000 Lessons, against 26 / 469 / 1884 / 7479 ms before. The gate's fixtures hold few Lessons, so its unchanged latency says nothing about large projects.
 - A stale Lesson reinforced after the newer one was saved still leads, as in search: a re-save is the Operator restating it.
