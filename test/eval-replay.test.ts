@@ -430,6 +430,59 @@ describe("summarizeReplay", () => {
     expect(worstCases(withTerse).filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
   });
 
+  describe("per project and typical", () => {
+    const meta = { storeBytesStart: 1000, storeBytesEnd: 3000 };
+    const inProject = (project: string, s: ReturnType<typeof scoreSession>) => ({ ...s, project });
+    const earlierS = session("pe", "2026-09-01T10:00:00Z", [{ user: "x" }, { tool: "Edit", file: `${CWD}/src/cart.ts` }]);
+    const later = (id: string, day: string) => session(id, `2026-09-${day}T10:00:00Z`, [{ user: "x" }, { tool: "Read", file: `${CWD}/src/cart.ts` }]);
+    const delivered = (id: string, day: string, project: string) => {
+      const s = later(id, day);
+      return inProject(project, scoreSession(s, deriveAnswerKey(s, [earlierS]), [probe("session-start", 0, [item({ ref: `observation:${id}`, files: ["src/cart.ts"] })])]));
+    };
+    const missed = (id: string, day: string, project: string) => {
+      const s = later(id, day);
+      return inProject(project, scoreSession(s, deriveAnswerKey(s, [earlierS]), []));
+    };
+    const mixed = [
+      delivered("a1", "02", "shop"),
+      missed("a2", "03", "shop"),
+      delivered("b1", "04", "blog"),
+      missed("m1", "05", "medical-researcher"),
+      missed("m2", "06", "agentmemory-sqlite"),
+    ];
+    const atypical = ["agentmemory-sqlite", "medical-researcher"];
+    const s = summarizeReplay(mixed, meta, atypical);
+
+    it("reports every project with the pooled shape", () => {
+      expect(Object.keys(s.byProject).sort()).toEqual(["agentmemory-sqlite", "blog", "medical-researcher", "shop"]);
+      expect(s.byProject.shop.sessions).toBe(2);
+      expect(s.byProject.shop.rightMoment.injection).toEqual({ n: 2, hit: 1, share: 0.5 });
+      expect(s.byProject.blog.rightMoment.injection).toEqual({ n: 1, hit: 1, share: 1 });
+      expect(s.byProject["medical-researcher"].rightMoment.injection.share).toBe(0);
+      expect(Object.keys(s.byProject.shop)).toEqual(Object.keys(s.typical.summary));
+    });
+
+    it("rolls up typical without the atypical projects", () => {
+      expect(s.typical.excluded).toEqual(atypical);
+      expect(s.typical.summary.sessions).toBe(3);
+      expect(s.typical.summary.rightMoment.injection).toEqual({ n: 3, hit: 2, share: 2 / 3 });
+    });
+
+    it("leaves the pooled numbers as they were", () => {
+      expect(s.sessions).toBe(5);
+      expect(s.rightMoment.injection).toEqual({ n: 5, hit: 2, share: 0.4 });
+      const { byProject, typical, ...pooled } = s;
+      const { byProject: _b, typical: _t, ...bare } = summarizeReplay(mixed, meta, []);
+      expect(pooled).toEqual(bare);
+    });
+
+    it("has an empty typical row when every project is atypical", () => {
+      const none = summarizeReplay(mixed, meta, [...atypical, "shop", "blog"]);
+      expect(none.typical.summary.sessions).toBe(0);
+      expect(none.typical.summary.rightMoment.injection.share).toBeNull();
+    });
+  });
+
   it("lists misses, noise and leaks with Session and turn", () => {
     const cases = worstCases(scores);
     expect(cases.filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);

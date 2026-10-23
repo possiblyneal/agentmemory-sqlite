@@ -20,10 +20,12 @@ import {
   scoreSession,
   summarizeReplay,
   worstCases,
+  DEFAULT_ATYPICAL_PROJECTS,
   type Probe,
   type ItemKind,
   type ProbeItem,
   type ProbeKind,
+  type ReplaySummary,
   type SessionScore,
 } from "./replay-score.js";
 import {
@@ -69,6 +71,7 @@ interface Options {
   resume: boolean;
   fromCheckpoints?: string;
   maintenance?: MaintenancePass;
+  atypical: string[];
 }
 
 function parseOptions(): Options {
@@ -91,6 +94,7 @@ function parseOptions(): Options {
       resume: { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
       maintenance: { type: "string" },
+      atypical: { type: "string", default: DEFAULT_ATYPICAL_PROJECTS.join(",") },
     },
   });
   const positive = (name: string, raw: string, min = 1): number => {
@@ -173,6 +177,7 @@ function parseOptions(): Options {
     resume: values.resume === true,
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
     maintenance,
+    atypical: (values.atypical as string).split(",").map((p) => p.trim()).filter(Boolean),
   };
 }
 
@@ -508,6 +513,17 @@ function agentmemoryProviders(opts: Options): Record<string, unknown> {
   };
 }
 
+const pct = (share: number | null): string => (share === null ? "-" : `${Math.round(share * 100)}%`);
+
+function projectRows(byProject: ReplaySummary["byProject"], typical: ReplaySummary["typical"]): string {
+  const row = (name: string, s: ReplaySummary): string =>
+    `${name.padEnd(28)} ${String(s.sessions).padStart(4)} Sessions  injection ${pct(s.rightMoment.injection.share).padStart(4)}  either ${pct(s.rightMoment.either.share).padStart(4)}  used ${pct(s.rightContent.usedShare).padStart(4)}  leaks ${s.rightScope.leaks}`;
+  return [
+    ...Object.entries(byProject).map(([name, s]) => row(name, s)),
+    row(`typical (not ${typical.excluded.join(",")})`, typical.summary),
+  ].join("\n");
+}
+
 function writeRun(
   opts: Options,
   scores: SessionScore[],
@@ -515,7 +531,7 @@ function writeRun(
   providers: Record<string, unknown>,
   extra: { minutes: number } & Record<string, unknown>,
 ): void {
-  const summary = summarizeReplay(scores, meta);
+  const summary = summarizeReplay(scores, meta, opts.atypical);
   const run = {
     date: new Date().toISOString(),
     options: { ...opts, root: undefined, out: undefined },
@@ -524,7 +540,9 @@ function writeRun(
   };
   writeFileSync(join(opts.out, "summary.json"), JSON.stringify({ run, summary }, null, 2));
   writeFileSync(join(opts.out, "worst-cases.md"), worstCasesMarkdown(scores));
-  console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary }, null, 2));
+  const { byProject, typical, ...pooled } = summary;
+  console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary: pooled }, null, 2));
+  console.log(`\n${projectRows(byProject, typical)}`);
   console.log(`\nwrote ${opts.out}/{summary.json,scores.ndjson,worst-cases.md}`);
 }
 

@@ -153,7 +153,10 @@ function isTerseNeed(o: KeyOutcome): boolean {
   return o.key.kind === "file" && o.key.terse === true;
 }
 
-export function summarizeReplay(scores: SessionScore[], meta: RunMeta) {
+// Repositories the daemon rarely serves like the rest; the typical rollup leaves them out.
+export const DEFAULT_ATYPICAL_PROJECTS = ["agentmemory-sqlite", "medical-researcher"];
+
+function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
   const items = scores.flatMap((s) => s.items);
   const all = scores.flatMap((s) => s.outcomes);
   const outcomes = all.filter((o) => !isTerseNeed(o));
@@ -239,6 +242,21 @@ export function summarizeReplay(scores: SessionScore[], meta: RunMeta) {
       replayedWeeks: weeks,
       storeGrowthBytes: growth,
       growthBytesPerWeek: growth / weeks,
+    },
+  };
+}
+
+// Store size and growth are run-wide, so every row carries the same storage numbers.
+export function summarizeReplay(scores: SessionScore[], meta: RunMeta, atypical: string[] = DEFAULT_ATYPICAL_PROJECTS) {
+  const projects = [...new Set(scores.map((s) => s.project))].sort();
+  return {
+    ...summarizeSessions(scores, meta),
+    byProject: Object.fromEntries(
+      projects.map((p) => [p, summarizeSessions(scores.filter((s) => s.project === p), meta)]),
+    ),
+    typical: {
+      excluded: atypical,
+      summary: summarizeSessions(scores.filter((s) => !atypical.includes(s.project)), meta),
     },
   };
 }
