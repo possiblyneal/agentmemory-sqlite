@@ -35,6 +35,7 @@ import {
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
+import { selectionOf } from "./replay-selection.js";
 import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
@@ -592,6 +593,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
     }
   }
   writeRun(opts, scores, { storeBytesStart: bytesStart, storeBytesEnd: bytesEnd }, agentmemoryProviders(opts), {
+    selection: selectionOf(scored),
     checkpoints: dir,
     maintenance: pass && { pass: pass.name, lastCheckpointBytesBeforePass: bytesBeforePass },
     directories: loaded.perDirectory,
@@ -705,13 +707,13 @@ async function main(): Promise<void> {
     const metrics = await backend.metrics();
     const llm = metrics && { llm: metrics };
     if (opts.saveCheckpoints) {
-      const run = { date: new Date().toISOString(), options: { ...opts, root: undefined, out: undefined }, ...llm, minutes };
+      const run = { date: new Date().toISOString(), options: { ...opts, root: undefined, out: undefined }, selection: selectionOf(scored), ...llm, minutes };
       writeFileSync(join(checkpointDir, "run.json"), JSON.stringify(run, null, 2));
       console.log(`wrote ${checkpoints.length} checkpoints to ${checkpointDir}`);
       return;
     }
     const meta = { storeBytesStart: bytesStart, storeBytesEnd: await backend.storeBytes() };
-    writeRun(opts, scores, meta, backend.providers(), { ...llm, directories: perDirectory, projects: perProject, minutes });
+    writeRun(opts, scores, meta, backend.providers(), { ...llm, selection: selectionOf(scored), directories: perDirectory, projects: perProject, minutes });
   } finally {
     await backend.stop();
   }
