@@ -329,6 +329,20 @@ describe("supersession: Lesson", () => {
   });
 });
 
+describe("supersession: Lesson saved just after a more-reinforced one", () => {
+  beforeEach(async () => {
+    for (let i = 0; i < 3; i++) {
+      await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
+      vi.advanceTimersByTime(1);
+    }
+    await sdk.trigger("mem::lesson-save", { content: `Rule: ${FRESH}`, project: PROJECT });
+  });
+
+  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
+    expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
+  });
+});
+
 describe("supersession: Insight", () => {
   beforeEach(async () => {
     await kv.set(KV.insights, "ins_stale", insight("ins_stale", "Whitespace style", `Team will ${STALE}`, 0.8, OLD));
