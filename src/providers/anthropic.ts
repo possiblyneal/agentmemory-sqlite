@@ -2,6 +2,14 @@ import Anthropic from '@anthropic-ai/sdk'
 import { compressMaxTokens, type CompressOptions, type MemoryProvider, type ProviderUsage } from '../types.js'
 import { getEnvVar } from '../config.js'
 import { UsageTally, hostOf } from './_usage.js'
+import { fetchWithTimeout } from './_fetch.js'
+
+const DEFAULT_TIMEOUT_MS = 60_000
+
+function resolveTimeoutMs(): number {
+  const parsed = Number.parseInt(getEnvVar('AGENTMEMORY_LLM_TIMEOUT_MS') ?? '', 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS
+}
 
 type Effort = NonNullable<Anthropic.OutputConfig['effort']>
 
@@ -14,7 +22,16 @@ export class AnthropicProvider implements MemoryProvider {
   private tally: UsageTally
 
   constructor(apiKey: string, model: string, maxTokens: number, baseURL?: string) {
-    this.client = new Anthropic({ apiKey, ...(baseURL ? { baseURL } : {}) })
+    const timeoutMs = resolveTimeoutMs()
+    // fetchWithTimeout owns the single deadline and the retries; the SDK's own
+    // timeout only has to outlast it and its retries are off (#313).
+    this.client = new Anthropic({
+      apiKey,
+      ...(baseURL ? { baseURL } : {}),
+      maxRetries: 0,
+      timeout: timeoutMs + 5_000,
+      fetch: (url, init) => fetchWithTimeout(String(url), init ?? {}, timeoutMs),
+    })
     this.model = model
     this.maxTokens = maxTokens
     this.tally = new UsageTally('anthropic', model, hostOf(baseURL || 'https://api.anthropic.com'))
