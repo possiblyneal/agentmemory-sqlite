@@ -213,6 +213,10 @@ For a remote embedder set the same variables the daemon reads in the shell, for 
 
 Output under `tmp/eval-replay/` (gitignored, because it quotes private transcripts): `summary.json` (run config, providers, per-Goal-line numbers), `scores.ndjson` (one row per Session), `worst-cases.md` (up to 20 misses, noise items and leaks, each with Session id and turn). Only the aggregates go into a scorecard under `docs/benchmarks/`.
 
+#### Freezing the corpus
+
+Claude Code deletes transcripts older than `cleanupPeriodDays` (default 30) from `~/.claude/projects`, so a later replay can select a different Session set and its numbers are not comparable. To compare runs, copy the projects directories once into a folder under `tmp/` (private, never committed), for example `mkdir -p tmp/replay-corpus && cp -rL ~/.claude/projects/<dir> tmp/replay-corpus/` (or `rsync -aL`), and pass `--root tmp/replay-corpus` to every run. Each run records `selection: { sessions, fingerprint }` in `summary.json` (and the checkpoint `run.json`); the fingerprint hashes the sorted ids of the scored Sessions. Two runs compare only when their fingerprints match: `eval:suite --against` prints a warning when they differ or one run predates the field, and still compares.
+
 #### Answer key
 
 Derived from Session k's transcript against earlier Sessions of the same project (Recall is project-scoped, so another project's Session could never have been injected):
@@ -290,6 +294,7 @@ eval/
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
 │   ├── replay-checkpoints.ts      save-pass manifest, --resume checks, checkpoint write
+│   ├── replay-selection.ts        scored-Session fingerprint and the cross-corpus comparison warning
 │   ├── replay-hooks.ts            transcript → the /observe payloads the hooks would have sent (--llm)
 │   ├── replay-hindsight.ts        transcript → Hindsight retains; recall results → probe items
 │   ├── hindsight.ts               throwaway Hindsight container and its HTTP calls (--backend hindsight)
