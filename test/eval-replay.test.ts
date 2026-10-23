@@ -41,6 +41,7 @@ const CWD = "/synthetic/shop";
 type Step =
   | { user: string; meta?: boolean }
   | { tool: string; file: string }
+  | { assistant: string; thinking?: string }
   | { toolResult: string };
 
 function transcript(sessionId: string, start: string, steps: Step[]): string {
@@ -50,6 +51,12 @@ function transcript(sessionId: string, start: string, steps: Step[]): string {
       const common = { sessionId, cwd: CWD, timestamp: new Date(base + i * 1000).toISOString() };
       if ("user" in step) {
         return { ...common, type: "user", isMeta: step.meta, message: { role: "user", content: step.user } };
+      }
+      if ("assistant" in step) {
+        const content: unknown[] = [];
+        if (step.thinking) content.push({ type: "thinking", thinking: step.thinking });
+        content.push({ type: "text", text: step.assistant });
+        return { ...common, type: "assistant", message: { role: "assistant", content } };
       }
       if ("tool" in step) {
         return {
@@ -140,6 +147,25 @@ describe("parseTranscript", () => {
       transcript("s4", "2026-09-05T08:00:00Z", [{ user: "hello there" }]),
     ].join("\n");
     expect(parseTranscript(lines)?.startedAt).toBe("2026-09-05T08:00:00.000Z");
+  });
+
+  it("carries the Agent's last text reply before each typed prompt", () => {
+    const s = session("s5", "2026-09-01T10:00:00Z", [
+      { user: "add a cart total" },
+      { assistant: "I will start by reading the cart." },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { toolResult: "file contents" },
+      { assistant: "Added calcTotal in src/cart.ts.", thinking: "private musings" },
+      { assistant: "Want me to add tests?" },
+      { user: "<command-name>/clear</command-name>" },
+      { user: "yes" },
+      { user: "continue" },
+    ]);
+    expect(s.userTurns.map((t) => t.precedingReply)).toEqual([
+      "",
+      "Added calcTotal in src/cart.ts.\n\nWant me to add tests?",
+      "",
+    ]);
   });
 
   it("returns null for a transcript with no human turn", () => {
@@ -428,6 +454,62 @@ describe("summarizeReplay", () => {
     expect(s.rightMoment.byKind.file.injection.n).toBe(2);
     expect(s.rightMoment.terse.injection).toEqual({ n: 1, hit: 0, share: 0 });
     expect(worstCases(withTerse).filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
+  });
+
+  describe("per project and typical", () => {
+    const meta = { storeBytesStart: 1000, storeBytesEnd: 3000 };
+    const inProject = (project: string, s: ReturnType<typeof scoreSession>) => ({ ...s, project });
+    const earlierS = session("pe", "2026-09-01T10:00:00Z", [{ user: "x" }, { tool: "Edit", file: `${CWD}/src/cart.ts` }]);
+    const later = (id: string, day: string) => session(id, `2026-09-${day}T10:00:00Z`, [{ user: "x" }, { tool: "Read", file: `${CWD}/src/cart.ts` }]);
+    const delivered = (id: string, day: string, project: string) => {
+      const s = later(id, day);
+      return inProject(project, scoreSession(s, deriveAnswerKey(s, [earlierS]), [probe("session-start", 0, [item({ ref: `observation:${id}`, files: ["src/cart.ts"] })])]));
+    };
+    const missed = (id: string, day: string, project: string) => {
+      const s = later(id, day);
+      return inProject(project, scoreSession(s, deriveAnswerKey(s, [earlierS]), []));
+    };
+    const mixed = [
+      delivered("a1", "02", "shop"),
+      missed("a2", "03", "shop"),
+      delivered("b1", "04", "blog"),
+      missed("m1", "05", "medical-researcher"),
+      missed("m2", "06", "agentmemory-sqlite"),
+    ];
+    const atypical = ["agentmemory-sqlite", "medical-researcher"];
+    const s = summarizeReplay(mixed, meta, atypical);
+
+    it("reports every project with the pooled shape", () => {
+      expect(Object.keys(s.byProject).sort()).toEqual(["agentmemory-sqlite", "blog", "medical-researcher", "shop"]);
+      expect(s.byProject.shop.sessions).toBe(2);
+      expect(s.byProject.shop.rightMoment.injection).toEqual({ n: 2, hit: 1, share: 0.5 });
+      expect(s.byProject.blog.rightMoment.injection).toEqual({ n: 1, hit: 1, share: 1 });
+      expect(s.byProject["medical-researcher"].rightMoment.injection.share).toBe(0);
+      expect(Object.keys(s.byProject.shop)).toEqual(Object.keys(s.typical.summary));
+      expect(s.byProject.shop).not.toHaveProperty("leastRecord");
+      expect(s.typical.summary).not.toHaveProperty("operatorAttention");
+      expect(s).toHaveProperty("leastRecord");
+    });
+
+    it("rolls up typical without the atypical projects", () => {
+      expect(s.typical.excluded).toEqual(atypical);
+      expect(s.typical.summary.sessions).toBe(3);
+      expect(s.typical.summary.rightMoment.injection).toEqual({ n: 3, hit: 2, share: 2 / 3 });
+    });
+
+    it("leaves the pooled numbers as they were", () => {
+      expect(s.sessions).toBe(5);
+      expect(s.rightMoment.injection).toEqual({ n: 5, hit: 2, share: 0.4 });
+      const { byProject, typical, ...pooled } = s;
+      const { byProject: _b, typical: _t, ...bare } = summarizeReplay(mixed, meta, []);
+      expect(pooled).toEqual(bare);
+    });
+
+    it("has an empty typical row when every project is atypical", () => {
+      const none = summarizeReplay(mixed, meta, [...atypical, "shop", "blog"]);
+      expect(none.typical.summary.sessions).toBe(0);
+      expect(none.typical.summary.rightMoment.injection.share).toBeNull();
+    });
   });
 
   it("lists misses, noise and leaks with Session and turn", () => {

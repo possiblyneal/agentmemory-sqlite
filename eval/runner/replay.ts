@@ -20,10 +20,12 @@ import {
   scoreSession,
   summarizeReplay,
   worstCases,
+  DEFAULT_ATYPICAL_PROJECTS,
   type Probe,
   type ItemKind,
   type ProbeItem,
   type ProbeKind,
+  type ReplaySummary,
   type SessionScore,
 } from "./replay-score.js";
 import {
@@ -35,10 +37,12 @@ import {
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
+import { selectionOf } from "./replay-selection.js";
 import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
+import { composeQuery, isQueryArm, QUERY_ARMS, type QueryArmOptions } from "./replay-query-arm.js";
 import { parseMaintenance, type MaintenancePass } from "./replay-maintenance.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
@@ -69,6 +73,8 @@ interface Options {
   resume: boolean;
   fromCheckpoints?: string;
   maintenance?: MaintenancePass;
+  atypical: string[];
+  queryArm: QueryArmOptions;
 }
 
 function parseOptions(): Options {
@@ -91,6 +97,10 @@ function parseOptions(): Options {
       resume: { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
       maintenance: { type: "string" },
+      "query-arm": { type: "string", default: "control" },
+      "reply-chars": { type: "string", default: "1000" },
+      "reply-scale": { type: "string", default: "0" },
+      atypical: { type: "string", default: DEFAULT_ATYPICAL_PROJECTS.join(",") },
     },
   });
   const positive = (name: string, raw: string, min = 1): number => {
@@ -150,6 +160,20 @@ function parseOptions(): Options {
     console.error("--maintenance runs on restored checkpoints; pass --from-checkpoints");
     process.exit(2);
   }
+  const queryArm = values["query-arm"] as string;
+  if (!isQueryArm(queryArm)) {
+    console.error(`--query-arm must be one of ${QUERY_ARMS.join(", ")}, got: ${queryArm}`);
+    process.exit(2);
+  }
+  if (queryArm !== "control" && values.backend === "hindsight") {
+    console.error("--query-arm shapes agentmemory's prompt-context probe; drop --backend hindsight");
+    process.exit(2);
+  }
+  const replyScale = Number(values["reply-scale"]);
+  if (!Number.isFinite(replyScale) || replyScale < 0) {
+    console.error(`--reply-scale must be a number >= 0, got: ${values["reply-scale"]}`);
+    process.exit(2);
+  }
   const maintenance = values.maintenance ? parseMaintenance(values.maintenance) : undefined;
   if (maintenance && "error" in maintenance) {
     console.error(maintenance.error);
@@ -173,6 +197,8 @@ function parseOptions(): Options {
     resume: values.resume === true,
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
     maintenance,
+    atypical: (values.atypical as string).split(",").map((p) => p.trim()).filter(Boolean),
+    queryArm: { arm: queryArm, chars: positive("reply-chars", values["reply-chars"] as string, 0), scale: replyScale },
   };
 }
 
@@ -337,6 +363,7 @@ async function probeSession(
   session: ReplaySession,
   maxPrompts: number,
   resolver: Resolver,
+  queryArm: QueryArmOptions,
 ): Promise<Probe[]> {
   const probes: Probe[] = [];
   const attempt = async (kind: ProbeKind, turn: number, run: () => Promise<Omit<Probe, "kind" | "turn">>) => {
@@ -353,8 +380,14 @@ async function probeSession(
   };
 
   await attempt("session-start", 0, injection("session/start", { sessionId: session.id, project: session.project, cwd: session.cwd }));
-  for (const turn of session.userTurns.slice(0, maxPrompts)) {
-    await attempt("prompt-context", turn.turn, injection("prompt-context", { sessionId: session.id, prompt: turn.text, project: session.project }));
+  for (const [i, turn] of session.userTurns.slice(0, maxPrompts).entries()) {
+    const prompt = composeQuery(
+      queryArm.arm,
+      { prompt: turn.text, reply: turn.precedingReply, prevPrompt: session.userTurns[i - 1]?.text ?? "" },
+      queryArm.chars,
+      queryArm.scale,
+    );
+    await attempt("prompt-context", turn.turn, injection("prompt-context", { sessionId: session.id, prompt, project: session.project }));
     await attempt("search", turn.turn, async () => {
       const { body, ms } = await post<{ results?: SearchRow[] }>(baseUrl, "smart-search", {
         query: turn.text,
@@ -508,6 +541,17 @@ function agentmemoryProviders(opts: Options): Record<string, unknown> {
   };
 }
 
+const pct = (share: number | null): string => (share === null ? "-" : `${Math.round(share * 100)}%`);
+
+function projectRows(byProject: ReplaySummary["byProject"], typical: ReplaySummary["typical"]): string {
+  const row = (name: string, s: ReplaySummary): string =>
+    `${name.padEnd(28)} ${String(s.sessions).padStart(4)} Sessions  injection ${pct(s.rightMoment.injection.share).padStart(4)}  either ${pct(s.rightMoment.either.share).padStart(4)}  used ${pct(s.rightContent.usedShare).padStart(4)}  leaks ${s.rightScope.leaks}`;
+  return [
+    ...Object.entries(byProject).map(([name, s]) => row(name, s)),
+    row(`typical (not ${typical.excluded.join(",")})`, typical.summary),
+  ].join("\n");
+}
+
 function writeRun(
   opts: Options,
   scores: SessionScore[],
@@ -515,16 +559,19 @@ function writeRun(
   providers: Record<string, unknown>,
   extra: { minutes: number } & Record<string, unknown>,
 ): void {
-  const summary = summarizeReplay(scores, meta);
+  const summary = summarizeReplay(scores, meta, opts.atypical);
   const run = {
     date: new Date().toISOString(),
-    options: { ...opts, root: undefined, out: undefined },
+    options: { ...opts, root: undefined, out: undefined, queryArm: undefined },
+    queryArm: opts.queryArm,
     providers,
     ...extra,
   };
   writeFileSync(join(opts.out, "summary.json"), JSON.stringify({ run, summary }, null, 2));
   writeFileSync(join(opts.out, "worst-cases.md"), worstCasesMarkdown(scores));
-  console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary }, null, 2));
+  const { byProject, typical, ...pooled } = summary;
+  console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary: pooled }, null, 2));
+  console.log(`\n${projectRows(byProject, typical)}`);
   console.log(`\nwrote ${opts.out}/{summary.json,scores.ndjson,worst-cases.md}`);
 }
 
@@ -578,7 +625,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       if (i === 0) bytesStart = bytesEnd;
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
-      const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
+      const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
       const score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
@@ -592,6 +639,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
     }
   }
   writeRun(opts, scores, { storeBytesStart: bytesStart, storeBytesEnd: bytesEnd }, agentmemoryProviders(opts), {
+    selection: selectionOf(scored),
     checkpoints: dir,
     maintenance: pass && { pass: pass.name, lastCheckpointBytesBeforePass: bytesBeforePass },
     directories: loaded.perDirectory,
@@ -610,7 +658,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
   let drainMsTotal = 0;
   let summarizedSessions = 0;
   return {
-    probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver),
+    probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver, opts.queryArm),
     async ingest(session) {
       let drain = "";
       if (opts.llm) {
@@ -648,6 +696,7 @@ async function main(): Promise<void> {
   const scored = new Set(selectSplit("replay", loaded.sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
   const sessions = opts.keyedOnly ? keyedSubset(loaded.sessions, scored) : loaded.sessions;
   if (opts.keyedOnly) console.log(`--keyed-only: ${sessions.length} of ${loaded.sessions.length} Sessions carry or answer a key item`);
+  console.log(`query arm: ${opts.queryArm.arm} (reply-chars ${opts.queryArm.chars}, reply-scale ${opts.queryArm.scale})`);
   console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
@@ -705,13 +754,13 @@ async function main(): Promise<void> {
     const metrics = await backend.metrics();
     const llm = metrics && { llm: metrics };
     if (opts.saveCheckpoints) {
-      const run = { date: new Date().toISOString(), options: { ...opts, root: undefined, out: undefined }, ...llm, minutes };
+      const run = { date: new Date().toISOString(), options: { ...opts, root: undefined, out: undefined }, selection: selectionOf(scored), ...llm, minutes };
       writeFileSync(join(checkpointDir, "run.json"), JSON.stringify(run, null, 2));
       console.log(`wrote ${checkpoints.length} checkpoints to ${checkpointDir}`);
       return;
     }
     const meta = { storeBytesStart: bytesStart, storeBytesEnd: await backend.storeBytes() };
-    writeRun(opts, scores, meta, backend.providers(), { ...llm, directories: perDirectory, projects: perProject, minutes });
+    writeRun(opts, scores, meta, backend.providers(), { ...llm, selection: selectionOf(scored), directories: perDirectory, projects: perProject, minutes });
   } finally {
     await backend.stop();
   }

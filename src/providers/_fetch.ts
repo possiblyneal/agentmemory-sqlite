@@ -5,12 +5,16 @@ import { getEnvVar } from "../config.js";
 // deadline — not per-attempt — so the worst case never blows past the caller's
 // timeout budget. A Retry-After is honored in full when it fits that budget:
 // every LLM call is background work, and retrying a busy server sooner than it
-// asked only earns another 429.
+// asked only earns another 429. A broker that puts its wait in the JSON body
+// as `retry_after_seconds` (top level or under `error`) is honored the same
+// way when the response has no usable Retry-After header; the header wins.
 const MAX_ATTEMPTS = 3;
 // A retry only makes sense if there's room for at least a token attempt after
 // the sleep; without this floor we'd sleep, fire, and get instantly cut off.
 const MIN_ATTEMPT_FLOOR_MS = 100;
-const RETRY_STATUS = new Set([429, 503]);
+// 529 is Anthropic's "overloaded"; its SDK retries are off, so this loop owns it.
+const RETRY_STATUS = new Set([429, 503, 529]);
+const DEFAULT_LLM_TIMEOUT_MS = 60_000;
 // Embedding calls take p99 3 s on the Operator's broker. A hung embedder must
 // fail fast so the index fill backfills the row, not hold a caller for the
 // LLM timeout.
@@ -76,15 +80,34 @@ function parseRetryAfter(header: string | null): number | undefined {
   return undefined;
 }
 
+async function bodyRetryAfter(response: Response): Promise<number | undefined> {
+  try {
+    const json: unknown = await response.clone().json();
+    const top = json as { retry_after_seconds?: unknown; error?: unknown } | null;
+    const nested = top?.error as { retry_after_seconds?: unknown } | null | undefined;
+    const seconds = top?.retry_after_seconds ?? nested?.retry_after_seconds;
+    return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+      ? seconds * 1000
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveLlmTimeoutMs(): number {
+  const parsed = Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LLM_TIMEOUT_MS;
+}
+
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs?: number,
 ): Promise<Response> {
-  const parsed =
-    timeoutMs ??
-    Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "60000", 10);
-  const ms = Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
+  const ms =
+    timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : resolveLlmTimeoutMs();
 
   // The caller's timeout is the TOTAL budget for all attempts, sleeps and the
   // caller's read of the returned body, honored exactly: nothing above this
@@ -105,8 +128,10 @@ export async function fetchWithTimeout(
   for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
     if (!RETRY_STATUS.has(response.status)) return response;
 
-    const retryAfter = parseRetryAfter(response.headers.get("Retry-After"));
-    // Exponential backoff fallback when no Retry-After: 500ms, 1000ms, ...
+    const retryAfter =
+      parseRetryAfter(response.headers.get("Retry-After")) ??
+      (await bodyRetryAfter(response));
+    // Exponential backoff fallback when neither header nor body gives a wait: 500ms, 1000ms, ...
     const backoff = 500 * 2 ** (attempt - 1);
     const delay = retryAfter ?? backoff;
 
