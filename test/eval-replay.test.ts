@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decisionsRevisited,
@@ -14,6 +18,7 @@ import {
   type Probe,
   type ProbeItem,
 } from "../eval/runner/replay-score.js";
+import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint } from "../eval/runner/replay-checkpoints.js";
 import { hookPayloads } from "../eval/runner/replay-hooks.js";
 import {
   bankId,
@@ -615,5 +620,120 @@ describe("parseMaintenance", () => {
     expect(parseMaintenance("consolidate")).toHaveProperty("error");
     expect(parseMaintenance("evict-cap:0")).toHaveProperty("error");
     expect(parseMaintenance("evict-importance:x")).toHaveProperty("error");
+  });
+});
+
+describe("replay save pass checkpoints", () => {
+  const dirs: string[] = [];
+  const scratch = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "replay-checkpoints-"));
+    dirs.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const sessions = ["a", "b", "c", "d"].map((id, i) =>
+    session(id, `2026-09-0${i + 1}T10:00:00Z`, [{ user: "x" }, { tool: "Read", file: `${CWD}/${id}.ts` }]),
+  );
+  const scored = new Set(sessions.map((s) => s.id));
+  const manifest = (...indexes: number[]): Checkpoint[] =>
+    indexes.map((i) => ({
+      sessionId: sessions[i]!.id,
+      file: `${String(i).padStart(3, "0")}-${sessions[i]!.id}.sqlite`,
+      ingested: sessions.slice(0, i).map((s) => s.id),
+    }));
+  const writeManifest = (dir: string, entries: Checkpoint[]): void =>
+    writeFileSync(join(dir, MANIFEST), JSON.stringify(entries));
+  const resume = (dir: string, s = sessions, set = scored) => openSavePass(dir, true, s, set);
+
+  it("resumes from the last checkpoint with the Sessions it already ingested", () => {
+    const dir = scratch();
+    const entries = manifest(1, 2);
+    writeManifest(dir, entries);
+    const pass = resume(dir);
+    expect(pass.resumeAt).toBe(2);
+    expect(pass.ingested.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(pass.seed).toBe(join(dir, "002-c.sqlite"));
+    expect(pass.checkpoints).toEqual(entries);
+  });
+
+  it("refuses a finished save pass", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(1));
+    writeFileSync(join(dir, "run.json"), "{}");
+    expect(() => resume(dir)).toThrow("holds a finished save pass; nothing to resume");
+  });
+
+  it("refuses a directory with no manifest", () => {
+    expect(() => resume(scratch())).toThrow("holds no save pass to resume");
+  });
+
+  it("refuses an empty manifest", () => {
+    const dir = scratch();
+    writeManifest(dir, []);
+    expect(() => resume(dir)).toThrow("lists no checkpoint to resume from");
+  });
+
+  it("refuses Sessions that load in another order than the save pass saw", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(2));
+    const earlier = session("z", "2026-08-01T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/z.ts` }]);
+    expect(() => resume(dir, [earlier, ...sessions], new Set([...scored, "z"]))).toThrow(
+      "was saved from other Sessions than these options load",
+    );
+  });
+
+  it("refuses a checkpoint that ingested Sessions these options do not load before it", () => {
+    const dir = scratch();
+    writeManifest(dir, [{ ...manifest(2)[0]!, ingested: ["a", "d"] }]);
+    expect(() => resume(dir)).toThrow("was saved from other Sessions than these options load");
+  });
+
+  it("refuses a checkpoint outside the scored set", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(1, 2));
+    expect(() => resume(dir, sessions, new Set(["a", "c"]))).toThrow("was saved from other Sessions than these options load");
+  });
+
+  it("refuses when none of the manifest's Sessions load", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(2));
+    expect(() => resume(dir, sessions.slice(0, 2), scored)).toThrow("was saved from other Sessions than these options load");
+  });
+
+  it("refuses a fresh save pass over an existing manifest", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(1));
+    expect(() => openSavePass(dir, false, sessions, scored)).toThrow("already holds a save pass; pass a fresh --out, or --resume");
+  });
+
+  it("starts a fresh save pass in a new directory", () => {
+    const dir = join(scratch(), "checkpoints");
+    const pass = openSavePass(dir, false, sessions, scored);
+    expect(existsSync(dir)).toBe(true);
+    expect(pass).toEqual({ checkpoints: [], ingested: [], resumeAt: 0, seed: undefined });
+  });
+
+  it("overwrites a leftover file at the checkpoint's name with a valid copy of the store", async () => {
+    const dir = scratch();
+    const source = join(dir, "source.sqlite");
+    const db = new DatabaseSync(source);
+    db.exec("CREATE TABLE kv (k TEXT, v TEXT); INSERT INTO kv VALUES ('a', '1'), ('b', '2')");
+    db.close();
+    writeFileSync(join(dir, "002-c.sqlite"), "interrupted garbage");
+    const saved = await saveCheckpoint(source, dir, 2, "c", sessions.slice(0, 2));
+    expect(saved).toEqual({ sessionId: "c", file: "002-c.sqlite", ingested: ["a", "b"] });
+    const copy = new DatabaseSync(join(dir, saved.file), { readOnly: true });
+    try {
+      expect(copy.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+      expect(copy.prepare("SELECT k, v FROM kv ORDER BY k").all()).toEqual([
+        { k: "a", v: "1" },
+        { k: "b", v: "2" },
+      ]);
+    } finally {
+      copy.close();
+    }
   });
 });

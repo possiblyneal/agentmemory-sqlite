@@ -5,7 +5,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -35,6 +34,7 @@ import {
   type ReplaySession,
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
+import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
 import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
@@ -534,38 +534,6 @@ async function recordIngested(baseUrl: string, session: ReplaySession, resolver:
   resolver.sessions.set(session.id, session);
 }
 
-// A copy of the store as it stands just before a scored Session would be
-// probed, so the probing pass can run later, and more than once, without
-// paying the import (and its LLM calls) again.
-interface Checkpoint {
-  sessionId: string;
-  file: string;
-  ingested: string[];
-}
-
-const MANIFEST = "manifest.json";
-
-async function saveCheckpoint(
-  sqlitePath: string,
-  dir: string,
-  index: number,
-  sessionId: string,
-  ingested: ReplaySession[],
-): Promise<Checkpoint> {
-  const file = `${String(index).padStart(3, "0")}-${sessionId}.sqlite`;
-  // VACUUM INTO, not sqlite.backup, which needs Node 22.16 against the 22.13 floor.
-  // It refuses an existing file, which a pass interrupted mid-write leaves
-  // behind unlisted for the resume to write again.
-  rmSync(join(dir, file), { force: true });
-  const db = new DatabaseSync(sqlitePath, { readOnly: true });
-  try {
-    db.prepare("VACUUM INTO ?").run(join(dir, file));
-  } finally {
-    db.close();
-  }
-  return { sessionId, file, ingested: ingested.map((s) => s.id) };
-}
-
 async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string): Promise<void> {
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const dir = opts.fromCheckpoints!;
@@ -688,40 +656,10 @@ async function main(): Promise<void> {
 
   const checkpointDir = join(opts.out, "checkpoints");
   const manifestPath = join(checkpointDir, MANIFEST);
-  let checkpoints: Checkpoint[] = [];
-  let ingested: ReplaySession[] = [];
-  let resumeAt = 0;
-  let seed: string | undefined;
-  if (opts.resume) {
-    // An interrupted save pass restarts from its last checkpoint: that store
-    // holds every Session ingested before it, so only the rest are replayed.
-    if (!existsSync(manifestPath)) throw new Error(`${checkpointDir} holds no save pass to resume`);
-    if (existsSync(join(checkpointDir, "run.json"))) throw new Error(`${checkpointDir} holds a finished save pass; nothing to resume`);
-    checkpoints = JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[];
-    const last = checkpoints.at(-1);
-    if (!last) throw new Error(`${manifestPath} lists no checkpoint to resume from`);
-    const byId = new Map(sessions.map((s) => [s.id, s]));
-    resumeAt = sessions.findIndex((s) => s.id === last.sessionId);
-    // The same options load the same Sessions in the same order and split, so
-    // the last checkpoint sits at the index its file name records, and every
-    // Session it ingested comes before it.
-    const before = new Set(sessions.slice(0, Math.max(resumeAt, 0)).map((s) => s.id));
-    const sameCorpus =
-      resumeAt === Number.parseInt(last.file, 10) &&
-      last.ingested.every((id) => before.has(id)) &&
-      checkpoints.every((c) => scored.has(c.sessionId));
-    if (!sameCorpus) {
-      throw new Error(`${manifestPath} was saved from other Sessions than these options load; pass the save pass's own options`);
-    }
-    ingested = last.ingested.map((id) => byId.get(id)!);
-    seed = join(checkpointDir, last.file);
-    console.log(`--resume: from ${last.file}, ${ingested.length} Sessions already ingested`);
-  } else if (opts.saveCheckpoints) {
-    // A save pass takes hours of LLM time; never let a rerun mix its stores
-    // with, or silently stand behind, an earlier pass's manifest.
-    if (existsSync(manifestPath)) throw new Error(`${checkpointDir} already holds a save pass; pass a fresh --out, or --resume`);
-    mkdirSync(checkpointDir, { recursive: true });
-  }
+  const { checkpoints, ingested, resumeAt, seed }: SavePass =
+    opts.resume || opts.saveCheckpoints
+      ? openSavePass(checkpointDir, opts.resume, sessions, scored)
+      : { checkpoints: [], ingested: [], resumeAt: 0 };
   const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts, seed);
   const scores: SessionScore[] = [];
   const t0 = Date.now();
