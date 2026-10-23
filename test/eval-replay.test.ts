@@ -685,6 +685,12 @@ describe("replay save pass checkpoints", () => {
     );
   });
 
+  it("refuses a checkpoint that ingested Sessions these options do not load before it", () => {
+    const dir = scratch();
+    writeManifest(dir, [{ ...manifest(2)[0]!, ingested: ["a", "d"] }]);
+    expect(() => resume(dir)).toThrow("was saved from other Sessions than these options load");
+  });
+
   it("refuses a checkpoint outside the scored set", () => {
     const dir = scratch();
     writeManifest(dir, manifest(1, 2));

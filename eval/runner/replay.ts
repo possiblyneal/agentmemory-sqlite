@@ -34,7 +34,7 @@ import {
   type ReplaySession,
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
-import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint } from "./replay-checkpoints.js";
+import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
 import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
@@ -655,10 +655,11 @@ async function main(): Promise<void> {
   if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson);
 
   const checkpointDir = join(opts.out, "checkpoints");
-  const { checkpoints, ingested, resumeAt, seed } =
+  const manifestPath = join(checkpointDir, MANIFEST);
+  const { checkpoints, ingested, resumeAt, seed }: SavePass =
     opts.resume || opts.saveCheckpoints
       ? openSavePass(checkpointDir, opts.resume, sessions, scored)
-      : { checkpoints: [] as Checkpoint[], ingested: [] as ReplaySession[], resumeAt: 0, seed: undefined };
+      : { checkpoints: [], ingested: [], resumeAt: 0 };
   const backend: Backend = opts.backend === "hindsight" ? await startHindsight({ port: opts.hindsightPort }) : await startAgentmemory(opts, seed);
   const scores: SessionScore[] = [];
   const t0 = Date.now();
