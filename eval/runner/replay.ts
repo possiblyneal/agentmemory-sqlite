@@ -42,6 +42,7 @@ import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
+import { composeQuery, isQueryArm, QUERY_ARMS, type QueryArmOptions } from "./replay-query-arm.js";
 import { parseMaintenance, type MaintenancePass } from "./replay-maintenance.js";
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
@@ -73,6 +74,7 @@ interface Options {
   fromCheckpoints?: string;
   maintenance?: MaintenancePass;
   atypical: string[];
+  queryArm: QueryArmOptions;
 }
 
 function parseOptions(): Options {
@@ -95,6 +97,9 @@ function parseOptions(): Options {
       resume: { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
       maintenance: { type: "string" },
+      "query-arm": { type: "string", default: "control" },
+      "reply-chars": { type: "string", default: "1000" },
+      "reply-scale": { type: "string", default: "0" },
       atypical: { type: "string", default: DEFAULT_ATYPICAL_PROJECTS.join(",") },
     },
   });
@@ -155,6 +160,20 @@ function parseOptions(): Options {
     console.error("--maintenance runs on restored checkpoints; pass --from-checkpoints");
     process.exit(2);
   }
+  const queryArm = values["query-arm"] as string;
+  if (!isQueryArm(queryArm)) {
+    console.error(`--query-arm must be one of ${QUERY_ARMS.join(", ")}, got: ${queryArm}`);
+    process.exit(2);
+  }
+  if (queryArm !== "control" && values.backend === "hindsight") {
+    console.error("--query-arm shapes agentmemory's prompt-context probe; drop --backend hindsight");
+    process.exit(2);
+  }
+  const replyScale = Number(values["reply-scale"]);
+  if (!Number.isFinite(replyScale) || replyScale < 0) {
+    console.error(`--reply-scale must be a number >= 0, got: ${values["reply-scale"]}`);
+    process.exit(2);
+  }
   const maintenance = values.maintenance ? parseMaintenance(values.maintenance) : undefined;
   if (maintenance && "error" in maintenance) {
     console.error(maintenance.error);
@@ -179,6 +198,7 @@ function parseOptions(): Options {
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
     maintenance,
     atypical: (values.atypical as string).split(",").map((p) => p.trim()).filter(Boolean),
+    queryArm: { arm: queryArm, chars: positive("reply-chars", values["reply-chars"] as string, 0), scale: replyScale },
   };
 }
 
@@ -343,6 +363,7 @@ async function probeSession(
   session: ReplaySession,
   maxPrompts: number,
   resolver: Resolver,
+  queryArm: QueryArmOptions,
 ): Promise<Probe[]> {
   const probes: Probe[] = [];
   const attempt = async (kind: ProbeKind, turn: number, run: () => Promise<Omit<Probe, "kind" | "turn">>) => {
@@ -359,8 +380,14 @@ async function probeSession(
   };
 
   await attempt("session-start", 0, injection("session/start", { sessionId: session.id, project: session.project, cwd: session.cwd }));
-  for (const turn of session.userTurns.slice(0, maxPrompts)) {
-    await attempt("prompt-context", turn.turn, injection("prompt-context", { sessionId: session.id, prompt: turn.text, project: session.project }));
+  for (const [i, turn] of session.userTurns.slice(0, maxPrompts).entries()) {
+    const prompt = composeQuery(
+      queryArm.arm,
+      { prompt: turn.text, reply: turn.precedingReply, prevPrompt: session.userTurns[i - 1]?.text ?? "" },
+      queryArm.chars,
+      queryArm.scale,
+    );
+    await attempt("prompt-context", turn.turn, injection("prompt-context", { sessionId: session.id, prompt, project: session.project }));
     await attempt("search", turn.turn, async () => {
       const { body, ms } = await post<{ results?: SearchRow[] }>(baseUrl, "smart-search", {
         query: turn.text,
@@ -536,6 +563,7 @@ function writeRun(
   const run = {
     date: new Date().toISOString(),
     options: { ...opts, root: undefined, out: undefined },
+    queryArm: opts.queryArm,
     providers,
     ...extra,
   };
@@ -597,7 +625,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       if (i === 0) bytesStart = bytesEnd;
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
-      const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver);
+      const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
       const score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
@@ -630,7 +658,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
   let drainMsTotal = 0;
   let summarizedSessions = 0;
   return {
-    probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver),
+    probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver, opts.queryArm),
     async ingest(session) {
       let drain = "";
       if (opts.llm) {
@@ -668,6 +696,7 @@ async function main(): Promise<void> {
   const scored = new Set(selectSplit("replay", loaded.sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
   const sessions = opts.keyedOnly ? keyedSubset(loaded.sessions, scored) : loaded.sessions;
   if (opts.keyedOnly) console.log(`--keyed-only: ${sessions.length} of ${loaded.sessions.length} Sessions carry or answer a key item`);
+  console.log(`query arm: ${opts.queryArm.arm} (reply-chars ${opts.queryArm.chars}, reply-scale ${opts.queryArm.scale})`);
   console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");

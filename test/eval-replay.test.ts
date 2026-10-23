@@ -41,6 +41,7 @@ const CWD = "/synthetic/shop";
 type Step =
   | { user: string; meta?: boolean }
   | { tool: string; file: string }
+  | { assistant: string; thinking?: string }
   | { toolResult: string };
 
 function transcript(sessionId: string, start: string, steps: Step[]): string {
@@ -50,6 +51,12 @@ function transcript(sessionId: string, start: string, steps: Step[]): string {
       const common = { sessionId, cwd: CWD, timestamp: new Date(base + i * 1000).toISOString() };
       if ("user" in step) {
         return { ...common, type: "user", isMeta: step.meta, message: { role: "user", content: step.user } };
+      }
+      if ("assistant" in step) {
+        const content: unknown[] = [];
+        if (step.thinking) content.push({ type: "thinking", thinking: step.thinking });
+        content.push({ type: "text", text: step.assistant });
+        return { ...common, type: "assistant", message: { role: "assistant", content } };
       }
       if ("tool" in step) {
         return {
@@ -140,6 +147,25 @@ describe("parseTranscript", () => {
       transcript("s4", "2026-09-05T08:00:00Z", [{ user: "hello there" }]),
     ].join("\n");
     expect(parseTranscript(lines)?.startedAt).toBe("2026-09-05T08:00:00.000Z");
+  });
+
+  it("carries the Agent's last text reply before each typed prompt", () => {
+    const s = session("s5", "2026-09-01T10:00:00Z", [
+      { user: "add a cart total" },
+      { assistant: "I will start by reading the cart." },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { toolResult: "file contents" },
+      { assistant: "Added calcTotal in src/cart.ts.", thinking: "private musings" },
+      { assistant: "Want me to add tests?" },
+      { user: "<command-name>/clear</command-name>" },
+      { user: "yes" },
+      { user: "continue" },
+    ]);
+    expect(s.userTurns.map((t) => t.precedingReply)).toEqual([
+      "",
+      "Added calcTotal in src/cart.ts.\n\nWant me to add tests?",
+      "",
+    ]);
   });
 
   it("returns null for a transcript with no human turn", () => {
