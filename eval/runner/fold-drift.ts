@@ -10,6 +10,8 @@ import { measureFoldDrift, type FoldDriftResult } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
 
+// A checkpoint is a closed copy read once, before any daemon exists, so it is
+// read straight from SqliteState's kv table rather than booting an Engine on it.
 function readScope<T>(db: DatabaseSync, scope: string): T[] {
   const rows = db
     .prepare("SELECT value FROM kv WHERE scope = ? ORDER BY seq")
@@ -60,14 +62,21 @@ async function main(): Promise<void> {
   db.close();
 
   const results: FoldDriftResult[] = [];
+  const failed: Array<{ sessionId: string; error: string }> = [];
   for (const [sessionId, observations] of sessions) {
-    const r = await measureFoldDrift(provider, observations, {
-      sessionId,
-      project: projects.get(sessionId) ?? "unknown",
-      batch,
-    });
-    results.push(r);
-    console.log(row(r));
+    try {
+      const r = await measureFoldDrift(provider, observations, {
+        sessionId,
+        project: projects.get(sessionId) ?? "unknown",
+        batch,
+      });
+      results.push(r);
+      console.log(row(r));
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      failed.push({ sessionId, error });
+      console.log(`${sessionId} failed: ${error}`);
+    }
   }
 
   const total = results.reduce(
@@ -83,12 +92,12 @@ async function main(): Promise<void> {
 
   mkdirSync(OUT_DIR, { recursive: true });
   const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-  writeFileSync(file, JSON.stringify({ store: values.store, batch, total, sessions: results }, null, 2));
+  writeFileSync(file, JSON.stringify({ store: values.store, batch, total, sessions: results, failed }, null, 2));
   console.log(`wrote ${file}`);
 }
 
 function row(r: FoldDriftResult): string {
-  return `${r.sessionId} obs=${r.observations} full=${r.full} folded=${r.folded} folds=${r.folds} missing(exact)=${r.missingExact} missing(jaccard>=0.5)=${r.missingLoose}`;
+  return `${r.sessionId} obs=${r.observations} full=${r.full} folded=${r.folded} folds=${r.folds} fallbacks=${r.fallbacks} missing(exact)=${r.missingExact} missing(jaccard>=0.5)=${r.missingLoose}`;
 }
 
 main().catch((err) => {

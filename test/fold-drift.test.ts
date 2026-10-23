@@ -46,8 +46,20 @@ describe("measureFoldDrift", () => {
     expect(r.full).toBe(3);
     expect(r.folded).toBe(2);
     expect(r.folds).toBe(1);
+    expect(r.fallbacks).toBe(0);
     expect(r.missingExact).toBe(1);
     expect(r.missingLoose).toBe(1);
+  });
+
+  it("counts an unparseable fold reply as a fallback, not a fold", async () => {
+    const provider: MemoryProvider = {
+      name: "fake",
+      compress: async () => "",
+      summarize: async (system: string) => (system === FOLD_SYSTEM ? "not xml" : xml(ALL)),
+    };
+    const r = await measureFoldDrift(provider, obs(6), opts);
+    expect(r.folds).toBe(0);
+    expect(r.fallbacks).toBe(1);
   });
 
   it("matches normalized text and counts a reworded decision as loosely matched", async () => {

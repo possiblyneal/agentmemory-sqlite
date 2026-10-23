@@ -486,6 +486,9 @@ describe("summarizeReplay", () => {
       expect(s.byProject.blog.rightMoment.injection).toEqual({ n: 1, hit: 1, share: 1 });
       expect(s.byProject["medical-researcher"].rightMoment.injection.share).toBe(0);
       expect(Object.keys(s.byProject.shop)).toEqual(Object.keys(s.typical.summary));
+      expect(s.byProject.shop).not.toHaveProperty("leastRecord");
+      expect(s.typical.summary).not.toHaveProperty("operatorAttention");
+      expect(s).toHaveProperty("leastRecord");
     });
 
     it("rolls up typical without the atypical projects", () => {

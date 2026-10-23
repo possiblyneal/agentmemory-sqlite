@@ -246,17 +246,22 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
   };
 }
 
-// Store size and growth are run-wide, so every row carries the same storage numbers.
+// Store size and growth are run-wide, so only the pooled row carries them.
+function summarizeSubset(scores: SessionScore[], meta: RunMeta) {
+  const { leastRecord: _store, operatorAttention: _growth, ...rest } = summarizeSessions(scores, meta);
+  return rest;
+}
+
 export function summarizeReplay(scores: SessionScore[], meta: RunMeta, atypical: string[] = DEFAULT_ATYPICAL_PROJECTS) {
   const projects = [...new Set(scores.map((s) => s.project))].sort();
   return {
     ...summarizeSessions(scores, meta),
     byProject: Object.fromEntries(
-      projects.map((p) => [p, summarizeSessions(scores.filter((s) => s.project === p), meta)]),
+      projects.map((p) => [p, summarizeSubset(scores.filter((s) => s.project === p), meta)]),
     ),
     typical: {
       excluded: atypical,
-      summary: summarizeSessions(scores.filter((s) => !atypical.includes(s.project)), meta),
+      summary: summarizeSubset(scores.filter((s) => !atypical.includes(s.project)), meta),
     },
   };
 }

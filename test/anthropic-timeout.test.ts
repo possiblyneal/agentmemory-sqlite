@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
+import { ProviderTimeoutError } from "../src/providers/_fetch.js";
 
 const reply = { content: [{ type: "text", text: "ok" }], usage: { input_tokens: 3, output_tokens: 5 } };
 
@@ -36,7 +37,7 @@ describe("AnthropicProvider outbound deadline (#313)", () => {
     const url = await stub(() => {}, () => hits++);
     const provider = new AnthropicProvider("k", "m", 64, url);
     const started = Date.now();
-    await expect(provider.summarize("sys", "user")).rejects.toBeDefined();
+    await expect(provider.summarize("sys", "user")).rejects.toBeInstanceOf(ProviderTimeoutError);
     expect(Date.now() - started).toBeLessThan(2000);
     expect(hits).toBe(1);
   });
@@ -47,6 +48,18 @@ describe("AnthropicProvider outbound deadline (#313)", () => {
     const url = await stub((_req, res) => {
       res.writeHead(hits === 1 ? 429 : 200, { "content-type": "application/json", "retry-after": "0" });
       res.end(JSON.stringify(hits === 1 ? { type: "error", error: { type: "rate_limit_error", message: "slow" } } : reply));
+    }, () => hits++);
+    const provider = new AnthropicProvider("k", "m", 64, url);
+    expect(await provider.summarize("sys", "user")).toBe("ok");
+    expect(hits).toBe(2);
+  });
+
+  it("retries a 529 overloaded reply", async () => {
+    process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "10000";
+    let hits = 0;
+    const url = await stub((_req, res) => {
+      res.writeHead(hits === 1 ? 529 : 200, { "content-type": "application/json", "retry-after": "0" });
+      res.end(JSON.stringify(hits === 1 ? { type: "error", error: { type: "overloaded_error", message: "busy" } } : reply));
     }, () => hits++);
     const provider = new AnthropicProvider("k", "m", 64, url);
     expect(await provider.summarize("sys", "user")).toBe("ok");

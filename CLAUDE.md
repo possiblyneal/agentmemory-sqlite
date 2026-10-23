@@ -354,7 +354,10 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
   timeout exactly. One deadline covers every retry and the read of the response body. LLM
   providers fall back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s (the OpenAI LLM provider
   resolves `OPENAI_TIMEOUT_MS` first); embedding providers pass `EMBED_TIMEOUT_MS` (30s), so
-  a hung embedder fails fast and the index fill backfills the row. The in-process Engine has
+  a hung embedder fails fast and the index fill backfills the row. A 429, 503 or 529 is
+  retried after its `Retry-After` header, else its JSON body's `retry_after_seconds`.
+  `AnthropicProvider` routes the SDK's requests through `fetchWithTimeout` with SDK retries
+  off and maps the SDK's timeout to `ProviderTimeoutError`. The in-process Engine has
   no invocation timeout, so never reintroduce a ceiling that clamps that bound
   ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)).
 
@@ -366,6 +369,8 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - Follow existing patterns in `test/crystallize.test.ts` for function tests
 - Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
 - `npm run eval:replay -- --projects=<dir>,...` replays the Operator's own `~/.claude/projects` transcripts into a throwaway daemon and scores each Goal line against an answer key derived from the transcripts, counting only turns the Operator typed (`eval/README.md`). `--llm` replays through the hook payloads into a daemon with LLM compression on, using the shell's OpenAI-compatible settings. It is not part of CI, and its output stays under `tmp/eval-replay/` because it quotes private transcripts; only aggregates reach `docs/benchmarks/`
+- `eval:replay --query-arm <arm>` (with `--reply-chars`, `--reply-scale`) shapes only the prompt-context probe's query from the previous Agent reply or prompt, to measure terse-prompt Injection before the hook changes; `summary.json` also carries `byProject` and a `typical` rollup excluding `--atypical`, and a change ships on the pooled number only when it does not lose on `typical`
+- `npm run eval:fold-drift -- --store <checkpoint> (--sessions a,b | --longest N)` compares each Session's full summarize with a fold sequence over `--batch` slices and counts decisions lost; it calls the configured LLM and writes `tmp/eval-fold-drift/`
 - Iterate on Recall with `npm run eval:suite -- --tier fast --against <label>` (~2 min: coding-life, PrecisionMemBench, LongMemEval sample; `full` adds replay). Every eval runner scores only the dev split by default; `--split holdout` or `all` (a published scorecard) needs `AGENTMEMORY_EVAL_HOLDOUT=<label>` and logs the look in `eval/holdout-ledger.ndjson`, which `eval:suite --holdout` does for you. Never change the split salt or share in `eval/runner/split.ts`; see `eval/README.md`
 - sdebench (AMB harness, boltons) results go in `docs/benchmarks/2026-10-18-sdebench.md`: one row per arm, rejected levers included, with dev and holdout totals. Read it before choosing a lever, so a tried one is not rerun
 - `test/supersession.test.ts` records, per record kind and Recall surface, whether a newer claim beats the stale one; `docs/supersession.md` maps each cell to its test and follow-up issue. A cell where the stale claim still wins is `it.fails`: a fix flips it to `it` and updates its row in that table

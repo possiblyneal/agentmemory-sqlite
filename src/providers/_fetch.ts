@@ -12,7 +12,9 @@ const MAX_ATTEMPTS = 3;
 // A retry only makes sense if there's room for at least a token attempt after
 // the sleep; without this floor we'd sleep, fire, and get instantly cut off.
 const MIN_ATTEMPT_FLOOR_MS = 100;
-const RETRY_STATUS = new Set([429, 503]);
+// 529 is Anthropic's "overloaded"; its SDK retries are off, so this loop owns it.
+const RETRY_STATUS = new Set([429, 503, 529]);
+const DEFAULT_LLM_TIMEOUT_MS = 60_000;
 // Embedding calls take p99 3 s on the Operator's broker. A hung embedder must
 // fail fast so the index fill backfills the row, not hold a caller for the
 // LLM timeout.
@@ -92,15 +94,20 @@ async function bodyRetryAfter(response: Response): Promise<number | undefined> {
   }
 }
 
+export function resolveLlmTimeoutMs(): number {
+  const parsed = Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LLM_TIMEOUT_MS;
+}
+
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs?: number,
 ): Promise<Response> {
-  const parsed =
-    timeoutMs ??
-    Number.parseInt(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS") ?? "60000", 10);
-  const ms = Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
+  const ms =
+    timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : resolveLlmTimeoutMs();
 
   // The caller's timeout is the TOTAL budget for all attempts, sleeps and the
   // caller's read of the returned body, honored exactly: nothing above this

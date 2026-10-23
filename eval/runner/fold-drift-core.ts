@@ -2,8 +2,7 @@ import type { ISdk } from "../../src/engine/types.js";
 import type { CompressedObservation, MemoryProvider, Session, SessionSummary } from "../../src/types.js";
 import { registerSummarizeFunction } from "../../src/functions/summarize.js";
 import { FOLD_SYSTEM } from "../../src/prompts/summary.js";
-import { KV } from "../../src/state/schema.js";
-import { jaccardSimilarity } from "../../src/state/schema.js";
+import { KV, jaccardSimilarity } from "../../src/state/schema.js";
 
 export interface FoldDriftOptions {
   sessionId: string;
@@ -17,6 +16,7 @@ export interface FoldDriftResult {
   full: number;
   folded: number;
   folds: number;
+  fallbacks: number;
   missingExact: number;
   missingLoose: number;
   missing: string[];
@@ -52,18 +52,19 @@ function summarizer(provider: MemoryProvider, opts: FoldDriftOptions) {
   const sdk = {
     registerFunction: (id: string, h: (data: unknown) => Promise<unknown>) => void handlers.set(id, h),
   } as unknown as ISdk;
-  let folds = 0;
+  const calls = { fold: 0, other: 0 };
   const counting: MemoryProvider = {
     ...provider,
     summarize: (system, prompt) => {
-      if (system === FOLD_SYSTEM) folds++;
+      if (system === FOLD_SYSTEM) calls.fold++;
+      else calls.other++;
       return provider.summarize(system, prompt);
     },
   };
   registerSummarizeFunction(sdk, kv as never, counting);
   const session: Session = { id: opts.sessionId, project: opts.project } as Session;
   return {
-    folds: () => folds,
+    calls: () => ({ ...calls }),
     async run(observations: CompressedObservation[]): Promise<SessionSummary | null> {
       await kv.set(KV.sessions, opts.sessionId, session);
       for (const o of observations) await kv.set(KV.observations(opts.sessionId), o.id, o);
@@ -87,9 +88,19 @@ export async function measureFoldDrift(
 
   const sequence = summarizer(provider, opts);
   let last: SessionSummary | null = null;
+  let folds = 0;
+  let fallbacks = 0;
   for (let end = opts.batch; ; end += opts.batch) {
     const cut = Math.min(end, observations.length);
+    const before = sequence.calls();
     last = await sequence.run(observations.slice(0, cut));
+    const after = sequence.calls();
+    // A run after the first that made any non-fold call re-summarized the whole
+    // Session, so its decisions are not a fold's.
+    if (end > opts.batch) {
+      if (after.other > before.other) fallbacks++;
+      else if (after.fold > before.fold) folds++;
+    }
     if (cut === observations.length) break;
   }
   const folded = last?.keyDecisions ?? [];
@@ -104,7 +115,8 @@ export async function measureFoldDrift(
     observations: observations.length,
     full: full.length,
     folded: folded.length,
-    folds: Math.max(0, sequence.folds()),
+    folds,
+    fallbacks,
     missingExact: missingList.length,
     missingLoose: missingLoose.length,
     missing: missingList,

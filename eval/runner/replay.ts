@@ -562,7 +562,7 @@ function writeRun(
   const summary = summarizeReplay(scores, meta, opts.atypical);
   const run = {
     date: new Date().toISOString(),
-    options: { ...opts, root: undefined, out: undefined },
+    options: { ...opts, root: undefined, out: undefined, queryArm: undefined },
     queryArm: opts.queryArm,
     providers,
     ...extra,

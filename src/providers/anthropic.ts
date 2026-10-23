@@ -2,13 +2,19 @@ import Anthropic from '@anthropic-ai/sdk'
 import { compressMaxTokens, type CompressOptions, type MemoryProvider, type ProviderUsage } from '../types.js'
 import { getEnvVar } from '../config.js'
 import { UsageTally, hostOf } from './_usage.js'
-import { fetchWithTimeout } from './_fetch.js'
+import { ProviderTimeoutError, fetchWithTimeout, resolveLlmTimeoutMs } from './_fetch.js'
 
-const DEFAULT_TIMEOUT_MS = 60_000
+const SDK_TIMEOUT_MARGIN_MS = 5_000
 
-function resolveTimeoutMs(): number {
-  const parsed = Number.parseInt(getEnvVar('AGENTMEMORY_LLM_TIMEOUT_MS') ?? '', 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS
+// The SDK rewraps any fetch failure, our deadline's included, as its own
+// connection error; graph extraction counts timeouts by ProviderTimeoutError.
+async function withTimeoutError<T>(request: Promise<T>): Promise<T> {
+  try {
+    return await request
+  } catch (err) {
+    if (err instanceof Anthropic.APIConnectionTimeoutError) throw new ProviderTimeoutError(err.message)
+    throw err
+  }
 }
 
 type Effort = NonNullable<Anthropic.OutputConfig['effort']>
@@ -22,14 +28,14 @@ export class AnthropicProvider implements MemoryProvider {
   private tally: UsageTally
 
   constructor(apiKey: string, model: string, maxTokens: number, baseURL?: string) {
-    const timeoutMs = resolveTimeoutMs()
+    const timeoutMs = resolveLlmTimeoutMs()
     // fetchWithTimeout owns the single deadline and the retries; the SDK's own
     // timeout only has to outlast it and its retries are off (#313).
     this.client = new Anthropic({
       apiKey,
       ...(baseURL ? { baseURL } : {}),
       maxRetries: 0,
-      timeout: timeoutMs + 5_000,
+      timeout: timeoutMs + SDK_TIMEOUT_MARGIN_MS,
       fetch: (url, init) => fetchWithTimeout(String(url), init ?? {}, timeoutMs),
     })
     this.model = model
@@ -61,7 +67,7 @@ export class AnthropicProvider implements MemoryProvider {
   }
 
   async describeImage(imageData: string, mimeType: string, prompt: string): Promise<string> {
-    const response = await this.client.messages.create({
+    const response = await withTimeoutError(this.client.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
       ...this.outputConfig,
@@ -75,7 +81,7 @@ export class AnthropicProvider implements MemoryProvider {
           { type: 'text', text: prompt },
         ],
       }],
-    })
+    }))
 
     this.tally.add(response.usage?.input_tokens, response.usage?.output_tokens)
     const textBlock = response.content.find((b) => b.type === 'text')
@@ -83,13 +89,13 @@ export class AnthropicProvider implements MemoryProvider {
   }
 
   private async call(systemPrompt: string, userPrompt: string, maxTokens = this.maxTokens): Promise<string> {
-    const response = await this.client.messages.create({
+    const response = await withTimeoutError(this.client.messages.create({
       model: this.model,
       max_tokens: maxTokens,
       ...this.outputConfig,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-    })
+    }))
 
     this.tally.add(response.usage?.input_tokens, response.usage?.output_tokens)
     const textBlock = response.content.find((b) => b.type === 'text')
