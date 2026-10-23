@@ -289,6 +289,7 @@ eval/
 │   ├── replay.ts                  replay runner over ~/.claude/projects transcripts (daemon glue)
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
+│   ├── replay-checkpoints.ts      save-pass manifest, --resume checks, checkpoint write
 │   ├── replay-hooks.ts            transcript → the /observe payloads the hooks would have sent (--llm)
 │   ├── replay-hindsight.ts        transcript → Hindsight retains; recall results → probe items
 │   ├── hindsight.ts               throwaway Hindsight container and its HTTP calls (--backend hindsight)
