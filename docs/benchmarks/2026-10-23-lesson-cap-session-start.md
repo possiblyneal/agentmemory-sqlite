@@ -40,7 +40,7 @@ All Δ 0.000: the cap changed no suite result.
 
 ## Methodology
 
-As in `eval/README.md`: dev split only (holdout not opened), supersession BM25-only on instance 25, the fast suite on its default instances with the baseline labelled `base-294` from `444bb900`.
+As in `eval/README.md`: dev split only (holdout not opened), supersession BM25-only on instance 25, the fast suite on its default instances with the baseline labelled `base-294` from `444bb900`. The suite ran at `2172bd5`; `eval:supersession` and `eval:gate` were rerun at `2478af9` (tokenize once in the cap) and gave identical supersession cells and a passing gate (p95 4 ms / 7 ms). The latency figures in Notes are from `2478af9`.
 
 ## Reproduce
 
