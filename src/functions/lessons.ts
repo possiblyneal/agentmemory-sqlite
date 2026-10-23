@@ -53,7 +53,7 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
   return lessonIndex ?? ensureLessonIndex(kv);
 }
 
-function lastActiveAt(lesson: Lesson): number {
+export function lastActiveAt(lesson: Lesson): number {
   return new Date(lesson.lastReinforcedAt ?? lesson.createdAt).getTime();
 }
 

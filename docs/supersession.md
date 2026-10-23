@@ -14,7 +14,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 |---|---|---|---|
 | Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale given alone** when the contradiction scores below the relevance floor (T4) |
 | Semantic Fact | unkeyed: stale capped behind the newer fact (T8); keyed: stale hidden (T8k) | unkeyed: stale demoted by the recency factor (T9); keyed: stale hidden (T9k) | not reachable (T10) |
-| Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
+| Lesson | **newer ranked first** (T11) | stale capped behind the newer Lesson (T12, T12r) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
 | Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
@@ -40,6 +40,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T10 | prompt-submit does not reach Semantic Facts, Lessons or Insights: prompt-submit gives none of them | passes |
 | T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | passes |
 | T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | passes |
+| T12r | Lesson saved just after a more-reinforced one: session start lists the newer Lesson ahead of the contradicted one | passes |
 | T13 | Insight: smart-search returns the newer Insight ahead of the contradicted one | passes |
 | T14 | Insight: session start lists the newer Insight ahead of the contradicted one | passes |
 | T15 | Session Summary decision: smart-search never returns a Session Summary decision on its own | passes |
@@ -112,8 +113,10 @@ recency`, where the recency boost decays 1% per day; a hit whose content overlap
 Jaccard 0.5 or more and was last reinforced (else created) earlier is capped just below that newer
 hit, so reinforcement cannot outvote a correction (T11). Lessons date by reinforcement, since only
 an explicit save reinforces one. Session start ranks by project-weighted
-confidence over the same boost, from `lastReinforcedAt` else `createdAt`, so a stale Lesson not
-reinforced since the newer one was saved is demoted (T12); a stale Lesson reinforced after it still leads.
+confidence over the same boost, from `lastReinforcedAt` else `createdAt`, and applies the same cap
+to the project's Lessons before taking the top 10, so a stale Lesson is capped behind a newer near-twin
+however often it was reinforced, even when both were saved milliseconds apart (T12, T12r); a stale
+Lesson reinforced after it still leads.
 
 **Insights.** Written by `mem::reflect` from concept clusters. The reflect prompt lists the cluster's
 existing Insights, and the model may answer one as `reinforces="<id>"`, which reinforces that Insight

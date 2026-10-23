@@ -255,7 +255,8 @@ type, so re-saving a Memory as a rule pins it.
   date by `lastReinforcedAt` else `createdAt` (an explicit re-save is the Operator restating it),
   Semantic Facts by `createdAt` (consolidation re-emits stale claims), Observations in
   `mem::search` by timestamp. `HybridSearch` (`mem::smart-search`) has only the Observation
-  recency factor, not this cap.
+  recency factor, not this cap. Session start (`mem::context`) caps the project's Lessons the same
+  way before taking its top 10.
 - **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
   in smart-search and prompt-context after their floors: an older Memory of the same type and
   Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly
