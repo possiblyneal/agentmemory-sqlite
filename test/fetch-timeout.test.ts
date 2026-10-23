@@ -1,4 +1,8 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach, beforeAll, afterAll } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { gzipSync } from "node:zlib";
+import { Agent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from "undici";
 import { EMBED_TIMEOUT_MS, fetchWithTimeout, ProviderTimeoutError } from "../src/providers/_fetch.js";
 import { MinimaxProvider } from "../src/providers/minimax.js";
 import { OpenRouterProvider } from "../src/providers/openrouter.js";
@@ -85,6 +89,73 @@ describe("fetchWithTimeout", () => {
     const p = fetchWithTimeout("https://example.com", {});
     expect(p).toBeInstanceOf(Promise);
     return p;
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// #302 — the caller's deadline is the only bound
+//
+// Node's global dispatcher aborts a request whose headers, or whose
+// gap between body chunks, pass 300 s. These tests shrink that
+// global ceiling against a real local server, so a request that still
+// rides the global dispatcher fails within the server's delay. undici
+// rounds a sub-second timeout up to about 1 s, hence the 2 s delay.
+// ─────────────────────────────────────────────────────────────
+describe("fetchWithTimeout against a slow server (#302)", () => {
+  const GLOBAL_CEILING_MS = 100;
+  const SERVER_DELAY_MS = 2000;
+  let server: Server;
+  let base: string;
+  let original: Dispatcher;
+  let tight: Agent;
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      if (req.url === "/gzip") {
+        res.writeHead(200, { "content-encoding": "gzip", "content-type": "application/json" });
+        res.end(gzipSync(JSON.stringify({ ok: true })));
+        return;
+      }
+      if (req.url === "/slow-body") {
+        res.writeHead(200);
+        res.write("first,");
+        setTimeout(() => res.end("last"), SERVER_DELAY_MS);
+        return;
+      }
+      setTimeout(() => res.end("late headers"), SERVER_DELAY_MS);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    original = getGlobalDispatcher();
+    tight = new Agent({ headersTimeout: GLOBAL_CEILING_MS, bodyTimeout: GLOBAL_CEILING_MS });
+    setGlobalDispatcher(tight);
+  });
+
+  afterAll(async () => {
+    setGlobalDispatcher(original);
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await tight.close();
+  });
+
+  it("waits for late headers and a long body gap past the global dispatcher's ceiling", async () => {
+    const [headers, body] = await Promise.all([
+      fetchWithTimeout(`${base}/slow-headers`, {}, 4000).then((res) => res.text()),
+      fetchWithTimeout(`${base}/slow-body`, {}, 4000).then((res) => res.text()),
+    ]);
+    expect(headers).toBe("late headers");
+    expect(body).toBe("first,last");
+  });
+
+  it("still aborts slow headers at the caller's deadline", async () => {
+    await expect(
+      fetchWithTimeout(`${base}/slow-headers`, {}, 200),
+    ).rejects.toBeInstanceOf(ProviderTimeoutError);
+  });
+
+  it("decodes a gzip response", async () => {
+    const res = await fetchWithTimeout(`${base}/gzip`, {}, 5000);
+    expect(await res.json()).toEqual({ ok: true });
   });
 });
 

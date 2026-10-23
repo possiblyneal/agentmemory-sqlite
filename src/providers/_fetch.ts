@@ -1,4 +1,11 @@
+import { Agent } from "undici";
 import { getEnvVar } from "../config.js";
+
+// Node's global fetch gives up when response headers, or the gap between body
+// chunks, pass undici's 300 s default, whatever the signal allows. A provider
+// that queues a request answers only when it is done, so the caller's deadline
+// must be the only bound (#302).
+const deadlineOnlyDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 
 // Bounded retry for transient rate-limit / unavailable responses. Attempts is
 // total tries (initial + retries). Retries are bounded by a TOTAL elapsed
@@ -122,7 +129,8 @@ export async function fetchWithTimeout(
   const signal = init.signal
     ? AbortSignal.any([init.signal, deadline.signal])
     : deadline.signal;
-  const send = () => fetch(url, { ...init, signal });
+  const send = () =>
+    fetch(url, { ...init, signal, dispatcher: deadlineOnlyDispatcher });
 
   let response: Response = await send();
   for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
