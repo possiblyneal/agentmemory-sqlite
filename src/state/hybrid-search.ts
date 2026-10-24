@@ -7,6 +7,8 @@ import type {
   CompressedObservation,
   Memory,
   QueryExpansion,
+  Session,
+  SessionSummary,
 } from "../types.js";
 import {
   memoryToObservation,
@@ -24,6 +26,7 @@ import {
 } from "../functions/graph-retrieval.js";
 import { extractEntitiesFromQuery } from "../functions/query-expansion.js";
 import { rerank } from "./reranker.js";
+import { capBehindNewer } from "../functions/recency-cap.js";
 
 const RRF_K = 60;
 const MAX_PER_SESSION = 3;
@@ -63,6 +66,56 @@ export function recencyFactor(timestamp: string, now: number): number {
     RECENCY_FLOOR +
     (1 - RECENCY_FLOOR) * Math.pow(0.5, ageDays / RECENCY_HALF_LIFE_DAYS)
   );
+}
+
+// An Observation that restates an older one's topic in nearly the same words
+// supersedes it, as for Lessons. Memories keep their score, and the pass is
+// pairwise over the hits already scored for the query. A twin in another
+// project is another repository's claim, so only a pair of one project caps;
+// an Observation whose project cannot be read pairs only within its Session.
+export async function capOlderNearTwins(
+  kv: StateKV,
+  hits: Array<{ observation: CompressedObservation; sessionId: string; score: number }>,
+): Promise<void> {
+  const observations = hits.filter(
+    (h) =>
+      !isDurableRecord(h.observation.id, h.sessionId) &&
+      Number.isFinite(Date.parse(h.observation.timestamp)),
+  );
+  const projects = await sessionProjects(
+    kv,
+    observations.map((h) => h.sessionId),
+  );
+  const byProject = new Map<string, typeof observations>();
+  for (const h of observations) {
+    const key = projects.get(h.sessionId)!;
+    byProject.set(key, [...(byProject.get(key) ?? []), h]);
+  }
+  for (const group of byProject.values()) {
+    capBehindNewer(
+      group,
+      (h) => `${h.observation.title} ${h.observation.narrative}`,
+      (h) => Date.parse(h.observation.timestamp),
+    );
+  }
+}
+
+async function sessionProjects(
+  kv: StateKV,
+  sessionIds: string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(sessionIds)];
+  const projects = await Promise.all(
+    unique.map(async (id) => {
+      const session = await kv.get<Session>(KV.sessions, id).catch(() => null);
+      if (session?.project) return session.project;
+      const summary = await kv
+        .get<SessionSummary>(KV.summaries, id)
+        .catch(() => null);
+      return summary?.project || `\0${id}`;
+    }),
+  );
+  return new Map(unique.map((id, i) => [id, projects[i]]));
 }
 
 function envNumber(key: string, fallback: number): number {
@@ -142,9 +195,9 @@ export class HybridSearch {
       }
     }
 
-    const ranked = Array.from(merged.values()).sort(
-      (a, b) => b.combinedScore - a.combinedScore,
-    );
+    // Each sub-query capped its own pool, so a stale twin's uncapped score
+    // from a pool that lacked the newer one can win the merge.
+    const ranked = await this.capNearTwins(Array.from(merged.values()));
 
     // Probe 0 capture, expansion arm. The two capture points inside
     // `tripleStreamSearch` fire once per sub-query and describe individual
@@ -405,8 +458,10 @@ export class HybridSearch {
       combined,
       filterNonLatest ? retrievalDepth * CANDIDATE_OVERFETCH : retrievalDepth,
     );
-    const enriched = this.applyRecency(
-      await this.enrichResults(diversified, retrievalDepth, filterNonLatest),
+    const enriched = await this.capNearTwins(
+      this.applyRecency(
+        await this.enrichResults(diversified, retrievalDepth, filterNonLatest),
+      ),
     );
 
     // Probe 0 capture point 2: what a reranker would actually receive. Taken
@@ -445,6 +500,21 @@ export class HybridSearch {
           },
     );
     return decayed.sort((a, b) => b.combinedScore - a.combinedScore);
+  }
+
+  private async capNearTwins(
+    rows: HybridSearchResult[],
+  ): Promise<HybridSearchResult[]> {
+    const scored = rows.map((row) => ({
+      row,
+      observation: row.observation,
+      sessionId: row.sessionId,
+      score: row.combinedScore,
+    }));
+    await capOlderNearTwins(this.kv, scored);
+    return scored
+      .map(({ row, score }) => ({ ...row, combinedScore: score }))
+      .sort((a, b) => b.combinedScore - a.combinedScore);
   }
 
   private diversifyBySession(
