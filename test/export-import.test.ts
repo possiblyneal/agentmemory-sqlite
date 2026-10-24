@@ -252,6 +252,32 @@ describe("Export/Import Functions", () => {
     expect((await kv.list<{ id: string }>("mem:lessons")).map((l) => l.id)).toEqual(["lsn_live"]);
   });
 
+  it("imports an old export carrying Action and Crystal sections, ignoring them", async () => {
+    const exportData = {
+      version: "0.9.29",
+      exportedAt: new Date().toISOString(),
+      sessions: [], observations: {}, summaries: [],
+      memories: [{ ...testMemory, id: "mem_old_export" }],
+      actions: [{ id: "act_1", title: "placeholder", status: "cancelled" }],
+      actionEdges: [{ id: "edge_1" }],
+      routines: [{ id: "rtn_1" }],
+      checkpoints: [{ id: "ckpt_1" }],
+      sentinels: [{ id: "snt_1" }],
+      sketches: [{ id: "skt_1" }],
+      crystals: [{ id: "crys_1", narrative: "done" }],
+    } as unknown as ExportData;
+
+    const result = (await sdk.trigger("mem::import", { exportData, strategy: "merge" })) as {
+      success: boolean;
+    };
+
+    expect(result.success).toBe(true);
+    expect(await kv.get("mem:memories", "mem_old_export")).not.toBeNull();
+    for (const scope of ["mem:actions", "mem:crystals", "mem:routines", "mem:sketches"]) {
+      expect(await kv.list(scope)).toEqual([]);
+    }
+  });
+
   it("import with skip strategy does not overwrite existing", async () => {
     const exportData: ExportData = {
       version: "0.3.0",
