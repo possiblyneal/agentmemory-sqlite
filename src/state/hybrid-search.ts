@@ -24,6 +24,7 @@ import {
 } from "../functions/graph-retrieval.js";
 import { extractEntitiesFromQuery } from "../functions/query-expansion.js";
 import { rerank } from "./reranker.js";
+import { capBehindNewer } from "../functions/recency-cap.js";
 
 const RRF_K = 60;
 const MAX_PER_SESSION = 3;
@@ -62,6 +63,24 @@ export function recencyFactor(timestamp: string, now: number): number {
   return (
     RECENCY_FLOOR +
     (1 - RECENCY_FLOOR) * Math.pow(0.5, ageDays / RECENCY_HALF_LIFE_DAYS)
+  );
+}
+
+// An Observation that restates an older one's topic in nearly the same words
+// supersedes it, as for Lessons. Memories keep their score, and the pass is
+// pairwise over the hits already scored for the query.
+export function capOlderNearTwins(
+  hits: Array<{ observation: CompressedObservation; sessionId: string; score: number }>,
+): void {
+  const observations = hits.filter(
+    (h) =>
+      !isDurableRecord(h.observation.id, h.sessionId) &&
+      Number.isFinite(Date.parse(h.observation.timestamp)),
+  );
+  capBehindNewer(
+    observations,
+    (h) => `${h.observation.title} ${h.observation.narrative}`,
+    (h) => Date.parse(h.observation.timestamp),
   );
 }
 
@@ -435,16 +454,18 @@ export class HybridSearch {
 
   private applyRecency(rows: HybridSearchResult[]): HybridSearchResult[] {
     const now = Date.now();
-    const decayed = rows.map((r) =>
-      isDurableRecord(r.observation.id, r.sessionId)
-        ? r
-        : {
-            ...r,
-            combinedScore:
-              r.combinedScore * recencyFactor(r.observation.timestamp, now),
-          },
-    );
-    return decayed.sort((a, b) => b.combinedScore - a.combinedScore);
+    const scored = rows.map((row) => ({
+      row,
+      observation: row.observation,
+      sessionId: row.sessionId,
+      score: isDurableRecord(row.observation.id, row.sessionId)
+        ? row.combinedScore
+        : row.combinedScore * recencyFactor(row.observation.timestamp, now),
+    }));
+    capOlderNearTwins(scored);
+    return scored
+      .map(({ row, score }) => ({ ...row, combinedScore: score }))
+      .sort((a, b) => b.combinedScore - a.combinedScore);
   }
 
   private diversifyBySession(

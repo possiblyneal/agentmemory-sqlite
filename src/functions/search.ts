@@ -1,11 +1,10 @@
 import type { ISdk } from '../engine/types.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
-import { capBehindNewer } from './recency-cap.js'
 import { StateKV } from '../state/kv.js'
 import { SearchIndex, isSearchLayer } from '../state/search-index.js'
 import { CHARS_PER_TOKEN } from '../utils/tokens.js'
-import { isDurableRecord, recencyFactor } from '../state/hybrid-search.js'
+import { capOlderNearTwins, isDurableRecord, recencyFactor } from '../state/hybrid-search.js'
 import { VectorIndex } from '../state/vector-index.js'
 import type { EmbeddingProvider } from '../types.js'
 import {
@@ -27,18 +26,6 @@ import {
   isNonLatestFilterEnabled,
 } from "../config.js";
 import { getCounters } from "../telemetry/setup.js";
-
-const observationText = (o: CompressedObservation): string => `${o.title} ${o.narrative}`
-
-// An Observation that restates an older one's topic in nearly the same words
-// supersedes it, as for Lessons. Memories keep their score, and the pass is
-// pairwise over the hits already scored for the query.
-function capOlderNearTwins(hits: SearchResult[]): void {
-  const observations = hits.filter(
-    (h) => !isDurableRecord(h.observation.id, h.sessionId) && Number.isFinite(Date.parse(h.observation.timestamp)),
-  )
-  capBehindNewer(observations, (h) => observationText(h.observation), (h) => Date.parse(h.observation.timestamp))
-}
 
 let index: SearchIndex | null = null
 let vectorIndex: VectorIndex | null = null

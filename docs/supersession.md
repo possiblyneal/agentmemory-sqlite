@@ -17,7 +17,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 | Lesson | **newer ranked first** (T11) | stale capped behind the newer Lesson (T12, T12r) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
-| Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
+| Observation | stale demoted by the recency factor (T20, T21); stale capped below the newer near-twin (T21b) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
 
 "Hidden" means the stale record is absent. "Demoted" means both are returned and the newer
 one is first. "Ranked first" means the stale record leads, or is the only one returned.
@@ -50,6 +50,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T19 | Session Summary decision: prompt-submit puts a Memory that contradicts a Session decision ahead of that decision | passes |
 | T20 | Observation: smart-search ranks the newer Observation above the contradicted one | passes |
 | T21 | Observation: smart-search ranks the newer Observation above a contradicted one that matches the query more strongly | passes |
+| T21b | Observation (`eval:supersession` wording, other projects holding the same claims): smart-search ranks the newer Observation above a contradicted one whose stronger match outweighs the recency factor | passes |
 | T22 | Observation: prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly | passes |
 | T23 | Observation: prompt-submit gives the newer Observation ahead of the contradicted one | passes |
 | T24 | Observation: session start lists the newer Session's Observation ahead of the contradicted one | passes |
@@ -136,11 +137,13 @@ recency factor (half-life 180 days, floor 0.6), which lets a newer Observation b
 within that margin (T20, T21). `mem::search`, which prompt submit calls, applies the same factor to Observation scores
 (Memories are exempt) before it cuts to the limit, so the newer one leads on an equal match (T23).
 The factor separates the two fixtures by 5.8%, less than the 7% by which the older one's BM25
-score leads in T22, so `mem::search` also applies the near-twin rule Lessons use: among the
-Observation hits scored for the query, an older Observation whose title and narrative overlap a
-newer one's by word-set Jaccard of at least 0.5 (`jaccardSimilarity`) is capped at 0.99 of the
-newer one's score, by Observation timestamp, before the cut to the limit (T22). Other Observations
-keep their scores. Session start lists Sessions newest first (T24).
+score leads in T22, and less than the fused-rank gap when other projects hold the same claims
+(T21b), so both surfaces also apply the near-twin rule Lessons use (`capOlderNearTwins`,
+`src/state/hybrid-search.ts`): among the Observation hits scored for the query, an older
+Observation whose title and narrative overlap a newer one's by word-set Jaccard of at least 0.5 is
+capped at 0.99 of the newer one's score, by Observation timestamp, before the cut to the limit
+(T21b, T22). `HybridSearch` runs it after the recency factor over its enriched pool (at least 20
+rows), before the reranker and the cut. Other Observations keep their scores. Session start lists Sessions newest first (T24).
 
 ## Not covered
 

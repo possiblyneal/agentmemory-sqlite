@@ -438,3 +438,33 @@ describe("supersession: Observation", () => {
     expect(ranksBefore(context, FRESH, STALE)).toBe(true);
   });
 });
+
+describe("supersession: Observation, eval:supersession wording", () => {
+  const BENCH_OLD = "2026-08-31T12:00:00.000Z";
+  const BENCH_NEW = "2026-10-10T12:00:00.000Z";
+
+  // The bench seeds every cell in one store, so other projects hold the same
+  // claims and the fused rank gap between the two outgrows the recency factor.
+  async function seedBenchCase(project: string, stale: string, fresh: string): Promise<void> {
+    await kv.set(KV.sessions, stale, { ...session(stale, BENCH_OLD), project });
+    await kv.set(KV.sessions, fresh, { ...session(fresh, BENCH_NEW), project });
+    await seedObservation({ ...observation(`${stale}_a`, stale, BENCH_OLD, `whitespace rule: we ${STALE} in every source file of the repository`), title: `whitespace rule: ${STALE}` });
+    await seedObservation({ ...observation(`${fresh}_b`, fresh, BENCH_NEW, `whitespace rule: we ${FRESH} in every source file of the repository`), title: `whitespace rule: ${FRESH}` });
+    await seedObservation({
+      ...observation(
+        `${stale}_a2`,
+        stale,
+        BENCH_OLD,
+        `whitespace rule whitespace rule: we ${STALE}, ${STALE}, never spaces, tabs tabs tabs in every source file of the repository`,
+      ),
+      title: `whitespace rule: ${STALE}`,
+    });
+  }
+
+  it("smart-search ranks the newer Observation above a contradicted one whose stronger match outweighs the recency factor", async () => {
+    for (let i = 0; i < 4; i++) await seedBenchCase(`project-bench-${i}`, `ses_bench_${i}_a`, `ses_bench_${i}_b`);
+    await seedBenchCase(PROJECT, "ses_a", "ses_b");
+    const { results } = await smartSearch("whitespace rule indent with tabs spaces source file");
+    expect(results[0].obsId).toBe("ses_b_b");
+  });
+});
