@@ -803,7 +803,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         if (isDurableRecord(r.observation.id, r.sessionId)) continue
         r.score *= recencyFactor(r.observation.timestamp, now)
       }
-      capOlderNearTwins(enriched)
+      await capOlderNearTwins(kv, enriched)
       enriched.sort((a, b) => b.score - a.score)
       enriched.length = Math.min(enriched.length, effectiveLimit)
 

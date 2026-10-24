@@ -1,6 +1,6 @@
 # 2026-10-23 — Observation near-twin cap in smart-search (#295)
 
-**Commit:** before `2591b079` (main); after `2591b079` + the uncommitted cap on `fix/smart-search-near-twin-cap`
+**Commit:** before `2591b079` (main); after `5a386bc` (supersession, suite and gate); the review fix that pairs only one project's Observations follows it, and its reruns match every number below except the gate p95, now 12 ms (session start) and 16 ms (prompt submit)
 **Bench:** supersession, dev split (`runner/supersession.ts`); `eval:suite --tier fast` (coding-life, PrecisionMemBench, LongMemEval sample); `eval:gate`
 **N:** supersession 110 cases (5 per Observation cell); suite as listed below
 **K:** 5 (search); an Injection is scored whole
@@ -10,7 +10,7 @@
 
 ## Headline
 
-Adopted. Observation / search with a stronger stale match falls from **0.80** stale-first to **0.00** (5/5 fresh-first). No other supersession cell moves, all 15 fast-suite metrics are identical to the baseline, and `eval:gate` passes with p95 10 ms (session start) and 22 ms (prompt submit) against the 500 ms ceiling.
+Adopted. Observation / search with a stronger stale match falls from **0.80** stale-first to **0.00** (5/5 fresh-first). No other supersession cell moves, all 15 fast-suite metrics are identical to the baseline, and `eval:gate` passes with p95 12 ms (session start) and 16 ms (prompt submit) against the 500 ms ceiling.
 
 ## Lever
 
@@ -45,6 +45,7 @@ As in `eval/README.md`: dev split only (holdout not opened), supersession BM25-o
 ## Reproduce
 
 ```sh
+git checkout 5a386bc
 npm ci && npm run build
 npm run eval:supersession -- --instance 32
 LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json npm run eval:suite -- --tier fast --label <label> --against 2591b079

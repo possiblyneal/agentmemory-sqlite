@@ -467,4 +467,16 @@ describe("supersession: Observation, eval:supersession wording", () => {
     const { results } = await smartSearch("whitespace rule indent with tabs spaces source file");
     expect(results[0].obsId).toBe("ses_b_b");
   });
+
+  it("smart-search does not cap an Observation behind a newer twin from another project", async () => {
+    const DAY_LATER = "2026-09-01T12:00:00.000Z";
+    await kv.set(KV.sessions, "ses_q", { ...session("ses_q", DAY_LATER), project: "project-q" });
+    await seedObservation({ ...observation("p_rule", "ses_a", BENCH_OLD, `whitespace rule: we ${STALE} in every source file of the repository`), title: `whitespace rule: ${STALE}` });
+    for (let i = 0; i < 4; i++) {
+      await seedObservation(observation(`p_other${i}`, "ses_a", BENCH_OLD, `indent with tabs, note ${i}: whitespace rule for source file layout${i}`));
+    }
+    await seedObservation({ ...observation("q_rule", "ses_q", DAY_LATER, `whitespace rule: we ${FRESH} in every source file of the repository`), title: `whitespace rule: ${FRESH}` });
+    const { results } = await smartSearch("whitespace rule indent with tabs source file");
+    expect(results[0].obsId).toBe("p_rule");
+  });
 });
