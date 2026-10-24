@@ -8,7 +8,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerReplayFunctions } from "../src/functions/replay.js";
-import { KV, fingerprintId } from "../src/state/schema.js";
+import { KV } from "../src/state/schema.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -61,20 +61,6 @@ function mockSdk(kv: ReturnType<typeof mockKV>) {
 
 const SID = "sess-reimport";
 
-function editLine(uuid: string, ts: string, filePath: string, cwd: string) {
-  return JSON.stringify({
-    type: "assistant",
-    uuid,
-    sessionId: SID,
-    timestamp: ts,
-    cwd,
-    message: {
-      role: "assistant",
-      content: [{ type: "tool_use", id: `tu-${uuid}`, name: "Edit", input: { file_path: filePath } }],
-    },
-  });
-}
-
 function line(type: "user" | "assistant", uuid: string, ts: string, text: string, cwd: string) {
   return JSON.stringify({
     type,
@@ -105,8 +91,7 @@ describe("import-jsonl re-import skips stored Observations", () => {
       sdk.trigger("mem::replay::import-jsonl", { path: root }) as Promise<{ observations: number }>;
     const stored = async () => (await kv.list(KV.observations(SID))).length;
     const count = async () => (await kv.get<any>(KV.sessions, SID))?.observationCount;
-    const crystal = () => kv.get<any>(KV.crystals, fingerprintId("crystal", SID));
-    return { kv, run, stored, count, crystal };
+    return { kv, run, stored, count };
   }
 
   it("stores each Observation once when the same transcript is imported twice", async () => {
@@ -148,19 +133,6 @@ describe("import-jsonl re-import skips stored Observations", () => {
     expect((await run()).observations).toBe(1);
     expect(await stored()).toBe(1);
     expect(await count()).toBe(1);
-  });
-
-  it("keeps the crystal's files when the transcript is imported again", async () => {
-    writeFileSync(
-      file,
-      [line("user", "u1", "2026-04-17T10:00:00Z", "fix the parser", root), editLine("a1", "2026-04-17T10:00:01Z", join(root, "parser.ts"), root)].join("\n") + "\n",
-    );
-    const { run, crystal } = await setup();
-    await run();
-    const first = await crystal();
-    await run();
-    expect(first.filesAffected.length).toBeGreaterThan(0);
-    expect((await crystal()).filesAffected).toEqual(first.filesAffected);
   });
 
   it("keeps each import of a transcript without a sessionId apart", async () => {

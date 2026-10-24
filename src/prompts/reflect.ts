@@ -1,4 +1,4 @@
-export const REFLECT_SYSTEM = `You are a higher-order reasoning engine. Given a cluster of related concepts, facts, lessons, and action outcomes, synthesize cross-cutting insights that span multiple individual memories.
+export const REFLECT_SYSTEM = `You are a higher-order reasoning engine. Given a cluster of related concepts, facts and lessons, synthesize cross-cutting insights that span multiple individual memories.
 
 Output format (XML):
 <insights>
@@ -19,10 +19,6 @@ Rules:
 
 export function formatScoredLine(confidence: number, text: string): string {
   return `- [confidence=${confidence}] ${text}`;
-}
-
-export function formatNarrativeLine(narrative: string): string {
-  return `- ${narrative}`;
 }
 
 // Existing Insights shown to the model, strongest first.
@@ -46,7 +42,6 @@ export function buildReflectPrompt(cluster: {
   concepts: string[];
   facts: Array<{ fact: string; confidence: number }>;
   lessons: Array<{ content: string; confidence: number }>;
-  crystalNarratives: string[];
   existingInsights?: Array<{ id: string; confidence: number; title: string; content: string }>;
 }): string {
   const sections: string[] = [];
@@ -64,13 +59,6 @@ export function buildReflectPrompt(cluster: {
     sections.push(
       "\n## Lessons Learned",
       ...cluster.lessons.map((l) => formatScoredLine(l.confidence, l.content)),
-    );
-  }
-
-  if (cluster.crystalNarratives.length > 0) {
-    sections.push(
-      "\n## Completed Work Summaries",
-      ...cluster.crystalNarratives.map(formatNarrativeLine),
     );
   }
 

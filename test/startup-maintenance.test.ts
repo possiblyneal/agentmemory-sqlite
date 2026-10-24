@@ -450,7 +450,6 @@ describe("startup maintenance: Insight collapse (#271)", () => {
       sourceConceptCluster: ["Security", "validation"],
       sourceMemoryIds: [`${id}-fact`],
       sourceLessonIds: [],
-      sourceCrystalIds: [],
       project: "app",
       tags: [],
       createdAt: "2026-10-01T00:00:00.000Z",

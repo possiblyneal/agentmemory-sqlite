@@ -8,7 +8,6 @@ import { registerMeshFunction } from "../src/functions/mesh.js";
 import type {
   MeshPeer,
   Memory,
-  Action,
   SemanticMemory,
   ProceduralMemory,
   MemoryRelation,
@@ -94,7 +93,6 @@ describe("Mesh Functions", () => {
       expect(result.success).toBe(true);
       expect(result.peer.sharedScopes).toEqual([
         "memories",
-        "actions",
         "semantic",
         "procedural",
         "relations",
@@ -400,128 +398,7 @@ describe("Mesh Functions", () => {
       expect(result.accepted).toBe(0);
     });
 
-    it("accepts new actions", async () => {
-      const action: Action = {
-        id: "act_1",
-        title: "Fix bug",
-        description: "Fix the login bug",
-        status: "pending",
-        priority: 1,
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-01T00:00:00Z",
-        createdBy: "agent-1",
-        tags: ["bug"],
-        sourceObservationIds: [],
-        sourceMemoryIds: [],
-      };
-
-      const result = (await sdk.trigger("mem::mesh-receive", {
-        actions: [action],
-      })) as { success: boolean; accepted: number };
-
-      expect(result.success).toBe(true);
-      expect(result.accepted).toBe(1);
-
-      const stored = await kv.get<Action>("mem:actions", "act_1");
-      expect(stored).toBeDefined();
-      expect(stored!.title).toBe("Fix bug");
-    });
-
-    it("accepts newer action over existing (last-write-wins)", async () => {
-      const older: Action = {
-        id: "act_1",
-        title: "Old action",
-        description: "Old desc",
-        status: "pending",
-        priority: 1,
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-01T00:00:00Z",
-        createdBy: "agent-1",
-        tags: [],
-        sourceObservationIds: [],
-        sourceMemoryIds: [],
-      };
-      await kv.set("mem:actions", "act_1", older);
-
-      const newer: Action = {
-        ...older,
-        updatedAt: "2026-03-02T00:00:00Z",
-        title: "Updated action",
-        status: "done",
-      };
-
-      const result = (await sdk.trigger("mem::mesh-receive", {
-        actions: [newer],
-      })) as { success: boolean; accepted: number };
-
-      expect(result.success).toBe(true);
-      expect(result.accepted).toBe(1);
-
-      const stored = await kv.get<Action>("mem:actions", "act_1");
-      expect(stored!.title).toBe("Updated action");
-      expect(stored!.status).toBe("done");
-    });
-
-    it("rejects older action than existing", async () => {
-      const existing: Action = {
-        id: "act_1",
-        title: "Current action",
-        description: "Current desc",
-        status: "active",
-        priority: 1,
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-02T00:00:00Z",
-        createdBy: "agent-1",
-        tags: [],
-        sourceObservationIds: [],
-        sourceMemoryIds: [],
-      };
-      await kv.set("mem:actions", "act_1", existing);
-
-      const older: Action = {
-        ...existing,
-        updatedAt: "2026-03-01T00:00:00Z",
-        title: "Stale action",
-      };
-
-      const result = (await sdk.trigger("mem::mesh-receive", {
-        actions: [older],
-      })) as { success: boolean; accepted: number };
-
-      expect(result.success).toBe(true);
-      expect(result.accepted).toBe(0);
-
-      const stored = await kv.get<Action>("mem:actions", "act_1");
-      expect(stored!.title).toBe("Current action");
-    });
-
-    it("skips action entries with missing id", async () => {
-      const result = (await sdk.trigger("mem::mesh-receive", {
-        actions: [
-          { updatedAt: "2026-03-01T00:00:00Z", title: "No ID" } as unknown as Action,
-        ],
-      })) as { success: boolean; accepted: number };
-
-      expect(result.success).toBe(true);
-      expect(result.accepted).toBe(0);
-    });
-
-    it("skips action entries with invalid date", async () => {
-      const result = (await sdk.trigger("mem::mesh-receive", {
-        actions: [
-          {
-            id: "act_bad_date",
-            updatedAt: "invalid-date-string",
-            title: "Bad date",
-          } as unknown as Action,
-        ],
-      })) as { success: boolean; accepted: number };
-
-      expect(result.success).toBe(true);
-      expect(result.accepted).toBe(0);
-    });
-
-    it("accepts both memories and actions in one call", async () => {
+    it("ignores an actions section from an older peer", async () => {
       const mem: Memory = {
         id: "mem_combo",
         createdAt: "2026-03-01T00:00:00Z",
@@ -536,33 +413,20 @@ describe("Mesh Functions", () => {
         version: 1,
         isLatest: true,
       };
-      const action: Action = {
-        id: "act_combo",
-        title: "Combo action",
-        description: "Desc",
-        status: "pending",
-        priority: 2,
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-01T00:00:00Z",
-        createdBy: "agent-1",
-        tags: [],
-        sourceObservationIds: [],
-        sourceMemoryIds: [],
-      };
 
       const result = (await sdk.trigger("mem::mesh-receive", {
         memories: [mem],
-        actions: [action],
+        actions: [{ id: "act_combo", updatedAt: "2026-03-01T00:00:00Z" }],
       })) as { success: boolean; accepted: number };
 
       expect(result.success).toBe(true);
-      expect(result.accepted).toBe(2);
+      expect(result.accepted).toBe(1);
+      expect(await kv.list("mem:actions")).toEqual([]);
     });
 
     it("returns zero accepted for empty arrays", async () => {
       const result = (await sdk.trigger("mem::mesh-receive", {
         memories: [],
-        actions: [],
       })) as { success: boolean; accepted: number };
 
       expect(result.success).toBe(true);

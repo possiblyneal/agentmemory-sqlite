@@ -17,7 +17,7 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 import { registerObsidianExportFunction } from "../src/functions/obsidian-export.js";
-import type { Memory, Lesson, Crystal, Session } from "../src/types.js";
+import type { Memory, Lesson, Session } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -92,20 +92,6 @@ function makeLesson(id: string): Lesson {
   };
 }
 
-function makeCrystal(id: string): Crystal {
-  return {
-    id,
-    narrative: `Crystal narrative ${id}`,
-    keyOutcomes: ["Outcome 1"],
-    filesAffected: ["src/test.ts"],
-    lessons: ["Learned something"],
-    sourceActionIds: ["act_1"],
-    sessionId: "ses_1",
-    project: "/test",
-    createdAt: "2026-04-01T00:00:00Z",
-  };
-}
-
 function makeSession(id: string): Session {
   return {
     id,
@@ -142,9 +128,8 @@ describe("Obsidian Export", () => {
     expect(result.success).toBe(true);
     expect(result.exported.memories).toBe(0);
     expect(result.exported.lessons).toBe(0);
-    expect(result.exported.crystals).toBe(0);
     expect(result.exported.sessions).toBe(0);
-    expect(createdDirs.size).toBe(4);
+    expect(createdDirs.size).toBe(3);
 
     const mocPath = [...writtenFiles.keys()].find((k) => k.endsWith("MOC.md"));
     expect(mocPath).toBeDefined();
@@ -195,20 +180,6 @@ describe("Obsidian Export", () => {
     expect(content).toContain('source: "manual"');
   });
 
-  it("exports crystals with wikilinks to source actions", async () => {
-    const crystal = makeCrystal("crys_001");
-    await kv.set("mem:crystals", crystal.id, crystal);
-
-    await sdk.trigger("mem::obsidian-export", {});
-
-    const crysFile = [...writtenFiles.entries()].find(([k]) =>
-      k.includes("crystals/crys_001.md"),
-    );
-    expect(crysFile).toBeDefined();
-    expect(crysFile![1]).toContain("[[act_1]]");
-    expect(crysFile![1]).toContain("Outcome 1");
-  });
-
   it("respects types filter", async () => {
     await kv.set("mem:memories", "mem_001", makeMemory("mem_001"));
     await kv.set("mem:lessons", "lsn_001", makeLesson("lsn_001"));
@@ -256,7 +227,6 @@ describe("Obsidian Export", () => {
   it("MOC groups entries by type", async () => {
     await kv.set("mem:memories", "mem_001", makeMemory("mem_001"));
     await kv.set("mem:lessons", "lsn_001", makeLesson("lsn_001"));
-    await kv.set("mem:crystals", "crys_001", makeCrystal("crys_001"));
     await kv.set("mem:sessions", "ses_001", makeSession("ses_001"));
 
     await sdk.trigger("mem::obsidian-export", {});
@@ -266,11 +236,9 @@ describe("Obsidian Export", () => {
 
     expect(moc).toContain("## Memories (1)");
     expect(moc).toContain("## Lessons (1)");
-    expect(moc).toContain("## Crystals (1)");
     expect(moc).toContain("## Sessions (1)");
     expect(moc).toContain("[[memories/mem_001|");
     expect(moc).toContain("[[lessons/lsn_001|");
-    expect(moc).toContain("[[crystals/crys_001|");
     expect(moc).toContain("[[sessions/ses_001|");
   });
 
@@ -294,7 +262,6 @@ describe("Obsidian Export", () => {
   it("skips records that are missing an id and keeps exporting the rest", async () => {
     await kv.set("mem:memories", "orphan-memory", { ...makeMemory("mem_missing"), id: undefined } as any);
     await kv.set("mem:lessons", "orphan-lesson", { ...makeLesson("lsn_missing"), id: undefined } as any);
-    await kv.set("mem:crystals", "orphan-crystal", { ...makeCrystal("crys_missing"), id: undefined } as any);
     await kv.set("mem:sessions", "orphan-session", { ...makeSession("ses_missing"), id: undefined } as any);
     await kv.set("mem:sessions", "valid-session", makeSession("ses_valid"));
 
@@ -307,7 +274,6 @@ describe("Obsidian Export", () => {
     expect(result.success).toBe(true);
     expect(result.exported.memories).toBe(0);
     expect(result.exported.lessons).toBe(0);
-    expect(result.exported.crystals).toBe(0);
     expect(result.exported.sessions).toBe(1);
     expect(result.errors).toBeUndefined();
     expect([...writtenFiles.keys()].some((path) => path.includes("undefined.md"))).toBe(false);
@@ -356,7 +322,7 @@ describe("Obsidian Export", () => {
     expect(content).not.toContain("## Supersedes");
   });
 
-  it("falls back to the id when title / content / narrative are missing", async () => {
+  it("falls back to the id when title / content are missing", async () => {
     await kv.set("mem:memories", "mem_no_title", {
       ...makeMemory("mem_no_title"),
       title: undefined,
@@ -365,10 +331,6 @@ describe("Obsidian Export", () => {
     await kv.set("mem:lessons", "lsn_no_content", {
       ...makeLesson("lsn_no_content"),
       content: undefined,
-    } as any);
-    await kv.set("mem:crystals", "crys_no_narr", {
-      ...makeCrystal("crys_no_narr"),
-      narrative: undefined,
     } as any);
 
     const result = (await sdk.trigger("mem::obsidian-export", {})) as {
@@ -379,7 +341,6 @@ describe("Obsidian Export", () => {
     expect(result.success).toBe(true);
     expect(result.exported.memories).toBe(1);
     expect(result.exported.lessons).toBe(1);
-    expect(result.exported.crystals).toBe(1);
 
     const memFile = [...writtenFiles.entries()].find(([k]) =>
       k.includes("memories/mem_no_title.md"),
@@ -390,11 +351,6 @@ describe("Obsidian Export", () => {
       k.includes("lessons/lsn_no_content.md"),
     );
     expect(lsnFile![1]).toContain("# Lesson: lsn_no_content");
-
-    const crysFile = [...writtenFiles.entries()].find(([k]) =>
-      k.includes("crystals/crys_no_narr.md"),
-    );
-    expect(crysFile![1]).toContain("# Crystal: crys_no_narr");
   });
 
   it("never throws out to the engine — returns {success: false, error: <string>} on internal failure", async () => {

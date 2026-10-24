@@ -72,10 +72,8 @@ describe("viewer dashboard rendering helpers", () => {
     expect(viewer).toContain("state.dashboard.memoriesTotal = results[2] && results[2].total");
   });
 
-  it("the Lessons and Crystals tiles read the response total, not the page length", () => {
+  it("the Lessons tile reads the response total, not the page length", () => {
     expect(viewer).toContain("state.dashboard.lessonTotal = results[8] && results[8].total");
-    expect(viewer).toContain("state.dashboard.crystalTotal = results[9] && results[9].total");
     expect(viewer).toMatch(/var lessonCount = d\.lessonTotal !== undefined \? d\.lessonTotal : \(d\.lessons \|\| \[\]\)\.length/);
-    expect(viewer).toMatch(/var crystalCount = d\.crystalTotal !== undefined \? d\.crystalTotal : \(d\.crystals \|\| \[\]\)\.length/);
   });
 });

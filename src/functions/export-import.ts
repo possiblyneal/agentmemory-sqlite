@@ -6,14 +6,7 @@ import type {
   SessionSummary,
   ProjectProfile,
   ExportData,
-  Action,
-  ActionEdge,
-  Routine,
   Signal,
-  Checkpoint,
-  Sentinel,
-  Sketch,
-  Crystal,
   Facet,
   Lesson,
   Insight,
@@ -83,17 +76,10 @@ export const DURABLE_STORES: readonly DurableStore[] = [
   { field: "graphEdges", scope: KV.graphEdges, keyOf: byId, graph: true },
   { field: "semanticMemories", scope: KV.semantic, keyOf: byId },
   { field: "proceduralMemories", scope: KV.procedural, keyOf: byId },
-  { field: "actions", scope: KV.actions, keyOf: byId },
-  { field: "actionEdges", scope: KV.actionEdges, keyOf: byId },
-  { field: "sentinels", scope: KV.sentinels, keyOf: byId },
-  { field: "sketches", scope: KV.sketches, keyOf: byId },
-  { field: "crystals", scope: KV.crystals, keyOf: byId },
   { field: "facets", scope: KV.facets, keyOf: byId },
   { field: "lessons", scope: KV.lessons, keyOf: byId },
   { field: "insights", scope: KV.insights, keyOf: byId },
-  { field: "routines", scope: KV.routines, keyOf: byId },
   { field: "signals", scope: KV.signals, keyOf: byId },
-  { field: "checkpoints", scope: KV.checkpoints, keyOf: byId },
   { field: "accessLogs", scope: KV.accessLog, keyOf: (a) => String(a.memoryId) },
 ];
 
@@ -120,7 +106,7 @@ function nonEmpty<T>(rows: T[] | undefined): T[] | undefined {
 function oversizedExport(bytes: number): OversizedPayload {
   return {
     success: false,
-    error: `Export is about ${(bytes / (1024 * 1024)).toFixed(1)} MiB, over the ${MAX_PAYLOAD_BYTES / (1024 * 1024)} MiB response limit; narrow the range with ?maxSessions / ?offset, or export fewer collections; the non-session collections (memories, graph, semantic, actions, lessons, ...) are not yet paginated`,
+    error: `Export is about ${(bytes / (1024 * 1024)).toFixed(1)} MiB, over the ${MAX_PAYLOAD_BYTES / (1024 * 1024)} MiB response limit; narrow the range with ?maxSessions / ?offset, or export fewer collections; the non-session collections (memories, graph, semantic, lessons, ...) are not yet paginated`,
     oversized: true,
     bytes,
     limitBytes: MAX_PAYLOAD_BYTES,
@@ -189,17 +175,10 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         graphEdges: nonEmpty(stores.graphEdges),
         semanticMemories: nonEmpty(stores.semanticMemories),
         proceduralMemories: nonEmpty(stores.proceduralMemories),
-        actions: nonEmpty(stores.actions),
-        actionEdges: nonEmpty(stores.actionEdges),
-        sentinels: nonEmpty(stores.sentinels),
-        sketches: nonEmpty(stores.sketches),
-        crystals: nonEmpty(stores.crystals),
         facets: nonEmpty(stores.facets),
         lessons: nonEmpty(stores.lessons),
         insights: nonEmpty(stores.insights),
-        routines: nonEmpty(stores.routines),
         signals: nonEmpty(stores.signals),
-        checkpoints: nonEmpty(stores.checkpoints),
         accessLogs: nonEmpty(stores.accessLogs),
       };
 
@@ -355,36 +334,9 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           await kv.list<SessionSummary>(KV.summaries),
           (s) => kv.delete(KV.summaries, s.sessionId),
         );
-        await runChunked(await kv.list<Action>(KV.actions).catch(() => []), (a) =>
-          kv.delete(KV.actions, a.id),
-        );
-        await runChunked(
-          await kv.list<ActionEdge>(KV.actionEdges).catch(() => []),
-          (e) => kv.delete(KV.actionEdges, e.id),
-        );
-        await runChunked(
-          await kv.list<Routine>(KV.routines).catch(() => []),
-          (r) => kv.delete(KV.routines, r.id),
-        );
         await runChunked(
           await kv.list<Signal>(KV.signals).catch(() => []),
           (s) => kv.delete(KV.signals, s.id),
-        );
-        await runChunked(
-          await kv.list<Checkpoint>(KV.checkpoints).catch(() => []),
-          (c) => kv.delete(KV.checkpoints, c.id),
-        );
-        await runChunked(
-          await kv.list<Sentinel>(KV.sentinels).catch(() => []),
-          (s) => kv.delete(KV.sentinels, s.id),
-        );
-        await runChunked(
-          await kv.list<Sketch>(KV.sketches).catch(() => []),
-          (s) => kv.delete(KV.sketches, s.id),
-        );
-        await runChunked(
-          await kv.list<Crystal>(KV.crystals).catch(() => []),
-          (c) => kv.delete(KV.crystals, c.id),
         );
         await runChunked(
           await kv.list<Facet>(KV.facets).catch(() => []),
@@ -563,33 +515,6 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         });
       }
 
-      if (importData.actions) {
-        await runChunked(importData.actions, async (action) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.actions, action.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.actions, action.id, action);
-        });
-      }
-      if (importData.actionEdges) {
-        await runChunked(importData.actionEdges, async (edge) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.actionEdges, edge.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.actionEdges, edge.id, edge);
-        });
-      }
-      if (importData.routines) {
-        await runChunked(importData.routines, async (routine) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.routines, routine.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.routines, routine.id, routine);
-        });
-      }
       if (importData.signals) {
         await runChunked(importData.signals, async (signal) => {
           if (strategy === "skip") {
@@ -597,42 +522,6 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
             if (existing) { stats.skipped++; return; }
           }
           await kv.set(KV.signals, signal.id, signal);
-        });
-      }
-      if (importData.checkpoints) {
-        await runChunked(importData.checkpoints, async (checkpoint) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.checkpoints, checkpoint.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.checkpoints, checkpoint.id, checkpoint);
-        });
-      }
-      if (importData.sentinels) {
-        await runChunked(importData.sentinels, async (sentinel) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.sentinels, sentinel.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.sentinels, sentinel.id, sentinel);
-        });
-      }
-      if (importData.sketches) {
-        await runChunked(importData.sketches, async (sketch) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.sketches, sketch.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.sketches, sketch.id, sketch);
-        });
-      }
-      if (importData.crystals) {
-        await runChunked(importData.crystals, async (crystal) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.crystals, crystal.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.crystals, crystal.id, crystal);
         });
       }
       if (importData.facets) {

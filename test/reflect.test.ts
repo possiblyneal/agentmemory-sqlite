@@ -7,7 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { registerReflectFunctions } from "../src/functions/reflect.js";
 import { recordProjectActivity } from "../src/state/project-time.js";
 import { indexGraphEdge, indexGraphNode, markGraphIndexesReady } from "../src/state/graph-indexes.js";
-import type { Insight, GraphNode, GraphEdge, SemanticMemory, Lesson, Crystal } from "../src/types.js";
+import type { Insight, GraphNode, GraphEdge, SemanticMemory, Lesson } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -145,18 +145,6 @@ function makeLesson(content: string, tags: string[]): Lesson {
     createdAt: "2026-04-01T00:00:00Z",
     updatedAt: "2026-04-01T00:00:00Z",
     decayRate: 0.05,
-  };
-}
-
-function makeCrystal(narrative: string, lessons: string[]): Crystal {
-  return {
-    id: `crys_${narrative.slice(0, 8)}`,
-    narrative,
-    keyOutcomes: [],
-    filesAffected: [],
-    lessons,
-    sourceActionIds: [],
-    createdAt: "2026-04-01T00:00:00Z",
   };
 }
 
@@ -372,25 +360,6 @@ describe("Reflect", () => {
       expect(provider.summarize).not.toHaveBeenCalled();
     });
 
-    it("fills the budget with the newest crystals first", async () => {
-      await seedNode(kv, makeConceptNode("security"));
-      await seedNode(kv, makeConceptNode("validation"));
-      await seedEdge(kv, makeEdge("security", "validation"));
-      for (let i = 0; i < 100; i++) {
-        await kv.set("mem:crystals", `crys_${i}`, {
-          ...makeCrystal(`crystal ${i} ${"y".repeat(400)}`, ["security matters"]),
-          id: `crys_${i}`,
-          createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
-        });
-      }
-
-      await sdk.trigger("mem::reflect", {});
-
-      const prompt = String(provider.summarize.mock.calls[0]![1]);
-      expect(prompt).toContain("crystal 99 ");
-      expect(prompt).not.toContain("crystal 0 ");
-    });
-
     it("deduplicates insights by fingerprint", async () => {
       await seedNode(kv, makeConceptNode("security"));
       await seedNode(kv, makeConceptNode("validation"));
@@ -491,7 +460,6 @@ Layered protection for security means input validation, safe APIs and deny-lists
         sourceConceptCluster: ["security", "validation"],
         sourceMemoryIds: [],
         sourceLessonIds: [],
-        sourceCrystalIds: [],
         tags: [],
         createdAt: "2026-04-01T00:00:00Z",
         updatedAt: "2026-04-01T00:00:00Z",
@@ -626,13 +594,13 @@ Layered protection for security means input validation, safe APIs and deny-lists
       await kv.set("mem:insights", "ins_1", {
         id: "ins_1", title: "Insight A", content: "Content A", confidence: 0.9,
         reinforcements: 2, sourceConceptCluster: ["security"], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], project: "/app",
+        sourceLessonIds: [], project: "/app",
         tags: ["security"], createdAt: now, updatedAt: now, decayRate: 0.05,
       });
       await kv.set("mem:insights", "ins_2", {
         id: "ins_2", title: "Insight B", content: "Content B", confidence: 0.4,
         reinforcements: 0, sourceConceptCluster: ["testing"], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], project: "/other",
+        sourceLessonIds: [], project: "/other",
         tags: ["testing"], createdAt: now, updatedAt: now, decayRate: 0.05,
       });
     });
@@ -671,7 +639,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       await kv.set("mem:insights", "ins_1", {
         id: "ins_1", title: "Defense in Depth", content: "Security requires layered protection",
         confidence: 0.85, reinforcements: 1, sourceConceptCluster: ["security"],
-        sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+        sourceMemoryIds: [], sourceLessonIds: [],
         tags: ["security"], createdAt: now, updatedAt: now, decayRate: 0.05,
       });
     });
@@ -691,7 +659,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
         const at = new Date(Date.now() - ageDays * day).toISOString();
         return {
           id, title: "Whitespace style", content, confidence, reinforcements: 0,
-          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [],
           tags: [], createdAt: at, updatedAt: at, decayRate: 0.05,
         };
       };
@@ -723,7 +691,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       await kv.set("mem:insights", "ins_old", {
         id: "ins_old", title: "Old", content: "Old insight", confidence: 0.8,
         reinforcements: 1, sourceConceptCluster: [], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        sourceLessonIds: [], tags: [],
         createdAt: new Date(Date.now() - 21 * 86400000).toISOString(),
         updatedAt: new Date(Date.now() - 21 * 86400000).toISOString(),
         decayRate: 0.05,
@@ -742,7 +710,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       const row = {
         id: "ins_race", title: "Race", content: "Race", confidence: 0.8,
         reinforcements: 1, sourceConceptCluster: [], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        sourceLessonIds: [], tags: [],
         createdAt: old, updatedAt: old, decayRate: 0.05,
       };
       await kv.set("mem:insights", "ins_race", { ...row });
@@ -772,7 +740,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       await kv.set("mem:insights", "ins_weak", {
         id: "ins_weak", title: "Weak", content: "Weak insight", confidence: 0.12,
         reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        sourceLessonIds: [], tags: [],
         createdAt: new Date(Date.now() - 21 * 86400000).toISOString(),
         updatedAt: new Date(Date.now() - 21 * 86400000).toISOString(),
         decayRate: 0.05,
@@ -788,7 +756,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       await kv.set("mem:insights", "ins_tombstone", {
         id: "ins_tombstone", title: "Tombstone", content: "Tombstone insight", confidence: 0.1,
         reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        sourceLessonIds: [], tags: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         decayRate: 0.05,
@@ -805,7 +773,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       const tombstone = {
         id: "ins_regen", title: "Regen", content: "Regen insight", confidence: 0.1,
         reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        sourceLessonIds: [], tags: [],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         decayRate: 0.05,
@@ -833,7 +801,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
         const at = new Date(Date.now() - idleDays * day).toISOString();
         return kv.set("mem:insights", id, {
           id, title: id, content: id, confidence: 0.9, reinforcements,
-          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+          sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [],
           tags: [], createdAt: at, updatedAt: at, lastReinforcedAt: at, decayRate: 0.05,
         });
       };
@@ -895,7 +863,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
     it("names the deleted Insights in the audit apart from the decayed ones", async () => {
       const old = new Date(Date.now() - 21 * 86400000).toISOString();
       const base = {
-        sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+        sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [],
         tags: [], createdAt: old, updatedAt: old, decayRate: 0.05,
       };
       await kv.set("mem:insights", "ins_keep", {
@@ -915,7 +883,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
 });
 
 describe("mem::reflect project scope (#1344)", () => {
-  it("builds a project's insights only from that project's facts, crystals and concepts", async () => {
+  it("builds a project's insights only from that project's facts and concepts", async () => {
     const sdk = mockSdk();
     const kv = mockKV();
     await markGraphIndexesReady(kv as never);
@@ -933,7 +901,6 @@ describe("mem::reflect project scope (#1344)", () => {
       await kv.set("mem:semantic", `sem_a${i}`, { ...makeSemantic(fact, `sem_a${i}`), sourceSessionIds: ["ses_a"] });
     }
     await kv.set("mem:semantic", "sem_b", { ...makeSemantic("Beta security keys live in vault", "sem_b"), sourceSessionIds: ["ses_b"] });
-    await kv.set("mem:crystals", "crys_b", { ...makeCrystal("beta work", ["Beta security rotates weekly"]), project: "beta" });
 
     await sdk.trigger("mem::reflect", { project: "alpha" });
 

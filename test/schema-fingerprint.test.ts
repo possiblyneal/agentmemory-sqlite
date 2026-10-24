@@ -47,32 +47,8 @@ describe("fingerprintId", () => {
 });
 
 describe("KV scopes", () => {
-  it("has actions scope", () => {
-    expect(KV.actions).toBe("mem:actions");
-  });
-
-  it("has actionEdges scope", () => {
-    expect(KV.actionEdges).toBe("mem:action-edges");
-  });
-
-  it("has leases scope", () => {
-    expect(KV.leases).toBe("mem:leases");
-  });
-
-  it("has routines scope", () => {
-    expect(KV.routines).toBe("mem:routines");
-  });
-
-  it("has routineRuns scope", () => {
-    expect(KV.routineRuns).toBe("mem:routine-runs");
-  });
-
   it("has signals scope", () => {
     expect(KV.signals).toBe("mem:signals");
-  });
-
-  it("has checkpoints scope", () => {
-    expect(KV.checkpoints).toBe("mem:checkpoints");
   });
 
   it("has mesh scope", () => {

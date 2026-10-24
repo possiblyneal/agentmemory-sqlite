@@ -33,7 +33,7 @@ Full agentmemory methodology: [`LONGMEMEVAL.md`](LONGMEMEVAL.md)
 | **Type** | Memory engine + MCP server | Memory layer API | Full agent runtime | Personal AI | Memory API + app | Benchmark-focused OSS | Memory engine (Oracle DB) | Memory system |
 | **Auto-capture via hooks** | ✅ 12 lifecycle hooks | ❌ Manual `add()` | ❌ Agent self-edits | ❌ Manual | ❌ API-side extraction | ❌ Manual | ❌ API extraction | ❌ Manual |
 | **Search strategy** | BM25 + Vector + Graph | Vector + Graph | Vector (archival) | Semantic | Vector + RAG | Vector-only (large model) | Vector + semantic | Decay-weighted |
-| **Multi-agent coordination** | ✅ Leases + signals + mesh | ❌ | Runtime-internal only | ❌ | ❌ | ❌ | Scoped only (user/agent/thread) | Multi-agent shared |
+| **Multi-agent coordination** | ✅ Signals + mesh | ❌ | Runtime-internal only | ❌ | ❌ | ❌ | Scoped only (user/agent/thread) | Multi-agent shared |
 | **Framework lock-in** | None | None | High | Standalone | None (drop-in wrappers) | None | Oracle Database | None |
 | **External deps** | None | Qdrant/pgvector | Postgres + vector | Multiple | Managed cloud | Vector store | Oracle AI Database | None |
 | **Self-hostable** | ✅ default | Optional | Optional | ✅ | ❌ Cloud-only | ✅ | ✅ (needs Oracle DB) | ✅ |
@@ -78,7 +78,7 @@ This isn't a "agentmemory wins everything" page. Different tools solve different
 - Real-time viewer to see what your agent is learning
 - Self-hostable with zero external databases
 - Privacy filtering on API keys and secrets
-- Multi-agent coordination (leases, signals, routines)
+- Multi-agent coordination (signals, mesh)
 
 **Choose Mem0 if you want:**
 - Framework-agnostic API to bolt onto an existing agent

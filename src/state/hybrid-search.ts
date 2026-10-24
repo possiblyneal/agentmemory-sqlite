@@ -401,7 +401,7 @@ export class HybridSearch {
     // Multiplicative, so it needs no recalibration when RRF_K, the leg
     // weights, or the fusion mode change. The id prefix is the primary
     // predicate: it needs no KV read and keeps working if sessionIds
-    // later gets populated by consolidate/flow-compress.
+    // later gets populated by consolidate.
     const layerBoost = envNumber("AGENTMEMORY_MEMORY_LAYER_BOOST", 1.0);
     const boostFor = (obsId: string, sessionId: string): number =>
       layerBoost !== 1 &&

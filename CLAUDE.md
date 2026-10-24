@@ -373,7 +373,7 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - `npm run typecheck` must report 0 errors and `npm test` (2,050+ tests) must pass before a PR; CI runs both
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
-- Follow existing patterns in `test/crystallize.test.ts` for function tests
+- Follow existing patterns in `test/lessons.test.ts` for function tests
 - Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
 - `npm run eval:replay -- --projects=<dir>,...` replays the Operator's own `~/.claude/projects` transcripts into a throwaway daemon and scores each Goal line against an answer key derived from the transcripts, counting only turns the Operator typed (`eval/README.md`). `--llm` replays through the hook payloads into a daemon with LLM compression on, using the shell's OpenAI-compatible settings. It is not part of CI, and its output stays under `tmp/eval-replay/` because it quotes private transcripts; only aggregates reach `docs/benchmarks/`
 - `eval:replay --query-arm <arm>` (with `--reply-chars`, `--reply-scale`) shapes only the prompt-context probe's query from the previous Agent reply or prompt, to measure terse-prompt Injection before the hook changes; `summary.json` also carries `byProject` and a `typical` rollup excluding `--atypical`, and a change ships on the pooled number only when it does not lose on `typical`
@@ -453,11 +453,11 @@ unchecked: the note is still upstream's claim, not a verified defect.
 
 `test/consistency.test.ts` enforces the install-path rule above (with its own exemption list) and the MCP tool and REST endpoint counts here; `test/tool-count-consistency.test.ts` enforces the hook and skill counts.
 
-- 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
-- 134 REST endpoints
+- 43 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
+- 102 REST endpoints
 - 6 MCP resources, 3 MCP prompts
 - 10 hooks, 17 skills
-- 260+ registered functions
+- 230+ registered functions
 - 2,050+ tests
 
 ## Agent skills
