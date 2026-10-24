@@ -16,3 +16,7 @@
 {"at":"2026-10-20T01:39:35.383Z","bench":"pmb","split":"holdout","label":"chunk-hold-fast-holdout","commit":"c6ac817"}
 {"at":"2026-10-20T01:39:35.453Z","bench":"coding-life","split":"holdout","label":"chunk-hold-fast-holdout","commit":"c6ac817"}
 {"at":"2026-10-20T01:39:37.196Z","bench":"longmemeval","split":"holdout","label":"chunk-hold-fast-holdout","commit":"c6ac817"}
+{"at":"2026-10-23T20:40:11.868Z","bench":"coding-life","split":"all","label":"scorecard-2026-10-23-pinned-rules","commit":"2591b079"}
+{"at":"2026-10-23T20:41:42.268Z","bench":"coding-life","split":"all","label":"scorecard-2026-10-23-pinned-rules","commit":"2591b079"}
+{"at":"2026-10-23T20:44:33.392Z","bench":"coding-life","split":"all","label":"scorecard-2026-10-23-pinned-rules","commit":"2591b079"}
+{"at":"2026-10-23T20:44:35.010Z","bench":"coding-life","split":"all","label":"scorecard-2026-10-23-pinned-rules","commit":"2591b079"}
