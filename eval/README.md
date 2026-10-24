@@ -41,7 +41,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 | `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on the first sandbox run |
 | `agentmemory-bm25` | sandbox daemon, no embeddings | all | `npm run build` |
 | `grep` | tokenized substring match, project-filtered | search, prompt-submit | nothing |
-| `random` | k Sessions drawn per question, seeded by question id | all | nothing — the floor every path must beat |
+| `random` | k Sessions drawn per question, seeded by question id | search, session-start, prompt-submit | nothing — the floor every path must beat |
 | `vector` | OpenAI `text-embedding-3-small` + cosine | search | `OPENAI_API_KEY` (paid) |
 
 ## Sandbox
@@ -79,7 +79,7 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
 
-The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start`, none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
+The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start` (and `pre-compact` in `baselines/pinned-rules.json`), none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
 
 ```text
 FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
@@ -103,7 +103,7 @@ npm run eval:gate:rules                       # CI: baselines/pinned-rules.json
 - **`rule-amended`** (#290 F2, the stale rule followed) — `kelpie` states an exact-pin rule, then replaces it with a caret-range rule four days later; the gold is the newer rule only, so the stale one costs precision, and **first** says whether the newer one leads.
 - a project never worked on, at each path, which must inject nothing.
 
-It is a corpus of its own because its Sessions would shift BM25 scores for the coding-agent-life-v2 questions. `eval:gate:rules` gates recall and no-answer clean and the 500 ms p95 ceilings for both paths; precision is not gated, because with the rule as the only gold it counts how many work Sessions the budget fits. CI runs it after `eval:gate`, on the same leg. With six questions the dev split leaves only some of them, so the published numbers come from `--split all`.
+It is a corpus of its own because its Sessions would shift BM25 scores for the coding-agent-life-v2 questions. `eval:gate:rules` gates recall and no-answer clean and the 500 ms p95 ceilings for both paths; precision is not gated, because with the rule as the only gold it counts how many work Sessions the budget fits. CI runs it after `eval:gate`, on the same leg. The share assumes the default session-start budget of 2000: against a live daemon (`--base-url`) with a changed `TOKEN_BUDGET`, session start is still reported against 2000. With six questions the dev split leaves only some of them, so the published numbers come from `--split all`.
 
 ### LongMemEval `_s` (public, 278MB download)
 

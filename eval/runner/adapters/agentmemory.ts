@@ -42,6 +42,7 @@ const NEEDLE_CHARS = 48;
 const SESSION_START_BUDGET = 2000;
 const PRE_COMPACT_BUDGET = 1500;
 const RULEBOOK_HEADING = "## Rules\n";
+const CONTEXT_FOOTER = "\n</agentmemory-context>";
 const SEARCH_TOOLS = new Set(["grep", "glob"]);
 
 function isSearchTool(tool: string): boolean {
@@ -250,11 +251,14 @@ async function querySearch(q: Question, state: AgentMemoryState, k: number): Pro
   return { ranked };
 }
 
-// The pinned `## Rules` block runs to the blank line that ends every block.
+// The pinned `## Rules` block runs to the blank line that ends every block,
+// or to the context's footer when it is the last block.
 export function rulebookShare(context: string, budget: number): number | undefined {
   const start = context.indexOf(RULEBOOK_HEADING);
   if (start === -1) return undefined;
-  const end = context.indexOf("\n\n", start);
+  const blankLine = context.indexOf("\n\n", start);
+  const footer = context.indexOf(CONTEXT_FOOTER, start);
+  const end = blankLine === -1 ? footer : blankLine;
   return estimateTokens(context.slice(start, end === -1 ? undefined : end)) / budget;
 }
 

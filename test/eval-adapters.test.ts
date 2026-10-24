@@ -8,7 +8,7 @@ import {
 } from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
 import { randomAdapter } from "../eval/runner/adapters/random.js";
-import { aggregate, compareToBaseline, scoreQuestion, summarize } from "../eval/runner/score.js";
+import { aggregate, compareToBaseline, RULE_TYPE_PREFIX, scoreQuestion, summarize } from "../eval/runner/score.js";
 import { questionPath, type Question, type QueryResult, type Session } from "../eval/runner/types.js";
 
 function question(overrides: Partial<Question>): Question {
@@ -115,6 +115,12 @@ describe("rulebookShare", () => {
   it("measures the Rules block alone against the budget", () => {
     const rules = "## Rules\nStanding rules.\n- never run migrations from the deploy hook";
     const context = `## Pinned\n- slot\n\n${rules}\n\n## Session\n- ${"x".repeat(900)}`;
+    expect(rulebookShare(context, 1000)).toBeCloseTo(Math.ceil(rules.length / 3) / 1000);
+  });
+
+  it("ends the Rules block at the footer when it is the last block", () => {
+    const rules = "## Rules\nStanding rules.\n- never run migrations from the deploy hook";
+    const context = `<agentmemory-context project="p">\n${rules}\n</agentmemory-context>`;
     expect(rulebookShare(context, 1000)).toBeCloseTo(Math.ceil(rules.length / 3) / 1000);
   });
 
@@ -330,7 +336,7 @@ describe("pinned-rules dataset", () => {
   const byId = new Map(sessions.map((s) => [s.id, s]));
 
   it("points every rule question at a rule of its own project", () => {
-    const ruleQuestions = queries.filter((q) => q.type.startsWith("rule-"));
+    const ruleQuestions = queries.filter((q) => q.type.startsWith(RULE_TYPE_PREFIX));
     expect(ruleQuestions.length).toBeGreaterThan(0);
     for (const q of ruleQuestions) {
       for (const gold of q.goldSessionIds) {

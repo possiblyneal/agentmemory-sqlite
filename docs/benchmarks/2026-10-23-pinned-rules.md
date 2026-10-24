@@ -1,6 +1,6 @@
 # 2026-10-23 — Pinned rules at session start and pre-compact (#297)
 
-**Commit:** `2591b079` (main) plus the uncommitted eval changes on `feat/eval-pinned-rules`; no `src/` change
+**Commit:** `38e01d3` (on `2591b079`; the review fixes that follow change no measured number); no `src/` change
 **Bench:** `eval/data/pinned-rules` through `runner/coding-life.ts`, `--split all`; `eval:gate` and `eval:gate:rules`
 **N:** session-start 3 (2 rule questions, 1 no-answer); pre-compact 3 (2 rule questions, 1 no-answer)
 **K:** n/a, each Injection is scored whole
@@ -59,11 +59,12 @@ Session-start precision also fell from 1.000 to 0.654, because the rule question
 
 ## Methodology
 
-As in `eval/README.md` (Pinned rules). Session start posts `/agentmemory/session/start`, which leaves the budget at the `TOKEN_BUDGET` default of 2000 because the sandbox leaves it unset. Pre-compact posts `/agentmemory/context` with `budget: 1500`, as `src/hooks/pre-compact.ts` does. The rules share is `estimateTokens` of the `## Rules` block (heading to the next blank line) over that budget. Rules are saved through `POST /agentmemory/remember` with `type: "rule"` and the Session's project.
+As in `eval/README.md` (Pinned rules). Session start posts `/agentmemory/session/start`, which leaves the budget at the `TOKEN_BUDGET` default of 2000 because the sandbox leaves it unset. Pre-compact posts `/agentmemory/context` with `budget: 1500`, as `src/hooks/pre-compact.ts` does. The rules share is `estimateTokens` of the `## Rules` block (heading to the next blank line) over that budget. Rules are saved through `POST /agentmemory/remember` with `type: "rule"` and the Session's project. There is no `grep` or `random` control row: neither adapter has a pre-compact path, and with the rule as the only gold, recall checks the pinned-prefix contract (the rule is always given) rather than beating a floor.
 
 ## Reproduce
 
 ```sh
+git checkout 38e01d3
 npm ci && npm run build
 AGENTMEMORY_EVAL_HOLDOUT=scorecard-2026-10-23-pinned-rules npm run eval:coding-life -- --data eval/data/pinned-rules --adapters agentmemory-bm25,agentmemory --split all --instance 44
 npm run eval:gate:rules
