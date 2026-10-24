@@ -75,24 +75,35 @@ async function withCoveringSummaries(kv: StateKV, ranked: Candidate[]): Promise<
 }
 
 // A newer Memory that contradicts a passed one in different words can score
-// below the floor, which would leave the stale claim given alone. Such a
-// Memory is admitted directly above the one it shadows; a below-floor Memory
-// that shadows nothing given stays out.
+// below the floor or fail the gate, which would leave the stale claim given
+// alone. Such a Memory is admitted directly above the first passed Memory it
+// shadows. The newest claim is judged over every Memory hit, those already
+// injected this Session included, so an intermediate claim is never given as
+// the current one.
 async function withShadowingMemories(
   kv: StateKV,
   passed: Candidate[],
-  belowFloor: NarratedHit[],
+  leftOut: NarratedHit[],
   seen: Set<string>,
 ): Promise<Candidate[]> {
   const passedMemoryIds = passed.filter(({ ref }) => ref.kind === "memory").map(({ ref }) => ref.id);
   if (passedMemoryIds.length === 0) return passed;
-  const extra = (await Promise.all(belowFloor.map((r) => candidateFor(kv, r)))).filter(
-    ({ ref }) => ref.kind === "memory" && !seen.has(refKey(ref)),
-  );
-  const shadowed = await shadowedMemoryIds(kv, [...passedMemoryIds, ...extra.map(({ ref }) => ref.id)]);
-  const shadowers = new Set(passedMemoryIds.map((id) => shadowed.get(id)));
-  const admitted = extra.filter(({ ref }) => shadowers.has(ref.id));
-  return newerAboveShadowed([...passed, ...admitted], ({ ref }) => ref.id, shadowed);
+  const extra = (await Promise.all(leftOut.map((r) => candidateFor(kv, r)))).filter(({ ref }) => ref.kind === "memory");
+  const [amongPassed, amongAll] = await Promise.all([
+    shadowedMemoryIds(kv, passedMemoryIds),
+    shadowedMemoryIds(kv, [...passedMemoryIds, ...extra.map(({ ref }) => ref.id)]),
+  ]);
+  const shadowers = new Set(passedMemoryIds.map((id) => amongAll.get(id)));
+  const admitted = extra.filter(({ ref }) => shadowers.has(ref.id) && !amongAll.has(ref.id) && !seen.has(refKey(ref)));
+  const ordered = newerAboveShadowed(passed, ({ ref }) => ref.id, amongPassed);
+  for (const memory of admitted) {
+    ordered.splice(
+      ordered.findIndex(({ ref }) => amongAll.get(ref.id) === memory.ref.id),
+      0,
+      memory,
+    );
+  }
+  return ordered;
 }
 
 // A covered Session renders once however many of its Observations hit, so
@@ -256,8 +267,11 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
         ({ ref }) => !seen.has(refKey(ref)),
       );
       const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation, GATE_POOL);
-      const belowFloor = earlier.filter((r): r is NarratedHit => r.score < floor && !!r.observation.narrative);
-      const gated = await withShadowingMemories(kv, passed, belowFloor, seen);
+      const passedIds = new Set(passed.map(({ hit }) => hit.observation.id));
+      const leftOut = earlier.filter(
+        (r): r is NarratedHit => !!r.observation.narrative && !passedIds.has(r.observation.id),
+      );
+      const gated = await withShadowingMemories(kv, passed, leftOut, seen);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 

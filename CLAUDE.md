@@ -205,7 +205,7 @@ case "memory_your_tool": {
 ```
 
 ### Injection Gate
-Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated. The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
+Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated, nor is a Memory admitted by `withShadowingMemories` (Memory shadowing below). The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
 ### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
@@ -260,9 +260,11 @@ type, so re-saving a Memory as a rule pins it.
 - **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
   in smart-search and prompt-context after their floors: an older Memory of the same type and
   Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly
-  below the newer one. Nothing is hidden. Prompt-context also admits a below-floor Memory hit
-  (`withShadowingMemories`, `src/functions/prompt-context.ts`) when it is the newest shadower of
-  a passed Memory, directly above it and within the 3 results; it skips the gate.
+  below the newer one. Nothing is hidden. Prompt-context also admits a Memory hit the floor or gate left out
+  (`withShadowingMemories`, `src/functions/prompt-context.ts`) when, among every Memory hit,
+  injected ones included, it is the newest shadower of a passed Memory and nothing shadows it,
+  and it is not yet injected; it goes directly above the first passed Memory it shadows, within
+  the 3 results, and skips the gate.
 - **De-indexing** — every path that sets a Memory `isLatest: false` (`mem::remember`, `mem::evolve`,
   `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
   consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).

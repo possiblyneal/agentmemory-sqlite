@@ -1,6 +1,6 @@
 # 2026-10-23 — Admit a below-floor shadowing Memory at prompt submit (#296)
 
-**Commit:** before `2591b079` (main); after `fix/prompt-context-admit-shadowing-memory` (on `2591b079`, uncommitted at measurement)
+**Commit:** before `2591b079` (main); after `3de47ec` (on `2591b079`); the review fixes after it change only which left-out Memory is admitted and where, which no eval reaches
 **Bench:** supersession, dev split (`runner/supersession.ts`); `eval:suite --tier fast` (coding-life, PrecisionMemBench, LongMemEval sample); `eval:gate`
 **N:** supersession 110 cases (5 per cell); suite as listed below
 **K:** 5 (search); an Injection is scored whole
@@ -14,7 +14,7 @@ Adopted. T4 in `test/supersession.test.ts` flips from `it.fails` to `it`: the ne
 
 ## Lever
 
-`mem::prompt-context` reordered only the Memory hits that passed its floor and the gate, so a newer Memory that contradicts a passed one in other words, and scores below the floor, was never given. `withShadowingMemories` (`src/functions/prompt-context.ts`) now runs `shadowedMemoryIds` over the passed Memory hits plus the search's below-floor Memory hits not yet injected this Session. A below-floor Memory that is the newest shadower of a passed one is admitted directly above it (`newerAboveShadowed`), skips the gate, and counts toward the 3 results. When no Memory passed, nothing extra is loaded.
+`mem::prompt-context` reordered only the Memory hits that passed its floor and the gate, so a newer Memory that contradicts a passed one in other words, and scores below the floor, was never given. `withShadowingMemories` (`src/functions/prompt-context.ts`) now runs `shadowedMemoryIds` over the passed Memory hits plus every Memory hit the floor or gate left out, injected ones included. A left-out Memory that is the newest shadower of a passed one, is shadowed by none, and was not injected earlier this Session is admitted directly above the first passed Memory it shadows, skips the gate, and counts toward the 3 results. When no Memory passed, nothing extra is loaded.
 
 ## Supersession
 
@@ -54,6 +54,7 @@ As in `eval/README.md`: dev split only (holdout not opened), BM25-only supersess
 ## Reproduce
 
 ```sh
+git checkout 3de47ec
 npm ci && npm run build
 npm run eval:supersession -- --instance 33
 LONGMEMEVAL_PATH=~/datasets/longmemeval/longmemeval_s.json npm run eval:suite -- --tier fast --label <label> --against 2591b079

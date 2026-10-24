@@ -77,10 +77,11 @@ Global marker that shares at least 2 distinctive terms (3+ letters, not stop wor
 the smaller term set. The newer is moved directly above the older, which stays; nothing is marked,
 hidden or deleted, and no LLM or stored field is involved. `mem::smart-search` reorders the hits
 above its relevance floor (T3). `mem::prompt-context` reorders the hits that passed its floor and
-the gate, and also tests them against the search's below-floor Memory hits not yet injected this
-Session: a below-floor Memory that is the newest shadower of a passed one is admitted directly
-above it without passing the gate, and counts toward the 3 results (T4). A below-floor Memory
-that shadows nothing given stays out.
+the gate, and also tests them against every Memory hit the floor or gate left out: one that is
+the newest shadower of a passed Memory, is shadowed by none, and was not injected earlier this
+Session is admitted directly above the first passed Memory it shadows, without passing the gate,
+and counts toward the 3 results (T4). The newest is judged with injected Memories included, so
+when the newest claim was already given, an older one is not admitted in its place.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
 `mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call
