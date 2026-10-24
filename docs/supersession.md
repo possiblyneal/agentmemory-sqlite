@@ -12,7 +12,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 
 | Record kind | search | session start | prompt submit |
 |---|---|---|---|
-| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale given alone** when the contradiction scores below the relevance floor (T4) |
+| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); stale demoted when a contradiction shares at least two terms, admitted from below the relevance floor (T4) |
 | Semantic Fact | unkeyed: stale capped behind the newer fact (T8); keyed: stale hidden (T8k) | unkeyed: stale demoted by the recency factor (T9); keyed: stale hidden (T9k) | not reachable (T10) |
 | Lesson | **newer ranked first** (T11) | stale capped behind the newer Lesson (T12, T12r) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
@@ -29,7 +29,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T1 | Memory: smart-search hides a Memory that a near-restatement saved later superseded | passes |
 | T2 | Memory: prompt-submit hides a Memory that a near-restatement saved later superseded | passes |
 | T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | passes |
-| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one | `it.fails` |
+| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one | passes |
 | T5 | Memory: smart-search hides a Memory that mem::evolve replaced | passes |
 | T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | passes |
 | T7 | Memory: session start does not reach Memories, so a superseded one cannot appear | passes |
@@ -79,8 +79,11 @@ Global marker that shares at least 2 distinctive terms (3+ letters, not stop wor
 the smaller term set. The newer is moved directly above the older, which stays; nothing is marked,
 hidden or deleted, and no LLM or stored field is involved. `mem::smart-search` reorders the hits
 above its relevance floor (T3). `mem::prompt-context` reorders the hits that passed its floor and
-the gate, so it never adds a newer Memory that scored below the floor: in T4 only the stale
-Memory passes, it is given alone, and the test stays `it.fails` until the newer one is admitted.
+the gate, and also tests them against every Memory hit the floor or gate left out: one that is
+the newest shadower of a passed Memory, is shadowed by none, and was not injected earlier this
+Session is admitted directly above the first passed Memory it shadows, without passing the gate,
+and counts toward the 3 results (T4). The newest is judged with injected Memories included, so
+when the newest claim was already given, an older one is not admitted in its place.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
 `mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call

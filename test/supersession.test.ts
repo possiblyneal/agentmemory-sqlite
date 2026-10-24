@@ -231,8 +231,8 @@ describe("supersession: Memory", () => {
     expect(results.map((r) => r.title)).toEqual([LOW_OVERLAP_B, LOW_OVERLAP_A]);
   });
 
-  // The newer Memory matches the prompt below the relevance floor, so only the stale one passes it and demotion has nothing to reorder.
-  it.fails("prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one", async () => {
+  // The newer Memory matches the prompt below the relevance floor; it is admitted because it shadows the stale one that passed.
+  it("prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one", async () => {
     await saveMemory(LOW_OVERLAP_A);
     vi.advanceTimersByTime(1000);
     await saveMemory(LOW_OVERLAP_B);
