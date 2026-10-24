@@ -33,6 +33,7 @@ export function scoreQuestion(
     hit,
     topGoldRank: goldIndex === -1 ? null : goldIndex + 1,
     chars: result.chars ?? null,
+    rulebookShare: result.rulebookShare ?? null,
     latencyMs,
   };
 }
@@ -44,7 +45,10 @@ export interface PathStats {
   precision: number;
   noAnswerClean: number | null;
   hit: number;
+  // Answerable questions whose Injection or results lead with a gold Session.
+  goldFirst: number | null;
   meanChars: number | null;
+  rulebookShareMax: number | null;
   latencyP50: number;
   latencyP95: number;
 }
@@ -59,6 +63,7 @@ export function summarize(rows: ScoreRow[]): PathStats {
   const answerable = rows.filter((r) => r.answerable);
   const noAnswer = rows.filter((r) => !r.answerable);
   const chars = rows.map((r) => r.chars).filter((t): t is number => t !== null);
+  const shares = rows.map((r) => r.rulebookShare).filter((t): t is number => t !== null);
   const latencies = rows.map((r) => r.latencyMs).sort((a, b) => a - b);
   return {
     n: rows.length,
@@ -70,7 +75,12 @@ export function summarize(rows: ScoreRow[]): PathStats {
         ? null
         : noAnswer.filter((r) => r.returned === 0).length / noAnswer.length,
     hit: rows.filter((r) => r.hit).length,
+    goldFirst:
+      answerable.length === 0
+        ? null
+        : answerable.filter((r) => r.topGoldRank === 1).length / answerable.length,
     meanChars: chars.length === 0 ? null : mean(chars),
+    rulebookShareMax: shares.length === 0 ? null : Math.max(...shares),
     latencyP50: latencies[Math.floor(latencies.length / 2)] ?? 0,
     latencyP95: latencies[Math.ceil(latencies.length * 0.95) - 1] ?? 0,
   };
@@ -95,10 +105,19 @@ function groupStats(
   return summary;
 }
 
-export function aggregate(rows: ScoreRow[]): { byPath: Summary; byType: Summary } {
+export const RULE_TYPE_PREFIX = "rule-";
+
+// `rules` is byPath over the pinned-rule questions alone, so rule recall at
+// session start is not averaged with project coverage.
+export function aggregate(rows: ScoreRow[]): { byPath: Summary; byType: Summary; rules: Summary } {
   return {
     byPath: groupStats(rows, (r) => r.adapter, (r) => r.path),
     byType: groupStats(rows, (r) => r.questionType, (r) => r.adapter),
+    rules: groupStats(
+      rows.filter((r) => r.questionType.startsWith(RULE_TYPE_PREFIX)),
+      (r) => r.adapter,
+      (r) => r.path,
+    ),
   };
 }
 

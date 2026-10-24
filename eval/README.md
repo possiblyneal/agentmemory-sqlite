@@ -21,6 +21,7 @@ A question names the path it exercises, and each path is scored on its own:
 | `search` | `POST /agentmemory/smart-search` with the question's `project` | top K Sessions |
 | `session-start` | `POST /agentmemory/session/start` for a probe Session — what the session-start hook injects | the whole Injection |
 | `prompt-submit` | the user prompt as the question — what `POST /agentmemory/prompt-context` returns for it, the per-prompt Injection | the whole Injection |
+| `pre-compact` | `POST /agentmemory/context` at budget 1500 for a probe Session, as the pre-compact hook posts it | the whole Injection |
 
 An Injection is text, so the runner maps it back to eval Sessions by finding each Observation's output in it.
 
@@ -31,6 +32,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 - **no-answer clean** — share of no-answer questions (`goldSessionIds: []`) that returned nothing. Every path has some: a topic never worked on and, on search and prompt-submit, one project's work asked from the other project. `prompt-submit` adds bare acknowledgements (`yes`, `continue`), which should never inject.
 - **hit** — gold in results for answerable questions, empty results for no-answer ones.
 - **chars** — mean size of the Injection, the cost the Agent pays to read it.
+- **first** and **max share** (pinned-rule questions only, the `=== Pinned rules ===` table and `rules` in `summary.json`) — the share of answerable questions whose Injection leads with a gold Session, and the largest share of the Injection's budget the `## Rules` block took (its estimated tokens over 2000 at session start, 1500 at pre-compact).
 
 ## Adapters
 
@@ -39,7 +41,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 | `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on the first sandbox run |
 | `agentmemory-bm25` | sandbox daemon, no embeddings | all | `npm run build` |
 | `grep` | tokenized substring match, project-filtered | search, prompt-submit | nothing |
-| `random` | k Sessions drawn per question, seeded by question id | all | nothing — the floor every path must beat |
+| `random` | k Sessions drawn per question, seeded by question id | search, session-start, prompt-submit | nothing — the floor every path must beat |
 | `vector` | OpenAI `text-embedding-3-small` + cosine | search | `OPENAI_API_KEY` (paid) |
 
 ## Sandbox
@@ -77,7 +79,7 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
 
-The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start`, none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
+The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start` (and `pre-compact` in `baselines/pinned-rules.json`), none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
 
 ```text
 FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
@@ -86,6 +88,22 @@ FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
 Search is gated on all three metrics. smart-search drops hybrid hits below a relevance floor (BM25 of at least 3.5 and half the best match, or a cosine of at least 0.3 on a hit BM25 also matched), so an off-topic query can return nothing. Search no-answer clean is 0.25, not 1: three of its four no-answer questions still have a lexical match above the floor (best BM25 3.9, 4.9 and 6.4), and gold Sessions score as low as 3.8, so a floor high enough to clear them (4.0 clears only the first) costs search recall.
 
 CI runs it on the ubuntu / Node 22 leg. The gate is BM25-only so CI never downloads the embedding model and needs no network beyond `npm ci`; the on-device embedding stack is still measured by `npm run eval:coding-life`. A PR that changes these numbers on purpose updates the baseline file in the same PR and says why. One question gained or lost on a path moves recall by at least 0.05, so the tolerance only absorbs rounding.
+
+### Pinned rules
+
+```sh
+npm run build
+npm run eval:coding-life -- --data eval/data/pinned-rules --adapters agentmemory-bm25,agentmemory
+npm run eval:gate:rules                       # CI: baselines/pinned-rules.json
+```
+
+`data/pinned-rules/` measures whether a `type: "rule"` Memory reaches the Agent through the `## Rules` block (`buildRulebook`, `src/functions/context.ts`) at session start and at pre-compact. It holds two projects of work Sessions, each with more Sessions than either budget fits, and three content-only Sessions that carry `"memoryType": "rule"`, which the runner saves through `POST /agentmemory/remember` as that type:
+
+- **`rule-buried`** (#290 F3, a rule delivered but buried) — `tidepool` states its rule on the first day and works eight more Sessions; the rule must still be in the Injection although its day's work no longer fits.
+- **`rule-amended`** (#290 F2, the stale rule followed) — `kelpie` states an exact-pin rule, then replaces it with a caret-range rule four days later; the gold is the newer rule only, so the stale one costs precision, and **first** says whether the newer one leads.
+- a project never worked on, at each path, which must inject nothing.
+
+It is a corpus of its own because its Sessions would shift BM25 scores for the coding-agent-life-v2 questions. `eval:gate:rules` gates recall and no-answer clean and the 500 ms p95 ceilings for both paths; precision is not gated, because with the rule as the only gold it counts how many work Sessions the budget fits. CI runs it after `eval:gate`, on the same leg. The share assumes the default session-start budget of 2000: against a live daemon (`--base-url`) with a changed `TOKEN_BUDGET`, session start is still reported against 2000. With six questions the dev split leaves only some of them, so the published numbers come from `--split all`.
 
 ### LongMemEval `_s` (public, 278MB download)
 
@@ -277,7 +295,8 @@ The key is a proxy and the numbers are not accuracy:
 eval/
 ├── README.md
 ├── baselines/
-│   └── coding-agent-life-v2.json  CI gate: per adapter × path floors, tolerance and p95 latency ceilings
+│   ├── coding-agent-life-v2.json  CI gate: per adapter × path floors, tolerance and p95 latency ceilings
+│   └── pinned-rules.json          CI gate for data/pinned-rules (eval:gate:rules)
 ├── runner/
 │   ├── types.ts                   Adapter, Question, QueryResult, ScoreRow
 │   ├── score.ts                   per-question scoring, per adapter × path aggregation, baseline gate
@@ -285,7 +304,7 @@ eval/
 │   ├── load.ts                    LongMemEval JSON → Question[]
 │   ├── beam-load.ts               BEAM rows → Question[] (Turns as Sessions, source_chat_ids as gold)
 │   ├── adapters/
-│   │   ├── agentmemory.ts         capture path in; smart-search, session/start, prompt-context out
+│   │   ├── agentmemory.ts         capture path in; smart-search, session/start, prompt-context, context out
 │   │   ├── grep.ts                tokenized substring baseline
 │   │   ├── random.ts              seeded random control
 │   │   └── vector.ts              OpenAI embeddings + cosine
@@ -317,6 +336,7 @@ eval/
 ├── holdout-ledger.ndjson          one line per holdout look (every `--split holdout` or `all`)
 └── data/
     ├── precisionmembench/         upstream fixtures @ b95d6ab, MIT
+    ├── pinned-rules/              17 Sessions (3 of them rules) and 6 session-start / pre-compact questions
     └── coding-agent-life-v2/
         ├── sessions.json          22 Sessions as tool-call Observations, each with a fixed 1-10 importance
         └── queries.json           38 questions with path, project and gold Session ids

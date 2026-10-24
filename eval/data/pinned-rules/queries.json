@@ -1,0 +1,8 @@
+[
+  { "id": "r-001", "path": "session-start", "project": "tidepool", "type": "rule-buried", "goldSessionIds": ["tide-r01"] },
+  { "id": "r-002", "path": "session-start", "project": "kelpie", "type": "rule-amended", "goldSessionIds": ["kelp-r02"] },
+  { "id": "r-n01", "path": "session-start", "project": "fresh-repo", "type": "no-answer", "goldSessionIds": [] },
+  { "id": "c-001", "path": "pre-compact", "project": "tidepool", "type": "rule-buried", "goldSessionIds": ["tide-r01"] },
+  { "id": "c-002", "path": "pre-compact", "project": "kelpie", "type": "rule-amended", "goldSessionIds": ["kelp-r02"] },
+  { "id": "c-n01", "path": "pre-compact", "project": "fresh-repo", "type": "no-answer", "goldSessionIds": [] }
+]

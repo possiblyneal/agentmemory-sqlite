@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { assertVariedImportance, attribute, needleFor } from "../eval/runner/adapters/agentmemory.js";
+import {
+  assertVariedImportance,
+  attribute,
+  needleFor,
+  rulebookShare,
+} from "../eval/runner/adapters/agentmemory.js";
 import { grepAdapter } from "../eval/runner/adapters/grep.js";
 import { randomAdapter } from "../eval/runner/adapters/random.js";
-import { aggregate, compareToBaseline, scoreQuestion, summarize } from "../eval/runner/score.js";
+import { aggregate, compareToBaseline, RULE_TYPE_PREFIX, scoreQuestion, summarize } from "../eval/runner/score.js";
 import { questionPath, type Question, type QueryResult, type Session } from "../eval/runner/types.js";
 
 function question(overrides: Partial<Question>): Question {
@@ -75,6 +80,53 @@ describe("aggregate", () => {
     expect(byType.decision.x).toMatchObject({ n: 2, recall: 0.5, hit: 1 });
     expect(byType.file.x).toMatchObject({ n: 1, recall: 1 });
   });
+
+  it("reports pinned-rule questions apart, with how often the rule leads and its largest share", () => {
+    const rows = [
+      scoreQuestion(
+        question({ id: "1", type: "rule-buried", path: "pre-compact", goldSessionIds: ["r"] }),
+        { ...ranked("r", "a"), rulebookShare: 0.05 },
+        5,
+        "x",
+        1,
+      ),
+      scoreQuestion(
+        question({ id: "2", type: "rule-amended", path: "pre-compact", goldSessionIds: ["r2"] }),
+        { ...ranked("r1", "r2"), rulebookShare: 0.08 },
+        5,
+        "x",
+        1,
+      ),
+      scoreQuestion(
+        question({ id: "3", type: "project-coverage", path: "pre-compact", goldSessionIds: ["a"] }),
+        ranked("b"),
+        5,
+        "x",
+        1,
+      ),
+    ];
+    const { byPath, rules } = aggregate(rows);
+    expect(rules.x["pre-compact"]).toMatchObject({ n: 2, recall: 1, goldFirst: 0.5, rulebookShareMax: 0.08 });
+    expect(byPath.x["pre-compact"].n).toBe(3);
+  });
+});
+
+describe("rulebookShare", () => {
+  it("measures the Rules block alone against the budget", () => {
+    const rules = "## Rules\nStanding rules.\n- never run migrations from the deploy hook";
+    const context = `## Pinned\n- slot\n\n${rules}\n\n## Session\n- ${"x".repeat(900)}`;
+    expect(rulebookShare(context, 1000)).toBeCloseTo(Math.ceil(rules.length / 3) / 1000);
+  });
+
+  it("ends the Rules block at the footer when it is the last block", () => {
+    const rules = "## Rules\nStanding rules.\n- never run migrations from the deploy hook";
+    const context = `<agentmemory-context project="p">\n${rules}\n</agentmemory-context>`;
+    expect(rulebookShare(context, 1000)).toBeCloseTo(Math.ceil(rules.length / 3) / 1000);
+  });
+
+  it("is undefined when no rule is pinned", () => {
+    expect(rulebookShare("## Session\n- work", 1500)).toBeUndefined();
+  });
 });
 
 describe("compareToBaseline", () => {
@@ -85,7 +137,9 @@ describe("compareToBaseline", () => {
     precision,
     noAnswerClean,
     hit: 1,
+    goldFirst: null,
     meanChars: null,
+    rulebookShareMax: null,
     latencyP50: 0,
     latencyP95: 0,
   });
@@ -265,8 +319,53 @@ describe("coding-agent-life-v2 dataset", () => {
     expect(() => assertVariedImportance(sessions)).not.toThrow();
   });
 
+  it("keeps pinned-rule fixtures out of this corpus, so they cannot shift its gated numbers", () => {
+    expect(sessions.some((s) => s.memoryType === "rule")).toBe(false);
+  });
+
   it("refuses a rated dataset that rates everything alike", () => {
     const flat: Session[] = [{ id: "s", observations: [{ tool: "Read", output: "a", importance: 5 }, { tool: "Read", output: "b", importance: 5 }] }];
     expect(() => assertVariedImportance(flat)).toThrow(/one importance/);
+  });
+});
+
+describe("pinned-rules dataset", () => {
+  const dir = new URL("../eval/data/pinned-rules/", import.meta.url);
+  const sessions = JSON.parse(readFileSync(new URL("sessions.json", dir), "utf8")) as Session[];
+  const queries = JSON.parse(readFileSync(new URL("queries.json", dir), "utf8")) as Question[];
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+
+  it("points every rule question at a rule of its own project", () => {
+    const ruleQuestions = queries.filter((q) => q.type.startsWith(RULE_TYPE_PREFIX));
+    expect(ruleQuestions.length).toBeGreaterThan(0);
+    for (const q of ruleQuestions) {
+      for (const gold of q.goldSessionIds) {
+        expect(byId.get(gold), `${q.id} -> ${gold}`).toMatchObject({ memoryType: "rule", project: q.project });
+      }
+    }
+  });
+
+  it("asks both session start and pre-compact for a buried rule, an amended rule and nothing", () => {
+    for (const path of ["session-start", "pre-compact"]) {
+      const types = queries.filter((q) => questionPath(q) === path).map((q) => q.type);
+      expect(types, path).toEqual(expect.arrayContaining(["rule-buried", "rule-amended", "no-answer"]));
+    }
+  });
+
+  it("gives every Observation and rule a needle no other Session shares", () => {
+    const owner = new Map<string, string>();
+    for (const s of sessions) {
+      const texts = [...(s.observations ?? []).map((o) => o.output), ...(s.content ? [s.content] : [])];
+      for (const text of texts) {
+        const needle = needleFor(text);
+        const prev = owner.get(needle);
+        expect(prev === undefined || prev === s.id, `${s.id} shares "${needle}" with ${prev}`).toBe(true);
+        owner.set(needle, s.id);
+      }
+    }
+  });
+
+  it("rates its Observations on more than one importance value", () => {
+    expect(() => assertVariedImportance(sessions)).not.toThrow();
   });
 });

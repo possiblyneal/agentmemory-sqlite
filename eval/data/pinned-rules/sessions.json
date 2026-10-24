@@ -1,0 +1,185 @@
+[
+  {
+    "id": "tide-001",
+    "project": "tidepool",
+    "timestamp": "2026-04-27T09:00:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "tidepool scheduler drops jobs whose cron expression uses a step value like */7 in the minute field", "importance": 5 },
+      { "tool": "Read", "file": "cron/expr.go", "output": "parser in cron/expr.go splits on commas before slashes, so */7 becomes a literal star and the job never fires", "importance": 4 },
+      { "tool": "Edit", "file": "cron/expr.go", "output": "step values now parse before list splitting and expand to every seventh minute, with a bounds check against 59", "importance": 9 },
+      { "tool": "Write", "file": "cron/expr_test.go", "output": "table test for step values in minute, hour and day-of-month fields including the */7 regression case", "importance": 7 },
+      { "tool": "Bash", "output": "go test ./cron/... passed, opened PR #41 for cron step parsing in tidepool scheduler", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-002",
+    "project": "tidepool",
+    "timestamp": "2026-04-28T10:15:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "tidepool worker pool leaks goroutines when a job context is cancelled mid-retry", "importance": 5 },
+      { "tool": "Read", "file": "worker/run.go", "output": "retry loop in worker/run.go selects on the timer only and never on ctx.Done, so cancelled jobs sleep out the backoff", "importance": 4 },
+      { "tool": "Edit", "file": "worker/run.go", "output": "retry backoff now selects on ctx.Done as well, returns context.Canceled and releases the worker slot immediately", "importance": 9 },
+      { "tool": "Write", "file": "worker/run_test.go", "output": "goleak-based test that cancels forty jobs mid-backoff and asserts no goroutines remain after shutdown", "importance": 7 },
+      { "tool": "Bash", "output": "go test -race ./worker/... clean, goroutine count flat at 112 over a ten minute soak in the tidepool staging pod", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-003",
+    "project": "tidepool",
+    "timestamp": "2026-04-29T13:40:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "add per-tenant concurrency limits to tidepool so one tenant cannot starve the queue", "importance": 5 },
+      { "tool": "Read", "file": "queue/dispatch.go", "output": "dispatcher in queue/dispatch.go pops jobs FIFO across all tenants with a single global semaphore of 64 slots", "importance": 4 },
+      { "tool": "Edit", "file": "queue/dispatch.go", "output": "dispatcher keeps a weighted semaphore per tenant, default eight slots, read from the tenants table at startup", "importance": 9 },
+      { "tool": "Edit", "file": "db/schema/tenants.sql", "output": "tenants table gains max_concurrency column with default 8 and a CHECK constraint between 1 and 64", "importance": 8 },
+      { "tool": "Bash", "output": "load test with three tenants: noisy tenant capped at 8 running jobs, p99 queue wait for the others fell from 41s to 3s", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-004",
+    "project": "tidepool",
+    "timestamp": "2026-04-30T09:25:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "tidepool job history table is 90GB and the dashboard query on it times out", "importance": 5 },
+      { "tool": "Read", "file": "api/history.go", "output": "history query in api/history.go filters on tenant_id and finished_at but the only index is on job_id", "importance": 4 },
+      { "tool": "Edit", "file": "db/schema/job_history.sql", "output": "composite index on (tenant_id, finished_at DESC) created concurrently, and the query now pages by keyset instead of OFFSET", "importance": 9 },
+      { "tool": "Write", "file": "db/schema/job_history_partitions.sql", "output": "partition job_history by month with a retention job that drops partitions older than 180 days", "importance": 8 },
+      { "tool": "Bash", "output": "dashboard history endpoint p95 went from 31s timeout to 140ms on the tidepool production replica", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-005",
+    "project": "tidepool",
+    "timestamp": "2026-05-01T11:05:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "tidepool alerts fire twice for every failed job since the pager integration moved to webhooks", "importance": 5 },
+      { "tool": "Read", "file": "notifier/pager.go", "output": "notifier/pager.go sends on both the legacy SMTP bridge and the new webhook, because the feature flag check was inverted", "importance": 4 },
+      { "tool": "Edit", "file": "notifier/pager.go", "output": "legacy SMTP bridge removed from notifier, webhook sender dedupes on job_id and attempt with a five minute window", "importance": 9 },
+      { "tool": "Write", "file": "notifier/pager_test.go", "output": "notifier test asserts one webhook per failed attempt and none for retries that later succeeded", "importance": 7 },
+      { "tool": "Bash", "output": "replayed yesterday's 212 failures through staging notifier, exactly 212 pages delivered and zero duplicates", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-006",
+    "project": "tidepool",
+    "timestamp": "2026-05-02T15:30:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "move tidepool config from environment variables to a versioned YAML file with schema validation", "importance": 5 },
+      { "tool": "Read", "file": "config/load.go", "output": "config/load.go reads 31 TIDEPOOL_ environment variables with ad hoc strconv parsing and silent defaults", "importance": 4 },
+      { "tool": "Edit", "file": "config/load.go", "output": "config loads tidepool.yaml validated against a JSON schema, env vars still override single keys for twelve factor deploys", "importance": 9 },
+      { "tool": "Write", "file": "config/schema.json", "output": "JSON schema for tidepool.yaml covering queue, worker, tenants and notifier sections with required keys marked", "importance": 7 },
+      { "tool": "Bash", "output": "tidepool config validate run against all four environment files, staging was missing notifier.webhook_url and now fails fast", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-007",
+    "project": "tidepool",
+    "timestamp": "2026-05-03T10:50:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "tidepool graceful shutdown kills running jobs during a rolling deploy", "importance": 5 },
+      { "tool": "Read", "file": "cmd/tidepool/main.go", "output": "main.go cancels the root context on SIGTERM without draining, and the pod terminationGracePeriodSeconds is only 30", "importance": 4 },
+      { "tool": "Edit", "file": "cmd/tidepool/main.go", "output": "SIGTERM now stops intake, waits up to 270s for running jobs to finish, then checkpoints the rest back to pending", "importance": 9 },
+      { "tool": "Edit", "file": "deploy/k8s/deployment.yaml", "output": "deployment manifest sets terminationGracePeriodSeconds to 300 and a preStop sleep of five seconds for endpoint removal", "importance": 8 },
+      { "tool": "Bash", "output": "rolling deploy during a 400 job burst finished with zero jobs killed and eleven checkpointed back to pending", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-008",
+    "project": "tidepool",
+    "timestamp": "2026-05-04T14:10:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "tidepool metrics endpoint cardinality exploded after adding job name labels", "importance": 5 },
+      { "tool": "Read", "file": "metrics/jobs.go", "output": "metrics/jobs.go labels the duration histogram with job_name, which includes a per-run UUID suffix for ad hoc jobs", "importance": 4 },
+      { "tool": "Edit", "file": "metrics/jobs.go", "output": "job_name label replaced by job_template, ad hoc runs collapse into one series, and run ids moved to exemplars", "importance": 9 },
+      { "tool": "Write", "file": "metrics/jobs_test.go", "output": "promtool unit test asserting the histogram stays under 500 series with ten thousand ad hoc runs", "importance": 7 },
+      { "tool": "Bash", "output": "prometheus head series for tidepool fell from 1.9 million to 3,400 after the deploy, scrape time back under a second", "importance": 6 }
+    ]
+  },
+  {
+    "id": "kelp-001",
+    "project": "kelpie",
+    "timestamp": "2026-04-27T09:00:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "kelpie build broke after a transitive serde_yaml minor release changed its error type", "importance": 5 },
+      { "tool": "Read", "file": "Cargo.toml", "output": "Cargo.toml lists serde_yaml = \"0.9\" so cargo update picked up 0.9.34 with the new error enum", "importance": 4 },
+      { "tool": "Edit", "file": "src/config.rs", "output": "kelpie config loader matches on the new serde_yaml error variants and keeps line and column in the message", "importance": 8 },
+      { "tool": "Bash", "output": "cargo build and cargo test green on kelpie after the serde_yaml loader fix, PR #17 opened", "importance": 6 }
+    ]
+  },
+  {
+    "id": "kelp-002",
+    "project": "kelpie",
+    "timestamp": "2026-04-28T13:20:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "kelpie sync command uploads the same chunk twice when the network drops mid-transfer", "importance": 5 },
+      { "tool": "Read", "file": "src/sync.rs", "output": "upload loop in src/sync.rs retries a chunk without checking whether the server already acknowledged its digest", "importance": 4 },
+      { "tool": "Edit", "file": "src/sync.rs", "output": "kelpie sync asks the server for acknowledged digests before retrying and skips any chunk already stored", "importance": 9 },
+      { "tool": "Bash", "output": "toxiproxy run dropping the link every 20s: 0 duplicate kelpie chunks across a 3GB upload, previously 41", "importance": 6 }
+    ]
+  },
+  {
+    "id": "kelp-003",
+    "project": "kelpie",
+    "timestamp": "2026-04-29T16:00:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "kelpie progress bar flickers and corrupts the terminal on Windows Terminal", "importance": 5 },
+      { "tool": "Read", "file": "src/progress.rs", "output": "src/progress.rs redraws with raw carriage returns at 60Hz and ignores whether stderr is a terminal", "importance": 4 },
+      { "tool": "Edit", "file": "src/progress.rs", "output": "kelpie progress output switched to indicatif with a 10Hz draw target and hidden when stderr is not a tty", "importance": 8 },
+      { "tool": "Bash", "output": "manual check on Windows Terminal and on a piped CI log: kelpie progress renders cleanly and CI logs stay plain", "importance": 6 }
+    ]
+  },
+  {
+    "id": "kelp-004",
+    "project": "kelpie",
+    "timestamp": "2026-04-30T11:30:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "kelpie restore is slow for archives with thousands of small files", "importance": 5 },
+      { "tool": "Read", "file": "src/restore.rs", "output": "restore in src/restore.rs fsyncs after every file and opens the index database once per entry", "importance": 4 },
+      { "tool": "Edit", "file": "src/restore.rs", "output": "kelpie restore batches fsync per directory and holds one index transaction for the whole restore", "importance": 9 },
+      { "tool": "Bash", "output": "restoring the 48k-file fixture archive dropped from 9m12s to 38s on the kelpie benchmark host", "importance": 6 }
+    ]
+  },
+  {
+    "id": "kelp-005",
+    "project": "kelpie",
+    "timestamp": "2026-05-01T10:00:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "kelpie dependency bumps keep stalling because every exact pin needs a manual PR", "importance": 5 },
+      { "tool": "Read", "file": "Cargo.toml", "output": "Cargo.toml holds 27 exact = pins and renovate.json has every kelpie crate group disabled", "importance": 4 },
+      { "tool": "Edit", "file": "renovate.json", "output": "Cargo.toml pins switched back to caret requirements and renovate groups the minor and patch bumps weekly", "importance": 8 },
+      { "tool": "Bash", "output": "cargo update then cargo test on kelpie passed with the caret ranges, Cargo.lock regenerated and committed", "importance": 6 }
+    ]
+  },
+  {
+    "id": "kelp-006",
+    "project": "kelpie",
+    "timestamp": "2026-05-02T14:45:00Z",
+    "observations": [
+      { "tool": "prompt", "output": "kelpie prune deletes snapshots that are still referenced by a pinned tag", "importance": 5 },
+      { "tool": "Read", "file": "src/prune.rs", "output": "src/prune.rs builds the keep set from retention policy only and never reads the tags table", "importance": 4 },
+      { "tool": "Edit", "file": "src/prune.rs", "output": "kelpie prune adds every snapshot reachable from a pinned tag to the keep set before applying retention", "importance": 9 },
+      { "tool": "Bash", "output": "prune dry run on the staging repository now keeps the 6 tagged kelpie snapshots it used to delete", "importance": 6 }
+    ]
+  },
+  {
+    "id": "tide-r01",
+    "project": "tidepool",
+    "timestamp": "2026-04-27T09:00:30Z",
+    "memoryType": "rule",
+    "content": "Rule for tidepool: never run schema migrations from the deploy hook. Run tidepool-migrate as its own Job and wait for it to finish before rolling out new pods."
+  },
+  {
+    "id": "kelp-r01",
+    "project": "kelpie",
+    "timestamp": "2026-04-27T09:00:30Z",
+    "memoryType": "rule",
+    "content": "Rule for kelpie: pin every dependency to an exact version (=1.2.3) in Cargo.toml. Caret ranges are not allowed."
+  },
+  {
+    "id": "kelp-r02",
+    "project": "kelpie",
+    "timestamp": "2026-05-01T10:00:30Z",
+    "memoryType": "rule",
+    "content": "Rule for kelpie, replacing the exact-pin rule: dependencies use caret ranges again with Cargo.lock committed, and renovate opens the weekly bumps."
+  }
+]
