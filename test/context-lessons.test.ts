@@ -277,7 +277,6 @@ describe("mem::context — insights auto-injection (upstream PR #615)", () => {
       sourceConceptCluster: [],
       sourceMemoryIds: [],
       sourceLessonIds: [],
-      sourceCrystalIds: [],
       tags: [],
       createdAt: now,
       updatedAt: now,

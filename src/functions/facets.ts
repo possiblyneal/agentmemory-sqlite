@@ -17,7 +17,7 @@ export function registerFacetsFunction(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "targetId is required" };
       }
 
-      const validTypes = ["action", "memory", "observation"];
+      const validTypes = ["memory", "observation"];
       if (!validTypes.includes(data.targetType)) {
         return {
           success: false,

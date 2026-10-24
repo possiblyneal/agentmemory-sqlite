@@ -7,7 +7,6 @@ import { KV } from "../state/schema.js";
 import type {
   Memory,
   Lesson,
-  Crystal,
   Session,
 } from "../types.js";
 import { recordAudit } from "./audit.js";
@@ -161,49 +160,6 @@ function lessonToMd(l: Lesson): string {
   return sections.join("\n");
 }
 
-function crystalToMd(c: Crystal): string {
-  const keyOutcomes = safeArray<string>(c.keyOutcomes);
-  const lessons = safeArray<string>(c.lessons);
-  const filesAffected = safeArray<string>(c.filesAffected);
-  const sourceActionIds = safeArray<string>(c.sourceActionIds);
-  const narrative = safeString(c.narrative);
-  const headline = narrative ? narrative.slice(0, 80) : c.id;
-
-  const fm = toFrontmatter({
-    id: c.id,
-    type: "crystal",
-    created: c.createdAt,
-    project: c.project,
-    sessionId: c.sessionId,
-    filesAffected,
-  });
-
-  const actionLinks = sourceActionIds.map((id) => `- [[${id}]]`).join("\n");
-
-  const sections = [
-    fm,
-    "",
-    `# Crystal: ${headline}`,
-    "",
-    narrative,
-    "",
-    "## Key Outcomes",
-    ...keyOutcomes.map((o) => `- ${o}`),
-  ];
-
-  if (lessons.length > 0) {
-    sections.push("", "## Lessons", ...lessons.map((l) => `- ${l}`));
-  }
-  if (filesAffected.length > 0) {
-    sections.push("", "## Files", ...filesAffected.map((f) => `- \`${f}\``));
-  }
-  if (actionLinks) {
-    sections.push("", "## Source Actions", actionLinks);
-  }
-
-  return sections.join("\n");
-}
-
 function sessionToMd(s: Session): string {
   const project = safeString(s.project, "unknown");
   const status = safeString(s.status, "unknown");
@@ -270,13 +226,12 @@ export function registerObsidianExportFunction(
         };
       }
       const exportTypes = new Set(
-        data.types ?? ["memories", "lessons", "crystals", "sessions"],
+        data.types ?? ["memories", "lessons", "sessions"],
       );
 
       const dirs = {
         memories: join(vaultDir, "memories"),
         lessons: join(vaultDir, "lessons"),
-        crystals: join(vaultDir, "crystals"),
         sessions: join(vaultDir, "sessions"),
       };
 
@@ -289,17 +244,15 @@ export function registerObsidianExportFunction(
           Object.values(dirs).map((dir) => mkdir(dir, { recursive: true })),
         );
 
-        const stats = { memories: 0, lessons: 0, crystals: 0, sessions: 0 };
+        const stats = { memories: 0, lessons: 0, sessions: 0 };
         const errors: ExportError[] = [];
         const memoryMoc: string[] = [];
         const lessonMoc: string[] = [];
-        const crystalMoc: string[] = [];
         const sessionMoc: string[] = [];
 
-        const [memories, lessons, crystals, sessions] = await Promise.all([
+        const [memories, lessons, sessions] = await Promise.all([
           exportTypes.has("memories") ? kv.list<Memory>(KV.memories) : Promise.resolve([] as Memory[]),
           exportTypes.has("lessons") ? kv.list<Lesson>(KV.lessons) : Promise.resolve([] as Lesson[]),
-          exportTypes.has("crystals") ? kv.list<Crystal>(KV.crystals) : Promise.resolve([] as Crystal[]),
           exportTypes.has("sessions") ? kv.list<Session>(KV.sessions) : Promise.resolve([] as Session[]),
         ]);
 
@@ -344,23 +297,6 @@ export function registerObsidianExportFunction(
           }
         }
 
-        for (const c of crystals.filter(hasExportId)) {
-          const filename = `${sanitize(c.id)}.md`;
-          const filepath = join(dirs.crystals, filename);
-          try {
-            await writeFile(filepath, crystalToMd(c));
-            stats.crystals++;
-            const headline = safeString(c.narrative).slice(0, 60) || c.id;
-            crystalMoc.push(`- [[crystals/${sanitize(c.id)}|${headline}]]`);
-          } catch (err) {
-            errors.push({
-              id: c.id,
-              path: filepath,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-
         const recent = sessions
           .filter(hasExportId)
           .sort((a, b) => safeTimestamp(b.startedAt) - safeTimestamp(a.startedAt))
@@ -399,9 +335,6 @@ export function registerObsidianExportFunction(
           "",
           `## Lessons (${stats.lessons})`,
           ...lessonMoc,
-          "",
-          `## Crystals (${stats.crystals})`,
-          ...crystalMoc,
           "",
           `## Sessions (${stats.sessions})`,
           ...sessionMoc,

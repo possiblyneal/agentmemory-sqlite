@@ -61,22 +61,21 @@ describe("AGENTMEMORY_AUDIT_STORE=off", () => {
     await recordAudit(kv, "forget", "mem::forget", ["mem_9"]);
     await recordAudit(kv, "lesson_delete", "mem::lesson-delete", ["lsn_9"]);
     // Destructive variants under a broader name stay; their repair/merge siblings go.
-    await recordAudit(kv, "heal", "mem::heal", ["lease_del"], { entityType: "lease", action: "delete" });
-    await recordAudit(kv, "heal", "mem::heal", ["act_upd"], { entityType: "action", action: "update" });
+    await recordAudit(kv, "heal", "mem::heal", ["sig_del"], { entityType: "signal", action: "delete" });
+    await recordAudit(kv, "heal", "mem::heal", ["mem_upd"], { entityType: "memory", action: "update" });
     await recordAudit(kv, "mesh_sync", "mem::mesh-remove", ["peer_del"], { action: "mesh.remove" });
     await recordAudit(kv, "mesh_sync", "mem::mesh-sync", ["peer_sync"], { action: "mesh.sync" });
     await recordAudit(kv, "import", "mem::import", [], { strategy: "replace", stats: { memories: 3 } });
     await recordAudit(kv, "import", "mem::import", [], { strategy: "merge", stats: { memories: 3 } });
-    // Decay deletions: a lesson decayed to deleted, an insight sweep that deleted, a sketch discarded by heal.
+    // Decay deletions: a lesson decayed to deleted, an insight sweep that deleted.
     await recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", ["lsn_soft"], { action: "soft-delete", reason: "decay-sweep" });
     await recordAudit(kv, "lesson_strengthen", "mem::lesson-decay-sweep", ["lsn_decay"], { action: "decay", reason: "decay-sweep" });
     await recordAudit(kv, "reflect", "mem::insight-decay-sweep", ["ins_deleted"], { event: "insight.decay", decayed: 4, deleted: 1 });
     await recordAudit(kv, "reflect", "mem::insight-decay-sweep", ["ins_decay"], { event: "insight.decay", decayed: 4, deleted: 0 });
-    await recordAudit(kv, "heal", "mem::heal", ["sk_disc"], { entityType: "sketch", reason: "expired-sketch", newStatus: "discarded" });
     const text = out.join("\n");
     expect(text).not.toContain("obs_1");
-    expect(text).toContain("lease_del");
-    expect(text).not.toContain("act_upd");
+    expect(text).toContain("sig_del");
+    expect(text).not.toContain("mem_upd");
     expect(text).toContain("peer_del");
     expect(text).not.toContain("peer_sync");
     expect(text).toContain("\"strategy\":\"replace\"");
@@ -85,7 +84,6 @@ describe("AGENTMEMORY_AUDIT_STORE=off", () => {
     expect(text).not.toContain("lsn_decay");
     expect(text).toContain("ins_deleted");
     expect(text).not.toContain("ins_decay");
-    expect(text).toContain("sk_disc");
     expect(text).toContain("] audit forget ");
     expect(text).toContain("mem_9");
     expect(text).toContain("lsn_9");

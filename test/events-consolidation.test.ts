@@ -27,9 +27,9 @@ import { logger } from "../src/logger.js";
 
 // event::session::stopped is the single source of truth for consolidation.
 // It fans out mem::summarize (awaited) plus fire-and-forget void triggers for
-// slot-reflect / consolidate-pipeline / auto-crystallize, each gated by config.
-// The client session-end hook no longer POSTs crystals/auto or
-// consolidate-pipeline, so these no longer double-fire for Claude Code.
+// slot-reflect / consolidate-pipeline, each gated by config.
+// The client session-end hook no longer POSTs consolidate-pipeline, so it no
+// longer double-fires for Claude Code.
 
 function mockKV() {
   return {
@@ -85,7 +85,7 @@ describe("event::session::stopped consolidation fan-out", () => {
     vi.mocked(logger.warn).mockClear();
   });
 
-  it("fires consolidate-pipeline and auto-crystallize when consolidation enabled", async () => {
+  it("fires consolidate-pipeline when consolidation enabled", async () => {
     vi.mocked(isConsolidationEnabled).mockReturnValue(true);
     const { sdk, handlers, trigger } = mockSdk();
     registerEventTriggers(sdk as never, mockKV() as never);
@@ -96,7 +96,6 @@ describe("event::session::stopped consolidation fan-out", () => {
     const ids = functionIds(trigger);
     expect(ids).toContain("mem::summarize");
     expect(ids).toContain("mem::consolidate-pipeline");
-    expect(ids).toContain("mem::auto-crystallize");
 
     const consolidateCall = trigger.mock.calls.find(
       (c) => (c[0] as { function_id: string }).function_id === "mem::consolidate-pipeline",
@@ -105,15 +104,9 @@ describe("event::session::stopped consolidation fan-out", () => {
       tier: "all",
       force: true,
     });
-    const crystallizeCall = trigger.mock.calls.find(
-      (c) => (c[0] as { function_id: string }).function_id === "mem::auto-crystallize",
-    );
-    expect((crystallizeCall![0] as { payload: unknown }).payload).toEqual({
-      olderThanDays: 0,
-    });
   });
 
-  it("skips consolidate-pipeline and auto-crystallize when consolidation disabled but still summarizes", async () => {
+  it("skips consolidate-pipeline when consolidation disabled but still summarizes", async () => {
     vi.mocked(isConsolidationEnabled).mockReturnValue(false);
     const { sdk, handlers, trigger } = mockSdk();
     registerEventTriggers(sdk as never, mockKV() as never);
@@ -124,14 +117,13 @@ describe("event::session::stopped consolidation fan-out", () => {
     const ids = functionIds(trigger);
     expect(ids).toContain("mem::summarize");
     expect(ids).not.toContain("mem::consolidate-pipeline");
-    expect(ids).not.toContain("mem::auto-crystallize");
   });
 
   it("suppresses the consolidation fan-out on the eviction recovery path", async () => {
     // Regression: mem::evict calls event::session::stopped once per recovered
     // stale session, then runs ONE final consolidation pass. Without the
     // recovery guard, N recovered sessions would launch N concurrent
-    // forced full-corpus consolidations + N crystallizations.
+    // forced full-corpus consolidations.
     vi.mocked(isConsolidationEnabled).mockReturnValue(true);
     const { sdk, handlers, trigger } = mockSdk();
     registerEventTriggers(sdk as never, mockKV() as never);
@@ -144,7 +136,6 @@ describe("event::session::stopped consolidation fan-out", () => {
     expect(ids).toContain("mem::summarize");
     // ...but the corpus-wide fan-out is deferred to evict's single pass.
     expect(ids).not.toContain("mem::consolidate-pipeline");
-    expect(ids).not.toContain("mem::auto-crystallize");
   });
 
   it("still fans out when recovery is explicitly false (normal stop)", async () => {
@@ -159,7 +150,6 @@ describe("event::session::stopped consolidation fan-out", () => {
 
     const ids = functionIds(trigger);
     expect(ids).toContain("mem::consolidate-pipeline");
-    expect(ids).toContain("mem::auto-crystallize");
   });
 
   it("respects the cooldown across repeated stops but this suite's non-persistent KV fires each single call", async () => {
@@ -256,10 +246,6 @@ describe("event::session::stopped consolidation fan-out", () => {
 describe("session-end hook no longer double-fires consolidation", () => {
   const src = readFileSync("src/hooks/session-end.ts", "utf-8");
 
-  it("does not POST /agentmemory/crystals/auto", () => {
-    expect(src).not.toContain("/agentmemory/crystals/auto");
-  });
-
   it("does not POST /agentmemory/consolidate-pipeline", () => {
     expect(src).not.toContain("/agentmemory/consolidate-pipeline");
   });
@@ -300,7 +286,7 @@ function persistentKV() {
 }
 
 // Regression: the Stop hook posts /session/end on every agent turn, which fires
-// event::session::stopped. consolidate-pipeline + auto-crystallize are full
+// event::session::stopped. consolidate-pipeline is full
 // corpus LLM work with no internal "nothing changed" guard, so firing them per
 // turn is a cost/latency storm for the connected agent. The debounce bounds corpus consolidation to once per cooldown.
 describe("session-stop consolidation debounce", () => {
@@ -326,7 +312,6 @@ describe("session-stop consolidation debounce", () => {
 
     // Corpus consolidation runs ONCE, not five times.
     expect(count("mem::consolidate-pipeline")).toBe(1);
-    expect(count("mem::auto-crystallize")).toBe(1);
     // Per-turn summary capture still runs every turn (the cheap path).
     expect(count("mem::summarize")).toBe(5);
   });

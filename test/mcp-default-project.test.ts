@@ -33,8 +33,4 @@ describe("withDefaultProject", () => {
     expect(withDefaultProject("memory_sessions", args, "repo")).toBe(args);
   });
 
-  it("leaves memory_sketch_promote alone so the sketch keeps its own project", () => {
-    const args = { sketchId: "s1" };
-    expect(withDefaultProject("memory_sketch_promote", args, "repo")).toBe(args);
-  });
 });

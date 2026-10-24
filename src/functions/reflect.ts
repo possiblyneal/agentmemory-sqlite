@@ -7,7 +7,6 @@ import type {
   GraphEdge,
   SemanticMemory,
   Lesson,
-  Crystal,
   MemoryProvider,
   Session,
 } from "../types.js";
@@ -15,7 +14,6 @@ import { recordAudit } from "./audit.js";
 import {
   REFLECT_SYSTEM,
   buildReflectPrompt,
-  formatNarrativeLine,
   formatScoredLine,
   EXISTING_INSIGHT_LIMIT,
 } from "../prompts/reflect.js";
@@ -38,30 +36,26 @@ interface ConceptCluster {
   concepts: string[];
   facts: Array<{ fact: string; confidence: number }>;
   lessons: Array<{ content: string; confidence: number }>;
-  crystalNarratives: string[];
   factIds: string[];
   lessonIds: string[];
-  crystalIds: string[];
   existingInsights: Insight[];
 }
 
-// Lessons and crystals are the more durable record, so they fill the budget
-// before facts. Lessons and facts go strongest first, crystals newest first.
+// Lessons are the more durable record, so they fill the budget before facts.
+// Both go strongest first.
 // An item too large for what is left is skipped and smaller ones keep filling.
 function fitClusterToBudget(
   concepts: string[],
   lessons: Lesson[],
-  crystals: Crystal[],
   facts: SemanticMemory[],
   existingInsights: Insight[],
-): { lessons: Lesson[]; crystals: Crystal[]; facts: SemanticMemory[] } {
+): { lessons: Lesson[]; facts: SemanticMemory[] } {
   // Rendering every section with an empty item reserves the intro, concept
   // header and section headings before any item is counted.
   const header = buildReflectPrompt({
     concepts,
     facts: [{ fact: "", confidence: 0 }],
     lessons: [{ content: "", confidence: 0 }],
-    crystalNarratives: [""],
     existingInsights,
   });
   let remaining = CONSOLIDATION_PROMPT_CHARS - header.length;
@@ -76,13 +70,6 @@ function fitClusterToBudget(
     lessons: take(
       [...lessons].sort((a, b) => b.confidence - a.confidence),
       (l) => formatScoredLine(l.confidence, l.content),
-    ),
-    crystals: take(
-      [...crystals].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
-      (c) => formatNarrativeLine(c.narrative),
     ),
     facts: take(
       [...facts].sort((a, b) => b.confidence - a.confidence),
@@ -279,10 +266,10 @@ export function registerReflectFunctions(
         (n.sessionId !== undefined && projectSessionIds.has(n.sessionId));
 
       const noGraph = { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
-      const [graph, semanticMemories, lessons, crystals] =
+      const [graph, semanticMemories, lessons] =
         await Promise.all([
           // B-mode: graph frozen — skip graph-scope reads, cluster over
-          // semantic/lessons/crystals only.
+          // semantic/lessons only.
           graphLegDisabled()
             ? noGraph
             : readBoundedGraphSnapshot(kv, REFLECT_GRAPH_NODE_LIMIT, inProject).catch(
@@ -290,22 +277,19 @@ export function registerReflectFunctions(
               ),
           kv.list<SemanticMemory>(KV.semantic).then((all) => all.filter((m) => m.isLatest !== false)).catch(() => []),
           kv.list<Lesson>(KV.lessons).catch(() => []),
-          kv.list<Crystal>(KV.crystals).catch(() => []),
         ]);
 
       let activeLessons = lessons;
       let scopedSemantic = semanticMemories;
-      let scopedCrystals = crystals;
       const scopedNodes = graph.nodes;
       let scopedEdges = graph.edges;
-      // One project's clusters must never borrow another's facts, crystals or
+      // One project's clusters must never borrow another's facts, lessons or
       // concepts: an insight is stamped with the project it was built for (#1344).
       if (project && projectSessionIds) {
         activeLessons = activeLessons.filter((l) => l.project === project);
         scopedSemantic = semanticMemories.filter((m) =>
           m.sourceSessionIds.some((id) => projectSessionIds.has(id)),
         );
-        scopedCrystals = crystals.filter((c) => c.project === project);
         const nodeIds = new Set(scopedNodes.map((n) => n.id));
         scopedEdges = graph.edges.filter(
           (e) => nodeIds.has(e.sourceNodeId) && nodeIds.has(e.targetNodeId),
@@ -359,16 +343,8 @@ export function registerReflectFunctions(
           ),
         );
 
-        const clusterCrystals = scopedCrystals.filter((c) =>
-          (c.lessons || []).some((l) =>
-            conceptNames.some((cn) =>
-              l.toLowerCase().includes(cn.toLowerCase()),
-            ),
-          ),
-        );
-
         const totalItems =
-          clusterFacts.length + clusterLessons.length + clusterCrystals.length;
+          clusterFacts.length + clusterLessons.length;
         if (totalItems < MIN_CLUSTER_ITEMS) {
           clustersSkipped++;
           continue;
@@ -384,12 +360,11 @@ export function registerReflectFunctions(
         const fitted = fitClusterToBudget(
           conceptNames,
           clusterLessons,
-          clusterCrystals,
           clusterFacts,
           shownInsights,
         );
         const keptItems =
-          fitted.facts.length + fitted.lessons.length + fitted.crystals.length;
+          fitted.facts.length + fitted.lessons.length;
         if (keptItems < totalItems) {
           logger.info("Reflect cluster trimmed to its prompt budget", {
             project: data?.project,
@@ -409,7 +384,6 @@ export function registerReflectFunctions(
           [
             ...fitted.facts.map((f) => `f:${f.id}:${f.fact}`),
             ...fitted.lessons.map((l) => `l:${l.id}:${l.content}`),
-            ...fitted.crystals.map((c) => `c:${c.id}:${c.narrative}`),
           ]
             .sort()
             .join("\n"),
@@ -430,10 +404,8 @@ export function registerReflectFunctions(
             content: l.content,
             confidence: l.confidence,
           })),
-          crystalNarratives: fitted.crystals.map((c) => c.narrative),
           factIds: fitted.facts.map((f) => f.id),
           lessonIds: fitted.lessons.map((l) => l.id),
-          crystalIds: fitted.crystals.map((c) => c.id),
           existingInsights: shownInsights,
         };
 
@@ -485,7 +457,6 @@ export function registerReflectFunctions(
                 sourceConceptCluster: conceptNames,
                 sourceMemoryIds: cluster.factIds.slice(0, MAX_SOURCE_LIST_IDS),
                 sourceLessonIds: cluster.lessonIds,
-                sourceCrystalIds: cluster.crystalIds,
                 project: data?.project,
                 tags: conceptNames,
                 createdAt: now,

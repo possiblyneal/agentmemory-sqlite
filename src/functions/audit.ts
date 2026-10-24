@@ -38,10 +38,10 @@ import { logger } from "../logger.js";
 //
 // Which entries become lines when the store is off: AGENTMEMORY_AUDIT_LOG=
 // all (default) | deletions | off. `deletions` keeps every path that removes
-// data - the six removal operations plus the removals that hide under a
+// data - the five removal operations plus the removals that hide under a
 // broader name: heal with action "delete", mesh peer removal, an import
 // that replaces the store, and the soft deletions (a lesson or insight
-// decayed to deleted, a sketch discarded by heal) - and drops the
+// decayed to deleted) - and drops the
 // per-operation chatter (observe, compress, heal repairs ...): a few lines
 // a month instead of ~100 KB a day. The details checks mirror the payloads
 // at those call sites; a new deletion path needs either a listed operation
@@ -52,13 +52,12 @@ function auditStoreOff(): boolean {
 }
 
 const DELETION_OPS: ReadonlySet<AuditEntry["operation"]> = new Set([
-  "forget", "delete", "lesson_delete", "slot_delete", "core_remove", "sketch_discard",
+  "forget", "delete", "lesson_delete", "slot_delete", "core_remove",
 ]);
 
 function isDeletion(operation: AuditEntry["operation"], details: Record<string, unknown>): boolean {
   if (DELETION_OPS.has(operation)) return true;
   if (details.action === "delete" || details.action === "soft-delete" || details.action === "mesh.remove") return true;
-  if (details.newStatus === "discarded") return true;
   if (typeof details.deleted === "number" && details.deleted > 0) return true;
   return operation === "import" && details.strategy === "replace";
 }

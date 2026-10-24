@@ -20,8 +20,6 @@ const FILTER_TOOLS = [
   "memory_smart_search",
   "memory_timeline",
   "memory_patterns",
-  "memory_frontier",
-  "memory_next",
   "memory_lesson_recall",
   "memory_reflect",
   "memory_insight_list",

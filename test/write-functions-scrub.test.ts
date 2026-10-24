@@ -10,14 +10,9 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
 
 import { registerRememberFunction } from "../src/functions/remember.js";
 import { registerLessonsFunctions } from "../src/functions/lessons.js";
-import { registerActionsFunction } from "../src/functions/actions.js";
-import { registerCheckpointsFunction } from "../src/functions/checkpoints.js";
 import { registerSignalsFunction } from "../src/functions/signals.js";
-import { registerSentinelsFunction } from "../src/functions/sentinels.js";
 import { registerFacetsFunction } from "../src/functions/facets.js";
 import { registerWorkingMemoryFunctions } from "../src/functions/working-memory.js";
-import { registerSketchesFunction } from "../src/functions/sketches.js";
-import { registerRoutinesFunction } from "../src/functions/routines.js";
 import { registerRelationsFunction } from "../src/functions/relations.js";
 import { registerSlotsFunctions } from "../src/functions/slots.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
@@ -93,50 +88,10 @@ const cases: Case[] = [
     },
   },
   {
-    name: "mem::action-create title and description",
-    register: registerActionsFunction,
-    run: async (call) => {
-      await call("mem::action-create", {
-        title: `rotate ${SECRET}`,
-        description: `it was ${SECRET}`,
-      });
-    },
-  },
-  {
-    name: "mem::action-update title, description and result",
-    register: registerActionsFunction,
-    run: async (call) => {
-      const created = await call("mem::action-create", { title: "clean" });
-      await call("mem::action-update", {
-        actionId: created.action.id,
-        title: `t ${SECRET}`,
-        description: `d ${SECRET}`,
-        result: `r ${SECRET}`,
-      });
-    },
-  },
-  {
-    name: "mem::checkpoint-create name and description",
-    register: registerCheckpointsFunction,
-    run: async (call) => {
-      await call("mem::checkpoint-create", {
-        name: `cp ${SECRET}`,
-        description: `d ${SECRET}`,
-      });
-    },
-  },
-  {
     name: "mem::signal-send content",
     register: registerSignalsFunction,
     run: async (call) => {
       await call("mem::signal-send", { from: "a", content: `use ${SECRET}` });
-    },
-  },
-  {
-    name: "mem::sentinel-create name",
-    register: registerSentinelsFunction,
-    run: async (call) => {
-      await call("mem::sentinel-create", { name: `s ${SECRET}`, type: "custom" });
     },
   },
   {
@@ -156,32 +111,6 @@ const cases: Case[] = [
     register: registerWorkingMemoryFunctions,
     run: async (call) => {
       await call("mem::core-add", { content: `core ${SECRET}` });
-    },
-  },
-  {
-    name: "mem::sketch-create and mem::sketch-add title and description",
-    register: registerSketchesFunction,
-    run: async (call) => {
-      const created = await call("mem::sketch-create", {
-        title: `sk ${SECRET}`,
-        description: `d ${SECRET}`,
-      });
-      await call("mem::sketch-add", {
-        sketchId: created.sketch.id,
-        title: `step ${SECRET}`,
-        description: `d2 ${SECRET}`,
-      });
-    },
-  },
-  {
-    name: "mem::routine-create name, description and step text",
-    register: registerRoutinesFunction,
-    run: async (call) => {
-      await call("mem::routine-create", {
-        name: `r ${SECRET}`,
-        description: `d ${SECRET}`,
-        steps: [{ order: 1, title: `one ${SECRET}`, description: `x ${SECRET}`, actionTemplate: {}, dependsOn: [] }],
-      });
     },
   },
   {

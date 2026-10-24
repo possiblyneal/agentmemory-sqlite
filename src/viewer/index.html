@@ -1047,8 +1047,6 @@
     <button data-tab="timeline">Timeline</button>
     <button data-tab="sessions">Sessions</button>
     <button data-tab="lessons">Lessons</button>
-    <button data-tab="actions">Actions</button>
-    <button data-tab="crystals">Crystals</button>
     <button data-tab="audit">Audit</button>
     <button data-tab="activity">Activity</button>
     <button data-tab="profile">Profile</button>
@@ -1062,8 +1060,6 @@
   <div id="view-graph" class="view"></div>
   <div id="view-memories" class="view"></div>
   <div id="view-lessons" class="view"></div>
-  <div id="view-actions" class="view"></div>
-  <div id="view-crystals" class="view"></div>
   <div id="view-timeline" class="view"></div>
   <div id="view-sessions" class="view"></div>
   <div id="view-audit" class="view"></div>
@@ -1150,12 +1146,12 @@
       task: '&#9745;', other: '&#128196;'
     };
     var CB_STATE_COLORS = { closed: 'badge-green', open: 'badge-red', 'half-open': 'badge-yellow' };
-    var TAB_IDS = ['dashboard', 'graph', 'memories', 'timeline', 'sessions', 'lessons', 'actions', 'crystals', 'audit', 'activity', 'profile', 'replay'];
+    var TAB_IDS = ['dashboard', 'graph', 'memories', 'timeline', 'sessions', 'lessons', 'audit', 'activity', 'profile', 'replay'];
     var VIEWER_TOKEN_STORAGE_KEY = 'agentmemory-viewer-token';
 
     var state = {
       activeTab: 'dashboard',
-      dashboard: { loaded: false, health: null, sessions: [], memories: [], graphStats: null, recentAudit: [], lessons: [], crystals: [] },
+      dashboard: { loaded: false, health: null, sessions: [], memories: [], graphStats: null, recentAudit: [], lessons: [] },
       graph: { loaded: false, nodes: [], edges: [], stats: null, filters: {}, selectedNode: null, queryError: null, truncated: false, totalNodes: 0, totalEdges: 0 },
       memories: { loaded: false, items: [], search: '', typeFilter: '', selectedId: null },
       timeline: { loaded: false, observations: [], sessionId: '', minImportance: 0, page: 0, pageSize: 50 },
@@ -1163,8 +1159,6 @@
       audit: { loaded: false, entries: [], opFilter: '' },
       activity: { loaded: false, observations: [], sessions: [], typeFilter: '' },
       lessons: { loaded: false, items: [], search: '', selectedId: null },
-      actions: { loaded: false, items: [], total: 0, frontier: [], statusFilter: '', search: '' },
-      crystals: { loaded: false, items: [], search: '', lessonMap: {} },
       profile: { loaded: false, projects: [], selectedProject: '', data: null },
       replay: { loaded: false, sessions: [], selectedId: '', timeline: null, cursor: 0, playing: false, speed: 1, timer: null, startAt: 0, offsetAt: 0 },
       flagsConfig: null,
@@ -1456,8 +1450,6 @@
         case 'timeline': await loadTimeline(); break;
         case 'sessions': await loadSessions(); break;
         case 'lessons': await loadLessons(); break;
-        case 'actions': await loadActions(); break;
-        case 'crystals': await loadCrystals(); break;
         case 'audit': await loadAudit(); break;
         case 'activity': await loadActivity(); break;
         case 'profile': await loadProfile(); break;
@@ -1486,7 +1478,6 @@
           apiGet('procedural'),
           apiGet('relations'),
           apiGet('lessons'),
-          apiGet('crystals'),
           apiGet('insights?limit=1')
         ]);
         // Polls, websocket events and the Refresh button overlap; only the
@@ -1500,19 +1491,17 @@
         state.dashboard.recentAudit = (results[4] && results[4].entries) || [];
         state.dashboard.semantic = (results[5] && results[5].facts) || (results[5] && results[5].semantic) || [];
         state.dashboard.semanticTotal = results[5] && results[5].total;
-        state.dashboard.insightTotal = results[10] && results[10].total;
+        state.dashboard.insightTotal = results[9] && results[9].total;
         state.dashboard.lessonTotal = results[8] && results[8].total;
-        state.dashboard.crystalTotal = results[9] && results[9].total;
         // A failed request resolves to null; the count cards show a dash for
         // it so the Operator can tell an unreachable count from an empty one.
         state.dashboard.failed = {
           health: !results[0], sessions: !results[1], memories: !results[2], graph: !results[3], audit: !results[4],
           semantic: !results[5], procedural: !results[6], relations: !results[7], lessons: !results[8],
-          crystals: !results[9], insights: !results[10]
+          insights: !results[9]
         };
         state.dashboard.procedural = (results[6] && results[6].procedures) || (results[6] && results[6].procedural) || [];
         state.dashboard.lessons = (results[8] && results[8].lessons) || [];
-        state.dashboard.crystals = (results[9] && results[9].crystals) || [];
         state.dashboard.relations = (results[7] && results[7].relations) || [];
         state.dashboard.loaded = true;
         renderDashboard();
@@ -1578,7 +1567,7 @@
       var failedTitles = {
         health: 'Health', sessions: 'Sessions', memories: 'Memories', graph: 'Graph Nodes', audit: 'Recent Activity',
         semantic: 'Semantic Facts', procedural: 'Procedural Memory', relations: 'Memory Relations', lessons: 'Lessons',
-        crystals: 'Crystals', insights: 'Insights'
+        insights: 'Insights'
       };
       var failedNames = Object.keys(failed).filter(function(k) { return failed[k]; }).map(function(k) { return failedTitles[k]; });
       if (failedNames.length > 0) {
@@ -1601,9 +1590,7 @@
       html += '<div class="stat-card" data-action="goto-tab" data-tab="sessions" role="link" tabindex="0"><div class="label">Sessions</div><div class="value">' + valueOrDash(d.sessions.length, failed.sessions) + '</div><div class="sub">' + valueOrDash(activeSessions, failed.sessions) + ' active</div></div>';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="memories" role="link" tabindex="0"><div class="label">Memories</div><div class="value">' + valueOrDash(d.memoriesTotal !== undefined ? d.memoriesTotal : d.memories.length, failed.memories) + '</div><div class="sub">latest versions</div></div>';
       var lessonCount = d.lessonTotal !== undefined ? d.lessonTotal : (d.lessons || []).length;
-      var crystalCount = d.crystalTotal !== undefined ? d.crystalTotal : (d.crystals || []).length;
       html += '<div class="stat-card" data-action="goto-tab" data-tab="lessons" role="link" tabindex="0"><div class="label">Lessons</div><div class="value">' + valueOrDash(lessonCount, failed.lessons) + '</div><div class="sub">confidence-scored</div></div>';
-      html += '<div class="stat-card" data-action="goto-tab" data-tab="crystals" role="link" tabindex="0"><div class="label">Crystals</div><div class="value">' + valueOrDash(crystalCount, failed.crystals) + '</div><div class="sub">action digests</div></div>';
       html += '<div class="stat-card"><div class="label">Semantic Facts</div><div class="value">' + valueOrDash(d.semanticTotal || 0, failed.semantic) + '</div><div class="sub">consolidated</div></div>';
       html += '<div class="stat-card"><div class="label">Insights</div><div class="value">' + valueOrDash(d.insightTotal || 0, failed.insights) + '</div><div class="sub">reflected</div></div>';
       html += '<div class="stat-card" data-action="goto-tab" data-tab="graph" role="link" tabindex="0"><div class="label">Graph Nodes</div><div class="value">' + valueOrDash(nodeCount, failed.graph) + '</div><div class="sub">' + valueOrDash(edgeCount, failed.graph) + ' edges</div></div>';
@@ -3477,7 +3464,7 @@
           html += '<td style="max-width:400px;">' + esc(truncate(l.content, 120)) + (l.context ? '<div style="font-size:11px;color:var(--ink-faint);margin-top:2px;">' + esc(truncate(l.context, 80)) + '</div>' : '') + '</td>';
           html += '<td><div class="gauge" style="min-width:80px;"><div class="gauge-bar"><div class="gauge-fill" style="width:' + confPct + '%;background:' + confColor + '"></div></div><span class="gauge-value" style="font-size:11px;">' + confPct + '%</span></div></td>';
           html += '<td style="text-align:center;">' + (l.reinforcements || 0) + '</td>';
-          html += '<td><span class="badge badge-' + (l.source === 'crystal' ? 'purple' : l.source === 'consolidation' ? 'yellow' : 'blue') + '">' + esc(l.source) + '</span></td>';
+          html += '<td><span class="badge badge-' + (l.source === 'consolidation' ? 'yellow' : 'blue') + '">' + esc(l.source) + '</span></td>';
           html += '<td style="font-size:12px;color:var(--ink-muted);">' + esc(l.project || '-') + '</td>';
           html += '<td style="font-size:12px;color:var(--ink-muted);">' + shortTime(l.updatedAt) + '</td>';
           html += '</tr>';
@@ -3504,203 +3491,6 @@
       el.innerHTML = html;
       var __ls = document.getElementById('lessons-search');
       if (__ls) bindImeSafeSearch(__ls, 200, function(v){ state.lessons.search = v; renderLessons(); });
-      restoreSearchFocus(__focus);
-    }
-
-    async function loadActions() {
-      var el = document.getElementById('view-actions');
-      if (!state.actions.loaded) el.innerHTML = '<div class="loading">Loading actions...</div>';
-      var results = await Promise.all([apiGet('actions?limit=200'), apiGet('frontier')]);
-      state.actions.items = (results[0] && results[0].actions) || [];
-      state.actions.total = (results[0] && results[0].total) || state.actions.items.length;
-      state.actions.frontier = (results[1] && (results[1].frontier || results[1].actions)) || [];
-      state.actions.loaded = true;
-      renderActions();
-    }
-
-    function renderActions() {
-      var el = document.getElementById('view-actions');
-      var items = state.actions.items;
-      var introCard = '<div class="card" style="margin-bottom:12px;padding:12px;background:var(--bg-subtle);">' +
-        '<div style="font-size:13px;color:var(--ink-muted);line-height:1.5;">' +
-        '<strong>Actions</strong> are follow-ups the agent surfaced during sessions — decisions to revisit, files to inspect, tasks blocked on input. Status flows pending &rarr; active &rarr; done/blocked; the <em>frontier</em> marks what is unblocked and ready to pick up next.' +
-        '</div></div>';
-      var search = state.actions.search.toLowerCase();
-      var statusFilter = state.actions.statusFilter;
-      var frontierIds = new Set((state.actions.frontier || []).map(function(a) { return a.id; }));
-
-      if (search) {
-        items = items.filter(function(a) {
-          return (a.title + ' ' + (a.description || '') + ' ' + tagList(a.tags).join(' ')).toLowerCase().indexOf(search) >= 0;
-        });
-      }
-      if (statusFilter) {
-        items = items.filter(function(a) { return a.status === statusFilter; });
-      }
-
-      var html = introCard;
-      html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
-      html += '<input id="actions-search" class="search-input" type="text" placeholder="Search actions..." value="' + esc(state.actions.search) + '" style="flex:1;min-width:200px" />';
-      html += '<select id="actions-status-filter" style="padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--ink);">';
-      html += '<option value="">All statuses</option>';
-      ['pending','active','done','blocked','cancelled'].forEach(function(s) {
-        html += '<option value="' + s + '"' + (statusFilter === s ? ' selected' : '') + '>' + s + '</option>';
-      });
-      html += '</select>';
-      html += '<span style="font-size:12px;color:var(--ink-faint);align-self:center;">' + items.length + ' actions</span>';
-      html += '</div>';
-      if (state.actions.total > state.actions.items.length) {
-        html += '<div style="font-size:12px;color:var(--ink-faint);margin-bottom:8px;">Showing the ' + state.actions.items.length + ' most recently updated of ' + state.actions.total + ' actions.</div>';
-      }
-
-      if (items.length === 0) {
-        html += '<div class="empty-state">' +
-          '<div class="empty-icon">&#9745;</div>' +
-          '<div class="empty-title">No actions tracked yet</div>' +
-          '<div class="empty-lead">Actions are follow-ups the agent surfaced during a session: <em>decisions to revisit</em>, <em>files to inspect</em>, <em>tasks blocked on input</em>. They show up here with status pending &rarr; active &rarr; done/blocked so nothing slips through between sessions.</div>' +
-          '<div class="empty-lead" style="margin-top:0;">Three ways to create them:</div>' +
-          '<pre class="empty-cmd"># 1. MCP tool (from any agent)\nmemory_action_create { title, description, priority }\n\n# 2. Curl\ncurl -X POST http://localhost:3111/agentmemory/actions \\\n  -H \'Content-Type: application/json\' \\\n  -d \'{"title":"ship v1","priority":"high"}\'\n\n# 3. Hooks auto-extract from long session bodies</pre>' +
-          '<div><a class="empty-link" href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-mcp-tools/SKILL.md" target="_blank" rel="noopener">Action lifecycle docs &rarr;</a></div>' +
-          '</div>';
-      } else {
-        html += '<table><thead><tr><th>Title</th><th>Status</th><th>Priority</th><th>Tags</th><th>Frontier</th><th>Updated</th></tr></thead><tbody>';
-        items = items.slice().sort(function(a, b) { return (b.priority || 0) - (a.priority || 0); });
-        items.forEach(function(a) {
-          var statusClass = a.status === 'done' ? 'badge-green' : a.status === 'active' ? 'badge-blue' : a.status === 'blocked' ? 'badge-red' : a.status === 'cancelled' ? 'badge-red' : 'badge-yellow';
-          var isFrontier = frontierIds.has(a.id);
-          html += '<tr' + (isFrontier ? ' style="background:rgba(45,106,79,0.08);"' : '') + '>';
-          html += '<td style="max-width:350px;"><strong>' + esc(a.title) + '</strong>';
-          if (a.description) html += '<div style="font-size:11px;color:var(--ink-faint);margin-top:2px;">' + esc(truncate(a.description, 80)) + '</div>';
-          html += '</td>';
-          html += '<td><span class="badge ' + statusClass + '">' + esc(a.status) + '</span></td>';
-          html += '<td style="text-align:center;font-weight:600;">' + (a.priority || '-') + '</td>';
-          html += '<td style="font-size:11px;color:var(--ink-muted);">' + tagList(a.tags).map(esc).join(', ') + '</td>';
-          html += '<td style="text-align:center;">' + (isFrontier ? '&#9889;' : '') + '</td>';
-          html += '<td style="font-size:12px;color:var(--ink-muted);">' + shortTime(a.updatedAt) + '</td>';
-          html += '</tr>';
-        });
-        html += '</tbody></table>';
-      }
-
-      var __focus = captureSearchFocus(['actions-search']);
-      el.innerHTML = html;
-      var __as = document.getElementById('actions-search');
-      if (__as) bindImeSafeSearch(__as, 200, function(v){ state.actions.search = v; renderActions(); });
-      var __af = document.getElementById('actions-status-filter');
-      if (__af) __af.addEventListener('change', function(){ state.actions.statusFilter = this.value; renderActions(); });
-      restoreSearchFocus(__focus);
-    }
-
-    async function loadCrystals() {
-      var el = document.getElementById('view-crystals');
-      if (!state.crystals.loaded) el.innerHTML = '<div class="loading">Loading crystals...</div>';
-      var results = await Promise.all([apiGet('crystals'), apiGet('lessons')]);
-      state.crystals.items = (results[0] && results[0].crystals) || [];
-      var lessonMap = {};
-      var lessons = (results[1] && results[1].lessons) || [];
-      lessons.forEach(function(l) { if (l && l.id) lessonMap[l.id] = l; });
-      state.crystals.lessonMap = lessonMap;
-      state.crystals.loaded = true;
-      renderCrystals();
-    }
-
-    function renderCrystals() {
-      var el = document.getElementById('view-crystals');
-      var items = state.crystals.items;
-      var search = state.crystals.search.toLowerCase();
-      var lessonMap = state.crystals.lessonMap || {};
-
-      if (search) {
-        items = items.filter(function(c) {
-          var lessonText = (c.lessons || [])
-            .map(function(lid) {
-              var l = lessonMap[lid];
-              return l && typeof l.content === 'string' ? l.content : lid;
-            })
-            .join(' ');
-          var filesText = (c.filesAffected || []).join(' ');
-          var haystack = [
-            c.narrative || '',
-            (c.keyOutcomes || []).join(' '),
-            lessonText,
-            filesText,
-            c.project || '',
-          ].join(' ').toLowerCase();
-          return haystack.indexOf(search) >= 0;
-        });
-      }
-
-      var html = '<div class="card" style="margin-bottom:12px;padding:12px;background:var(--bg-subtle);">';
-      html += '<div style="font-size:13px;color:var(--ink-muted);line-height:1.5;">';
-      html += '<strong>Crystals</strong> are frozen snapshots of completed work. Each crystal captures one session\'s narrative, the tools invoked (key outcomes), files touched, and lessons surfaced — a replayable summary you keep after raw observations are pruned. Auto-created on JSONL import or via <code>memory_crystallize</code>.';
-      html += '</div></div>';
-
-      html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-      html += '<input id="crystals-search" class="search-input" type="text" placeholder="Search crystals..." value="' + esc(state.crystals.search) + '" style="flex:1" />';
-      html += '<span style="font-size:12px;color:var(--ink-faint);align-self:center;">' + items.length + ' crystals</span>';
-      html += '</div>';
-
-      if (items.length === 0) {
-        html += '<div class="empty-state">' +
-          '<div class="empty-icon">&#128142;</div>' +
-          '<div class="empty-title">No crystals yet</div>' +
-          '<div class="empty-lead">Crystals are frozen snapshots of completed work &mdash; one session’s narrative, key outcomes, files touched, and lessons surfaced, kept after raw observations are pruned so the next session gets fast context.</div>' +
-          '<pre class="empty-cmd"># Auto: import a JSONL transcript\n#   Replay tab &rarr; Import JSONL\n\n# Manual: crystallize a specific session\nmemory_crystallize { sessionId }</pre>' +
-          '<div><a class="empty-link" href="https://github.com/possiblyneal/agentmemory-sqlite/blob/main/plugin/skills/agentmemory-mcp-tools/SKILL.md" target="_blank" rel="noopener">Crystal pipeline &rarr;</a></div>' +
-          '</div>';
-      } else {
-        items.forEach(function(c) {
-          html += '<div class="card" style="margin-bottom:12px;border-left:3px solid var(--accent);">';
-          html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">';
-          html += '<div style="flex:1;font-size:14px;font-weight:600;color:var(--ink);line-height:1.4;">' + esc(truncate(c.narrative || 'Untitled crystal', 300)) + '</div>';
-          html += '<div style="font-size:10px;color:var(--ink-faint);font-family:var(--font-mono);white-space:nowrap;">' + esc(formatTime(c.createdAt)) + '</div>';
-          html += '</div>';
-
-          var pillRow = [];
-          if (c.project) pillRow.push('<span class="badge badge-muted">' + esc(c.project) + '</span>');
-          if (c.sessionId) pillRow.push('<span class="badge badge-blue" style="font-family:var(--font-mono);">' + esc(c.sessionId.slice(0, 14)) + '</span>');
-          if (c.keyOutcomes && c.keyOutcomes.length) pillRow.push('<span style="font-size:11px;color:var(--ink-muted);">' + c.keyOutcomes.length + ' tools</span>');
-          if (c.filesAffected && c.filesAffected.length) pillRow.push('<span style="font-size:11px;color:var(--ink-muted);">' + c.filesAffected.length + ' files</span>');
-          if (c.lessons && c.lessons.length) pillRow.push('<span style="font-size:11px;color:var(--ink-muted);">' + c.lessons.length + ' lessons</span>');
-          if (pillRow.length) html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' + pillRow.join('') + '</div>';
-
-          if (c.keyOutcomes && c.keyOutcomes.length > 0) {
-            html += '<div style="margin:10px 0;"><div style="font-size:10px;letter-spacing:0.08em;color:var(--ink-muted);margin-bottom:4px;">TOOLS USED</div>';
-            html += '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
-            c.keyOutcomes.forEach(function(o) {
-              html += '<span class="badge" style="background:var(--bg-alt);color:var(--ink);font-family:var(--font-mono);">' + esc(o) + '</span>';
-            });
-            html += '</div></div>';
-          }
-
-          if (c.filesAffected && c.filesAffected.length > 0) {
-            html += '<div style="margin:10px 0;"><div style="font-size:10px;letter-spacing:0.08em;color:var(--ink-muted);margin-bottom:4px;">FILES TOUCHED</div>';
-            html += '<div style="font-size:12px;font-family:var(--font-mono);color:var(--ink);line-height:1.6;">';
-            c.filesAffected.slice(0, 10).forEach(function(f) {
-              html += '<div>&#8226; ' + esc(f) + '</div>';
-            });
-            if (c.filesAffected.length > 10) html += '<div style="color:var(--ink-faint);">+' + (c.filesAffected.length - 10) + ' more</div>';
-            html += '</div></div>';
-          }
-
-          if (c.lessons && c.lessons.length > 0) {
-            html += '<div style="margin:10px 0;"><div style="font-size:10px;letter-spacing:0.08em;color:var(--ink-muted);margin-bottom:4px;">LESSONS SURFACED</div>';
-            c.lessons.slice(0, 8).forEach(function(lid) {
-              var content = lessonMap[lid] ? lessonMap[lid].content : lid;
-              html += '<div style="font-size:12px;padding:4px 8px;margin:2px 0;background:var(--bg-alt);border-radius:3px;color:var(--ink);line-height:1.4;">&#128161; ' + esc(content) + '</div>';
-            });
-            if (c.lessons.length > 8) html += '<div style="font-size:11px;color:var(--ink-faint);margin-top:4px;">+' + (c.lessons.length - 8) + ' more lessons</div>';
-            html += '</div>';
-          }
-
-          html += '</div>';
-        });
-      }
-
-      var __focus = captureSearchFocus(['crystals-search']);
-      el.innerHTML = html;
-      var __cs = document.getElementById('crystals-search');
-      if (__cs) bindImeSafeSearch(__cs, 200, function(v){ state.crystals.search = v; renderCrystals(); });
       restoreSearchFocus(__focus);
     }
 

@@ -112,13 +112,6 @@ async function runRecoveredSessionConsolidation(sdk: ISdk): Promise<void> {
       function_id: "mem::consolidate-pipeline",
       payload: { tier: "all", force: true },
     });
-    // One crystallization pass for the batch (the per-session fan-out was
-    // suppressed on the recovery path), keeping recovered sessions
-    // consistent with normally-stopped ones without the N-fold amplification.
-    await sdk.trigger({
-      function_id: "mem::auto-crystallize",
-      payload: { olderThanDays: 0 },
-    });
   } catch (err) {
     logger.warn("Recovered session consolidation failed", {
       error: err instanceof Error ? err.message : String(err),

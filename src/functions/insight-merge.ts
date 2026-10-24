@@ -64,7 +64,4 @@ export function absorbInsight(survivor: Insight, other: Insight): void {
   survivor.sourceLessonIds = [
     ...new Set([...survivor.sourceLessonIds, ...other.sourceLessonIds]),
   ];
-  survivor.sourceCrystalIds = [
-    ...new Set([...survivor.sourceCrystalIds, ...other.sourceCrystalIds]),
-  ];
 }

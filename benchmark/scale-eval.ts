@@ -344,7 +344,7 @@ function generateReport(scale: ScaleResult[], cross: CrossSessionResult[]): stri
   w("| Scale beyond 200 lines | No (hard cap) | Unlimited |");
   w("| Cross-session recall | Only if in 200-line window | Full corpus search |");
   w("| Cross-agent sharing | No (per-agent files) | MCP + REST API |");
-  w("| Multi-agent coordination | No | Leases, signals, actions |");
+  w("| Multi-agent coordination | No | Signals, mesh |");
   w("| Temporal queries | No | Point-in-time graph |");
   w("| Memory lifecycle | No (manual pruning) | Ebbinghaus decay + eviction |");
   w("| Knowledge graph | No | Entity extraction + traversal |");

@@ -173,7 +173,7 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
         });
       }
     }
-    // Crystals + lessons consolidation. The stop lifecycle is the single
+    // Lessons consolidation. The stop lifecycle is the single
     // source of truth: event::session::stopped fires for ALL agents (the
     // client-side session-end hook no longer drives consolidation directly).
     // Gated so keyless/zero-LLM users don't fire no-op LLM calls.
@@ -182,17 +182,16 @@ export function registerEventTriggers(sdk: ISdk, kv: StateKV): void {
     // by eviction's stale-session recovery: evict calls session::stopped
     // once per recovered session, then runs ONE final consolidation pass.
     // Without this guard, N recovered sessions launch N concurrent forced
-    // full-corpus consolidations plus N crystallizations.
+    // full-corpus consolidations.
     //
     // Debounce: /session/end is posted by the per-turn Stop hook, so this
-    // handler fires on every agent turn. consolidate-pipeline + auto-crystallize
-    // are full-corpus LLM work with no internal "nothing changed" guard, so
+    // handler fires on every agent turn. consolidate-pipeline is full-corpus
+    // LLM work with no internal "nothing changed" guard, so
     // firing them every turn is a cost/latency storm for connected agents.
     // Bound the global corpus consolidation to once per cooldown window.
     if (isConsolidationEnabled() && !data.recovery) {
       if (await consolidationDue(kv)) {
         fireAndForget("mem::consolidate-pipeline", { tier: "all", force: true });
-        fireAndForget("mem::auto-crystallize", { olderThanDays: 0 });
       }
     }
     return summary;

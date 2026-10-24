@@ -79,7 +79,7 @@ agentmemory top-10 results:
 | Scale beyond 200 lines | No (hard cap) | Unlimited |
 | Cross-session recall | Only if in 200-line window | Full corpus search |
 | Cross-agent sharing | No (per-agent files) | MCP + REST API |
-| Multi-agent coordination | No | Leases, signals, actions |
+| Multi-agent coordination | No | Signals, mesh |
 | Temporal queries | No | Point-in-time graph |
 | Memory lifecycle | No (manual pruning) | Ebbinghaus decay + eviction |
 | Knowledge graph | No | Entity extraction + traversal |

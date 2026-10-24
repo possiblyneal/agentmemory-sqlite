@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 // summarize + slot-reflect + graph extraction actually fire. Before this
 // fix the `event::session::stopped` handler in events.ts was a dead
 // subscriber — no code published `agentmemory.session.stopped`, so graph
-// nodes / lessons / crystals never materialized despite the handler
+// nodes / lessons never materialized despite the handler
 // existing. Direct fire-and-forget trigger keeps the HTTP response fast
 // (kv.update runs synchronously, downstream pipeline fan-outs without
 // blocking).
