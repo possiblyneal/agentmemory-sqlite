@@ -260,7 +260,9 @@ type, so re-saving a Memory as a rule pins it.
 - **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
   in smart-search and prompt-context after their floors: an older Memory of the same type and
   Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly
-  below the newer one. Nothing is hidden.
+  below the newer one. Nothing is hidden. Prompt-context also admits a below-floor Memory hit
+  (`withShadowingMemories`, `src/functions/prompt-context.ts`) when it is the newest shadower of
+  a passed Memory, directly above it and within the 3 results; it skips the gate.
 - **De-indexing** — every path that sets a Memory `isLatest: false` (`mem::remember`, `mem::evolve`,
   `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
   consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).

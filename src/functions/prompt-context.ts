@@ -74,6 +74,27 @@ async function withCoveringSummaries(kv: StateKV, ranked: Candidate[]): Promise<
   });
 }
 
+// A newer Memory that contradicts a passed one in different words can score
+// below the floor, which would leave the stale claim given alone. Such a
+// Memory is admitted directly above the one it shadows; a below-floor Memory
+// that shadows nothing given stays out.
+async function withShadowingMemories(
+  kv: StateKV,
+  passed: Candidate[],
+  belowFloor: NarratedHit[],
+  seen: Set<string>,
+): Promise<Candidate[]> {
+  const passedMemoryIds = passed.filter(({ ref }) => ref.kind === "memory").map(({ ref }) => ref.id);
+  if (passedMemoryIds.length === 0) return passed;
+  const extra = (await Promise.all(belowFloor.map((r) => candidateFor(kv, r)))).filter(
+    ({ ref }) => ref.kind === "memory" && !seen.has(refKey(ref)),
+  );
+  const shadowed = await shadowedMemoryIds(kv, [...passedMemoryIds, ...extra.map(({ ref }) => ref.id)]);
+  const shadowers = new Set(passedMemoryIds.map((id) => shadowed.get(id)));
+  const admitted = extra.filter(({ ref }) => shadowers.has(ref.id));
+  return newerAboveShadowed([...passed, ...admitted], ({ ref }) => ref.id, shadowed);
+}
+
 // A covered Session renders once however many of its Observations hit, so
 // the result budget counts Sessions, not hits: a second hit from the same
 // Session would spend a slot another Session could use.
@@ -235,11 +256,8 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
         ({ ref }) => !seen.has(refKey(ref)),
       );
       const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation, GATE_POOL);
-      const shadowed = await shadowedMemoryIds(
-        kv,
-        passed.filter(({ ref }) => ref.kind === "memory").map(({ ref }) => ref.id),
-      );
-      const gated = newerAboveShadowed(passed, ({ ref }) => ref.id, shadowed);
+      const belowFloor = earlier.filter((r): r is NarratedHit => r.score < floor && !!r.observation.narrative);
+      const gated = await withShadowingMemories(kv, passed, belowFloor, seen);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
       if (chosen.length === 0) return EMPTY;
 
