@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { PmbRow } from "./pmb-score.js";
 import type { SessionScore } from "./replay-score.js";
+import { selectionWarning, type Selection } from "./replay-selection.js";
 import { HOLDOUT_ENV, HOLDOUT_LEDGER, type Split } from "./split.js";
 import { pairedBootstrap, pooled, type Comparison, type ItemMetrics, type Ratio } from "./suite-stats.js";
 import type { ScoreRow } from "./types.js";
@@ -151,11 +152,26 @@ function runBench(bench: Bench, tier: Tier, split: Split, dir: string, input: st
 
 const fmt = (x: number | null, digits = 3) => (x === null ? "—" : x.toFixed(digits));
 
+function replaySelection(runDir: string): Selection | undefined {
+  try {
+    return (JSON.parse(readFileSync(join(runDir, "replay", "summary.json"), "utf8")) as { run?: { selection?: Selection } }).run?.selection;
+  } catch {
+    return undefined;
+  }
+}
+
+function replaySelectionWarning(againstDir: string, dir: string): string | undefined {
+  if (!existsSync(join(againstDir, "replay", "scores.ndjson")) || !existsSync(join(dir, "replay", "scores.ndjson"))) return undefined;
+  return selectionWarning(replaySelection(againstDir), replaySelection(dir));
+}
+
 function compare(dir: string, againstDir: string, benches: Bench[], meta: RunMeta): boolean {
   const before = JSON.parse(readFileSync(join(againstDir, "meta.json"), "utf8")) as RunMeta;
   const changed = CONFIG_KEYS.filter((k) => (before.config[k] ?? "") !== (meta.config[k] ?? ""));
   console.log(`\n=== ${meta.label} vs ${before.label} ===`);
   if (changed.length > 0) console.log(`  config differs: ${changed.map((k) => `${k} ${before.config[k] ?? "∅"} → ${meta.config[k] ?? "∅"}`).join(", ")}`);
+  const warning = replaySelectionWarning(againstDir, dir);
+  if (warning) console.log(`  WARNING: ${warning}`);
   const pairs: Array<{ bench: Bench; metric: string; base: Record<string, Ratio>; cand: Record<string, Ratio> }> = [];
   for (const bench of benches) {
     if (!existsSync(join(againstDir, bench.name, "scores.ndjson")) || !existsSync(join(dir, bench.name, "scores.ndjson"))) continue;

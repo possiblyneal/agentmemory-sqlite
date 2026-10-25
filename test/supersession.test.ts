@@ -156,7 +156,6 @@ function insight(id: string, title: string, content: string, confidence: number,
     sourceConceptCluster: [],
     sourceMemoryIds: [],
     sourceLessonIds: [],
-    sourceCrystalIds: [],
     project: PROJECT,
     tags: [],
     createdAt,
@@ -231,8 +230,8 @@ describe("supersession: Memory", () => {
     expect(results.map((r) => r.title)).toEqual([LOW_OVERLAP_B, LOW_OVERLAP_A]);
   });
 
-  // The newer Memory matches the prompt below the relevance floor, so only the stale one passes it and demotion has nothing to reorder.
-  it.fails("prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one", async () => {
+  // The newer Memory matches the prompt below the relevance floor; it is admitted because it shadows the stale one that passed.
+  it("prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one", async () => {
     await saveMemory(LOW_OVERLAP_A);
     vi.advanceTimersByTime(1000);
     await saveMemory(LOW_OVERLAP_B);
@@ -325,6 +324,20 @@ describe("supersession: Lesson", () => {
       const stamp = lesson.content.includes(STALE) ? OLD : NEW;
       await kv.set(KV.lessons, lesson.id, { ...lesson, createdAt: stamp, updatedAt: stamp, lastReinforcedAt: lesson.reinforcements ? stamp : undefined });
     }
+    expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
+  });
+});
+
+describe("supersession: Lesson saved just after a more-reinforced one", () => {
+  beforeEach(async () => {
+    for (let i = 0; i < 3; i++) {
+      await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
+      vi.advanceTimersByTime(1);
+    }
+    await sdk.trigger("mem::lesson-save", { content: `Rule: ${FRESH}`, project: PROJECT });
+  });
+
+  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });
@@ -422,5 +435,47 @@ describe("supersession: Observation", () => {
   it("prompt-submit gives the newer Observation ahead of the contradicted one", async () => {
     const context = await promptSubmit("what is the whitespace rule, should we indent with tabs or spaces in every source file of the repository");
     expect(ranksBefore(context, FRESH, STALE)).toBe(true);
+  });
+});
+
+describe("supersession: Observation, eval:supersession wording", () => {
+  const BENCH_OLD = "2026-08-31T12:00:00.000Z";
+  const BENCH_NEW = "2026-10-10T12:00:00.000Z";
+
+  // The bench seeds every cell in one store, so other projects hold the same
+  // claims and the fused rank gap between the two outgrows the recency factor.
+  async function seedBenchCase(project: string, stale: string, fresh: string): Promise<void> {
+    await kv.set(KV.sessions, stale, { ...session(stale, BENCH_OLD), project });
+    await kv.set(KV.sessions, fresh, { ...session(fresh, BENCH_NEW), project });
+    await seedObservation({ ...observation(`${stale}_a`, stale, BENCH_OLD, `whitespace rule: we ${STALE} in every source file of the repository`), title: `whitespace rule: ${STALE}` });
+    await seedObservation({ ...observation(`${fresh}_b`, fresh, BENCH_NEW, `whitespace rule: we ${FRESH} in every source file of the repository`), title: `whitespace rule: ${FRESH}` });
+    await seedObservation({
+      ...observation(
+        `${stale}_a2`,
+        stale,
+        BENCH_OLD,
+        `whitespace rule whitespace rule: we ${STALE}, ${STALE}, never spaces, tabs tabs tabs in every source file of the repository`,
+      ),
+      title: `whitespace rule: ${STALE}`,
+    });
+  }
+
+  it("smart-search ranks the newer Observation above a contradicted one whose stronger match outweighs the recency factor", async () => {
+    for (let i = 0; i < 4; i++) await seedBenchCase(`project-bench-${i}`, `ses_bench_${i}_a`, `ses_bench_${i}_b`);
+    await seedBenchCase(PROJECT, "ses_a", "ses_b");
+    const { results } = await smartSearch("whitespace rule indent with tabs spaces source file");
+    expect(results[0].obsId).toBe("ses_b_b");
+  });
+
+  it("smart-search does not cap an Observation behind a newer twin from another project", async () => {
+    const DAY_LATER = "2026-09-01T12:00:00.000Z";
+    await kv.set(KV.sessions, "ses_q", { ...session("ses_q", DAY_LATER), project: "project-q" });
+    await seedObservation({ ...observation("p_rule", "ses_a", BENCH_OLD, `whitespace rule: we ${STALE} in every source file of the repository`), title: `whitespace rule: ${STALE}` });
+    for (let i = 0; i < 4; i++) {
+      await seedObservation(observation(`p_other${i}`, "ses_a", BENCH_OLD, `indent with tabs, note ${i}: whitespace rule for source file layout${i}`));
+    }
+    await seedObservation({ ...observation("q_rule", "ses_q", DAY_LATER, `whitespace rule: we ${FRESH} in every source file of the repository`), title: `whitespace rule: ${FRESH}` });
+    const { results } = await smartSearch("whitespace rule indent with tabs source file");
+    expect(results[0].obsId).toBe("p_rule");
   });
 });

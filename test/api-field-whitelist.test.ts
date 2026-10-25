@@ -31,11 +31,9 @@ function mockSdk() {
 }
 
 const ARRAY_FIELDS = new Set([
-  "files", "observations", "memoryIds", "type", "tags", "sourceObservationIds",
-  "sourceMemoryIds", "edges", "steps", "sourceProceduralIds", "linkedActionIds",
-  "sharedScopes", "scopes", "memories", "actions", "semantic", "procedural",
-  "relations", "graphNodes", "graphEdges", "actionIds", "categories", "matchAll",
-  "matchAny",
+  "files", "observations", "memoryIds", "type", "sharedScopes", "scopes",
+  "memories", "semantic", "procedural", "relations", "graphNodes", "graphEdges",
+  "categories", "matchAll", "matchAny",
 ]);
 
 // [REST route, Engine function, fields the function reads]
@@ -52,30 +50,10 @@ const ROUTES: Array<[string, string, string[]]> = [
   ["api::governance-bulk", "mem::governance-bulk", ["type", "dateFrom", "dateTo", "project", "qualityBelow", "dryRun"]],
   ["api::snapshot-create", "mem::snapshot-create", ["message"]],
   ["api::snapshot-restore", "mem::snapshot-restore", ["commitHash"]],
-  ["api::action-create", "mem::action-create", ["title", "description", "priority", "createdBy", "project", "tags", "parentId", "sourceObservationIds", "sourceMemoryIds", "edges"]],
-  ["api::action-update", "mem::action-update", ["actionId", "status", "title", "description", "priority", "assignedTo", "result", "tags"]],
-  ["api::action-edge", "mem::action-edge-create", ["sourceActionId", "targetActionId", "type", "metadata"]],
-  ["api::lease-acquire", "mem::lease-acquire", ["actionId", "agentId", "ttlMs"]],
-  ["api::lease-release", "mem::lease-release", ["actionId", "agentId", "result"]],
-  ["api::lease-renew", "mem::lease-renew", ["actionId", "agentId", "ttlMs"]],
-  ["api::routine-create", "mem::routine-create", ["name", "description", "steps", "tags", "frozen", "sourceProceduralIds"]],
-  ["api::routine-run", "mem::routine-run", ["routineId", "initiatedBy", "project", "overrides"]],
   ["api::signal-send", "mem::signal-send", ["from", "to", "content", "type", "threadId", "replyTo", "metadata", "expiresInMs"]],
-  ["api::checkpoint-create", "mem::checkpoint-create", ["name", "description", "type", "linkedActionIds", "expiresInMs"]],
-  ["api::checkpoint-resolve", "mem::checkpoint-resolve", ["checkpointId", "status", "resolvedBy", "result"]],
   ["api::mesh-register", "mem::mesh-register", ["url", "name", "sharedScopes", "syncFilter"]],
   ["api::mesh-sync", "mem::mesh-sync", ["peerId", "scopes", "direction"]],
-  ["api::mesh-receive", "mem::mesh-receive", ["memories", "actions", "semantic", "procedural", "relations", "graphNodes", "graphEdges"]],
-  ["api::flow-compress", "mem::flow-compress", ["runId", "actionIds", "project"]],
-  ["api::sentinel-create", "mem::sentinel-create", ["name", "type", "config", "linkedActionIds", "expiresInMs"]],
-  ["api::sentinel-trigger", "mem::sentinel-trigger", ["sentinelId", "result"]],
-  ["api::sentinel-cancel", "mem::sentinel-cancel", ["sentinelId"]],
-  ["api::sketch-create", "mem::sketch-create", ["title", "description", "expiresInMs", "project"]],
-  ["api::sketch-add", "mem::sketch-add", ["sketchId", "title", "description", "priority", "dependsOn"]],
-  ["api::sketch-promote", "mem::sketch-promote", ["sketchId", "project"]],
-  ["api::sketch-discard", "mem::sketch-discard", ["sketchId"]],
-  ["api::crystallize", "mem::crystallize", ["actionIds", "sessionId", "project"]],
-  ["api::auto-crystallize", "mem::auto-crystallize", ["olderThanDays", "project", "dryRun"]],
+  ["api::mesh-receive", "mem::mesh-receive", ["memories", "semantic", "procedural", "relations", "graphNodes", "graphEdges"]],
   ["api::diagnose", "mem::diagnose", ["categories"]],
   ["api::heal", "mem::heal", ["categories", "dryRun"]],
   ["api::facet-tag", "mem::facet-tag", ["targetId", "targetType", "dimension", "value"]],
@@ -107,25 +85,5 @@ describe.each(ROUTES)("%s field whitelist", (route, fn, fields) => {
       body: { ...allowed, injected: "dropped" },
     });
     expect(received).toEqual(allowed);
-  });
-});
-
-describe.each([
-  ["api::action-create", "mem::action-create", { title: "t" }],
-  ["api::action-update", "mem::action-update", { actionId: "a" }],
-])("%s tag normalisation", (route, fn, base) => {
-  it("stores CSV string tags as an array", async () => {
-    const sdk = mockSdk();
-    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
-    let received: { tags?: unknown } | undefined;
-    sdk._fns.set(fn, (data: { tags?: unknown }) => {
-      received = data;
-      return { success: true };
-    });
-    await sdk._fns.get(route)!({
-      headers: { authorization: `Bearer ${SECRET}` },
-      body: { ...base, tags: "bug, auth,," },
-    });
-    expect(received?.tags).toEqual(["bug", "auth"]);
   });
 });

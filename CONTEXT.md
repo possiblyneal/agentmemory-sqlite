@@ -74,11 +74,6 @@ A short, reusable rule learned from experience — a correction or practice wort
 later Sessions. Its confidence rises when reinforced and decays when unused.
 _Avoid_: rule, tip, learning
 
-**Crystal**:
-A narrative digest of a finished piece of tracked work: what was done, its key outcomes, the
-files it touched and the Lessons it yielded.
-_Avoid_: digest, recap
-
 **Semantic Fact**:
 A standalone claim distilled by consolidation from Session Summaries across many Sessions, with
 a confidence and the Sessions it came from. Unlike a Memory, it is produced by the store, not

@@ -61,3 +61,8 @@ jobs:
       - name: Recall quality gate
         if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.node-version == 22 }}
         run: npm run eval:gate
+      # A corpus of its own, so its Sessions do not shift BM25 scores for the
+      # questions above.
+      - name: Pinned rules gate
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.node-version == 22 }}
+        run: npm run eval:gate:rules

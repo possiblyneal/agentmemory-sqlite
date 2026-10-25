@@ -17,6 +17,8 @@ import { StateKV } from "../state/kv.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { withFiles } from "./injections.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
+import { lastActiveAt } from "./lessons.js";
+import { capBehindNewer } from "./recency-cap.js";
 import { logger } from "../logger.js";
 import {
   isSlotsEnabled,
@@ -38,8 +40,14 @@ function projectWeighted(item: { project?: string; confidence: number }, project
 }
 
 function lessonRank(l: Lesson, project: string): number {
-  const days = (Date.now() - new Date(l.lastReinforcedAt || l.createdAt).getTime()) / 86_400_000;
+  const days = (Date.now() - lastActiveAt(l)) / 86_400_000;
   return projectWeighted(l, project) / (1 + days * 0.01);
+}
+
+function rankLessons(lessons: Lesson[], project: string): Lesson[] {
+  const scored = lessons.map((lesson) => ({ lesson, score: lessonRank(lesson, project) }));
+  capBehindNewer(scored, (s) => s.lesson.content, (s) => lastActiveAt(s.lesson));
+  return scored.sort((a, b) => b.score - a.score).map((s) => s.lesson);
 }
 
 const MAX_CONTEXT_SEMANTIC_FACTS = 5;
@@ -217,10 +225,10 @@ export function registerContextFunction(
           .map((m) => oneLine(m.content).toLowerCase()),
       );
 
-      const relevantLessons = lessons
-        .filter((l) => (!l.project || l.project === data.project))
-        .sort((a, b) => lessonRank(b, data.project) - lessonRank(a, data.project))
-        .slice(0, 10);
+      const relevantLessons = rankLessons(
+        lessons.filter((l) => !l.project || l.project === data.project),
+        data.project,
+      ).slice(0, 10);
 
       let lessonsBlock: ContextBlock | undefined;
       let lessonsPinned = false;

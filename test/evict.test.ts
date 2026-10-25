@@ -170,7 +170,6 @@ describe("mem::evict stale sessions", () => {
     sdk.registerFunction("mem::consolidate-pipeline", () => ({
       success: true,
     }));
-    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
 
     const result = (await sdk.trigger({
       function_id: "mem::evict",
@@ -195,7 +194,7 @@ describe("mem::evict stale sessions", () => {
 
   it("bounds consolidation to one pass regardless of how many stale sessions are recovered", async () => {
     // Regression (P1): before the recovery guard, N recovered
-    // sessions each triggered a forced full-corpus consolidate + crystallize
+    // sessions each triggered a forced full-corpus consolidate
     // via the session::stopped fan-out, on top of evict's final pass — an
     // N+1 amplification of an expensive LLM path. Recovery must stay O(1).
     const ids = ["ses_a", "ses_b", "ses_c"];
@@ -224,7 +223,6 @@ describe("mem::evict stale sessions", () => {
       return { success: true };
     });
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
-    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
 
     await sdk.trigger({ function_id: "mem::evict", payload: {} });
 
@@ -234,10 +232,9 @@ describe("mem::evict stale sessions", () => {
     for (const p of stoppedPayloads) {
       expect(p).toMatchObject({ recovery: true });
     }
-    // ...and the corpus-wide consolidation + crystallization run exactly once.
+    // ...and the corpus-wide consolidation runs exactly once.
     const fnIds = calls.map((c) => c.function_id);
     expect(fnIds.filter((f) => f === "mem::consolidate-pipeline")).toHaveLength(1);
-    expect(fnIds.filter((f) => f === "mem::auto-crystallize")).toHaveLength(1);
   });
 
   it("recovers Sessions one at a time, an Abandoned one included", async () => {
@@ -266,7 +263,6 @@ describe("mem::evict stale sessions", () => {
       return { success: true };
     });
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
-    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
 
     const result = (await sdk.trigger({ function_id: "mem::evict", payload: {} })) as {
       staleSessions: number;
@@ -292,7 +288,6 @@ describe("mem::evict stale sessions", () => {
       return { success: true };
     });
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
-    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
 
     await Promise.all([
       sdk.trigger({ function_id: "mem::evict", payload: {} }),
@@ -399,7 +394,6 @@ describe("mem::evict stale sessions", () => {
       return { success: true };
     });
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
-    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
 
     const result = (await sdk.trigger({
       function_id: "mem::evict",
@@ -931,7 +925,6 @@ describe("mem::evict spares Observations their Session's stop has not finished w
     registerEvictFunction(sdk as never, kv as never);
     sdk.registerFunction("event::session::stopped", () => ({ success: true }));
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
-    sdk.registerFunction("mem::auto-crystallize", () => ({ success: true }));
 
     const stats = (await sdk.trigger({ function_id: "mem::evict", payload: {} })) as Record<
       string,

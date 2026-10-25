@@ -1,4 +1,4 @@
-import { jaccardSimilarity } from "../state/schema.js";
+import { jaccardOverlap, jaccardText } from "../state/schema.js";
 
 const RESTATEMENT_OVERLAP = 0.5;
 
@@ -10,14 +10,16 @@ export function capBehindNewer<T extends { score: number }>(
   textOf: (item: T) => string,
   activeAt: (item: T) => number,
 ): void {
-  const byRecency = [...scored].sort((a, b) => activeAt(b) - activeAt(a));
+  const byRecency = [...scored]
+    .sort((a, b) => activeAt(b) - activeAt(a))
+    .map((item) => ({ item, at: activeAt(item), text: jaccardText(textOf(item)) }));
   for (let i = 1; i < byRecency.length; i++) {
     const older = byRecency[i];
     for (let j = 0; j < i; j++) {
       const newer = byRecency[j];
-      if (activeAt(newer) === activeAt(older)) continue;
-      if (jaccardSimilarity(textOf(newer), textOf(older)) < RESTATEMENT_OVERLAP) continue;
-      older.score = Math.min(older.score, newer.score * 0.99);
+      if (newer.at === older.at) continue;
+      if (jaccardOverlap(newer.text, older.text) < RESTATEMENT_OVERLAP) continue;
+      older.item.score = Math.min(older.item.score, newer.item.score * 0.99);
     }
   }
 }

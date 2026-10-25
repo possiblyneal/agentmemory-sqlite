@@ -86,18 +86,9 @@ import { registerConsolidationPipelineFunction } from "./functions/consolidation
 import { registerTeamFunction } from "./functions/team.js";
 import { registerGovernanceFunction } from "./functions/governance.js";
 import { registerSnapshotFunction } from "./functions/snapshot.js";
-import { registerActionsFunction } from "./functions/actions.js";
-import { registerFrontierFunction } from "./functions/frontier.js";
-import { registerLeasesFunction } from "./functions/leases.js";
-import { registerRoutinesFunction } from "./functions/routines.js";
 import { registerSignalsFunction } from "./functions/signals.js";
-import { registerCheckpointsFunction } from "./functions/checkpoints.js";
-import { registerFlowCompressFunction } from "./functions/flow-compress.js";
 import { registerMeshFunction } from "./functions/mesh.js";
 import { registerBranchAwareFunction } from "./functions/branch-aware.js";
-import { registerSentinelsFunction } from "./functions/sentinels.js";
-import { registerSketchesFunction } from "./functions/sketches.js";
-import { registerCrystallizeFunction } from "./functions/crystallize.js";
 import { registerDiagnosticsFunction } from "./functions/diagnostics.js";
 import { registerFacetsFunction } from "./functions/facets.js";
 import { registerVerifyFunction } from "./functions/verify.js";
@@ -328,18 +319,9 @@ async function main() {
 
   registerGovernanceFunction(sdk, kv);
 
-  registerActionsFunction(sdk, kv);
-  registerFrontierFunction(sdk, kv);
-  registerLeasesFunction(sdk, kv);
-  registerRoutinesFunction(sdk, kv);
   registerSignalsFunction(sdk, kv);
-  registerCheckpointsFunction(sdk, kv);
   registerMeshFunction(sdk, kv, secret);
   registerBranchAwareFunction(sdk, kv);
-  registerFlowCompressFunction(sdk, kv, provider);
-  registerSentinelsFunction(sdk, kv);
-  registerSketchesFunction(sdk, kv);
-  registerCrystallizeFunction(sdk, kv, provider);
   registerDiagnosticsFunction(sdk, kv);
   registerFacetsFunction(sdk, kv);
   registerVerifyFunction(sdk, kv);
@@ -360,7 +342,7 @@ async function main() {
     `v0.6 advanced retrieval: sliding-window, query-expansion, temporal-graph, retention-scoring`,
   );
   bootLog(
-    `Orchestration layer: actions, frontier, leases, routines, signals, checkpoints, flow-compress, mesh, branch-aware, sentinels, sketches, crystallize, diagnostics, facets`,
+    `Orchestration layer: signals, mesh, branch-aware, diagnostics, facets`,
   );
   if (isSlotsEnabled()) {
     bootLog(
@@ -568,7 +550,7 @@ async function main() {
     `Ready. ${embeddingProvider ? "Triple-stream (BM25+Vector+Graph)" : "BM25+Graph"} search active.`,
   );
   bootLog(
-    `REST API: 134 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
+    `REST API: 102 endpoints at http://localhost:${config.restPort}/agentmemory/*`,
   );
   bootLog(
     `MCP surface (opt-in via \`agentmemory mcp\`): ${getAllTools().length} tools · 6 resources · 3 prompts`,

@@ -73,18 +73,9 @@ export const KV = {
     `mem:team:${teamId}:users:${userId}`,
   teamProfile: (teamId: string) => `mem:team:${teamId}:profile`,
   audit: "mem:audit",
-  actions: "mem:actions",
-  actionEdges: "mem:action-edges",
-  leases: "mem:leases",
-  routines: "mem:routines",
-  routineRuns: "mem:routine-runs",
   signals: "mem:signals",
-  checkpoints: "mem:checkpoints",
   mesh: "mem:mesh",
-  sketches: "mem:sketches",
   facets: "mem:facets",
-  sentinels: "mem:sentinels",
-  crystals: "mem:crystals",
   lessons: "mem:lessons",
   insights: "mem:insights",
   projectActivity: "mem:project-activity",
@@ -166,11 +157,25 @@ function jaccardTokens(text: string): Set<string> {
   return tokens;
 }
 
+export interface JaccardText {
+  normalized: string;
+  tokens: Set<string>;
+}
+
+export function jaccardText(text: string): JaccardText {
+  const normalized = text.normalize("NFC");
+  return { normalized, tokens: jaccardTokens(normalized) };
+}
+
 export function jaccardSimilarity(a: string, b: string): number {
-  const na = a.normalize("NFC");
-  const nb = b.normalize("NFC");
-  const setA = jaccardTokens(na);
-  const setB = jaccardTokens(nb);
+  return jaccardOverlap(jaccardText(a), jaccardText(b));
+}
+
+export function jaccardOverlap(a: JaccardText, b: JaccardText): number {
+  const na = a.normalized;
+  const nb = b.normalized;
+  const setA = a.tokens;
+  const setB = b.tokens;
   // An empty token set carries no signal for the overlap metric. Very short
   // ASCII text ("AI", "a b", "go") tokenizes to nothing because words <=2
   // chars are dropped. Fall back to exact normalized equality so re-saving

@@ -21,6 +21,7 @@ A question names the path it exercises, and each path is scored on its own:
 | `search` | `POST /agentmemory/smart-search` with the question's `project` | top K Sessions |
 | `session-start` | `POST /agentmemory/session/start` for a probe Session — what the session-start hook injects | the whole Injection |
 | `prompt-submit` | the user prompt as the question — what `POST /agentmemory/prompt-context` returns for it, the per-prompt Injection | the whole Injection |
+| `pre-compact` | `POST /agentmemory/context` at budget 1500 for a probe Session, as the pre-compact hook posts it | the whole Injection |
 
 An Injection is text, so the runner maps it back to eval Sessions by finding each Observation's output in it.
 
@@ -31,6 +32,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 - **no-answer clean** — share of no-answer questions (`goldSessionIds: []`) that returned nothing. Every path has some: a topic never worked on and, on search and prompt-submit, one project's work asked from the other project. `prompt-submit` adds bare acknowledgements (`yes`, `continue`), which should never inject.
 - **hit** — gold in results for answerable questions, empty results for no-answer ones.
 - **chars** — mean size of the Injection, the cost the Agent pays to read it.
+- **first** and **max share** (pinned-rule questions only, the `=== Pinned rules ===` table and `rules` in `summary.json`) — the share of answerable questions whose Injection leads with a gold Session, and the largest share of the Injection's budget the `## Rules` block took (its estimated tokens over 2000 at session start, 1500 at pre-compact).
 
 ## Adapters
 
@@ -39,7 +41,7 @@ An Injection is text, so the runner maps it back to eval Sessions by finding eac
 | `agentmemory` | sandbox daemon, on-device embeddings | all | `npm run build`; the embedding model downloads from Hugging Face on the first sandbox run |
 | `agentmemory-bm25` | sandbox daemon, no embeddings | all | `npm run build` |
 | `grep` | tokenized substring match, project-filtered | search, prompt-submit | nothing |
-| `random` | k Sessions drawn per question, seeded by question id | all | nothing — the floor every path must beat |
+| `random` | k Sessions drawn per question, seeded by question id | search, session-start, prompt-submit | nothing — the floor every path must beat |
 | `vector` | OpenAI `text-embedding-3-small` + cosine | search | `OPENAI_API_KEY` (paid) |
 
 ## Sandbox
@@ -77,7 +79,7 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
 
-The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start`, none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
+The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start` (and `pre-compact` in `baselines/pinned-rules.json`), none for `search`. 500 ms is `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
 
 ```text
 FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
@@ -86,6 +88,22 @@ FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
 Search is gated on all three metrics. smart-search drops hybrid hits below a relevance floor (BM25 of at least 3.5 and half the best match, or a cosine of at least 0.3 on a hit BM25 also matched), so an off-topic query can return nothing. Search no-answer clean is 0.25, not 1: three of its four no-answer questions still have a lexical match above the floor (best BM25 3.9, 4.9 and 6.4), and gold Sessions score as low as 3.8, so a floor high enough to clear them (4.0 clears only the first) costs search recall.
 
 CI runs it on the ubuntu / Node 22 leg. The gate is BM25-only so CI never downloads the embedding model and needs no network beyond `npm ci`; the on-device embedding stack is still measured by `npm run eval:coding-life`. A PR that changes these numbers on purpose updates the baseline file in the same PR and says why. One question gained or lost on a path moves recall by at least 0.05, so the tolerance only absorbs rounding.
+
+### Pinned rules
+
+```sh
+npm run build
+npm run eval:coding-life -- --data eval/data/pinned-rules --adapters agentmemory-bm25,agentmemory
+npm run eval:gate:rules                       # CI: baselines/pinned-rules.json
+```
+
+`data/pinned-rules/` measures whether a `type: "rule"` Memory reaches the Agent through the `## Rules` block (`buildRulebook`, `src/functions/context.ts`) at session start and at pre-compact. It holds two projects of work Sessions, each with more Sessions than either budget fits, and three content-only Sessions that carry `"memoryType": "rule"`, which the runner saves through `POST /agentmemory/remember` as that type:
+
+- **`rule-buried`** (#290 F3, a rule delivered but buried) — `tidepool` states its rule on the first day and works eight more Sessions; the rule must still be in the Injection although its day's work no longer fits.
+- **`rule-amended`** (#290 F2, the stale rule followed) — `kelpie` states an exact-pin rule, then replaces it with a caret-range rule four days later; the gold is the newer rule only, so the stale one costs precision, and **first** says whether the newer one leads.
+- a project never worked on, at each path, which must inject nothing.
+
+It is a corpus of its own because its Sessions would shift BM25 scores for the coding-agent-life-v2 questions. `eval:gate:rules` gates recall and no-answer clean and the 500 ms p95 ceilings for both paths; precision is not gated, because with the rule as the only gold it counts how many work Sessions the budget fits. CI runs it after `eval:gate`, on the same leg. The share assumes the default session-start budget of 2000: against a live daemon (`--base-url`) with a changed `TOKEN_BUDGET`, session start is still reported against 2000. With six questions the dev split leaves only some of them, so the published numbers come from `--split all`.
 
 ### LongMemEval `_s` (public, 278MB download)
 
@@ -166,6 +184,10 @@ npm run build && npm run eval:supersession -- --instance N
 
 It runs BM25-only by default (`--embeddings local` adds vectors), is not part of `eval:suite`, and takes `--split dev` unless the holdout is named through `AGENTMEMORY_EVAL_HOLDOUT`, like every runner. `--instance` defaults to 5; give each concurrent run its own.
 
+### Fold drift
+
+`npm run eval:fold-drift -- --store <replay checkpoint .sqlite> (--sessions id,... | --longest N) [--batch N]` measures whether folding new Observations into a Session Summary (`FOLD_SYSTEM`) loses decisions. Per Session it runs the daemon's own `mem::summarize` twice over a throwaway in-memory store: once over all Observations, and once as a sequence of growing prefixes, `--batch` Observations apart (default 50), so every step after the first folds into the previous Summary. Stop boundaries are not recorded on stored Observations, so batches are fixed-size. It reports decisions after the full pass, after the fold sequence, and full-pass decisions that no fold-sequence decision matches: by normalized exact text, and by word-set Jaccard >= 0.5 as a looser view. A step whose fold reply was empty or unparseable falls back to a full summarize; it is counted under `fallbacks`, not `folds`. A Session that throws is listed under `failed` and the run continues. The provider is the daemon's own (`~/.agentmemory/.env`), so it spends real LLM calls; run it deliberately. Output goes to `tmp/eval-fold-drift/*.json`, which quotes private Observations and is never committed. The logic is `eval/runner/fold-drift-core.ts`, tested with a fake provider in `test/fold-drift.test.ts`.
+
 ### Replay (the Operator's own transcripts)
 
 ```sh
@@ -180,7 +202,7 @@ npm run eval:replay -- --projects=-home-neal-code-homelab,-home-neal-orca-worksp
 
 then ingests Session k through `/agentmemory/replay/import-jsonl`, the path `agentmemory import-jsonl` uses, naming the project explicitly (below). What each probe delivered is read back from `GET /agentmemory/injections` (the daemon's own record of the Injected Memories), not guessed from the text.
 
-Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` because they start with `-`), `--cap N` (Sessions per resolved project, earliest first, default 40), `--min-turns N` (default 2; drops the one-prompt automated `claude -p` runs that otherwise dominate), `--keyed-only` (replays only the scored Sessions with a non-empty answer key and the earlier Sessions their key items name, after the split is drawn; it saves the broker time a keyless Session costs under `--llm`, but the store holds fewer distractors, so compare it only with another `--keyed-only` run), `--save-checkpoints` (imports without probing and saves a copy of the store under `<out>/checkpoints/` wherever a scored Session would be probed, with a `manifest.json`, and its LLM metrics in `checkpoints/run.json` in place of a `summary.json`; it refuses an `--out` that already holds a manifest), `--from-checkpoints DIR` (probes each saved copy in a fresh sandbox, with no import and no LLM call; pass the same `--projects`, `--cap`, `--min-turns` and `--split` as the save pass (it refuses a checkpoint outside the split), so two probing passes that differ only in a setting such as the Injection Gate compare over identical compressed stores and the LLM's run-to-run variance drops out), `--maintenance PASS` (with `--from-checkpoints` only: runs one maintenance pass on each restored store after its vector fill and before it is probed, and reports the store's live bytes, pages in use rather than file size, after the pass; below), `--max-prompts N` (prompts probed per Session, default 40), `--instance N` (default 9, never 0; ports 3111+100N), `--embeddings local|none` (default `local`), `--out DIR` (default `tmp/eval-replay`), `--llm` and `--backend agentmemory|hindsight` (below; checkpoints are agentmemory-only). Subagent transcripts (`agent-*.jsonl`, `subagents/`), sidechain entries and files over 20 MB are skipped. Only turns the Operator typed count as prompts, for the key and for probing: skill bodies (`Base directory for this skill:`, meta turns), continuation summaries, Harness Messages and the "Another Claude session sent a message" relay, slash-command wrappers, `!` shell escapes and their output, and turns that are only `<system-reminder>` are dropped.
+Flags: `--projects=a,b` (directory names under `~/.claude/projects`; use `=` because they start with `-`), `--cap N` (Sessions per resolved project, earliest first, default 40), `--min-turns N` (default 2; drops the one-prompt automated `claude -p` runs that otherwise dominate), `--keyed-only` (replays only the scored Sessions with a non-empty answer key and the earlier Sessions their key items name, after the split is drawn; it saves the broker time a keyless Session costs under `--llm`, but the store holds fewer distractors, so compare it only with another `--keyed-only` run), `--save-checkpoints` (imports without probing and saves a copy of the store under `<out>/checkpoints/` wherever a scored Session would be probed, with a `manifest.json`, and its LLM metrics in `checkpoints/run.json` in place of a `summary.json`; it refuses an `--out` that already holds a manifest unless `--resume`), `--resume` (with `--save-checkpoints` only: continues an interrupted save pass in the same `--out` from its manifest's last checkpoint, which already holds every Session ingested before it, and appends the rest; pass the save pass's own options, since it refuses a manifest saved from other Sessions, and a finished pass; `run.json`'s LLM metrics then cover only the resumed part, and the later stores are not byte-comparable with an uninterrupted pass's, since the seeded daemon runs its boot maintenance and the last checkpoint may predate the previous Session's consolidation), `--from-checkpoints DIR` (probes each saved copy in a fresh sandbox, with no import and no LLM call; pass the same `--projects`, `--cap`, `--min-turns` and `--split` as the save pass (it refuses a checkpoint outside the split), so two probing passes that differ only in a setting such as the Injection Gate compare over identical compressed stores and the LLM's run-to-run variance drops out), `--maintenance PASS` (with `--from-checkpoints` only: runs one maintenance pass on each restored store after its vector fill and before it is probed, and reports the store's live bytes, pages in use rather than file size, after the pass; below), `--atypical a,b` (resolved project names, as `resolveProject()` names them, e.g. `agentmemory-sqlite`, left out of the `typical` rollup; default `agentmemory-sqlite,medical-researcher`, which are unlike the repositories the daemon mostly serves; recorded in `summary.json`), `--query-arm ARM` (default `control`; agentmemory only: `control`, `reply-tail`, `reply-head`, `reply-last`, `reply-terms`, `prev-prompt`; shapes the `prompt` sent to the prompt-context probe only, the smart-search baseline keeps the raw prompt; below), `--reply-chars N` (default 1000; cap on the text an arm adds), `--reply-scale K` (default 0 = fixed cap; K > 0 makes the cap `max(0, N − K × prompt length)`), `--max-prompts N` (prompts probed per Session, default 40), `--instance N` (default 9, never 0; ports 3111+100N), `--embeddings local|none` (default `local`), `--out DIR` (default `tmp/eval-replay`), `--llm` and `--backend agentmemory|hindsight` (below; checkpoints are agentmemory-only). Subagent transcripts (`agent-*.jsonl`, `subagents/`), sidechain entries and files over 20 MB are skipped. Only turns the Operator typed count as prompts, for the key and for probing: skill bodies (`Base directory for this skill:`, meta turns), continuation summaries, Harness Messages and the "Another Claude session sent a message" relay, slash-command wrappers, `!` shell escapes and their output, and turns that are only `<system-reminder>` are dropped.
 
 `--maintenance` takes one pass, run as one REST call:
 
@@ -197,7 +219,7 @@ Each Session is filed under its repository the way the live hooks' `resolveProje
 
 The sandbox runs with `AGENTMEMORY_INJECT_CONTEXT=true`, as the Operator's live daemon does, unless the shell sets it.
 
-Providers are recorded in `summary.json`. Without `--llm` there is no LLM provider, so Memories are synthetic and there are no summaries or Crystals worth recalling. Sessions then go in through `import-jsonl`, whose Observations rarely name a file (4% on the [2026-10-15 compression replay](../docs/benchmarks/2026-10-15-replay-compression.md), against 76% under `--llm`), so file key items score near zero: compare a no-`--llm` run only with another. To isolate LLM Compression, keep the hook path and turn compression off instead: `--llm` with `AGENTMEMORY_AUTO_COMPRESS=false` in the shell compresses synthetically and still summarizes through the LLM.
+Providers are recorded in `summary.json`. Without `--llm` there is no LLM provider, so Memories are synthetic and there are no summaries worth recalling. Sessions then go in through `import-jsonl`, whose Observations rarely name a file (4% on the [2026-10-15 compression replay](../docs/benchmarks/2026-10-15-replay-compression.md), against 76% under `--llm`), so file key items score near zero: compare a no-`--llm` run only with another. To isolate LLM Compression, keep the hook path and turn compression off instead: `--llm` with `AGENTMEMORY_AUTO_COMPRESS=false` in the shell compresses synthetically and still summarizes through the LLM.
 
 `--llm` forwards the OpenAI-compatible provider from the shell (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, `OPENAI_TIMEOUT_MS`, `AGENTMEMORY_LLM_TIMEOUT_MS`, `AGENTMEMORY_LLM_MAX_CONCURRENCY`) and sets `AGENTMEMORY_AUTO_COMPRESS=true` unless the shell sets it. `import-jsonl` always compresses synthetically, so under `--llm` Session k goes in the way the live hooks send it instead: each prompt and each finished tool call to `/observe` (the hooks' truncation; no assistant text), then the runner waits until every Observation has its compression, awaits `/summarize`, and posts `/session/end`. The consolidation that the end of a Session fans out is not waited for, and the importer's phrase-extracted lessons do not exist on this path. `summary.json` records the model, the base URL's host and the `mem::compress` / `mem::summarize` call counts and mean latency, never a key. Source the provider for that one command, for example `env $(grep -E '^(OPENAI_API_KEY|OPENAI_BASE_URL|OPENAI_MODEL|OPENAI_REASONING_EFFORT|AGENTMEMORY_LLM_[A-Z_]+)=' ~/.agentmemory/.env | xargs) npm run eval:replay -- --llm ...`.
 
@@ -211,7 +233,17 @@ Recalled units have no file list, so their files are the paths their text names,
 
 For a remote embedder set the same variables the daemon reads in the shell, for example `EMBEDDING_PROVIDER=openai OPENAI_EMBEDDING_BASE_URL=... OPENAI_EMBEDDING_API_KEY=... OPENAI_EMBEDDING_MODEL=... OPENAI_EMBEDDING_DIMENSIONS=...`; the sandbox forwards `EMBEDDING_PROVIDER`, `OPENAI_EMBEDDING_*` and `AGENTMEMORY_LOCAL_EMBEDDING_*` (and `RERANK_ENABLED`) when set and `--embeddings` is not `none`. To pick a different on-device model, set it in the shell, for example `AGENTMEMORY_LOCAL_EMBEDDING_MODEL=Xenova/bge-small-en-v1.5 AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS=384 npm run eval:suite -- --tier fast` (any model but the default needs its dimensions, or the sandbox daemon fails to start); `eval:suite` records the model (and dimensions) in the run's config, so `--against` names it when two runs differ. Never commit an endpoint.
 
+### Query arms (#310)
+
+Many Operator prompts are one word or a bare skill command, so the prompt-submit query has no terms and the meaning sits in the Agent's previous reply. `--query-arm` appends text to the prompt-context probe's `prompt` (never the smart-search baseline's) to measure what helps before the hook changes. `control` is today's behaviour, byte for byte. `reply-tail` and `reply-head` add the last or first N chars of the Agent's last reply (its text blocks after the last tool result, before the typed prompt; tool calls, tool results and thinking excluded). `reply-last` adds the reply's final paragraph, or its final sentence when it ends with a question. `reply-terms` adds the reply's file paths, identifiers (camelCase, PascalCase, snake_case, dotted, `::`) and `#123` refs, deduped, whole terms only. `prev-prompt` adds the Session's previous typed prompt. Each is capped at the `--reply-chars` / `--reply-scale` length. The arm, N and K are recorded in `summary.json` (`run.queryArm`) and printed before the run.
+
+To compare arms, save checkpoints once, then probe the same checkpoints per arm with identical `--projects`, `--cap`, `--min-turns` and `--split`, each into its own `--out`: `npm run eval:replay -- --projects=… --from-checkpoints tmp/eval-replay/checkpoints --query-arm reply-tail --out tmp/eval-replay-tail`. Compare `rightMoment.terse` and the substantive hits together with injected chars (an arm that wins only by injecting more is visible there), on the per-project and `typical` rows (#315).
+
 Output under `tmp/eval-replay/` (gitignored, because it quotes private transcripts): `summary.json` (run config, providers, per-Goal-line numbers), `scores.ndjson` (one row per Session), `worst-cases.md` (up to 20 misses, noise items and leaks, each with Session id and turn). Only the aggregates go into a scorecard under `docs/benchmarks/`.
+
+#### Freezing the corpus
+
+Claude Code deletes transcripts older than `cleanupPeriodDays` (default 30) from `~/.claude/projects`, so a later replay can select a different Session set and its numbers are not comparable. To compare runs, copy the projects directories once into a folder under `tmp/` (private, never committed), for example `mkdir -p tmp/replay-corpus && cp -rL ~/.claude/projects/<dir> tmp/replay-corpus/` (or `rsync -aL`), and pass `--root tmp/replay-corpus` to every run. Each run records `selection: { sessions, fingerprint }` in `summary.json` (and the checkpoint `run.json`); the fingerprint hashes the sorted ids of the scored Sessions. Two runs compare only when their fingerprints match: `eval:suite --against` prints a warning when they differ or one run predates the field, and still compares.
 
 #### Answer key
 
@@ -237,6 +269,8 @@ Session start is turn 0; a prompt's Injection arrives before the work on that pr
 | Never on the critical path | p50/p99 of each probe, and how many exceeded the 1.5 s hook timeout |
 | Operator attention | store growth in bytes per replayed week (span of start times, at least one day; live bytes in a checkpoint pass) |
 
+`summary.json` and the printed output also carry `byProject` (every metric above, per resolved project; store size and growth are run-wide, so only the pooled row carries `leastRecord` and `operatorAttention`) and `typical` (`{excluded, summary}`: the same metrics over the Sessions of projects not in `--atypical`). The pooled numbers are unchanged. Reading rule: a change ships on the pooled number only when it does not lose on the `typical` row.
+
 #### Blind spots
 
 The key is a proxy and the numbers are not accuracy:
@@ -261,7 +295,8 @@ The key is a proxy and the numbers are not accuracy:
 eval/
 ├── README.md
 ├── baselines/
-│   └── coding-agent-life-v2.json  CI gate: per adapter × path floors, tolerance and p95 latency ceilings
+│   ├── coding-agent-life-v2.json  CI gate: per adapter × path floors, tolerance and p95 latency ceilings
+│   └── pinned-rules.json          CI gate for data/pinned-rules (eval:gate:rules)
 ├── runner/
 │   ├── types.ts                   Adapter, Question, QueryResult, ScoreRow
 │   ├── score.ts                   per-question scoring, per adapter × path aggregation, baseline gate
@@ -269,7 +304,7 @@ eval/
 │   ├── load.ts                    LongMemEval JSON → Question[]
 │   ├── beam-load.ts               BEAM rows → Question[] (Turns as Sessions, source_chat_ids as gold)
 │   ├── adapters/
-│   │   ├── agentmemory.ts         capture path in; smart-search, session/start, prompt-context out
+│   │   ├── agentmemory.ts         capture path in; smart-search, session/start, prompt-context, context out
 │   │   ├── grep.ts                tokenized substring baseline
 │   │   ├── random.ts              seeded random control
 │   │   └── vector.ts              OpenAI embeddings + cosine
@@ -287,8 +322,13 @@ eval/
 │   ├── suite-stats.ts             pooled ratios and the paired bootstrap
 │   ├── coding-life.ts             in-house benchmark runner
 │   ├── replay.ts                  replay runner over ~/.claude/projects transcripts (daemon glue)
-│   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns)
+│   ├── fold-drift.ts              eval:fold-drift CLI: store → providers → table and JSON
+│   ├── fold-drift-core.ts         full pass vs fold sequence over mem::summarize, decision matching
+│   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns, preceding reply)
+│   ├── replay-query-arm.ts        --query-arm: prompt + reply/prev-prompt text per arm
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
+│   ├── replay-checkpoints.ts      save-pass manifest, --resume checks, checkpoint write
+│   ├── replay-selection.ts        scored-Session fingerprint and the cross-corpus comparison warning
 │   ├── replay-hooks.ts            transcript → the /observe payloads the hooks would have sent (--llm)
 │   ├── replay-hindsight.ts        transcript → Hindsight retains; recall results → probe items
 │   ├── hindsight.ts               throwaway Hindsight container and its HTTP calls (--backend hindsight)
@@ -296,6 +336,7 @@ eval/
 ├── holdout-ledger.ndjson          one line per holdout look (every `--split holdout` or `all`)
 └── data/
     ├── precisionmembench/         upstream fixtures @ b95d6ab, MIT
+    ├── pinned-rules/              17 Sessions (3 of them rules) and 6 session-start / pre-compact questions
     └── coding-agent-life-v2/
         ├── sessions.json          22 Sessions as tool-call Observations, each with a fixed 1-10 importance
         └── queries.json           38 questions with path, project and gold Session ids

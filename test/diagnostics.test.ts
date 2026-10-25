@@ -10,12 +10,7 @@ vi.mock("../src/logger.js", () => ({
 import { ALL_CATEGORIES, registerDiagnosticsFunction } from "../src/functions/diagnostics.js";
 import { getAllTools } from "../src/mcp/tools-registry.js";
 import type {
-  Action,
-  ActionEdge,
   DiagnosticCheck,
-  Lease,
-  Sentinel,
-  Sketch,
   Signal,
   Session,
   Memory,
@@ -40,72 +35,6 @@ function mockSdk() {
       if (!fn) throw new Error(`No function: ${id}`);
       return fn(payload);
     },
-  };
-}
-
-function makeAction(overrides: Partial<Action> = {}): Action {
-  return {
-    id: `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    title: "Test action",
-    description: "",
-    status: "pending",
-    priority: 5,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    createdBy: "agent-1",
-    tags: [],
-    sourceObservationIds: [],
-    sourceMemoryIds: [],
-    ...overrides,
-  };
-}
-
-function makeLease(overrides: Partial<Lease> = {}): Lease {
-  return {
-    id: `lease_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    actionId: "act_missing",
-    agentId: "agent-1",
-    acquiredAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    status: "active",
-    ...overrides,
-  };
-}
-
-function makeEdge(overrides: Partial<ActionEdge> = {}): ActionEdge {
-  return {
-    id: `ae_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    type: "requires",
-    sourceActionId: "src",
-    targetActionId: "tgt",
-    createdAt: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-function makeSentinel(overrides: Partial<Sentinel> = {}): Sentinel {
-  return {
-    id: `sen_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    name: "Test sentinel",
-    type: "timer",
-    status: "watching",
-    config: {},
-    createdAt: new Date().toISOString(),
-    linkedActionIds: [],
-    ...overrides,
-  };
-}
-
-function makeSketch(overrides: Partial<Sketch> = {}): Sketch {
-  return {
-    id: `sk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    title: "Test sketch",
-    description: "",
-    status: "active",
-    actionIds: [],
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    ...overrides,
   };
 }
 
@@ -219,9 +148,9 @@ describe("Diagnostics Functions", () => {
       };
 
       expect(result.success).toBe(true);
-      // 22 checks = 8 original (actions, leases, sentinels, sketches, signals,
-      // sessions, memories, mesh) + 6 added in #lesson-visibility
-      // (lessons, summaries, semantic, procedural, crystals, insights) +
+      // 17 checks = 4 original (signals, sessions, memories, mesh) +
+      // 5 added in #lesson-visibility
+      // (lessons, summaries, semantic, procedural, insights) +
       // 1 added in #memory-project-scope (memory-project-coverage) +
       // 1 for observations, the last record type that had no check +
       // 1 store write probe (#1166) +
@@ -229,7 +158,7 @@ describe("Diagnostics Functions", () => {
       // 1 Unrecalled Memory report (#76) +
       // 1 injected-item use report (#85) +
       // 1 prompt rerank gate report (#169).
-      expect(result.summary.pass).toBe(20);
+      expect(result.summary.pass).toBe(15);
       expect(result.summary.warn).toBe(1);
       expect(result.summary.fail).toBe(0);
       expect(result.summary.fixable).toBe(0);
@@ -330,168 +259,6 @@ describe("Diagnostics Functions", () => {
       })) as { checks: DiagnosticCheck[] };
 
       expect(result.checks.find((c) => c.name === "observations-ok")).toBeDefined();
-    });
-
-    it("active action with no lease produces warn", async () => {
-      const action = makeAction({ status: "active" });
-      await kv.set(KV.actions, action.id, action);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["actions"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("active-no-lease:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("warn");
-      expect(check!.fixable).toBe(false);
-    });
-
-    it("blocked action with all deps done produces fail (fixable)", async () => {
-      const dep = makeAction({ status: "done" });
-      const blocked = makeAction({ status: "blocked" });
-      const edge = makeEdge({
-        sourceActionId: blocked.id,
-        targetActionId: dep.id,
-        type: "requires",
-      });
-      await kv.set(KV.actions, dep.id, dep);
-      await kv.set(KV.actions, blocked.id, blocked);
-      await kv.set(KV.actionEdges, edge.id, edge);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["actions"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("blocked-deps-done:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("fail");
-      expect(check!.fixable).toBe(true);
-    });
-
-    it("pending action with unsatisfied deps produces fail (fixable)", async () => {
-      const dep = makeAction({ status: "active" });
-      const pending = makeAction({ status: "pending" });
-      const edge = makeEdge({
-        sourceActionId: pending.id,
-        targetActionId: dep.id,
-        type: "requires",
-      });
-      await kv.set(KV.actions, dep.id, dep);
-      await kv.set(KV.actions, pending.id, pending);
-      await kv.set(KV.actionEdges, edge.id, edge);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["actions"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("pending-unsatisfied-deps:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("fail");
-      expect(check!.fixable).toBe(true);
-    });
-
-    it("expired active lease produces fail (fixable)", async () => {
-      const action = makeAction({ status: "active" });
-      const lease = makeLease({
-        actionId: action.id,
-        status: "active",
-        expiresAt: new Date(Date.now() - 60_000).toISOString(),
-      });
-      await kv.set(KV.actions, action.id, action);
-      await kv.set(KV.leases, lease.id, lease);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["leases"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("expired-lease:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("fail");
-      expect(check!.fixable).toBe(true);
-    });
-
-    it("orphaned lease (action gone) produces fail (fixable)", async () => {
-      const lease = makeLease({
-        actionId: "act_gone",
-        status: "active",
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      });
-      await kv.set(KV.leases, lease.id, lease);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["leases"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("orphaned-lease:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("fail");
-      expect(check!.fixable).toBe(true);
-    });
-
-    it("expired watching sentinel produces fail (fixable)", async () => {
-      const sentinel = makeSentinel({
-        status: "watching",
-        expiresAt: new Date(Date.now() - 60_000).toISOString(),
-      });
-      await kv.set(KV.sentinels, sentinel.id, sentinel);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["sentinels"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("expired-sentinel:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("fail");
-      expect(check!.fixable).toBe(true);
-    });
-
-    it("sentinel referencing missing action produces warn", async () => {
-      const sentinel = makeSentinel({
-        linkedActionIds: ["act_nonexistent"],
-      });
-      await kv.set(KV.sentinels, sentinel.id, sentinel);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["sentinels"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("sentinel-missing-action:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("warn");
-      expect(check!.fixable).toBe(false);
-    });
-
-    it("expired active sketch produces fail (fixable)", async () => {
-      const sketch = makeSketch({
-        status: "active",
-        expiresAt: new Date(Date.now() - 60_000).toISOString(),
-      });
-      await kv.set(KV.sketches, sketch.id, sketch);
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["sketches"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const check = result.checks.find((c) =>
-        c.name.startsWith("expired-sketch:"),
-      );
-      expect(check).toBeDefined();
-      expect(check!.status).toBe("fail");
-      expect(check!.fixable).toBe(true);
     });
 
     it("expired signal produces fail (fixable)", async () => {
@@ -614,8 +381,8 @@ describe("Diagnostics Functions", () => {
     });
 
     it("filters by categories", async () => {
-      const action = makeAction({ status: "active" });
-      await kv.set(KV.actions, action.id, action);
+      const memory = makeMemory({ supersedes: ["mem_gone"] });
+      await kv.set(KV.memories, memory.id, memory);
 
       const signal = makeSignal({
         expiresAt: new Date(Date.now() - 60_000).toISOString(),
@@ -628,7 +395,7 @@ describe("Diagnostics Functions", () => {
 
       expect(result.checks.every((c) => c.category === "signals")).toBe(true);
       expect(
-        result.checks.some((c) => c.category === "actions"),
+        result.checks.some((c) => c.category === "memories"),
       ).toBe(false);
     });
   });
@@ -775,97 +542,6 @@ describe("Diagnostics Functions", () => {
       expect((await useCheck()).message).toContain("100% of 10 injected items unused");
     });
 
-    describe("Insights (#94)", () => {
-      async function seedInsight(id: string, sources: { lessons?: string[]; crystals?: string[] }) {
-        await kv.set(KV.insights, id, {
-          id, title: id, content: "c", confidence: 0.5, reinforcements: 0, sourceConceptCluster: [],
-          sourceMemoryIds: [], sourceLessonIds: sources.lessons ?? [],
-          sourceCrystalIds: sources.crystals ?? [], tags: [], createdAt: minutesAgo(600),
-          updatedAt: minutesAgo(600), decayRate: 0.1,
-        });
-      }
-
-      const insightRefs = (ids: string[]): InjectedRef[] => ids.map((id) => ({ kind: "insight", id }));
-
-      beforeEach(async () => {
-        await kv.set(KV.crystals, "cry_a", { id: "cry_a", filesAffected: ["src/a.ts"] });
-        await kv.set(KV.crystals, "cry_b", { id: "cry_b", filesAffected: ["src/b.ts"] });
-        await kv.set(KV.crystals, "cry_empty", { id: "cry_empty", filesAffected: [] });
-      });
-
-      it("scores an Insight as used when a later Observation touches any of its source Crystals' files", async () => {
-        await seedInsight("ins_ab", { crystals: ["cry_a", "cry_b"] });
-        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_ab"]));
-        await seedTouch("s1", "obs_1", ["src/b.ts"]);
-        const message = (await useCheck()).message;
-        expect(message).toContain("No scorable injected items other than Insights between 1h and 24h ago. Insights 0% of 1 unused");
-      });
-
-      it("tolerates an imported Insight with no source Crystal list", async () => {
-        await kv.set(KV.insights, "ins_bare", { id: "ins_bare", title: "t", content: "c" });
-        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_bare"]));
-        expect((await useCheck()).message).toContain("No scorable injected items");
-      });
-
-      it("scores an Insight as unused when no later Observation touches its source Crystals' files", async () => {
-        await seedInsight("ins_a", { crystals: ["cry_a"] });
-        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_a"]));
-        await seedTouch("s1", "obs_1", ["src/elsewhere.ts"]);
-        expect((await useCheck()).message).toContain("Insights 100% of 1 unused");
-      });
-
-      it("leaves an Insight unscorable when its sources carry no files", async () => {
-        await kv.set(KV.lessons, "les_src", { id: "les_src", content: "rule" });
-        await seedInsight("ins_les", { lessons: ["les_src"] });
-        await seedInsight("ins_empty", { crystals: ["cry_empty"] });
-        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_les", "ins_empty"]));
-        const message = (await useCheck()).message;
-        expect(message).toContain("No scorable injected items");
-        expect(message).not.toContain("Insights");
-      });
-
-      it("skips a missing source Crystal or Insight", async () => {
-        await seedInsight("ins_part", { crystals: ["cry_gone", "cry_a"] });
-        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_part", "ins_gone"]));
-        await seedTouch("s1", "obs_1", ["src/a.ts"]);
-        expect((await useCheck()).message).toContain("Insights 0% of 1 unused");
-      });
-
-      it("keeps Insights out of the per-source rates, the total and the warning", async () => {
-        await seedInsight("ins_a", { crystals: ["cry_a"] });
-        const refs = memoryRefs(10);
-        await seedRecord("r1", "context", "s1", [...refs, ...insightRefs(["ins_a"])]);
-        await seedTouch("s1", "obs_1", refs.slice(0, 8).flatMap((r) => r.files));
-
-        const check = await useCheck();
-
-        expect(check.name).toBe("injection-use-ok");
-        expect(check.message).toContain("20% of 10 injected items unused between 1h and 24h ago (context 20% of 10)");
-        expect(check.message).toContain("Insights 100% of 1 unused");
-      });
-
-      it("never warns on unused Insights alone", async () => {
-        const ids = Array.from({ length: 10 }, (_, i) => `ins_${i}`);
-        await Promise.all(ids.map((id) => seedInsight(id, { crystals: ["cry_a"] })));
-        await seedRecord("r1", "session-start", "s1", insightRefs(ids));
-
-        const check = await useCheck();
-
-        expect(check.status).toBe("pass");
-        expect(check.message).toContain("Insights 100% of 10 unused");
-      });
-
-      it("reads each Insight and source Crystal once per run", async () => {
-        await seedInsight("ins_a", { crystals: ["cry_a"] });
-        await seedRecord("r1", "session-start", "s1", insightRefs(["ins_a"]));
-        await seedRecord("r2", "session-start", "s1", insightRefs(["ins_a"]));
-        const get = vi.spyOn(kv, "get");
-        await useCheck();
-        const reads = get.mock.calls.map(([scope, key]) => `${scope}/${key}`);
-        expect(reads.filter((r) => r === `${KV.insights}/ins_a`)).toHaveLength(1);
-        expect(reads.filter((r) => r === `${KV.crystals}/cry_a`)).toHaveLength(1);
-      });
-    });
   });
 
   describe("mem::diagnose recall-coverage (#76)", () => {
@@ -943,127 +619,6 @@ describe("Diagnostics Functions", () => {
   });
 
   describe("mem::heal", () => {
-    it("unblocks stuck blocked action", async () => {
-      const dep = makeAction({ status: "done" });
-      const blocked = makeAction({ status: "blocked", title: "Stuck task" });
-      const edge = makeEdge({
-        sourceActionId: blocked.id,
-        targetActionId: dep.id,
-        type: "requires",
-      });
-      await kv.set(KV.actions, dep.id, dep);
-      await kv.set(KV.actions, blocked.id, blocked);
-      await kv.set(KV.actionEdges, edge.id, edge);
-
-      const result = (await sdk.trigger("mem::heal", {
-        categories: ["actions"],
-      })) as { success: boolean; fixed: number; details: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.fixed).toBe(1);
-      expect(result.details[0]).toContain("Unblocked");
-
-      const updated = await kv.get<Action>(KV.actions, blocked.id);
-      expect(updated!.status).toBe("pending");
-    });
-
-    it("blocks pending action with unsatisfied deps", async () => {
-      const dep = makeAction({ status: "active" });
-      const pending = makeAction({
-        status: "pending",
-        title: "Should be blocked",
-      });
-      const edge = makeEdge({
-        sourceActionId: pending.id,
-        targetActionId: dep.id,
-        type: "requires",
-      });
-      await kv.set(KV.actions, dep.id, dep);
-      await kv.set(KV.actions, pending.id, pending);
-      await kv.set(KV.actionEdges, edge.id, edge);
-
-      const result = (await sdk.trigger("mem::heal", {
-        categories: ["actions"],
-      })) as { success: boolean; fixed: number; details: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.fixed).toBe(1);
-      expect(result.details[0]).toContain("Blocked");
-
-      const updated = await kv.get<Action>(KV.actions, pending.id);
-      expect(updated!.status).toBe("blocked");
-    });
-
-    it("expires stale lease and resets action", async () => {
-      const action = makeAction({
-        status: "active",
-        assignedTo: "agent-1",
-      });
-      const lease = makeLease({
-        actionId: action.id,
-        agentId: "agent-1",
-        status: "active",
-        expiresAt: new Date(Date.now() - 60_000).toISOString(),
-      });
-      await kv.set(KV.actions, action.id, action);
-      await kv.set(KV.leases, lease.id, lease);
-
-      const result = (await sdk.trigger("mem::heal", {
-        categories: ["leases"],
-      })) as { success: boolean; fixed: number; details: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.fixed).toBe(1);
-      expect(result.details[0]).toContain("Expired lease");
-
-      const updatedLease = await kv.get<Lease>(KV.leases, lease.id);
-      expect(updatedLease!.status).toBe("expired");
-
-      const updatedAction = await kv.get<Action>(KV.actions, action.id);
-      expect(updatedAction!.status).toBe("pending");
-      expect(updatedAction!.assignedTo).toBeUndefined();
-    });
-
-    it("deletes orphaned lease", async () => {
-      const lease = makeLease({
-        actionId: "act_gone",
-        status: "released",
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      });
-      await kv.set(KV.leases, lease.id, lease);
-
-      const result = (await sdk.trigger("mem::heal", {
-        categories: ["leases"],
-      })) as { success: boolean; fixed: number; details: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.fixed).toBe(1);
-      expect(result.details[0]).toContain("Deleted orphaned lease");
-
-      const deleted = await kv.get<Lease>(KV.leases, lease.id);
-      expect(deleted).toBeNull();
-    });
-
-    it("expires stale sentinel", async () => {
-      const sentinel = makeSentinel({
-        status: "watching",
-        name: "Stale watcher",
-        expiresAt: new Date(Date.now() - 60_000).toISOString(),
-      });
-      await kv.set(KV.sentinels, sentinel.id, sentinel);
-
-      const result = (await sdk.trigger("mem::heal", {
-        categories: ["sentinels"],
-      })) as { success: boolean; fixed: number; details: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.fixed).toBe(1);
-      expect(result.details[0]).toContain("Expired sentinel");
-
-      const updated = await kv.get<Sentinel>(KV.sentinels, sentinel.id);
-      expect(updated!.status).toBe("expired");
-    });
-
     it("closes abandoned session at its last activity without touching live ones", async () => {
       const lastSeen = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
       const abandoned = makeSession({
@@ -1100,19 +655,13 @@ describe("Diagnostics Functions", () => {
     });
 
     it("dry run reports but does not fix", async () => {
-      const dep = makeAction({ status: "done" });
-      const blocked = makeAction({ status: "blocked", title: "Stuck task" });
-      const edge = makeEdge({
-        sourceActionId: blocked.id,
-        targetActionId: dep.id,
-        type: "requires",
+      const signal = makeSignal({
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
       });
-      await kv.set(KV.actions, dep.id, dep);
-      await kv.set(KV.actions, blocked.id, blocked);
-      await kv.set(KV.actionEdges, edge.id, edge);
+      await kv.set(KV.signals, signal.id, signal);
 
       const result = (await sdk.trigger("mem::heal", {
-        categories: ["actions"],
+        categories: ["signals"],
         dryRun: true,
       })) as { success: boolean; fixed: number; details: string[] };
 
@@ -1120,8 +669,7 @@ describe("Diagnostics Functions", () => {
       expect(result.fixed).toBe(1);
       expect(result.details[0]).toContain("[dry-run]");
 
-      const unchanged = await kv.get<Action>(KV.actions, blocked.id);
-      expect(unchanged!.status).toBe("blocked");
+      expect(await kv.get<Signal>(KV.signals, signal.id)).not.toBeNull();
     });
   });
 
@@ -1187,25 +735,11 @@ describe("Diagnostics Functions", () => {
       expect(warn?.status).toBe("warn");
     });
 
-    it("crystals category: warns on empty narrative", async () => {
-      await kv.set(KV.crystals, "cry_1", {
-        id: "cry_1", narrative: "", keyOutcomes: [], filesAffected: [],
-        lessons: [], sourceActionIds: [], createdAt: "",
-      });
-
-      const result = (await sdk.trigger("mem::diagnose", {
-        categories: ["crystals"],
-      })) as { checks: DiagnosticCheck[] };
-
-      const warn = result.checks.find((c) => c.name.startsWith("crystal-empty-narrative:"));
-      expect(warn?.status).toBe("warn");
-    });
-
     it("insights category: warns on out-of-range confidence", async () => {
       await kv.set(KV.insights, "ins_bad", {
         id: "ins_bad", title: "t", content: "c", confidence: -0.1,
         reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [],
-        sourceLessonIds: [], sourceCrystalIds: [], tags: [],
+        sourceLessonIds: [], tags: [],
         createdAt: "", updatedAt: "", decayRate: 0.05,
       });
 
@@ -1286,26 +820,6 @@ describe("Diagnostics Functions", () => {
         expect(result.checks.some((c) => c.category === "lessons")).toBe(true);
       });
 
-      it("non-string crystal narrative doesn't throw — surfaces as warn", async () => {
-        await kv.set(KV.crystals, "cry_bad", {
-          id: "cry_bad",
-          narrative: undefined as unknown as string,
-          keyOutcomes: [],
-          filesAffected: [],
-          lessons: [],
-          sourceActionIds: [],
-          createdAt: "",
-        });
-
-        const result = (await sdk.trigger("mem::diagnose", {
-          categories: ["crystals"],
-        })) as { checks: DiagnosticCheck[]; success?: boolean };
-
-        expect(result.success).toBe(true);
-        const warn = result.checks.find((c) => c.name.startsWith("crystal-empty-narrative:"));
-        expect(warn?.status).toBe("warn");
-      });
-
       it("Infinity confidence on insight + semantic both flagged", async () => {
         await kv.set(KV.insights, "ins_inf", {
           id: "ins_inf",
@@ -1316,7 +830,6 @@ describe("Diagnostics Functions", () => {
           sourceConceptCluster: [],
           sourceMemoryIds: [],
           sourceLessonIds: [],
-          sourceCrystalIds: [],
           tags: [],
           createdAt: "",
           updatedAt: "",

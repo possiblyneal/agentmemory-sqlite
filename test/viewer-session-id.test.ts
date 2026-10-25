@@ -77,8 +77,6 @@ function loadViewerSandbox() {
     "timeline",
     "sessions",
     "lessons",
-    "actions",
-    "crystals",
     "audit",
     "activity",
     "profile",
@@ -218,7 +216,6 @@ describe("viewer session rendering", () => {
       graphStats: null,
       recentAudit: [],
       lessons: [],
-      crystals: [],
     };
 
     expect(() => sandbox.renderDashboard()).not.toThrow();
@@ -235,7 +232,6 @@ describe("viewer session rendering", () => {
       graphStats: null,
       recentAudit: [],
       lessons: [],
-      crystals: [],
       semanticTotal: 12,
       insightTotal: null,
       failed: { insights: true },
@@ -257,7 +253,6 @@ describe("viewer session rendering", () => {
       graphStats: null,
       recentAudit: [],
       lessons: [],
-      crystals: [],
       failed: { sessions: true },
     };
 

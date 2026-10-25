@@ -652,7 +652,7 @@ export function getConsolidatedMemoryForgetDays(): number {
 
 // Cooldown between corpus consolidations triggered by session stop. The Stop
 // hook fires per agent turn and posts /session/end, so without this every turn
-// would kick a full LLM semantic-merge + reflect + crystallize. Debounced to at
+// would kick a full LLM semantic-merge + reflect. Debounced to at
 // most once per window. Set to 0 to disable the debounce (consolidate on every
 // stop). Default 5 minutes.
 const CONSOLIDATION_COOLDOWN_DEFAULT_MS = 300000;

@@ -12,6 +12,7 @@ import type {
 } from "../types.js";
 import { questionPath } from "../types.js";
 import { VERSION } from "../../../src/version.js";
+import { estimateTokens } from "../../../src/utils/tokens.js";
 
 interface Needle {
   text: string;
@@ -36,6 +37,12 @@ interface SmartSearchResponse {
 }
 
 const NEEDLE_CHARS = 48;
+// What each Injection is built under: `TOKEN_BUDGET`'s default, which the
+// sandbox leaves unset, and the budget `src/hooks/pre-compact.ts` posts.
+const SESSION_START_BUDGET = 2000;
+const PRE_COMPACT_BUDGET = 1500;
+const RULEBOOK_HEADING = "## Rules\n";
+const CONTEXT_FOOTER = "\n</agentmemory-context>";
 const SEARCH_TOOLS = new Set(["grep", "glob"]);
 
 function isSearchTool(tool: string): boolean {
@@ -192,9 +199,11 @@ export function assertVariedImportance(sessions: Session[]): void {
 async function ingestRemembered(state: AgentMemoryState, s: Session): Promise<void> {
   const body = await post<{ memory?: { id?: string }; id?: string }>(state, "remember", {
     content: s.content,
-    type: "eval-session",
+    type: s.memoryType ?? "eval-session",
     concepts: [s.id],
+    ...(s.project && { project: s.project }),
   });
+  if (s.content) state.needles.push({ text: needleFor(s.content), sessionId: s.id });
   const memoryId = body.memory?.id ?? body.id;
   if (memoryId) state.memoryToSession.set(memoryId, s.id);
   if (memoryId && s.timestamp) await dateMemory(state, memoryId, s.timestamp);
@@ -242,12 +251,41 @@ async function querySearch(q: Question, state: AgentMemoryState, k: number): Pro
   return { ranked };
 }
 
+// The pinned `## Rules` block runs to the blank line that ends every block,
+// or to the context's footer when it is the last block.
+export function rulebookShare(context: string, budget: number): number | undefined {
+  const start = context.indexOf(RULEBOOK_HEADING);
+  if (start === -1) return undefined;
+  const blankLine = context.indexOf("\n\n", start);
+  const footer = context.indexOf(CONTEXT_FOOTER, start);
+  const end = blankLine === -1 ? footer : blankLine;
+  return estimateTokens(context.slice(start, end === -1 ? undefined : end)) / budget;
+}
+
+function injectionResult(context: string, state: AgentMemoryState, budget: number): QueryResult {
+  return {
+    ranked: attribute(context, state.needles),
+    chars: context.length,
+    rulebookShare: rulebookShare(context, budget),
+  };
+}
+
 async function querySessionStart(q: Question, state: AgentMemoryState): Promise<QueryResult> {
   const { context = "" } = await post<{ context?: string }>(state, "session/start", {
     sessionId: probeSessionId(),
     ...projectScope(q.project),
   });
-  return { ranked: attribute(context, state.needles), chars: context.length };
+  return injectionResult(context, state, SESSION_START_BUDGET);
+}
+
+// What the pre-compact hook posts: the project's context at its own budget.
+async function queryPreCompact(q: Question, state: AgentMemoryState): Promise<QueryResult> {
+  const { context = "" } = await post<{ context?: string }>(state, "context", {
+    sessionId: probeSessionId(),
+    project: projectScope(q.project).project,
+    budget: PRE_COMPACT_BUDGET,
+  });
+  return injectionResult(context, state, PRE_COMPACT_BUDGET);
 }
 
 async function queryPromptSubmit(q: Question, state: AgentMemoryState): Promise<QueryResult> {
@@ -264,7 +302,7 @@ async function queryPromptSubmit(q: Question, state: AgentMemoryState): Promise<
 // (the CI gate) simply passes none.
 export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = {
   name: "agentmemory",
-  paths: ["search", "session-start", "prompt-submit"],
+  paths: ["search", "session-start", "pre-compact", "prompt-submit"],
   async init(sessions, config = {}) {
     const sandbox = config.baseUrl
       ? undefined
@@ -301,6 +339,8 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
         return querySearch(q, state, k);
       case "session-start":
         return querySessionStart(q, state);
+      case "pre-compact":
+        return queryPreCompact(q, state);
       case "prompt-submit":
         return queryPromptSubmit(q, state);
     }

@@ -4,6 +4,10 @@ export interface UserTurn {
   turn: number;
   text: string;
   timestamp: string;
+  // Text blocks of the Agent's last reply before this prompt (the text after
+  // the last tool result); "" when it said nothing. Tool calls, tool results
+  // and thinking are left out.
+  precedingReply: string;
 }
 
 export interface FileUse {
@@ -71,6 +75,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
   const parsed = parseJsonlText(text);
   const userTurns: UserTurn[] = [];
   const fileUses: FileUse[] = [];
+  let reply: string[] = [];
   for (const obs of parsed.observations) {
     const entry = rawEntry(obs.raw);
     if (entry.isSidechain === true) continue;
@@ -78,7 +83,12 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       const prompt = obs.userPrompt.trim();
       if (entry.isMeta === true || entry.isCompactSummary === true) continue;
       if (!isOperatorTurn(prompt)) continue;
-      userTurns.push({ turn: userTurns.length + 1, text: prompt, timestamp: obs.timestamp });
+      userTurns.push({ turn: userTurns.length + 1, text: prompt, timestamp: obs.timestamp, precedingReply: reply.join("\n\n") });
+      reply = [];
+    } else if (obs.hookType === "stop" && obs.assistantResponse) {
+      reply.push(obs.assistantResponse.trim());
+    } else if (obs.hookType === "post_tool_use" || obs.hookType === "post_tool_failure") {
+      reply = [];
     } else if (obs.hookType === "pre_tool_use" && obs.toolName) {
       const mode = READ_TOOLS.has(obs.toolName) ? "read" : EDIT_TOOLS.has(obs.toolName) ? "edit" : null;
       const abs = toolFile(obs.toolInput);

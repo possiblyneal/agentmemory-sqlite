@@ -244,7 +244,7 @@ describe("Insight decay on Project Time", () => {
     const created = iso(at(0, 1));
     await kv.set<Insight>(KV.insights, id, {
       id, title: id, content: id, confidence: 0.5, reinforcements: 0,
-      sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], sourceCrystalIds: [],
+      sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [],
       tags: [], createdAt: created, updatedAt: created, decayRate: 0.05, project,
     });
   }

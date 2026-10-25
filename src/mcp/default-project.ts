@@ -1,9 +1,5 @@
 import { getAllTools } from "./tools-registry.js";
 
-// Omitting project on this tool already means something other than "every
-// project": the promoted actions inherit the sketch's own project.
-const KEEPS_OMITTED_PROJECT = new Set(["memory_sketch_promote"]);
-
 let projectTools: Set<string> | undefined;
 
 function takesProject(toolName: string): boolean {
@@ -12,7 +8,7 @@ function takesProject(toolName: string): boolean {
       .filter((t) => "project" in (t.inputSchema.properties ?? {}))
       .map((t) => t.name),
   );
-  return projectTools.has(toolName) && !KEEPS_OMITTED_PROJECT.has(toolName);
+  return projectTools.has(toolName);
 }
 
 export function withDefaultProject(

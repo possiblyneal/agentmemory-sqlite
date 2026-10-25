@@ -591,6 +591,61 @@ describe("mem::prompt-context", () => {
     });
   });
 
+  describe("a newer Memory that contradicts a given one", () => {
+    const memoryAt = (id: string, createdAt: string, colour: string) =>
+      kv.set(KV.memories, id, {
+        id,
+        type: "workflow",
+        title: id,
+        content: `deploy staging through the ${colour} pipeline`,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    const prompt = "which pipeline deploys staging for shipctl";
+
+    it("is admitted from below the floor directly above the stale one", async () => {
+      await memoryAt("mem_old", "2026-10-01T10:00:00.000Z", "blue");
+      await memoryAt("mem_new", "2026-10-05T10:00:00.000Z", "green");
+      hits = [
+        { id: "mem_old", score: 16, sessionId: "memory" },
+        { id: "mem_new", score: 3, sessionId: "memory" },
+      ];
+      expect((await run(prompt)).injected.map((r) => r.id)).toEqual(["mem_new", "mem_old"]);
+    });
+
+    it("goes above a newer passed claim too, so no passed claim sits below an older one", async () => {
+      await memoryAt("mem_p", "2026-10-01T10:00:00.000Z", "blue");
+      await memoryAt("mem_q", "2026-10-03T10:00:00.000Z", "green");
+      await memoryAt("mem_x", "2026-10-05T10:00:00.000Z", "red");
+      hits = [
+        { id: "mem_p", score: 16, sessionId: "memory" },
+        { id: "mem_q", score: 12, sessionId: "memory" },
+        { id: "mem_x", score: 3, sessionId: "memory" },
+      ];
+      expect((await run(prompt)).injected.map((r) => r.id)).toEqual(["mem_x", "mem_q", "mem_p"]);
+    });
+
+    it("admits nothing when the newest claim was already given this Session", async () => {
+      await memoryAt("mem_p", "2026-10-01T10:00:00.000Z", "blue");
+      await memoryAt("mem_x", "2026-10-03T10:00:00.000Z", "green");
+      await memoryAt("mem_s", "2026-10-05T10:00:00.000Z", "red");
+      await kv.set<InjectionRecord>(KV.injections, "inj_1", {
+        id: "inj_1",
+        source: "context",
+        sessionId: "ses_1",
+        injected: [{ kind: "memory", id: "mem_s" }],
+        tokens: 10,
+        at: "2026-10-06T00:00:00.000Z",
+      });
+      hits = [
+        { id: "mem_p", score: 16, sessionId: "memory" },
+        { id: "mem_x", score: 3, sessionId: "memory" },
+        { id: "mem_s", score: 3, sessionId: "memory" },
+      ];
+      expect((await run(prompt)).injected.map((r) => r.id)).toEqual(["mem_p"]);
+    });
+  });
+
   it("fails instead of answering empty when search fails", async () => {
     sdk.registerFunction("mem::search", async () => {
       throw new Error("isolated scope without agent id");

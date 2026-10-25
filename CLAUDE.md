@@ -205,7 +205,7 @@ case "memory_your_tool": {
 ```
 
 ### Injection Gate
-Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated. The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
+Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated, nor is a Memory admitted by `withShadowingMemories` (Memory shadowing below). The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
 ### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
@@ -253,13 +253,20 @@ type, so re-saving a Memory as a rule pins it.
 - **Near-twin cap** — `capBehindNewer` (`src/functions/recency-cap.ts`): of two hits whose text
   overlaps by word-set Jaccard ≥ 0.5, the older is capped at 0.99 of the newer's score. Lessons
   date by `lastReinforcedAt` else `createdAt` (an explicit re-save is the Operator restating it),
-  Semantic Facts by `createdAt` (consolidation re-emits stale claims), Observations in
-  `mem::search` by timestamp. `HybridSearch` (`mem::smart-search`) has only the Observation
-  recency factor, not this cap.
+  Semantic Facts by `createdAt` (consolidation re-emits stale claims), Observations by timestamp
+  (`capOlderNearTwins`, `src/state/hybrid-search.ts`) after the recency factor in both
+  `mem::search` and `HybridSearch` (`mem::smart-search`, again after query expansion's merge),
+  pairing only Observations of one project (their Session's, else its Summary's; unknown pairs
+  within its Session). Session start (`mem::context`) caps the project's Lessons the same way
+  before taking its top 10.
 - **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
   in smart-search and prompt-context after their floors: an older Memory of the same type and
   Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly
-  below the newer one. Nothing is hidden.
+  below the newer one. Nothing is hidden. Prompt-context also admits a Memory hit the floor or gate left out
+  (`withShadowingMemories`, `src/functions/prompt-context.ts`) when, among every Memory hit,
+  injected ones included, it is the newest shadower of a passed Memory and nothing shadows it,
+  and it is not yet injected; it goes directly above the first passed Memory it shadows, within
+  the 3 results, and skips the gate.
 - **De-indexing** — every path that sets a Memory `isLatest: false` (`mem::remember`, `mem::evolve`,
   `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
   consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).
@@ -354,7 +361,10 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
   timeout exactly. One deadline covers every retry and the read of the response body. LLM
   providers fall back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s (the OpenAI LLM provider
   resolves `OPENAI_TIMEOUT_MS` first); embedding providers pass `EMBED_TIMEOUT_MS` (30s), so
-  a hung embedder fails fast and the index fill backfills the row. The in-process Engine has
+  a hung embedder fails fast and the index fill backfills the row. A 429, 503 or 529 is
+  retried after its `Retry-After` header, else its JSON body's `retry_after_seconds`.
+  `AnthropicProvider` routes the SDK's requests through `fetchWithTimeout` with SDK retries
+  off and maps the SDK's timeout to `ProviderTimeoutError`. The in-process Engine has
   no invocation timeout, so never reintroduce a ceiling that clamps that bound
   ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)). Its requests go through
   its own `undici` Agent with `headersTimeout` and `bodyTimeout` 0: Node's global dispatcher
@@ -366,14 +376,16 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - `npm run typecheck` must report 0 errors and `npm test` (2,050+ tests) must pass before a PR; CI runs both
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
-- Follow existing patterns in `test/crystallize.test.ts` for function tests
+- Follow existing patterns in `test/lessons.test.ts` for function tests
 - Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
 - `npm run eval:replay -- --projects=<dir>,...` replays the Operator's own `~/.claude/projects` transcripts into a throwaway daemon and scores each Goal line against an answer key derived from the transcripts, counting only turns the Operator typed (`eval/README.md`). `--llm` replays through the hook payloads into a daemon with LLM compression on, using the shell's OpenAI-compatible settings. It is not part of CI, and its output stays under `tmp/eval-replay/` because it quotes private transcripts; only aggregates reach `docs/benchmarks/`
+- `eval:replay --query-arm <arm>` (with `--reply-chars`, `--reply-scale`) shapes only the prompt-context probe's query from the previous Agent reply or prompt, to measure terse-prompt Injection before the hook changes; `summary.json` also carries `byProject` and a `typical` rollup excluding `--atypical`, and a change ships on the pooled number only when it does not lose on `typical`
+- `npm run eval:fold-drift -- --store <checkpoint> (--sessions a,b | --longest N)` compares each Session's full summarize with a fold sequence over `--batch` slices and counts decisions lost; it calls the configured LLM and writes `tmp/eval-fold-drift/`
 - Iterate on Recall with `npm run eval:suite -- --tier fast --against <label>` (~2 min: coding-life, PrecisionMemBench, LongMemEval sample; `full` adds replay). Every eval runner scores only the dev split by default; `--split holdout` or `all` (a published scorecard) needs `AGENTMEMORY_EVAL_HOLDOUT=<label>` and logs the look in `eval/holdout-ledger.ndjson`, which `eval:suite --holdout` does for you. Never change the split salt or share in `eval/runner/split.ts`; see `eval/README.md`
 - sdebench (AMB harness, boltons) results go in `docs/benchmarks/2026-10-18-sdebench.md`: one row per arm, rejected levers included, with dev and holdout totals. Read it before choosing a lever, so a tried one is not rerun
 - `test/supersession.test.ts` records, per record kind and Recall surface, whether a newer claim beats the stale one; `docs/supersession.md` maps each cell to its test and follow-up issue. A cell where the stale claim still wins is `it.fails`: a fix flips it to `it` and updates its row in that table
 - `npm run eval:supersession -- --instance <N>` (after `npm run build`) scores the stale-first rate per record kind and surface, the cells of `docs/supersession.md`, against a throwaway daemon; dev split only, outside `eval:suite`. A change that fixes a supersession cell reruns it and publishes a new dated scorecard in `docs/benchmarks/` (`2026-10-20-supersession.md` is the baseline); `eval/README.md` (Supersession) describes it
-- CI gates Recall quality with `npm run eval:gate` (Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why
+- CI gates Recall quality with `npm run eval:gate` (Node 22 leg only, BM25-only, ~10s): it always starts a fresh sandbox, never a live daemon, and fails with a per-metric diff when any metric in `eval/baselines/coding-agent-life-v2.json` falls below its floor minus the tolerance, or when the prompt-submit or session-start Injection p95 exceeds its `latencyCeilingMs` (500 ms, no tolerance; search is not latency-gated). A PR that moves those numbers on purpose updates that file and says why. `npm run eval:gate:rules` gates pinned-rule recall at session start and pre-compact the same way, over its own corpus (`eval/data/pinned-rules`, `eval/baselines/pinned-rules.json`); never append its Sessions to `coding-agent-life-v2`, where they shift BM25 scores for the gated questions
 
 ## Supported hosts
 
@@ -444,11 +456,11 @@ unchecked: the note is still upstream's claim, not a verified defect.
 
 `test/consistency.test.ts` enforces the install-path rule above (with its own exemption list) and the MCP tool and REST endpoint counts here; `test/tool-count-consistency.test.ts` enforces the hook and skill counts.
 
-- 55 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
-- 134 REST endpoints
+- 43 MCP tools (all visible by default, `AGENTMEMORY_TOOLS=core` for the 8 essentials)
+- 102 REST endpoints
 - 6 MCP resources, 3 MCP prompts
 - 10 hooks, 17 skills
-- 260+ registered functions
+- 230+ registered functions
 - 2,050+ tests
 
 ## Agent skills

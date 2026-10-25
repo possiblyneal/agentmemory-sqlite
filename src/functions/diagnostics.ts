@@ -8,22 +8,16 @@ import { readMissedInjections } from "../hooks/_missed-injection.js";
 import { injectionGateState } from "./prompt-rerank.js";
 import { inferMemoryProjects } from "./migrate.js";
 import { loadProjectTime } from "../state/project-time.js";
-import { injectedItemUse, resolveInsightFiles, withFiles } from "./injections.js";
+import { injectedItemUse } from "./injections.js";
 import type { AccessLog } from "./access-tracker.js";
 import type {
-  Action,
-  ActionEdge,
   DiagnosticCheck,
   Insight,
-  Lease,
   Lesson,
-  Crystal,
   ProceduralMemory,
   SemanticMemory,
   SessionSummary,
   Signal,
-  Sentinel,
-  Sketch,
   MeshPeer,
   Session,
   Memory,
@@ -32,10 +26,6 @@ import type {
 } from "../types.js";
 
 export const ALL_CATEGORIES = [
-  "actions",
-  "leases",
-  "sentinels",
-  "sketches",
   "signals",
   "sessions",
   "observations",
@@ -44,7 +34,6 @@ export const ALL_CATEGORIES = [
   "summaries",
   "semantic",
   "procedural",
-  "crystals",
   "insights",
   "mesh",
   "injections",
@@ -123,209 +112,6 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
 
       const checks: DiagnosticCheck[] = [];
       const now = Date.now();
-
-      if (categories.includes("actions")) {
-        const actions = await kv.list<Action>(KV.actions);
-        const allEdges = await kv.list<ActionEdge>(KV.actionEdges);
-        const leases = await kv.list<Lease>(KV.leases);
-        const actionMap = new Map(actions.map((a) => [a.id, a]));
-
-        for (const action of actions) {
-          if (action.status === "active") {
-            const hasActiveLease = leases.some(
-              (l) =>
-                l.actionId === action.id &&
-                l.status === "active" &&
-                new Date(l.expiresAt).getTime() > now,
-            );
-            if (!hasActiveLease) {
-              checks.push({
-                name: `active-no-lease:${action.id}`,
-                category: "actions",
-                status: "warn",
-                message: `Action "${action.title}" is active but has no active lease`,
-                fixable: false,
-              });
-            }
-          }
-
-          if (action.status === "blocked") {
-            const deps = allEdges.filter(
-              (e) => e.sourceActionId === action.id && e.type === "requires",
-            );
-            if (deps.length > 0) {
-              const allDone = deps.every((d) => {
-                const target = actionMap.get(d.targetActionId);
-                return target && target.status === "done";
-              });
-              if (allDone) {
-                checks.push({
-                  name: `blocked-deps-done:${action.id}`,
-                  category: "actions",
-                  status: "fail",
-                  message: `Action "${action.title}" is blocked but all dependencies are done`,
-                  fixable: true,
-                });
-              }
-            }
-          }
-
-          if (action.status === "pending") {
-            const deps = allEdges.filter(
-              (e) => e.sourceActionId === action.id && e.type === "requires",
-            );
-            if (deps.length > 0) {
-              const hasUnsatisfied = deps.some((d) => {
-                const target = actionMap.get(d.targetActionId);
-                return !target || target.status !== "done";
-              });
-              if (hasUnsatisfied) {
-                checks.push({
-                  name: `pending-unsatisfied-deps:${action.id}`,
-                  category: "actions",
-                  status: "fail",
-                  message: `Action "${action.title}" is pending but has unsatisfied dependencies`,
-                  fixable: true,
-                });
-              }
-            }
-          }
-        }
-
-        if (
-          !checks.some((c) => c.category === "actions" && c.status !== "pass")
-        ) {
-          checks.push({
-            name: "actions-ok",
-            category: "actions",
-            status: "pass",
-            message: `All ${actions.length} actions are consistent`,
-            fixable: false,
-          });
-        }
-      }
-
-      if (categories.includes("leases")) {
-        const leases = await kv.list<Lease>(KV.leases);
-        const actions = await kv.list<Action>(KV.actions);
-        const actionIds = new Set(actions.map((a) => a.id));
-        let leaseIssues = 0;
-
-        for (const lease of leases) {
-          if (
-            lease.status === "active" &&
-            new Date(lease.expiresAt).getTime() <= now
-          ) {
-            checks.push({
-              name: `expired-lease:${lease.id}`,
-              category: "leases",
-              status: "fail",
-              message: `Lease ${lease.id} for action ${lease.actionId} expired at ${lease.expiresAt}`,
-              fixable: true,
-            });
-            leaseIssues++;
-          }
-
-          if (!actionIds.has(lease.actionId)) {
-            checks.push({
-              name: `orphaned-lease:${lease.id}`,
-              category: "leases",
-              status: "fail",
-              message: `Lease ${lease.id} references non-existent action ${lease.actionId}`,
-              fixable: true,
-            });
-            leaseIssues++;
-          }
-        }
-
-        if (leaseIssues === 0) {
-          checks.push({
-            name: "leases-ok",
-            category: "leases",
-            status: "pass",
-            message: `All ${leases.length} leases are healthy`,
-            fixable: false,
-          });
-        }
-      }
-
-      if (categories.includes("sentinels")) {
-        const sentinels = await kv.list<Sentinel>(KV.sentinels);
-        const actions = await kv.list<Action>(KV.actions);
-        const actionIds = new Set(actions.map((a) => a.id));
-        let sentinelIssues = 0;
-
-        for (const sentinel of sentinels) {
-          if (
-            sentinel.status === "watching" &&
-            sentinel.expiresAt &&
-            new Date(sentinel.expiresAt).getTime() <= now
-          ) {
-            checks.push({
-              name: `expired-sentinel:${sentinel.id}`,
-              category: "sentinels",
-              status: "fail",
-              message: `Sentinel "${sentinel.name}" expired at ${sentinel.expiresAt}`,
-              fixable: true,
-            });
-            sentinelIssues++;
-          }
-
-          for (const actionId of sentinel.linkedActionIds) {
-            if (!actionIds.has(actionId)) {
-              checks.push({
-                name: `sentinel-missing-action:${sentinel.id}:${actionId}`,
-                category: "sentinels",
-                status: "warn",
-                message: `Sentinel "${sentinel.name}" references non-existent action ${actionId}`,
-                fixable: false,
-              });
-              sentinelIssues++;
-            }
-          }
-        }
-
-        if (sentinelIssues === 0) {
-          checks.push({
-            name: "sentinels-ok",
-            category: "sentinels",
-            status: "pass",
-            message: `All ${sentinels.length} sentinels are healthy`,
-            fixable: false,
-          });
-        }
-      }
-
-      if (categories.includes("sketches")) {
-        const sketches = await kv.list<Sketch>(KV.sketches);
-        let sketchIssues = 0;
-
-        for (const sketch of sketches) {
-          if (
-            sketch.status === "active" &&
-            new Date(sketch.expiresAt).getTime() <= now
-          ) {
-            checks.push({
-              name: `expired-sketch:${sketch.id}`,
-              category: "sketches",
-              status: "fail",
-              message: `Sketch "${sketch.title}" expired at ${sketch.expiresAt}`,
-              fixable: true,
-            });
-            sketchIssues++;
-          }
-        }
-
-        if (sketchIssues === 0) {
-          checks.push({
-            name: "sketches-ok",
-            category: "sketches",
-            status: "pass",
-            message: `All ${sketches.length} sketches are healthy`,
-            fixable: false,
-          });
-        }
-      }
 
       if (categories.includes("signals")) {
         const signals = await kv.list<Signal>(KV.signals);
@@ -676,32 +462,6 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         }
       }
 
-      if (categories.includes("crystals")) {
-        const crystals = await kv.list<Crystal>(KV.crystals);
-        let crystalIssues = 0;
-        for (const c of crystals) {
-          if (typeof c.narrative !== "string" || c.narrative.trim().length === 0) {
-            checks.push({
-              name: `crystal-empty-narrative:${c.id}`,
-              category: "crystals",
-              status: "warn",
-              message: `Crystal ${c.id} has empty narrative`,
-              fixable: false,
-            });
-            crystalIssues++;
-          }
-        }
-        if (crystalIssues === 0) {
-          checks.push({
-            name: "crystals-ok",
-            category: "crystals",
-            status: "pass",
-            message: `All ${crystals.length} crystals are consistent`,
-            fixable: false,
-          });
-        }
-      }
-
       if (categories.includes("insights")) {
         const insights = await kv.list<Insight>(KV.insights);
         let insightIssues = 0;
@@ -828,25 +588,22 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           return age >= UNUSED_INJECTION_SETTLE_MS && age <= TWENTY_FOUR_HOURS_MS && r.injected.length > 0;
         });
         const sessionIds = [...new Set(records.map((r) => r.sessionId))];
-        const [observationsBySession, insightFiles] = await Promise.all([
-          Promise.all(
+        const observationsBySession = new Map(
+          await Promise.all(
             sessionIds.map(
               async (id) => [id, await kv.list<CompressedObservation>(KV.observations(id))] as const,
             ),
-          ).then((entries) => new Map(entries)),
-          resolveInsightFiles(kv, records),
-        ]);
+          ),
+        );
         const bySource = new Map<string, { scored: number; unused: number }>();
         const total = { scored: 0, unused: 0 };
-        const insights = { scored: 0, unused: 0 };
         for (const record of records) {
           const tally = bySource.get(record.source) ?? { scored: 0, unused: 0 };
           const observations = observationsBySession.get(record.sessionId) ?? [];
           for (const ref of record.injected) {
-            const isInsight = ref.kind === "insight";
-            const use = injectedItemUse(isInsight ? withFiles(ref, insightFiles.get(ref.id)) : ref, record, observations);
+            const use = injectedItemUse(ref, record, observations);
             if (use === "unscorable") continue;
-            for (const t of isInsight ? [insights] : [tally, total]) {
+            for (const t of [tally, total]) {
               t.scored++;
               if (use === "unused") t.unused++;
             }
@@ -863,19 +620,16 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
           total.unused / total.scored > UNUSED_INJECTION_WARN_SHARE;
         const injectedItemsNote =
           total.scored === 0
-            ? `No scorable injected items${insights.scored > 0 ? " other than Insights" : ""} between 1h and 24h ago.`
+            ? "No scorable injected items between 1h and 24h ago."
             : `${share(total)}% of ${total.scored} injected items unused between 1h and 24h ago (${breakdown}); ` +
               `warns above ${UNUSED_INJECTION_WARN_SHARE * 100}% once ${UNUSED_INJECTION_MIN_ITEMS} items are scored. ` +
               "This is a proxy: an item counts as used when a later Observation in the same Session touched one of its files or named it, " +
               "and items with no files are not scored.";
-        const insightNote =
-          insights.scored > 0 &&
-          `Insights ${share(insights)}% of ${insights.scored} unused, scored apart by their source Crystals' files and never warned on.`;
         checks.push({
           name: tooUnused ? "unused-injections" : "injection-use-ok",
           category: "injection-use",
           status: tooUnused ? "warn" : "pass",
-          message: insightNote ? `${injectedItemsNote} ${insightNote}` : injectedItemsNote,
+          message: injectedItemsNote,
           fixable: false,
         });
       }
@@ -941,218 +695,6 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
       const details: string[] = [];
       const now = Date.now();
 
-      if (categories.includes("actions")) {
-        const actions = await kv.list<Action>(KV.actions);
-        const allEdges = await kv.list<ActionEdge>(KV.actionEdges);
-        const actionMap = new Map(actions.map((a) => [a.id, a]));
-
-        for (const action of actions) {
-          if (action.status === "blocked") {
-            const deps = allEdges.filter(
-              (e) => e.sourceActionId === action.id && e.type === "requires",
-            );
-            if (deps.length > 0) {
-              const allDone = deps.every((d) => {
-                const target = actionMap.get(d.targetActionId);
-                return target && target.status === "done";
-              });
-              if (allDone) {
-                if (dryRun) {
-                  details.push(
-                    `[dry-run] Would unblock action "${action.title}" (${action.id})`,
-                  );
-                  fixed++;
-                  continue;
-                }
-                const didFix = await withKeyedLock(
-                  `mem:action:${action.id}`,
-                  async () => {
-                    const fresh = await kv.get<Action>(KV.actions, action.id);
-                    if (!fresh || fresh.status !== "blocked") return false;
-                    const freshEdges = await kv.list<ActionEdge>(KV.actionEdges);
-                    const freshDeps = freshEdges.filter(
-                      (e) =>
-                        e.sourceActionId === fresh.id && e.type === "requires",
-                    );
-                    const freshActions = await kv.list<Action>(KV.actions);
-                    const freshMap = new Map(
-                      freshActions.map((a) => [a.id, a]),
-                    );
-                    const stillAllDone = freshDeps.every((d) => {
-                      const target = freshMap.get(d.targetActionId);
-                      return target && target.status === "done";
-                    });
-                    if (!stillAllDone) return false;
-                    fresh.status = "pending";
-                    fresh.updatedAt = new Date().toISOString();
-                    await kv.set(KV.actions, fresh.id, fresh);
-                    await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
-                      reason: "blocked-deps-done",
-                      previousStatus: "blocked",
-                      newStatus: "pending",
-                    });
-                    return true;
-                  },
-                );
-                if (didFix) {
-                  details.push(
-                    `Unblocked action "${action.title}" (${action.id})`,
-                  );
-                  fixed++;
-                } else {
-                  skipped++;
-                }
-              }
-            }
-          }
-
-          if (action.status === "pending") {
-            const deps = allEdges.filter(
-              (e) => e.sourceActionId === action.id && e.type === "requires",
-            );
-            if (deps.length > 0) {
-              const hasUnsatisfied = deps.some((d) => {
-                const target = actionMap.get(d.targetActionId);
-                return !target || target.status !== "done";
-              });
-              if (hasUnsatisfied) {
-                if (dryRun) {
-                  details.push(
-                    `[dry-run] Would block action "${action.title}" (${action.id})`,
-                  );
-                  fixed++;
-                  continue;
-                }
-                const didFix = await withKeyedLock(
-                  `mem:action:${action.id}`,
-                  async () => {
-                    const fresh = await kv.get<Action>(KV.actions, action.id);
-                    if (!fresh || fresh.status !== "pending") return false;
-                    const freshEdges = await kv.list<ActionEdge>(KV.actionEdges);
-                    const freshDeps = freshEdges.filter(
-                      (e) =>
-                        e.sourceActionId === fresh.id && e.type === "requires",
-                    );
-                    const freshActions = await kv.list<Action>(KV.actions);
-                    const freshMap = new Map(
-                      freshActions.map((a) => [a.id, a]),
-                    );
-                    const stillUnsatisfied = freshDeps.some((d) => {
-                      const target = freshMap.get(d.targetActionId);
-                      return !target || target.status !== "done";
-                    });
-                    if (!stillUnsatisfied) return false;
-                    fresh.status = "blocked";
-                    fresh.updatedAt = new Date().toISOString();
-                    await kv.set(KV.actions, fresh.id, fresh);
-                    await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
-                      reason: "pending-unsatisfied-deps",
-                      previousStatus: "pending",
-                      newStatus: "blocked",
-                    });
-                    return true;
-                  },
-                );
-                if (didFix) {
-                  details.push(
-                    `Blocked action "${action.title}" (${action.id})`,
-                  );
-                  fixed++;
-                } else {
-                  skipped++;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (categories.includes("leases")) {
-        const leases = await kv.list<Lease>(KV.leases);
-        const actions = await kv.list<Action>(KV.actions);
-        const actionIds = new Set(actions.map((a) => a.id));
-
-        for (const lease of leases) {
-          if (
-            lease.status === "active" &&
-            new Date(lease.expiresAt).getTime() <= now
-          ) {
-            if (dryRun) {
-              details.push(
-                `[dry-run] Would expire lease ${lease.id} for action ${lease.actionId}`,
-              );
-              fixed++;
-              continue;
-            }
-            const didFix = await withKeyedLock(
-              `mem:action:${lease.actionId}`,
-              async () => {
-                const fresh = await kv.get<Lease>(KV.leases, lease.id);
-                if (
-                  !fresh ||
-                  fresh.status !== "active" ||
-                  new Date(fresh.expiresAt).getTime() > Date.now()
-                ) {
-                  return false;
-                }
-                fresh.status = "expired";
-                await kv.set(KV.leases, fresh.id, fresh);
-                await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
-                  entityType: "lease",
-                  reason: "expired-lease",
-                  newStatus: "expired",
-                });
-
-                const action = await kv.get<Action>(KV.actions, fresh.actionId);
-                if (
-                  action &&
-                  action.status === "active" &&
-                  action.assignedTo === fresh.agentId
-                ) {
-                  action.status = "pending";
-                  action.assignedTo = undefined;
-                  action.updatedAt = new Date().toISOString();
-                  await kv.set(KV.actions, action.id, action);
-                  await recordAudit(kv, "heal", "mem::heal", [action.id], {
-                    entityType: "action",
-                    reason: "release-expired-lease",
-                    newStatus: "pending",
-                  });
-                }
-                return true;
-              },
-            );
-            if (didFix) {
-              details.push(
-                `Expired lease ${lease.id} for action ${lease.actionId}`,
-              );
-              fixed++;
-            } else {
-              skipped++;
-            }
-            continue;
-          }
-
-          if (!actionIds.has(lease.actionId)) {
-            if (dryRun) {
-              details.push(
-                `[dry-run] Would delete orphaned lease ${lease.id}`,
-              );
-              fixed++;
-              continue;
-            }
-            await kv.delete(KV.leases, lease.id);
-            await recordAudit(kv, "heal", "mem::heal", [lease.id], {
-              entityType: "lease",
-              reason: "orphaned-lease",
-              action: "delete",
-            });
-            details.push(`Deleted orphaned lease ${lease.id}`);
-            fixed++;
-          }
-        }
-      }
-
       if (categories.includes("sessions")) {
         const sessions = await kv.list<Session>(KV.sessions);
 
@@ -1182,132 +724,6 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
             fixed++;
           } else {
             skipped++;
-          }
-        }
-      }
-
-      if (categories.includes("sentinels")) {
-        const sentinels = await kv.list<Sentinel>(KV.sentinels);
-
-        for (const sentinel of sentinels) {
-          if (
-            sentinel.status === "watching" &&
-            sentinel.expiresAt &&
-            new Date(sentinel.expiresAt).getTime() <= now
-          ) {
-            if (dryRun) {
-              details.push(
-                `[dry-run] Would expire sentinel "${sentinel.name}" (${sentinel.id})`,
-              );
-              fixed++;
-              continue;
-            }
-            const didFix = await withKeyedLock(
-              `mem:sentinel:${sentinel.id}`,
-              async () => {
-                const fresh = await kv.get<Sentinel>(
-                  KV.sentinels,
-                  sentinel.id,
-                );
-                if (!fresh || fresh.status !== "watching") return false;
-                if (
-                  !fresh.expiresAt ||
-                  new Date(fresh.expiresAt).getTime() > Date.now()
-                ) {
-                  return false;
-                }
-                fresh.status = "expired";
-                await kv.set(KV.sentinels, fresh.id, fresh);
-                await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
-                  entityType: "sentinel",
-                  reason: "expired-sentinel",
-                  newStatus: "expired",
-                });
-                return true;
-              },
-            );
-            if (didFix) {
-              details.push(
-                `Expired sentinel "${sentinel.name}" (${sentinel.id})`,
-              );
-              fixed++;
-            } else {
-              skipped++;
-            }
-          }
-        }
-      }
-
-      if (categories.includes("sketches")) {
-        const sketches = await kv.list<Sketch>(KV.sketches);
-
-        for (const sketch of sketches) {
-          if (
-            sketch.status === "active" &&
-            new Date(sketch.expiresAt).getTime() <= now
-          ) {
-            if (dryRun) {
-              details.push(
-                `[dry-run] Would discard expired sketch "${sketch.title}" (${sketch.id})`,
-              );
-              fixed++;
-              continue;
-            }
-            const didFix = await withKeyedLock(
-              `mem:sketch:${sketch.id}`,
-              async () => {
-                const fresh = await kv.get<Sketch>(KV.sketches, sketch.id);
-                if (
-                  !fresh ||
-                  fresh.status !== "active" ||
-                  new Date(fresh.expiresAt).getTime() > Date.now()
-                ) {
-                  return false;
-                }
-
-                const allEdges = await kv.list<ActionEdge>(KV.actionEdges);
-                const actionIdSet = new Set(fresh.actionIds);
-                for (const edge of allEdges) {
-                  if (
-                    actionIdSet.has(edge.sourceActionId) ||
-                    actionIdSet.has(edge.targetActionId)
-                  ) {
-                    await kv.delete(KV.actionEdges, edge.id);
-                    await recordAudit(kv, "heal", "mem::heal", [edge.id], {
-                      entityType: "actionEdge",
-                      reason: "sketch-gc-discard",
-                      action: "delete",
-                    });
-                  }
-                }
-                for (const actionId of fresh.actionIds) {
-                  await kv.delete(KV.actions, actionId);
-                  await recordAudit(kv, "heal", "mem::heal", [actionId], {
-                    entityType: "action",
-                    reason: "sketch-gc-discard",
-                    action: "delete",
-                  });
-                }
-
-                fresh.status = "discarded";
-                fresh.discardedAt = new Date().toISOString();
-                await kv.set(KV.sketches, fresh.id, fresh);
-                await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
-                  entityType: "sketch",
-                  reason: "expired-sketch",
-                  newStatus: "discarded",
-                });
-                return true;
-              },
-            );
-            if (didFix) {
-              details.push(
-                `Discarded expired sketch "${sketch.title}" (${sketch.id})`,
-              );
-              fixed++;
-            } else {
-              skipped++;
-            }
           }
         }
       }

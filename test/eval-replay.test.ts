@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decisionsRevisited,
@@ -14,6 +18,7 @@ import {
   type Probe,
   type ProbeItem,
 } from "../eval/runner/replay-score.js";
+import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint } from "../eval/runner/replay-checkpoints.js";
 import { hookPayloads } from "../eval/runner/replay-hooks.js";
 import {
   bankId,
@@ -36,6 +41,7 @@ const CWD = "/synthetic/shop";
 type Step =
   | { user: string; meta?: boolean }
   | { tool: string; file: string }
+  | { assistant: string; thinking?: string }
   | { toolResult: string };
 
 function transcript(sessionId: string, start: string, steps: Step[]): string {
@@ -45,6 +51,12 @@ function transcript(sessionId: string, start: string, steps: Step[]): string {
       const common = { sessionId, cwd: CWD, timestamp: new Date(base + i * 1000).toISOString() };
       if ("user" in step) {
         return { ...common, type: "user", isMeta: step.meta, message: { role: "user", content: step.user } };
+      }
+      if ("assistant" in step) {
+        const content: unknown[] = [];
+        if (step.thinking) content.push({ type: "thinking", thinking: step.thinking });
+        content.push({ type: "text", text: step.assistant });
+        return { ...common, type: "assistant", message: { role: "assistant", content } };
       }
       if ("tool" in step) {
         return {
@@ -135,6 +147,25 @@ describe("parseTranscript", () => {
       transcript("s4", "2026-09-05T08:00:00Z", [{ user: "hello there" }]),
     ].join("\n");
     expect(parseTranscript(lines)?.startedAt).toBe("2026-09-05T08:00:00.000Z");
+  });
+
+  it("carries the Agent's last text reply before each typed prompt", () => {
+    const s = session("s5", "2026-09-01T10:00:00Z", [
+      { user: "add a cart total" },
+      { assistant: "I will start by reading the cart." },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { toolResult: "file contents" },
+      { assistant: "Added calcTotal in src/cart.ts.", thinking: "private musings" },
+      { assistant: "Want me to add tests?" },
+      { user: "<command-name>/clear</command-name>" },
+      { user: "yes" },
+      { user: "continue" },
+    ]);
+    expect(s.userTurns.map((t) => t.precedingReply)).toEqual([
+      "",
+      "Added calcTotal in src/cart.ts.\n\nWant me to add tests?",
+      "",
+    ]);
   });
 
   it("returns null for a transcript with no human turn", () => {
@@ -425,6 +456,62 @@ describe("summarizeReplay", () => {
     expect(worstCases(withTerse).filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
   });
 
+  describe("per project and typical", () => {
+    const meta = { storeBytesStart: 1000, storeBytesEnd: 3000 };
+    const inProject = (project: string, s: ReturnType<typeof scoreSession>) => ({ ...s, project });
+    const earlierS = session("pe", "2026-09-01T10:00:00Z", [{ user: "x" }, { tool: "Edit", file: `${CWD}/src/cart.ts` }]);
+    const later = (id: string, day: string) => session(id, `2026-09-${day}T10:00:00Z`, [{ user: "x" }, { tool: "Read", file: `${CWD}/src/cart.ts` }]);
+    const delivered = (id: string, day: string, project: string) => {
+      const s = later(id, day);
+      return inProject(project, scoreSession(s, deriveAnswerKey(s, [earlierS]), [probe("session-start", 0, [item({ ref: `observation:${id}`, files: ["src/cart.ts"] })])]));
+    };
+    const missed = (id: string, day: string, project: string) => {
+      const s = later(id, day);
+      return inProject(project, scoreSession(s, deriveAnswerKey(s, [earlierS]), []));
+    };
+    const mixed = [
+      delivered("a1", "02", "shop"),
+      missed("a2", "03", "shop"),
+      delivered("b1", "04", "blog"),
+      missed("m1", "05", "medical-researcher"),
+      missed("m2", "06", "agentmemory-sqlite"),
+    ];
+    const atypical = ["agentmemory-sqlite", "medical-researcher"];
+    const s = summarizeReplay(mixed, meta, atypical);
+
+    it("reports every project with the pooled shape", () => {
+      expect(Object.keys(s.byProject).sort()).toEqual(["agentmemory-sqlite", "blog", "medical-researcher", "shop"]);
+      expect(s.byProject.shop.sessions).toBe(2);
+      expect(s.byProject.shop.rightMoment.injection).toEqual({ n: 2, hit: 1, share: 0.5 });
+      expect(s.byProject.blog.rightMoment.injection).toEqual({ n: 1, hit: 1, share: 1 });
+      expect(s.byProject["medical-researcher"].rightMoment.injection.share).toBe(0);
+      expect(Object.keys(s.byProject.shop)).toEqual(Object.keys(s.typical.summary));
+      expect(s.byProject.shop).not.toHaveProperty("leastRecord");
+      expect(s.typical.summary).not.toHaveProperty("operatorAttention");
+      expect(s).toHaveProperty("leastRecord");
+    });
+
+    it("rolls up typical without the atypical projects", () => {
+      expect(s.typical.excluded).toEqual(atypical);
+      expect(s.typical.summary.sessions).toBe(3);
+      expect(s.typical.summary.rightMoment.injection).toEqual({ n: 3, hit: 2, share: 2 / 3 });
+    });
+
+    it("leaves the pooled numbers as they were", () => {
+      expect(s.sessions).toBe(5);
+      expect(s.rightMoment.injection).toEqual({ n: 5, hit: 2, share: 0.4 });
+      const { byProject, typical, ...pooled } = s;
+      const { byProject: _b, typical: _t, ...bare } = summarizeReplay(mixed, meta, []);
+      expect(pooled).toEqual(bare);
+    });
+
+    it("has an empty typical row when every project is atypical", () => {
+      const none = summarizeReplay(mixed, meta, [...atypical, "shop", "blog"]);
+      expect(none.typical.summary.sessions).toBe(0);
+      expect(none.typical.summary.rightMoment.injection.share).toBeNull();
+    });
+  });
+
   it("lists misses, noise and leaks with Session and turn", () => {
     const cases = worstCases(scores);
     expect(cases.filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
@@ -615,5 +702,120 @@ describe("parseMaintenance", () => {
     expect(parseMaintenance("consolidate")).toHaveProperty("error");
     expect(parseMaintenance("evict-cap:0")).toHaveProperty("error");
     expect(parseMaintenance("evict-importance:x")).toHaveProperty("error");
+  });
+});
+
+describe("replay save pass checkpoints", () => {
+  const dirs: string[] = [];
+  const scratch = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "replay-checkpoints-"));
+    dirs.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const sessions = ["a", "b", "c", "d"].map((id, i) =>
+    session(id, `2026-09-0${i + 1}T10:00:00Z`, [{ user: "x" }, { tool: "Read", file: `${CWD}/${id}.ts` }]),
+  );
+  const scored = new Set(sessions.map((s) => s.id));
+  const manifest = (...indexes: number[]): Checkpoint[] =>
+    indexes.map((i) => ({
+      sessionId: sessions[i]!.id,
+      file: `${String(i).padStart(3, "0")}-${sessions[i]!.id}.sqlite`,
+      ingested: sessions.slice(0, i).map((s) => s.id),
+    }));
+  const writeManifest = (dir: string, entries: Checkpoint[]): void =>
+    writeFileSync(join(dir, MANIFEST), JSON.stringify(entries));
+  const resume = (dir: string, s = sessions, set = scored) => openSavePass(dir, true, s, set);
+
+  it("resumes from the last checkpoint with the Sessions it already ingested", () => {
+    const dir = scratch();
+    const entries = manifest(1, 2);
+    writeManifest(dir, entries);
+    const pass = resume(dir);
+    expect(pass.resumeAt).toBe(2);
+    expect(pass.ingested.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(pass.seed).toBe(join(dir, "002-c.sqlite"));
+    expect(pass.checkpoints).toEqual(entries);
+  });
+
+  it("refuses a finished save pass", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(1));
+    writeFileSync(join(dir, "run.json"), "{}");
+    expect(() => resume(dir)).toThrow("holds a finished save pass; nothing to resume");
+  });
+
+  it("refuses a directory with no manifest", () => {
+    expect(() => resume(scratch())).toThrow("holds no save pass to resume");
+  });
+
+  it("refuses an empty manifest", () => {
+    const dir = scratch();
+    writeManifest(dir, []);
+    expect(() => resume(dir)).toThrow("lists no checkpoint to resume from");
+  });
+
+  it("refuses Sessions that load in another order than the save pass saw", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(2));
+    const earlier = session("z", "2026-08-01T10:00:00Z", [{ user: "x" }, { tool: "Read", file: `${CWD}/z.ts` }]);
+    expect(() => resume(dir, [earlier, ...sessions], new Set([...scored, "z"]))).toThrow(
+      "was saved from other Sessions than these options load",
+    );
+  });
+
+  it("refuses a checkpoint that ingested Sessions these options do not load before it", () => {
+    const dir = scratch();
+    writeManifest(dir, [{ ...manifest(2)[0]!, ingested: ["a", "d"] }]);
+    expect(() => resume(dir)).toThrow("was saved from other Sessions than these options load");
+  });
+
+  it("refuses a checkpoint outside the scored set", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(1, 2));
+    expect(() => resume(dir, sessions, new Set(["a", "c"]))).toThrow("was saved from other Sessions than these options load");
+  });
+
+  it("refuses when none of the manifest's Sessions load", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(2));
+    expect(() => resume(dir, sessions.slice(0, 2), scored)).toThrow("was saved from other Sessions than these options load");
+  });
+
+  it("refuses a fresh save pass over an existing manifest", () => {
+    const dir = scratch();
+    writeManifest(dir, manifest(1));
+    expect(() => openSavePass(dir, false, sessions, scored)).toThrow("already holds a save pass; pass a fresh --out, or --resume");
+  });
+
+  it("starts a fresh save pass in a new directory", () => {
+    const dir = join(scratch(), "checkpoints");
+    const pass = openSavePass(dir, false, sessions, scored);
+    expect(existsSync(dir)).toBe(true);
+    expect(pass).toEqual({ checkpoints: [], ingested: [], resumeAt: 0, seed: undefined });
+  });
+
+  it("overwrites a leftover file at the checkpoint's name with a valid copy of the store", async () => {
+    const dir = scratch();
+    const source = join(dir, "source.sqlite");
+    const db = new DatabaseSync(source);
+    db.exec("CREATE TABLE kv (k TEXT, v TEXT); INSERT INTO kv VALUES ('a', '1'), ('b', '2')");
+    db.close();
+    writeFileSync(join(dir, "002-c.sqlite"), "interrupted garbage");
+    const saved = await saveCheckpoint(source, dir, 2, "c", sessions.slice(0, 2));
+    expect(saved).toEqual({ sessionId: "c", file: "002-c.sqlite", ingested: ["a", "b"] });
+    const copy = new DatabaseSync(join(dir, saved.file), { readOnly: true });
+    try {
+      expect(copy.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+      expect(copy.prepare("SELECT k, v FROM kv ORDER BY k").all()).toEqual([
+        { k: "a", v: "1" },
+        { k: "b", v: "2" },
+      ]);
+    } finally {
+      copy.close();
+    }
   });
 });

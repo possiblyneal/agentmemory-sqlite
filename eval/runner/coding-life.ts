@@ -135,6 +135,19 @@ async function main(): Promise<void> {
       );
     }
   }
+  if (Object.keys(summary.rules).length > 0) {
+    console.log("\n=== Pinned rules ===");
+    console.log(
+      `  ${"adapter".padEnd(18)} ${"path".padEnd(14)} ${"n".padStart(3)} ${"recall".padStart(7)} ${"first".padStart(7)} ${"max share".padStart(9)}`,
+    );
+    for (const [adapter, byPath] of Object.entries(summary.rules)) {
+      for (const [path, s] of Object.entries(byPath)) {
+        console.log(
+          `  ${adapter.padEnd(18)} ${path.padEnd(14)} ${String(s.n).padStart(3)} ${fmt(s.recall).padStart(7)} ${fmt(s.goldFirst).padStart(7)} ${fmt(s.rulebookShareMax).padStart(9)}`,
+        );
+      }
+    }
+  }
   console.log(`\nwrote ${ndjsonPath}`);
 
   if (baseline) {

@@ -146,16 +146,16 @@ describe("Lessons", () => {
       expect(result.success).toBe(false);
     });
 
-    it("sets crystal source and sourceIds when provided", async () => {
+    it("sets consolidation origin and sourceIds when provided", async () => {
       const result = (await sdk.trigger("mem::lesson-save", {
-        content: "Crystal-derived lesson",
-        source: "crystal",
-        sourceIds: ["crys_123"],
+        content: "Consolidation-derived lesson",
+        source: "consolidation",
+        sourceIds: ["sem_123"],
         confidence: 0.6,
       })) as { lesson: Lesson };
 
-      expect(result.lesson.source).toBe("crystal");
-      expect(result.lesson.sourceIds).toEqual(["crys_123"]);
+      expect(result.lesson.source).toBe("consolidation");
+      expect(result.lesson.sourceIds).toEqual(["sem_123"]);
       expect(result.lesson.confidence).toBe(0.6);
     });
   });
@@ -306,7 +306,7 @@ describe("Lessons", () => {
     beforeEach(async () => {
       await sdk.trigger("mem::lesson-save", { content: "Lesson A", confidence: 0.9, project: "/app" });
       await sdk.trigger("mem::lesson-save", { content: "Lesson B", confidence: 0.3, project: "/app" });
-      await sdk.trigger("mem::lesson-save", { content: "Lesson C", confidence: 0.7, source: "crystal" });
+      await sdk.trigger("mem::lesson-save", { content: "Lesson C", confidence: 0.7, source: "consolidation" });
     });
 
     it("lists all lessons sorted by confidence", async () => {
@@ -323,7 +323,7 @@ describe("Lessons", () => {
     });
 
     it("filters by source", async () => {
-      const result = (await sdk.trigger("mem::lesson-list", { source: "crystal" })) as { lessons: Lesson[] };
+      const result = (await sdk.trigger("mem::lesson-list", { source: "consolidation" })) as { lessons: Lesson[] };
       expect(result.lessons.length).toBe(1);
     });
 

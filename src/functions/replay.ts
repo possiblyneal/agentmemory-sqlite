@@ -4,7 +4,6 @@ import { resolve, join } from "node:path";
 import type { ISdk } from "../engine/types.js";
 import type {
   CompressedObservation,
-  Crystal,
   Lesson,
   RawObservation,
   Session,
@@ -118,23 +117,15 @@ export function extractLessons(texts: string[]): string[] {
   return Array.from(lessons.values());
 }
 
-async function deriveCrystalAndLessons(
+async function deriveLessons(
   kv: StateKV,
   sessionId: string,
   project: string,
   rawObs: RawObservation[],
-  compressed: CompressedObservation[],
   firstPrompt: string | undefined,
 ): Promise<void> {
   if (rawObs.length === 0) return;
   const createdAt = new Date().toISOString();
-
-  const files = new Set<string>();
-  const tools = new Set<string>();
-  for (const c of compressed) {
-    for (const f of c.files || []) files.add(f);
-    if (c.type && c.type !== "conversation" && c.title) tools.add(c.title);
-  }
 
   const assistantTexts: string[] = [];
   const userPrompts: string[] = [];
@@ -197,34 +188,6 @@ async function deriveCrystalAndLessons(
     } catch {}
   }
   if (lessonIds.length > 0) resetLessonIndex();
-
-  // Content-addressed on sessionId so re-importing the same session
-  // upserts the crystal in place instead of creating a new one.
-  const crystalId = fingerprintId("crystal", sessionId);
-  const narrativePreview = firstPrompt
-    ? firstPrompt.slice(0, 300)
-    : compressed
-        .slice(0, 5)
-        .map((c) => c.narrative || c.title)
-        .filter(Boolean)
-        .join(" · ")
-        .slice(0, 300);
-
-  try {
-    const existingCrystal = await kv.get<Crystal>(KV.crystals, crystalId);
-    const crystal: Crystal = {
-      id: crystalId,
-      narrative: narrativePreview || `Session ${sessionId.slice(0, 12)} (${rawObs.length} observations)`,
-      keyOutcomes: Array.from(tools).slice(0, 8),
-      filesAffected: Array.from(files).slice(0, 20),
-      lessons: lessonIds,
-      sourceActionIds: existingCrystal?.sourceActionIds ?? [],
-      sessionId,
-      project,
-      createdAt: existingCrystal?.createdAt ?? createdAt,
-    };
-    await kv.set(KV.crystals, crystalId, crystal);
-  } catch {}
 }
 
 function isRawShape(o: unknown): o is RawObservation {
@@ -514,12 +477,11 @@ export function registerReplayFunctions(sdk: ISdk, kv: StateKV): void {
         observationCount += fresh.length;
         sessionIds.push(parsed.sessionId);
 
-        await deriveCrystalAndLessons(
+        await deriveLessons(
           kv,
           parsed.sessionId,
           parsed.project,
           parsed.observations,
-          compressed,
           firstPrompt,
         );
       }

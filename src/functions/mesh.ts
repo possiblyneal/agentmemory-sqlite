@@ -13,7 +13,6 @@ import { GRAPH_WRITE_LOCK } from "./graph.js";
 import type {
   MeshPeer,
   Memory,
-  Action,
   SemanticMemory,
   ProceduralMemory,
   MemoryRelation,
@@ -63,7 +62,6 @@ async function isAllowedUrl(urlStr: string): Promise<boolean> {
 
 const DEFAULT_SHARED_SCOPES = [
   "memories",
-  "actions",
   "semantic",
   "procedural",
   "relations",
@@ -73,7 +71,6 @@ const DEFAULT_SHARED_SCOPES = [
 
 interface MeshSyncPayload {
   memories?: Memory[];
-  actions?: Action[];
   semantic?: SemanticMemory[];
   procedural?: ProceduralMemory[];
   relations?: MemoryRelation[];
@@ -358,7 +355,6 @@ export function registerMeshFunction(
       let accepted = 0;
 
       accepted += await lwwMergeList(kv, KV.memories, data.memories, "mem:memory", "updatedAt");
-      accepted += await lwwMergeList(kv, KV.actions, data.actions, "mem:action", "updatedAt");
       accepted += await lwwMergeList(kv, KV.semantic, data.semantic, "mem:semantic", "updatedAt");
       accepted += await lwwMergeList(kv, KV.procedural, data.procedural, "mem:procedural", "updatedAt");
       if (data.relations && Array.isArray(data.relations)) {
@@ -481,14 +477,6 @@ async function collectSyncData(
     result.memories = deltaFilter(all, sinceTime, "updatedAt");
   }
 
-  if (scopes.includes("actions")) {
-    let all = await kv.list<Action>(KV.actions);
-    if (syncFilter?.project) {
-      all = all.filter((a) => a.project === syncFilter.project);
-    }
-    result.actions = deltaFilter(all, sinceTime, "updatedAt");
-  }
-
   const projectScoped = !!syncFilter?.project;
 
   if (scopes.includes("semantic") && !projectScoped) {
@@ -532,9 +520,6 @@ async function applySyncData(
 
   if (scopes.includes("memories")) {
     applied += await lwwMergeList(kv, KV.memories, data.memories, "mem:memory", "updatedAt");
-  }
-  if (scopes.includes("actions")) {
-    applied += await lwwMergeList(kv, KV.actions, data.actions, "mem:action", "updatedAt");
   }
   if (scopes.includes("semantic")) {
     applied += await lwwMergeList(kv, KV.semantic, data.semantic, "mem:semantic", "updatedAt");

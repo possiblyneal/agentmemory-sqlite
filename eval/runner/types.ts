@@ -15,10 +15,12 @@ export interface Session {
   project?: string;
   timestamp?: string;
   content?: string;
+  // The Memory type a content-only Session is remembered as; `rule` pins it.
+  memoryType?: string;
   observations?: EvalObservation[];
 }
 
-export type QuestionPath = "search" | "session-start" | "prompt-submit";
+export type QuestionPath = "search" | "session-start" | "pre-compact" | "prompt-submit";
 
 export interface Question {
   id: string;
@@ -39,6 +41,8 @@ export interface RankedDoc {
 export interface QueryResult {
   ranked: RankedDoc[];
   chars?: number;
+  // The `## Rules` block's tokens over the Injection's budget.
+  rulebookShare?: number;
 }
 
 export interface AdapterConfig {
@@ -68,6 +72,7 @@ export interface ScoreRow {
   hit: boolean;
   topGoldRank: number | null;
   chars: number | null;
+  rulebookShare: number | null;
   latencyMs: number;
 }
 

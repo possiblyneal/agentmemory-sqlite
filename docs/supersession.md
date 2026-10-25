@@ -12,12 +12,12 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 
 | Record kind | search | session start | prompt submit |
 |---|---|---|---|
-| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); **stale given alone** when the contradiction scores below the relevance floor (T4) |
+| Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); stale demoted when a contradiction shares at least two terms, admitted from below the relevance floor (T4) |
 | Semantic Fact | unkeyed: stale capped behind the newer fact (T8); keyed: stale hidden (T8k) | unkeyed: stale demoted by the recency factor (T9); keyed: stale hidden (T9k) | not reachable (T10) |
-| Lesson | **newer ranked first** (T11) | stale demoted by the recency factor (T12) | not reachable (T10) |
+| Lesson | **newer ranked first** (T11) | stale capped behind the newer Lesson (T12, T12r) | not reachable (T10) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
-| Observation | stale demoted by the recency factor (T20, T21) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
+| Observation | stale demoted by the recency factor (T20, T21); stale capped below the newer near-twin of its own project (T21b, T21c) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
 
 "Hidden" means the stale record is absent. "Demoted" means both are returned and the newer
 one is first. "Ranked first" means the stale record leads, or is the only one returned.
@@ -29,7 +29,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T1 | Memory: smart-search hides a Memory that a near-restatement saved later superseded | passes |
 | T2 | Memory: prompt-submit hides a Memory that a near-restatement saved later superseded | passes |
 | T3 | Memory: smart-search ranks a contradicting Memory with little wording in common above the stale one | passes |
-| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one | `it.fails` |
+| T4 | Memory: prompt-submit gives a contradicting Memory with little wording in common ahead of the stale one | passes |
 | T5 | Memory: smart-search hides a Memory that mem::evolve replaced | passes |
 | T6 | Memory: prompt-submit hides a Memory that mem::evolve replaced | passes |
 | T7 | Memory: session start does not reach Memories, so a superseded one cannot appear | passes |
@@ -40,6 +40,7 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T10 | prompt-submit does not reach Semantic Facts, Lessons or Insights: prompt-submit gives none of them | passes |
 | T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | passes |
 | T12 | Lesson: session start lists the newer Lesson ahead of the contradicted one | passes |
+| T12r | Lesson saved just after a more-reinforced one: session start lists the newer Lesson ahead of the contradicted one | passes |
 | T13 | Insight: smart-search returns the newer Insight ahead of the contradicted one | passes |
 | T14 | Insight: session start lists the newer Insight ahead of the contradicted one | passes |
 | T15 | Session Summary decision: smart-search never returns a Session Summary decision on its own | passes |
@@ -49,6 +50,8 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T19 | Session Summary decision: prompt-submit puts a Memory that contradicts a Session decision ahead of that decision | passes |
 | T20 | Observation: smart-search ranks the newer Observation above the contradicted one | passes |
 | T21 | Observation: smart-search ranks the newer Observation above a contradicted one that matches the query more strongly | passes |
+| T21b | Observation (`eval:supersession` wording, other projects holding the same claims): smart-search ranks the newer Observation above a contradicted one whose stronger match outweighs the recency factor | passes |
+| T21c | Observation: smart-search does not cap an Observation behind a newer twin from another project | passes |
 | T22 | Observation: prompt-submit gives the newer Observation ahead of a contradicted one that matches the prompt more strongly | passes |
 | T23 | Observation: prompt-submit gives the newer Observation ahead of the contradicted one | passes |
 | T24 | Observation: session start lists the newer Session's Observation ahead of the contradicted one | passes |
@@ -76,8 +79,11 @@ Global marker that shares at least 2 distinctive terms (3+ letters, not stop wor
 the smaller term set. The newer is moved directly above the older, which stays; nothing is marked,
 hidden or deleted, and no LLM or stored field is involved. `mem::smart-search` reorders the hits
 above its relevance floor (T3). `mem::prompt-context` reorders the hits that passed its floor and
-the gate, so it never adds a newer Memory that scored below the floor: in T4 only the stale
-Memory passes, it is given alone, and the test stays `it.fails` until the newer one is admitted.
+the gate, and also tests them against every Memory hit the floor or gate left out: one that is
+the newest shadower of a passed Memory, is shadowed by none, and was not injected earlier this
+Session is admitted directly above the first passed Memory it shadows, without passing the gate,
+and counts toward the 3 results (T4). The newest is judged with injected Memories included, so
+when the newest claim was already given, an older one is not admitted in its place.
 
 **Memory evolve, consolidation and auto-forget.** `mem::evolve`, `mem::consolidate` (LLM) and
 `mem::auto-forget` (Jaccard above 0.9) set `isLatest: false` and then call
@@ -112,8 +118,10 @@ recency`, where the recency boost decays 1% per day; a hit whose content overlap
 Jaccard 0.5 or more and was last reinforced (else created) earlier is capped just below that newer
 hit, so reinforcement cannot outvote a correction (T11). Lessons date by reinforcement, since only
 an explicit save reinforces one. Session start ranks by project-weighted
-confidence over the same boost, from `lastReinforcedAt` else `createdAt`, so a stale Lesson not
-reinforced since the newer one was saved is demoted (T12); a stale Lesson reinforced after it still leads.
+confidence over the same boost, from `lastReinforcedAt` else `createdAt`, and applies the same cap
+to the project's Lessons before taking the top 10, so a stale Lesson is capped behind a newer near-twin
+however often it was reinforced, even when both were saved milliseconds apart (T12, T12r); a stale
+Lesson reinforced after it still leads.
 
 **Insights.** Written by `mem::reflect` from concept clusters. The reflect prompt lists the cluster's
 existing Insights, and the model may answer one as `reinforces="<id>"`, which reinforces that Insight
@@ -133,11 +141,18 @@ recency factor (half-life 180 days, floor 0.6), which lets a newer Observation b
 within that margin (T20, T21). `mem::search`, which prompt submit calls, applies the same factor to Observation scores
 (Memories are exempt) before it cuts to the limit, so the newer one leads on an equal match (T23).
 The factor separates the two fixtures by 5.8%, less than the 7% by which the older one's BM25
-score leads in T22, so `mem::search` also applies the near-twin rule Lessons use: among the
-Observation hits scored for the query, an older Observation whose title and narrative overlap a
-newer one's by word-set Jaccard of at least 0.5 (`jaccardSimilarity`) is capped at 0.99 of the
-newer one's score, by Observation timestamp, before the cut to the limit (T22). Other Observations
-keep their scores. Session start lists Sessions newest first (T24).
+score leads in T22, and less than the fused-rank gap when other projects hold the same claims
+(T21b), so both surfaces also apply the near-twin rule Lessons use (`capOlderNearTwins`,
+`src/state/hybrid-search.ts`): among the Observation hits scored for the query, an older
+Observation whose title and narrative overlap a newer one's by word-set Jaccard of at least 0.5 is
+capped at 0.99 of the newer one's score, by Observation timestamp, before the cut to the limit
+(T21b, T22). Only two Observations of one project pair: a newer twin in another repository never
+caps this one's claim (T21c). An Observation's project is its Session's, else its Session
+Summary's; one with neither pairs only within its own Session. `HybridSearch` runs the cap after
+the recency factor over its enriched pool (at least 20 rows), and again over the merged ranking
+when query expansion ran, before the reranker and the cut. With `RERANK_ENABLED=true` the
+reranker's order inside its window wins, so the cap does not hold there. Other Observations keep
+their scores. Session start lists Sessions newest first (T24).
 
 ## Not covered
 

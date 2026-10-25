@@ -37,7 +37,9 @@
     "eval:pmb": "tsx eval/runner/pmb.ts",
     "eval:suite": "tsx eval/runner/suite.ts",
     "eval:supersession": "tsx eval/runner/supersession.ts",
-    "eval:gate": "tsx eval/runner/coding-life.ts --gate eval/baselines/coding-agent-life-v2.json"
+    "eval:fold-drift": "tsx eval/runner/fold-drift.ts",
+    "eval:gate": "tsx eval/runner/coding-life.ts --gate eval/baselines/coding-agent-life-v2.json",
+    "eval:gate:rules": "tsx eval/runner/coding-life.ts --data eval/data/pinned-rules --gate eval/baselines/pinned-rules.json"
   },
   "keywords": [
     "ai",

@@ -60,7 +60,7 @@ describe("Facets Functions", () => {
     it("tags a target with a facet", async () => {
       const result = (await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       })) as { success: boolean; facet: Facet };
@@ -68,7 +68,7 @@ describe("Facets Functions", () => {
       expect(result.success).toBe(true);
       expect(result.facet.id).toMatch(/^fct_/);
       expect(result.facet.targetId).toBe("act_123");
-      expect(result.facet.targetType).toBe("action");
+      expect(result.facet.targetType).toBe("observation");
       expect(result.facet.dimension).toBe("priority");
       expect(result.facet.value).toBe("high");
       expect(result.facet.createdAt).toBeDefined();
@@ -77,7 +77,7 @@ describe("Facets Functions", () => {
     it("returns error when dimension is empty", async () => {
       const result = (await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "  ",
         value: "high",
       })) as { success: boolean; error: string };
@@ -89,7 +89,7 @@ describe("Facets Functions", () => {
     it("returns error when value is empty", async () => {
       const result = (await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "",
       })) as { success: boolean; error: string };
@@ -113,14 +113,14 @@ describe("Facets Functions", () => {
     it("skips duplicate tag", async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
 
       const result = (await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       })) as { success: boolean; facet: Facet; skipped: boolean };
@@ -134,13 +134,13 @@ describe("Facets Functions", () => {
     it("removes a specific value from a dimension", async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "urgent",
       });
@@ -164,13 +164,13 @@ describe("Facets Functions", () => {
     it("removes all values in a dimension when value is omitted", async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_123",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "urgent",
       });
@@ -195,25 +195,25 @@ describe("Facets Functions", () => {
     beforeEach(async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "status",
         value: "active",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_2",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "low",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_2",
-        targetType: "action",
+        targetType: "observation",
         dimension: "status",
         value: "active",
       });
@@ -294,19 +294,19 @@ describe("Facets Functions", () => {
     it("returns facets grouped by dimension", async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "urgent",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "status",
         value: "active",
       });
@@ -341,19 +341,19 @@ describe("Facets Functions", () => {
     beforeEach(async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_2",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_3",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "low",
       });
@@ -412,19 +412,19 @@ describe("Facets Functions", () => {
     it("returns unique dimension names with counts", async () => {
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "high",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_2",
-        targetType: "action",
+        targetType: "observation",
         dimension: "priority",
         value: "low",
       });
       await sdk.trigger("mem::facet-tag", {
         targetId: "act_1",
-        targetType: "action",
+        targetType: "observation",
         dimension: "status",
         value: "active",
       });

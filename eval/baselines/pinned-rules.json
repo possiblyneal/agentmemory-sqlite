@@ -1,0 +1,12 @@
+{
+  "tolerance": 0.02,
+  "metrics": {
+    "agentmemory-bm25": {
+      "session-start": { "recall": 1, "noAnswerClean": 1 },
+      "pre-compact": { "recall": 1, "noAnswerClean": 1 }
+    }
+  },
+  "latencyCeilingMs": {
+    "agentmemory-bm25": { "session-start": 500, "pre-compact": 500 }
+  }
+}
