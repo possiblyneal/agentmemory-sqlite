@@ -22,7 +22,7 @@ import type { VectorIndex } from "../state/vector-index.js";
 import { parentIdOf } from "../state/vector-index.js";
 import { KV } from "../state/schema.js";
 import {
-  embedInputHash,
+  vectorMatchesText,
   enumerateIndexCorpus,
   memoryEmbedJobs,
   observationEmbedJobs,
@@ -123,7 +123,7 @@ export function createIndexFill(
         report.expected++;
         expectedIds.add(job.id);
         const row = rows.get(job.id);
-        if (row && (row.hashState === "legacy" || row.inputHash === embedInputHash(job.text))) {
+        if (row && vectorMatchesText(row, job.text)) {
           report.present++;
         } else {
           missing.push(job);

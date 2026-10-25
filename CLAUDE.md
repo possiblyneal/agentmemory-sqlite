@@ -296,6 +296,10 @@ on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char 
 prefixed with the title and concepts, under ids `<memoryId>#<i>` when there is more than one.
 BM25 still indexes the Memory whole. The fill pass embeds missing chunk ids, re-embeds any whose
 text changed and prunes the orphaned ones, so toggling it needs no migration. Observations are not chunked.
+Import, snapshot restore and replay index through `indexRecords()` (`src/functions/search.ts`),
+which skips a job whose id already holds a vector for its text and session
+(`hasCurrentVector()`, `src/engine/inproc/vectors.ts`, by the fill pass's `vectorMatchesText()`),
+so re-importing an unchanged Memory costs no embed call.
 
 ### Date terms
 `SearchIndex.add()` gives each record `@date:YYYY-MM-DD`, `@month:YYYY-MM` and `@md:MM-DD`

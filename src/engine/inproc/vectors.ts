@@ -19,6 +19,7 @@ import {
   contentLocation,
   embedInputHash,
   embedJobsFor,
+  vectorMatchesText,
   type EmbedJob,
 } from "../../state/index-corpus.js";
 
@@ -154,6 +155,19 @@ export class SqliteVectorStore implements VectorStore {
         hashState: r.hash_state,
       };
     }
+  }
+
+  // Whether `id` already holds the vector for `text` under `sessionId`, by the
+  // fill pass's test, so re-indexing unchanged content need not re-embed it.
+  hasCurrentVector(id: string, sessionId: string, text: string): boolean {
+    const row = this.state.db
+      .prepare("SELECT session_id, input_hash, hash_state FROM vectors WHERE id = ?")
+      .get(id) as { session_id: string; input_hash: string; hash_state: string } | undefined;
+    return (
+      row !== undefined &&
+      row.session_id === sessionId &&
+      vectorMatchesText({ inputHash: row.input_hash, hashState: row.hash_state }, text)
+    );
   }
 
   hydrate(index: VectorIndex): number {

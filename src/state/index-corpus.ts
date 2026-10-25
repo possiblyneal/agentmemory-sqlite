@@ -47,6 +47,15 @@ export function embedInputHash(text: string): string {
   return createHash("sha256").update(clipEmbedInput(text)).digest("hex");
 }
 
+// Whether a stored vector row already embeds `text`. A `legacy` row has no
+// input text to hash and counts as current until its content is rewritten.
+export function vectorMatchesText(
+  row: { inputHash: string; hashState: string },
+  text: string,
+): boolean {
+  return row.hashState === "legacy" || row.inputHash === embedInputHash(text);
+}
+
 // Tool-name prefixes whose observations are STORED but never INDEXED.
 //
 // Retrieval echoes — the daemon's own record of "the agent ran
