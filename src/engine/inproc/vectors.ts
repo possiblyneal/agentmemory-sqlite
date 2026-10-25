@@ -159,14 +159,24 @@ export class SqliteVectorStore implements VectorStore {
 
   // Whether `id` already holds the vector for `text` under `sessionId`, by the
   // fill pass's test, so re-indexing unchanged content need not re-embed it.
+  // A bare id with `id#…` chunk rows beside it is never current: only its
+  // re-embed (`put`) deletes those stale chunks.
   hasCurrentVector(id: string, sessionId: string, text: string): boolean {
     const row = this.state.db
       .prepare("SELECT session_id, input_hash, hash_state FROM vectors WHERE id = ?")
       .get(id) as { session_id: string; input_hash: string; hash_state: string } | undefined;
+    if (
+      row === undefined ||
+      row.session_id !== sessionId ||
+      !vectorMatchesText({ inputHash: row.input_hash, hashState: row.hash_state }, text)
+    ) {
+      return false;
+    }
+    if (id.includes("#")) return true;
     return (
-      row !== undefined &&
-      row.session_id === sessionId &&
-      vectorMatchesText({ inputHash: row.input_hash, hashState: row.hash_state }, text)
+      this.state.db
+        .prepare("SELECT 1 FROM vectors WHERE id >= ? AND id < ? LIMIT 1")
+        .get(id + CHUNK_LO, id + CHUNK_HI) === undefined
     );
   }
 

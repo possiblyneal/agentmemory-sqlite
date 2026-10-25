@@ -349,4 +349,20 @@ describe("mem::index-fill-missing", () => {
     expect(provider.calls.flat().length - before).toBe(memoryEmbedJobs(moved).length);
     expect(rows().every((x) => x.id.startsWith("mem_imp#"))).toBe(true);
   });
+
+  it("indexRecords re-embeds a bare Memory id that has stale chunks beside it", async () => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    const short = memory("mem_flip", "short passage");
+    state.set(KV.memories, short.id, short);
+    await indexRecords([], [short]);
+
+    const long = { ...short, content: "long passage. ".repeat(200) };
+    state.set(KV.memories, short.id, long);
+    await indexRecords([], [long]);
+    expect(rows().some((x) => x.id.startsWith("mem_flip#"))).toBe(true);
+
+    state.set(KV.memories, short.id, short);
+    await indexRecords([], [short]);
+    expect(rows().map((x) => x.id)).toEqual(["mem_flip"]);
+  });
 });
