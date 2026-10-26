@@ -10,6 +10,7 @@ import { KV } from "../src/state/schema.js";
 import { embedInputHash, memoryEmbedJobs } from "../src/state/index-corpus.js";
 import { claimedNow, createIndexFill, dropMismatchedVectors } from "../src/functions/index-fill.js";
 import {
+  indexRecords,
   setEmbeddingProvider,
   setInprocStores,
   setVectorIndex,
@@ -323,5 +324,45 @@ describe("mem::index-fill-missing", () => {
     const r = await createIndexFill(state, vectors, vi).run();
     expect(r).toMatchObject({ missing: 130, embedded: 0, failed: 130, aborted: true });
     expect(rows()).toEqual([]);
+  });
+
+  it("indexRecords re-embeds only chunks whose text or session changed", async () => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    const m = memory("mem_imp", "imported passage. ".repeat(200));
+    state.set(KV.memories, m.id, m);
+    await indexRecords([], [m]);
+    const chunks = provider.calls.flat().length;
+    expect(chunks).toBeGreaterThan(1);
+
+    await indexRecords([], [{ ...m, createdAt: "2020-01-01T00:00:00.000Z" }]);
+    expect(provider.calls.flat()).toHaveLength(chunks);
+
+    const edited = { ...m, content: "edited passage. ".repeat(200) };
+    state.set(KV.memories, m.id, edited);
+    await indexRecords([], [edited]);
+    expect(provider.calls.flat().length).toBeGreaterThan(chunks);
+
+    const moved = { ...edited, sessionIds: ["s_moved"] };
+    state.set(KV.memories, m.id, moved);
+    const before = provider.calls.flat().length;
+    await indexRecords([], [moved]);
+    expect(provider.calls.flat().length - before).toBe(memoryEmbedJobs(moved).length);
+    expect(rows().every((x) => x.id.startsWith("mem_imp#"))).toBe(true);
+  });
+
+  it("indexRecords re-embeds a bare Memory id that has stale chunks beside it", async () => {
+    delete process.env.AGENTMEMORY_MEMORY_CHUNKING;
+    const short = memory("mem_flip", "short passage");
+    state.set(KV.memories, short.id, short);
+    await indexRecords([], [short]);
+
+    const long = { ...short, content: "long passage. ".repeat(200) };
+    state.set(KV.memories, short.id, long);
+    await indexRecords([], [long]);
+    expect(rows().some((x) => x.id.startsWith("mem_flip#"))).toBe(true);
+
+    state.set(KV.memories, short.id, short);
+    await indexRecords([], [short]);
+    expect(rows().map((x) => x.id)).toEqual(["mem_flip"]);
   });
 });

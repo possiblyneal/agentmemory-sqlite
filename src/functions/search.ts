@@ -426,7 +426,8 @@ function getRebuildEmbedBatchSize(): number {
 // rebuild and every import path (export-import, jsonl replay) funnel
 // through this so they index identically and none can silently skip the
 // vector side. It does NOT clear the index — callers that rebuild clear
-// first; importers add. When no embedding provider is configured it skips
+// first; importers add. A job whose id already holds the vector for its
+// text is not re-embedded. When no embedding provider is configured it skips
 // the vector enqueue entirely, so a keyless install never allocates embed
 // jobs it would immediately discard.
 export async function indexRecords(
@@ -450,6 +451,7 @@ export async function indexRecords(
   }
   const enqueue = async (job: EmbedJob): Promise<void> => {
     if (!vectorEnabled) return
+    if (inprocVectorStore?.hasCurrentVector(job.id, job.sessionId, job.text)) return
     pending.push(job)
     if (pending.length >= batchSize) await flush()
   }
