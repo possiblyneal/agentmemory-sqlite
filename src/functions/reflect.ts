@@ -23,7 +23,7 @@ import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { logger } from "../logger.js";
 import { MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 import { getInsightMaxIdleWeeks } from "../config.js";
-import { insightClusterKey, compareShown } from "./insight-merge.js";
+import { insightClusterKey, compareShown, factBelongsToProject } from "./insight-merge.js";
 
 const MIN_CLUSTER_ITEMS = 3;
 // Nodes one reflect pass reads from the graph indexes.
@@ -254,12 +254,11 @@ export function registerReflectFunctions(
       const maxTotal = 50;
 
       const project = data?.project;
-      const projectSessionIds = project
-        ? new Set(
-            (await kv.list<Session>(KV.sessions))
-              .filter((s) => s.project === project)
-              .map((s) => s.id),
-          )
+      const sessionProjects = project
+        ? new Map((await kv.list<Session>(KV.sessions)).map((s) => [s.id, s.project]))
+        : undefined;
+      const projectSessionIds = sessionProjects
+        ? new Set([...sessionProjects].filter(([, p]) => p === project).map(([id]) => id))
         : undefined;
       const inProject = (n: GraphNode): boolean =>
         !projectSessionIds ||
@@ -285,10 +284,10 @@ export function registerReflectFunctions(
       let scopedEdges = graph.edges;
       // One project's clusters must never borrow another's facts, lessons or
       // concepts: an insight is stamped with the project it was built for (#1344).
-      if (project && projectSessionIds) {
+      if (project && sessionProjects) {
         activeLessons = activeLessons.filter((l) => l.project === project);
         scopedSemantic = semanticMemories.filter((m) =>
-          m.sourceSessionIds.some((id) => projectSessionIds.has(id)),
+          factBelongsToProject(m, project, sessionProjects),
         );
         const nodeIds = new Set(scopedNodes.map((n) => n.id));
         scopedEdges = graph.edges.filter(

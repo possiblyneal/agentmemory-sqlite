@@ -137,6 +137,7 @@ describe("startup maintenance", () => {
       deadIndexRowsDeleted: 0,
       decayRepaired: 0,
       insightsCollapsed: 0,
+      insightsMisscopedDeleted: 0,
     });
     expect(
       (store.get(KV.graphNodes, "node-2") as { sourceObservationIds: string[] })
@@ -591,5 +592,43 @@ describe("startup maintenance: Insight collapse (#271)", () => {
 
     expect((store.get(KV.insights, "top0") as { reinforcements: number }).reinforcements).toBe(11);
     expect(store.list(KV.insights)).toHaveLength(5);
+  });
+});
+
+describe("startup maintenance: misscoped Insights (#323)", () => {
+  let store: SqliteState;
+
+  const insight = (id: string, project: string, factIds: string[]) => ({
+    id, title: id, content: id, confidence: 0.5, reinforcements: 0,
+    sourceConceptCluster: ["spotify"], sourceMemoryIds: factIds, sourceLessonIds: [],
+    project, tags: [], createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z", decayRate: 0.1,
+  });
+
+  beforeEach(() => {
+    store = new SqliteState(":memory:");
+    store.set(KV.sessions, "ses_g1", { id: "ses_g1", project: "glydr" });
+    store.set(KV.sessions, "ses_g2", { id: "ses_g2", project: "glydr" });
+    store.set(KV.sessions, "ses_t", { id: "ses_t", project: "template" });
+    store.set(KV.semantic, "sem_glydr", { id: "sem_glydr", fact: "Glydr scraper UA", sourceSessionIds: ["ses_g1", "ses_g2", "ses_t", "ses_gone"] });
+    store.set(KV.semantic, "sem_tpl", { id: "sem_tpl", fact: "Template uses vitest", sourceSessionIds: ["ses_t", "ses_gone"] });
+  });
+
+  afterEach(() => store.close());
+
+  it("deletes a project's Insight that cites a fact from another project, once", async () => {
+    store.set(KV.insights, "ins_leak", insight("ins_leak", "template", ["sem_tpl", "sem_glydr"]));
+    store.set(KV.insights, "ins_tpl", insight("ins_tpl", "template", ["sem_tpl"]));
+    store.set(KV.insights, "ins_lessons", insight("ins_lessons", "template", []));
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.insightsMisscopedDeleted).toBe(1);
+    expect((store.list(KV.insights) as Array<{ id: string }>).map((i) => i.id).sort()).toEqual(["ins_lessons", "ins_tpl"]);
+    expect(store.get(KV.config, "insight-project-scope:done")).toMatchObject({ count: 1 });
+
+    store.set(KV.insights, "ins_late", insight("ins_late", "template", ["sem_glydr"]));
+    expect((await runStartupMaintenance(store)).insightsMisscopedDeleted).toBe(0);
+    expect(store.get(KV.insights, "ins_late")).toBeTruthy();
   });
 });

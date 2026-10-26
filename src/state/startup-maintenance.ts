@@ -9,6 +9,7 @@ import { logger } from "../logger.js";
 import {
   absorbInsight,
   compareSurvivor,
+  factBelongsToProject,
   insightClusterKey,
   INSIGHTS_PER_CLUSTER,
   nearestInsight,
@@ -46,10 +47,13 @@ export type StartupMaintenanceResult = {
   decayRepaired: number;
   /** Near-duplicate Insights merged into a survivor and deleted. */
   insightsCollapsed: number;
+  /** Insights deleted because a Semantic Fact they cite is not their project's. */
+  insightsMisscopedDeleted: number;
 };
 
 const DECAY_REPAIR_MARKER = "decay-repair:done";
 const INSIGHT_COLLAPSE_MARKER = "insight-collapse:done";
+const INSIGHT_SCOPE_MARKER = "insight-project-scope:done";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function alreadyRan(state: SqliteState): boolean {
@@ -310,6 +314,49 @@ async function collapseInsights(state: SqliteState): Promise<number> {
   return collapsed;
 }
 
+// Reflect once admitted a Semantic Fact into a project when any one of its
+// Sessions was that project's (#323), so a project's Insights could be built
+// from another repo's facts. Deletes every project Insight citing a fact that
+// factBelongsToProject now rejects, under its own marker.
+function deleteMisscopedInsights(state: SqliteState): number {
+  if (state.get(KV.config, INSIGHT_SCOPE_MARKER) !== null) return 0;
+
+  const sessionProjects = new Map(
+    (state.list(KV.sessions) as Session[]).map((s) => [s.id, s.project]),
+  );
+  const facts = new Map(
+    (state.list(KV.semantic) as SemanticMemory[]).map((f) => [f.id, f]),
+  );
+  const misscoped = (state.list(KV.insights) as Insight[]).filter(
+    (insight) =>
+      !insight.deleted &&
+      insight.project !== undefined &&
+      insight.sourceMemoryIds.some((id) => {
+        const fact = facts.get(id);
+        return fact !== undefined && !factBelongsToProject(fact, insight.project!, sessionProjects);
+      }),
+  );
+
+  const at = new Date().toISOString();
+  state.transaction(() => {
+    for (const insight of misscoped) state.delete(KV.insights, insight.id);
+    if (misscoped.length > 0) {
+      const id = generateId("aud");
+      state.set(KV.audit, id, {
+        id,
+        timestamp: at,
+        operation: "delete",
+        functionId: "startup-maintenance",
+        targetIds: misscoped.map((i) => i.id),
+        details: { event: "insight.misscoped", deleted: misscoped.length },
+      });
+    }
+    state.set(KV.config, INSIGHT_SCOPE_MARKER, { at, count: misscoped.length });
+  });
+  if (misscoped.length > 0) logger.info("Misscoped Insights deleted", { count: misscoped.length });
+  return misscoped.length;
+}
+
 async function sessionCheckoutRoots(state: SqliteState): Promise<string[]> {
   const roots = new Set<string>();
   const cwds = new Set(
@@ -336,6 +383,7 @@ export async function runStartupMaintenance(
   state: SqliteState,
 ): Promise<StartupMaintenanceResult> {
   const decayRepaired = await repairDecay(state);
+  const insightsMisscopedDeleted = deleteMisscopedInsights(state);
   const insightsCollapsed = await collapseInsights(state);
 
   if (alreadyRan(state)) {
@@ -348,6 +396,7 @@ export async function runStartupMaintenance(
       deadIndexRowsDeleted: 0,
       decayRepaired,
       insightsCollapsed,
+      insightsMisscopedDeleted,
     };
   }
 
@@ -374,6 +423,7 @@ export async function runStartupMaintenance(
     deadIndexRowsDeleted,
     decayRepaired,
     insightsCollapsed,
+    insightsMisscopedDeleted,
   };
 
   if (

@@ -189,6 +189,10 @@ same project and concept set (`insightClusterKey()`, `src/functions/insight-merg
 otherwise writes a new one. No lexical similarity is involved. `collapseInsights` in
 `src/state/startup-maintenance.ts` ran once (`KV.config` `insight-collapse:done`), keeping the
 top `INSIGHTS_PER_CLUSTER` (5) per cluster and folding the rest into their nearest survivor.
+A project's Reflect reads a Semantic Fact only when every cited Session that still exists is
+that project's (`factBelongsToProject()`), so a fact shared across projects feeds none of them;
+`deleteMisscopedInsights` in startup maintenance ran once (`insight-project-scope:done`),
+deleting each project Insight that cites a fact the rule rejects.
 Measurements and rationale are in `docs/research/record-kind-counts.md`.
 
 ### MCP Tool Handler
