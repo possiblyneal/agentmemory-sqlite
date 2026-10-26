@@ -63,3 +63,20 @@ The Operator kept `INJECT_TIMEOUT_MS` at 1500 ms (`src/hooks/_missed-injection.t
 - **Done when.** Two weeks of the live `missed-injections.jsonl` (`/diagnostics` `injections`)
   show whether prompt-submit timeouts under normal use cost Injections, and the wait is either
   raised with that evidence or kept and this item deleted.
+
+## Re-score Session Summary decisions as a Recall layer (#259)
+
+Indexing Summary decisions for Recall was built in two variants and scored once with no
+effect. That test could not decide it, so it waits for free broker time.
+
+- **What exists.** Draft #298 (`feat/summary-decision-index`): A `a3576cf` indexes decisions
+  as a BM25 layer, B `4215e7b` adds an `appliesWhen` line written at summarize time. The
+  replay scorecard (`docs/benchmarks/2026-10-22-summary-decision-index.md`) shows control, A
+  and B equal on every hit metric, but its corpus held 2 decision key items, both already
+  found by search, and its Summaries predate the decision-merge fix (#301).
+- **Experiment.** Rebase #298 onto main, run one `eval:replay --llm --save-checkpoints
+  --keyed-only` save pass on build B (about 48 h on the broker, so only when #234's load
+  allows), then probe control, A and B from the same checkpoints. Run #259's sdebench passes
+  only if an arm beats the control.
+- **Done when.** A dated scorecard on a corpus with more decision key items names a winning
+  arm, which ships from #298, or rejects both, and #298 is closed with its branch.
