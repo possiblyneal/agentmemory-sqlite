@@ -54,6 +54,7 @@ describe("measureFoldDrift", () => {
 
   it("counts a prior decision the fold's rewrite dropped", async () => {
     const r = await measureFoldDrift(fakeProvider([ALL[1]!]), obs(6), opts);
+    expect(r.folds).toBe(1);
     expect(r.folded).toBe(1);
     expect(r.droppedExact).toBe(1);
     expect(r.droppedLoose).toBe(1);
@@ -70,6 +71,19 @@ describe("measureFoldDrift", () => {
     expect(r.fallbacks).toBe(1);
   });
 
+  it("counts what a fallback's re-summarize drops apart from fold drops", async () => {
+    const provider: MemoryProvider = {
+      name: "fake",
+      compress: async () => "",
+      summarize: async (system: string, prompt: string) =>
+        system === FOLD_SYSTEM ? "not xml" : xml(prompt.includes("(3 total)") ? [ALL[0]!] : [ALL[1]!]),
+    };
+    const r = await measureFoldDrift(provider, obs(6), opts);
+    expect(r.fallbacks).toBe(1);
+    expect(r.droppedExact).toBe(0);
+    expect(r.fallbackDroppedExact).toBe(1);
+  });
+
   it("matches normalized text and counts a reworded decision as loosely matched", async () => {
     const r = await measureFoldDrift(
       fakeProvider(["use sqlite for storage.", "Keep hooks fire and forget always", ALL[2]!]),
@@ -84,6 +98,7 @@ describe("measureFoldDrift", () => {
     const r = await measureFoldDrift(fakeProvider(ALL), obs(6), opts);
     expect(r.missingExact).toBe(0);
     expect(r.missingLoose).toBe(0);
+    expect(r.droppedExact).toBe(0);
     expect(r.droppedLoose).toBe(0);
   });
 });

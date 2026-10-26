@@ -21,6 +21,8 @@ export interface FoldDriftResult {
   missingLoose: number;
   droppedExact: number;
   droppedLoose: number;
+  fallbackDroppedExact: number;
+  fallbackDroppedLoose: number;
   missing: string[];
   fullSummary: SessionSummary | null;
   foldedSummary: SessionSummary | null;
@@ -97,6 +99,8 @@ export async function measureFoldDrift(
   let fallbacks = 0;
   let droppedExact = 0;
   let droppedLoose = 0;
+  let fallbackDroppedExact = 0;
+  let fallbackDroppedLoose = 0;
   for (let end = opts.batch; ; end += opts.batch) {
     const cut = Math.min(end, observations.length);
     const before = sequence.calls();
@@ -106,10 +110,13 @@ export async function measureFoldDrift(
     // A run after the first that made any non-fold call re-summarized the whole
     // Session, so its decisions are not a fold's.
     if (end > opts.batch) {
-      if (after.other > before.other) fallbacks++;
-      else if (after.fold > before.fold) {
+      const lost = missingFrom(prior, last?.keyDecisions ?? []);
+      if (after.other > before.other) {
+        fallbacks++;
+        fallbackDroppedExact += lost.exact.length;
+        fallbackDroppedLoose += lost.loose.length;
+      } else if (after.fold > before.fold) {
         folds++;
-        const lost = missingFrom(prior, last?.keyDecisions ?? []);
         droppedExact += lost.exact.length;
         droppedLoose += lost.loose.length;
       }
@@ -129,6 +136,8 @@ export async function measureFoldDrift(
     missingLoose: missing.loose.length,
     droppedExact,
     droppedLoose,
+    fallbackDroppedExact,
+    fallbackDroppedLoose,
     missing: missing.exact,
     fullSummary,
     foldedSummary: last,

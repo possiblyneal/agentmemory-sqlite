@@ -10,8 +10,8 @@
 
 ## Headline
 
-Appending a fold's new decisions in code stops folds dropping decisions: 0 dropped over 100
-folds, against 426 dropped by main's 83 (exact text; 405 by Jaccard). After the fold sequence the
+Appending a fold's new decisions in code stops folds dropping decisions: 0 drops over 100
+folds, against 426 drops by main's 83 (exact text; 405 by Jaccard). After the fold sequence the
 3 Sessions hold 155 decisions against 15. No replay metric moves: every hit, Used item and
 correction count is equal, and the fix injects 1.4% more characters. The corpus has no decision
 key items, so it cannot show the gain this fix makes. The fix fails #312's acceptance (no drop,
@@ -20,8 +20,13 @@ at least one gain), is rejected, and is not merged.
 ## Decisions dropped by folds
 
 A fold step drops a decision when the previous step's Summary held it and the fold's output does
-not, matched by normalized exact text (word-set Jaccard >= 0.5 in brackets). A fallback is a step
-whose fold reply failed to parse or validate, so the whole Session was re-summarized.
+not, matched by normalized exact text (word-set Jaccard >= 0.5 in brackets). Drops are summed over
+folds, so a decision dropped, restored and dropped again counts twice; they are drop events, not
+distinct decisions. A fallback is a step that re-summarized the whole Session instead of folding:
+the fold reply failed to parse or validate, it held no decisions while the prior Summary had some,
+or the fold prompt did not fit one chunk. These runs did not count what a fallback drops, so the
+dropped columns cover folds only; `eval:fold-drift` now reports that loss apart as
+`dropped-by-fallbacks`.
 
 | Observations | main folds / fallbacks | main dropped | fix folds / fallbacks | fix dropped |
 |---|---|---|---|---|
@@ -76,7 +81,8 @@ host whose load average ran from 4 to 19 over the 9.6-hour run.
 ## Reproduce
 
 ```sh
-# per arm (b84e3614 for main, this branch for the fix), from the repaired last #259 checkpoint
+# per arm (b84e3614 for main; the fix is c7d0c7ce on the Operator's local, unpushed branch
+# wip/312-fold-append-decisions, described under Methodology), from the repaired last #259 checkpoint
 npm ci && npm run build
 SUMMARIZE_CHUNK_CONCURRENCY=1 AGENTMEMORY_LLM_TIMEOUT_MS=900000 \
   npm run eval:fold-drift -- --store <checkpoint> --longest 3 --batch 20
@@ -88,8 +94,8 @@ npm run eval:replay -- --from-checkpoints <patched copy> --keyed-only --cap 1000
 
 ## Notes
 
-- The fix's remaining loss is the fallback: a fold whose reply fails validation (an empty
-  narrative, say) re-summarizes the whole Session and rebuilds the list from scratch. On the
+- The fix's remaining loss is the fallback: a fold that falls back (an empty narrative fails
+  validation, say) re-summarizes the whole Session and rebuilds the list from scratch. On the
   816-Observation Session the list grew to 40 and a fallback cut it back to 10 or fewer.
 - Injection shows the first 10 decisions of a Summary. With an appended list those are the
   Session's oldest 10, where a rewritten list put whatever the model kept first.
