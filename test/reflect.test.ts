@@ -911,4 +911,33 @@ describe("mem::reflect project scope (#1344)", () => {
     const insights = await kv.list<Insight>("mem:insights");
     expect(insights.every((i) => i.project === "alpha")).toBe(true);
   });
+  it("leaves out a fact whose cited Sessions are mostly another project's (#323)", async () => {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    await markGraphIndexesReady(kv as never);
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue(XML_RESPONSE) };
+    registerReflectFunctions(sdk as never, kv as never, provider as never);
+    await kv.set("mem:sessions", "ses_a", { id: "ses_a", project: "alpha" });
+    for (const name of ["security", "validation"]) {
+      await seedNode(kv, { ...makeConceptNode(name), sessionId: "ses_a" });
+    }
+    await seedEdge(kv, makeEdge("security", "validation"));
+    await kv.set("mem:sessions", "ses_b1", { id: "ses_b1", project: "beta" });
+    await kv.set("mem:sessions", "ses_b2", { id: "ses_b2", project: "beta" });
+    const alphaFacts = ["Always validate security inputs", "Testing improves security coverage", "Validation prevents security injection"];
+    for (const [i, fact] of alphaFacts.entries()) {
+      await kv.set("mem:semantic", `sem_a${i}`, { ...makeSemantic(fact, `sem_a${i}`), sourceSessionIds: ["ses_a", "ses_gone"] });
+    }
+    await kv.set("mem:semantic", "sem_mixed", {
+      ...makeSemantic("Spotify security scraper needs facebookexternalhit", "sem_mixed"),
+      sourceSessionIds: ["ses_b1", "ses_b2", "ses_a"],
+    });
+
+    await sdk.trigger("mem::reflect", { project: "alpha" });
+
+    expect(provider.summarize).toHaveBeenCalled();
+    for (const [, prompt] of provider.summarize.mock.calls) {
+      expect(String(prompt)).not.toMatch(/spotify/i);
+    }
+  });
 });

@@ -1,10 +1,22 @@
 import { jaccardSimilarity } from "../state/schema.js";
-import type { Insight } from "../types.js";
+import type { Insight, SemanticMemory } from "../types.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 
 // Insights a cluster keeps once the startup collapse has run. One reflect pass
 // writes at most this many per cluster.
 export const INSIGHTS_PER_CLUSTER = 5;
+
+// A Semantic Fact feeds a project's Reflect only when every cited Session that
+// still exists is that project's: one stray Session must not carry another
+// repo's fact into it (#323).
+export function factBelongsToProject(
+  fact: Pick<SemanticMemory, "sourceSessionIds">,
+  project: string,
+  sessionProjects: ReadonlyMap<string, string | undefined>,
+): boolean {
+  const known = fact.sourceSessionIds.filter((id) => sessionProjects.has(id));
+  return known.length > 0 && known.every((id) => sessionProjects.get(id) === project);
+}
 
 export function insightClusterKey(
   project: string | undefined,
