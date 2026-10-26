@@ -101,15 +101,15 @@ npm run eval:replay -- --from-checkpoints <patched copy> --keyed-only --cap 1000
   Session's oldest 10, where a rewritten list put whatever the model kept first.
 - The replay harness re-embeds every seeded checkpoint at boot (no recorded vector space). That
   fill blocked the daemon's event loop past `readyz` and outran the 10-minute fill limit on the
-  larger checkpoints, so `eval/runner/sandbox.ts` now waits up to 5 minutes for a `readyz` reply
-  and 45 minutes for the fill.
+  larger checkpoints, so `eval/runner/sandbox.ts` now gives a seeded boot up to 5 minutes in
+  total for `readyz`, each poll bounded by the time left, and 45 minutes for the fill.
 
 ## Rejected levers
 
 - **Code-built append of fold decisions** (this fix): stops the drop, but replay shows no gain
   on a corpus with no decision key items; it would need a corpus that scores decisions.
-- **Model rewrites the whole list on each fold** (main): drops 426 decisions over 83 folds.
-- **Longer sandbox boot timeout** (30 s to 120 s): still missed `readyz` under load; the
-  per-request wait replaced it.
+- **Model rewrites the whole list on each fold** (main): 426 decision drops over 83 folds.
+- **A flat 120 s boot timeout for every sandbox**: still missed `readyz` while a seeded store's
+  boot re-embed held the event loop. A 5-minute deadline for seeded stores only replaced it.
 - **Probing the arms in parallel at the 10-minute fill limit**: the fill timed out.
 - **`eval:replay --llm` as the replay arm**: it never folds, so it cannot see this change.
