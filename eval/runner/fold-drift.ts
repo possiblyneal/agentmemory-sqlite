@@ -85,10 +85,12 @@ async function main(): Promise<void> {
       folded: t.folded + r.folded,
       missingExact: t.missingExact + r.missingExact,
       missingLoose: t.missingLoose + r.missingLoose,
+      droppedExact: t.droppedExact + r.droppedExact,
+      droppedLoose: t.droppedLoose + r.droppedLoose,
     }),
-    { full: 0, folded: 0, missingExact: 0, missingLoose: 0 },
+    { full: 0, folded: 0, missingExact: 0, missingLoose: 0, droppedExact: 0, droppedLoose: 0 },
   );
-  console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose}`);
+  console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose} dropped-by-folds(exact)=${total.droppedExact} dropped-by-folds(jaccard>=0.5)=${total.droppedLoose}`);
 
   mkdirSync(OUT_DIR, { recursive: true });
   const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
@@ -97,7 +99,7 @@ async function main(): Promise<void> {
 }
 
 function row(r: FoldDriftResult): string {
-  return `${r.sessionId} obs=${r.observations} full=${r.full} folded=${r.folded} folds=${r.folds} fallbacks=${r.fallbacks} missing(exact)=${r.missingExact} missing(jaccard>=0.5)=${r.missingLoose}`;
+  return `${r.sessionId} obs=${r.observations} full=${r.full} folded=${r.folded} folds=${r.folds} fallbacks=${r.fallbacks} missing(exact)=${r.missingExact} missing(jaccard>=0.5)=${r.missingLoose} dropped-by-folds(exact)=${r.droppedExact} dropped-by-folds(jaccard>=0.5)=${r.droppedLoose}`;
 }
 
 main().catch((err) => {

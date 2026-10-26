@@ -29,19 +29,20 @@ const xml = (decisions: string[]) =>
 
 const ALL = ["Use SQLite for storage", "Keep hooks fire and forget", "Cap summaries at ten decisions"];
 
+// A whole-Session summary of the first batch alone finds only the first decision.
 function fakeProvider(foldReply: string[]): MemoryProvider {
   return {
     name: "fake",
     compress: async () => "",
-    summarize: async (system: string) =>
-      system === FOLD_SYSTEM ? xml(foldReply) : xml(ALL),
+    summarize: async (system: string, prompt: string) =>
+      system === FOLD_SYSTEM ? xml(foldReply) : xml(prompt.includes("(3 total)") ? [ALL[0]!] : ALL),
   };
 }
 
 const opts = { sessionId: "s1", project: "p", batch: 3 };
 
 describe("measureFoldDrift", () => {
-  it("counts a decision the fold sequence dropped", async () => {
+  it("counts a decision the fold sequence never found", async () => {
     const r = await measureFoldDrift(fakeProvider([ALL[0]!, ALL[1]!]), obs(6), opts);
     expect(r.full).toBe(3);
     expect(r.folded).toBe(2);
@@ -49,6 +50,13 @@ describe("measureFoldDrift", () => {
     expect(r.fallbacks).toBe(0);
     expect(r.missingExact).toBe(1);
     expect(r.missingLoose).toBe(1);
+  });
+
+  it("counts a prior decision the fold's rewrite dropped", async () => {
+    const r = await measureFoldDrift(fakeProvider([ALL[1]!]), obs(6), opts);
+    expect(r.folded).toBe(1);
+    expect(r.droppedExact).toBe(1);
+    expect(r.droppedLoose).toBe(1);
   });
 
   it("counts an unparseable fold reply as a fallback, not a fold", async () => {
@@ -76,5 +84,6 @@ describe("measureFoldDrift", () => {
     const r = await measureFoldDrift(fakeProvider(ALL), obs(6), opts);
     expect(r.missingExact).toBe(0);
     expect(r.missingLoose).toBe(0);
+    expect(r.droppedLoose).toBe(0);
   });
 });

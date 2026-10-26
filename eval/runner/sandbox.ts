@@ -19,7 +19,7 @@ export interface Sandbox {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BOOT_TIMEOUT_MS = 30_000;
-const VECTOR_FILL_TIMEOUT_MS = 10 * 60_000;
+const VECTOR_FILL_TIMEOUT_MS = 45 * 60_000;
 const STOP_GRACE_MS = 10_000;
 
 // Mirrors `--instance N` in src/cli.ts: REST anchors the block, streams and
@@ -47,10 +47,13 @@ export function isListening(port: number): Promise<boolean> {
 
 // readyz, not livez: livez answers as soon as the ports bind, while every
 // other route still answers 503 until a non-empty store has hydrated.
+// A seeded store whose vectors are re-embedded holds the daemon's event loop
+// for a minute or more right after readyz opens, so a short poll times out
+// until it ends; a refused connection still fails at once.
 async function isUp(baseUrl: string): Promise<boolean> {
   try {
     const res = await fetch(`${baseUrl}/agentmemory/readyz`, {
-      signal: AbortSignal.timeout(500),
+      signal: AbortSignal.timeout(5 * 60_000),
     });
     return res.ok;
   } catch {
