@@ -1084,16 +1084,38 @@ describe("mem::summarize incremental fold", () => {
     expect(stored.observationCount).toBe(8);
   });
 
-  it("retries a fold that drops every decision the prior summary had", async () => {
+  it("appends the fold's new decisions to the prior ones, dropping exact repeats", async () => {
+    const { handler, kv } = await withPriorSummary("ses_foldadd", 8, 5, "obs_4", [
+      summaryXml({ title: "folded", decisions: ["prior decision", " new decision "] }),
+    ]);
+
+    await handler({ sessionId: "ses_foldadd" });
+
+    const stored: any = await kv.get("summaries", "ses_foldadd");
+    expect(stored.keyDecisions).toEqual(["prior decision", "new decision"]);
+  });
+
+  it("keeps the prior decisions when a fold adds none, without re-summarizing", async () => {
     const { handler, kv, provider } = await withPriorSummary("ses_folddrop", 8, 5, "obs_4", [
       summaryXml({ title: "folded", decisions: [] }),
-      summaryXml({ title: "whole", decisions: ["rule"] }),
     ]);
 
     await handler({ sessionId: "ses_folddrop" });
 
-    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls).toHaveLength(1);
     const stored: any = await kv.get("summaries", "ses_folddrop");
+    expect(stored.keyDecisions).toEqual(["prior decision"]);
+  });
+
+  it("does not carry the prior decisions into a whole-Session retry", async () => {
+    const { handler, kv } = await withPriorSummary("ses_foldwhole", 8, 5, "obs_4", [
+      "not xml",
+      summaryXml({ title: "whole", decisions: ["rule"] }),
+    ]);
+
+    await handler({ sessionId: "ses_foldwhole" });
+
+    const stored: any = await kv.get("summaries", "ses_foldwhole");
     expect(stored.keyDecisions).toEqual(["rule"]);
   });
 

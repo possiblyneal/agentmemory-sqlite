@@ -426,6 +426,12 @@ function parseSummaryXml(
   };
 }
 
+// A fold's reply lists only the decisions its new Observations made: a model
+// asked to rewrite the whole list drops most of it (#312).
+function appendDecisions(prior: string[], added: string[]): string[] {
+  return [...new Set([...prior, ...added].map((d) => d.trim()))];
+}
+
 const MAX_INJECTED_DECISION_CHARS = 600;
 
 export function cutDecision(decision: string): string {
@@ -605,6 +611,7 @@ export function registerSummarizeFunction(
             logger.warn("Failed to parse summary XML", { sessionId, attempt });
             continue;
           }
+          if (fold) parsed.keyDecisions = appendDecisions(existing!.keyDecisions, parsed.keyDecisions);
           const validation = validateOutput(
             SummaryOutputSchema,
             {

@@ -116,7 +116,7 @@ Output EXACTLY this XML format with no additional text:
   <title>Short session title (max 100 chars)</title>
   <narrative>3-5 sentence narrative covering the whole session</narrative>
   <decisions>
-    <decision>Key technical decision made</decision>
+    <decision>Key technical decision made in the new observations</decision>
   </decisions>
   <files>
     <file>path/to/modified/file</file>
@@ -128,7 +128,7 @@ Output EXACTLY this XML format with no additional text:
 
 Rules:
 - Rewrite the narrative so it covers the whole session, not only the new observations
-- Keep every existing decision unless a new observation reverses it; add new ones
+- List under decisions only the decisions the new observations make. The existing decisions are kept as they are, so never repeat one; when a new observation reverses one, list the new decision
 - Give every rule, requirement or constraint the user stated as its own decision, keeping its exact values (status codes, limits, thresholds, names) and conditions; never generalize a specific value away
 - When a rule applies only in some cases, keep in the same decision what the user said happens in the rest ("otherwise ...", "for any other ..."), so the rule cannot be read as excluding them; the two are one decision even when stated or summarized apart
 - When an agent reply restates the agreed rules (a recap or a "Settled:" line) and the user does not correct it, keep each restated rule verbatim as its own decision; read a user's short answer ("down", "yes") against the agent's question before it
@@ -154,7 +154,7 @@ export function buildFoldPrompt(
   return `Current summary (covers observations 1-${priorObservationCount}):
 Title: ${prior.title}
 Narrative: ${prior.narrative}
-Decisions:
+Decisions (already recorded):
 ${decisions}
 Files:
 ${files}
