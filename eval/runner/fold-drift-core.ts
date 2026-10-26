@@ -19,7 +19,13 @@ export interface FoldDriftResult {
   fallbacks: number;
   missingExact: number;
   missingLoose: number;
+  droppedExact: number;
+  droppedLoose: number;
+  fallbackDroppedExact: number;
+  fallbackDroppedLoose: number;
   missing: string[];
+  fullSummary: SessionSummary | null;
+  foldedSummary: SessionSummary | null;
 }
 
 const LOOSE_JACCARD = 0.5;
@@ -84,32 +90,41 @@ export async function measureFoldDrift(
   observations: CompressedObservation[],
   opts: FoldDriftOptions,
 ): Promise<FoldDriftResult> {
-  const full = (await summarizer(provider, opts).run(observations))?.keyDecisions ?? [];
+  const fullSummary = await summarizer(provider, opts).run(observations);
+  const full = fullSummary?.keyDecisions ?? [];
 
   const sequence = summarizer(provider, opts);
   let last: SessionSummary | null = null;
   let folds = 0;
   let fallbacks = 0;
+  let droppedExact = 0;
+  let droppedLoose = 0;
+  let fallbackDroppedExact = 0;
+  let fallbackDroppedLoose = 0;
   for (let end = opts.batch; ; end += opts.batch) {
     const cut = Math.min(end, observations.length);
     const before = sequence.calls();
+    const prior = last?.keyDecisions ?? [];
     last = await sequence.run(observations.slice(0, cut));
     const after = sequence.calls();
     // A run after the first that made any non-fold call re-summarized the whole
     // Session, so its decisions are not a fold's.
     if (end > opts.batch) {
-      if (after.other > before.other) fallbacks++;
-      else if (after.fold > before.fold) folds++;
+      const lost = missingFrom(prior, last?.keyDecisions ?? []);
+      if (after.other > before.other) {
+        fallbacks++;
+        fallbackDroppedExact += lost.exact.length;
+        fallbackDroppedLoose += lost.loose.length;
+      } else if (after.fold > before.fold) {
+        folds++;
+        droppedExact += lost.exact.length;
+        droppedLoose += lost.loose.length;
+      }
     }
     if (cut === observations.length) break;
   }
   const folded = last?.keyDecisions ?? [];
-
-  const exact = new Set(folded.map(normalize));
-  const missingList = full.filter((d) => !exact.has(normalize(d)));
-  const missingLoose = missingList.filter(
-    (d) => !folded.some((f) => jaccardSimilarity(d, f) >= LOOSE_JACCARD),
-  );
+  const missing = missingFrom(full, folded);
   return {
     sessionId: opts.sessionId,
     observations: observations.length,
@@ -117,8 +132,23 @@ export async function measureFoldDrift(
     folded: folded.length,
     folds,
     fallbacks,
-    missingExact: missingList.length,
-    missingLoose: missingLoose.length,
-    missing: missingList,
+    missingExact: missing.exact.length,
+    missingLoose: missing.loose.length,
+    droppedExact,
+    droppedLoose,
+    fallbackDroppedExact,
+    fallbackDroppedLoose,
+    missing: missing.exact,
+    fullSummary,
+    foldedSummary: last,
   };
+}
+
+// Decisions of `from` that `to` lacks, by normalized exact text and, looser, by
+// word-set Jaccard.
+function missingFrom(from: string[], to: string[]): { exact: string[]; loose: string[] } {
+  const present = new Set(to.map(normalize));
+  const exact = from.filter((d) => !present.has(normalize(d)));
+  const loose = exact.filter((d) => !to.some((t) => jaccardSimilarity(d, t) >= LOOSE_JACCARD));
+  return { exact, loose };
 }

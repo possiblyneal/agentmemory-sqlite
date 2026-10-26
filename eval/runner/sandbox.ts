@@ -19,7 +19,8 @@ export interface Sandbox {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BOOT_TIMEOUT_MS = 30_000;
-const VECTOR_FILL_TIMEOUT_MS = 10 * 60_000;
+const SEEDED_BOOT_TIMEOUT_MS = 5 * 60_000;
+const VECTOR_FILL_TIMEOUT_MS = 45 * 60_000;
 const STOP_GRACE_MS = 10_000;
 
 // Mirrors `--instance N` in src/cli.ts: REST anchors the block, streams and
@@ -47,10 +48,13 @@ export function isListening(port: number): Promise<boolean> {
 
 // readyz, not livez: livez answers as soon as the ports bind, while every
 // other route still answers 503 until a non-empty store has hydrated.
-async function isUp(baseUrl: string): Promise<boolean> {
+// A seeded store whose vectors are re-embedded holds the daemon's event loop
+// for a minute or more right after readyz opens, so each poll may wait out the
+// whole boot deadline; a refused connection still fails at once.
+async function isUp(baseUrl: string, timeoutMs: number): Promise<boolean> {
   try {
     const res = await fetch(`${baseUrl}/agentmemory/readyz`, {
-      signal: AbortSignal.timeout(500),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return res.ok;
   } catch {
@@ -211,8 +215,8 @@ export async function startSandbox(opts: {
     rmSync(dir, { recursive: true, force: true });
   };
 
-  const deadline = Date.now() + BOOT_TIMEOUT_MS;
-  while (!(await isUp(baseUrl))) {
+  const deadline = Date.now() + (opts.seed ? SEEDED_BOOT_TIMEOUT_MS : BOOT_TIMEOUT_MS);
+  while (!(await isUp(baseUrl, Math.max(500, deadline - Date.now())))) {
     if (hasExited() || Date.now() > deadline) {
       await stop();
       throw new Error(`sandbox daemon on ${baseUrl} did not come up; see ${logPath}`);
