@@ -156,6 +156,9 @@ export interface SessionSummary {
   title: string;
   narrative: string;
   keyDecisions: string[];
+  // Parallel to keyDecisions: when each was first made or last restated. Absent
+  // on Summaries written before it existed; a missing entry reads as decidedAt().
+  decisionDates?: string[];
   filesModified: string[];
   concepts: string[];
   observationCount: number;

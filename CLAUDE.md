@@ -238,6 +238,18 @@ drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions
 (each cut as above) and 10 modified files, then `(+N more)`, so one large Summary cannot crowd
 out the rest of the budget; its `summary` ref keeps every file. Summary blocks are ordered newest work first by the same date prompt submit uses (`decidedAt`), not by write time.
+`mem::summarize` (`carryDecisions`, `src/functions/summarize.ts`) carries the prior Summary's
+decisions forward in code on every path (fold, retry, full re-read, `force`); the model's reply
+only adds to them, because a model asked to rewrite the list drops most of it. A stale Summary
+is folded; a failed fold is retried once as a fold, then the whole Session is re-read, and that
+re-read's decisions are merged into the carried list, never replacing it. `decisionDates` is an
+optional array parallel to `keyDecisions` holding when each was first made. A Summary written
+before it existed, or a missing entry, reads as `decidedAt()` (`lastObservationAt`, else
+`coveredThrough`, else `createdAt`), so old plain-string Summaries need no migration. A new
+decision whose word-set Jaccard with a carried one is at least `RESTATEMENT_OVERLAP`
+(`src/functions/recency-cap.ts`, 0.5) replaces it in place and takes the new date, which is the
+last Observation's timestamp; any other is appended. A Summary with no prior is stored as the
+model wrote it.
 
 ### Pinned rules
 `mem::context` (session start; pre-compact posts the same `/agentmemory/context` at budget 1500)

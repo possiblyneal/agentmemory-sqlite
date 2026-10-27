@@ -56,6 +56,11 @@ describe("session-start Summary block is bounded", () => {
     expect(context).not.toContain("d11");
   });
 
+  it("renders a Summary written before decisions were dated, from plain-string decisions", async () => {
+    const { context } = await start({ keyDecisions: ["Fail closed when the token is unset"], decisionDates: undefined });
+    expect(context).toContain("Decisions: Fail closed when the token is unset\n");
+  });
+
   it("carries a 500-character decision whole", async () => {
     const { context } = await start({ keyDecisions: ["x".repeat(500)] });
     expect(context).toContain(`Decisions: ${"x".repeat(500)}\n`);

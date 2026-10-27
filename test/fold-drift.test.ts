@@ -52,12 +52,12 @@ describe("measureFoldDrift", () => {
     expect(r.missingLoose).toBe(1);
   });
 
-  it("counts a prior decision the fold's rewrite dropped", async () => {
+  it("keeps a prior decision the fold's reply leaves out", async () => {
     const r = await measureFoldDrift(fakeProvider([ALL[1]!]), obs(6), opts);
     expect(r.folds).toBe(1);
-    expect(r.folded).toBe(1);
-    expect(r.droppedExact).toBe(1);
-    expect(r.droppedLoose).toBe(1);
+    expect(r.folded).toBe(2);
+    expect(r.droppedExact).toBe(0);
+    expect(r.droppedLoose).toBe(0);
   });
 
   it("counts an unparseable fold reply as a fallback, not a fold", async () => {
@@ -71,7 +71,7 @@ describe("measureFoldDrift", () => {
     expect(r.fallbacks).toBe(1);
   });
 
-  it("counts what a fallback's re-summarize drops apart from fold drops", async () => {
+  it("keeps the prior decisions through a fallback's re-summarize", async () => {
     const provider: MemoryProvider = {
       name: "fake",
       compress: async () => "",
@@ -81,7 +81,7 @@ describe("measureFoldDrift", () => {
     const r = await measureFoldDrift(provider, obs(6), opts);
     expect(r.fallbacks).toBe(1);
     expect(r.droppedExact).toBe(0);
-    expect(r.fallbackDroppedExact).toBe(1);
+    expect(r.fallbackDroppedExact).toBe(0);
   });
 
   it("matches normalized text and counts a reworded decision as loosely matched", async () => {

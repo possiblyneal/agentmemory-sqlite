@@ -4,7 +4,8 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../src/state/schema.js", () => ({
+vi.mock("../src/state/schema.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/state/schema.js")>()),
   KV: {
     sessions: "sessions",
     summaries: "summaries",
@@ -1067,21 +1068,36 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
   });
 
-  it("retries a fold whose first reply fails to parse as a whole-Session summary", async () => {
+  it("retries a failed fold once as a fold, then re-reads the whole Session", async () => {
     const { handler, kv, provider } = await withPriorSummary("ses_retry", 8, 5, "obs_4", [
       "not xml",
-      summaryXml({ title: "second try" }),
+      "not xml",
+      summaryXml({ title: "third try", decisions: ["whole read decision"] }),
     ]);
 
     const result: any = await handler({ sessionId: "ses_retry" });
 
-    expect(result.summary.title).toBe("second try");
-    expect(provider.calls).toHaveLength(2);
+    expect(result.summary.title).toBe("third try");
+    expect(provider.calls).toHaveLength(3);
     expect(provider.calls[0].user).toContain("prior narrative text");
-    expect(provider.calls[1].user).toContain("Session observations (8 total)");
-    expect(provider.calls[1].user).not.toContain("prior narrative text");
+    expect(provider.calls[1].user).toContain("prior narrative text");
+    expect(provider.calls[2].user).toContain("Session observations (8 total)");
+    expect(provider.calls[2].user).not.toContain("prior narrative text");
     const stored: any = await kv.get("summaries", "ses_retry");
     expect(stored.observationCount).toBe(8);
+  });
+
+  it("settles on the fold's retry when it succeeds, without re-reading", async () => {
+    const { handler, provider } = await withPriorSummary("ses_retryfold", 8, 5, "obs_4", [
+      "not xml",
+      summaryXml({ title: "second try" }),
+    ]);
+
+    const result: any = await handler({ sessionId: "ses_retryfold" });
+
+    expect(result.summary.title).toBe("second try");
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[1].user).toContain("prior narrative text");
   });
 
   it("appends the fold's new decisions to the prior ones, dropping exact repeats", async () => {
@@ -1107,16 +1123,76 @@ describe("mem::summarize incremental fold", () => {
     expect(stored.keyDecisions).toEqual(["prior decision"]);
   });
 
-  it("does not carry the prior decisions into a whole-Session retry", async () => {
+  it("keeps every prior decision after a whole-Session re-read", async () => {
     const { handler, kv } = await withPriorSummary("ses_foldwhole", 8, 5, "obs_4", [
       "not xml",
-      summaryXml({ title: "whole", decisions: ["rule"] }),
+      "not xml",
+      summaryXml({ title: "whole", decisions: ["rule about something else entirely"] }),
     ]);
 
     await handler({ sessionId: "ses_foldwhole" });
 
     const stored: any = await kv.get("summaries", "ses_foldwhole");
-    expect(stored.keyDecisions).toEqual(["rule"]);
+    expect(stored.keyDecisions).toEqual(["prior decision", "rule about something else entirely"]);
+  });
+
+  it("keeps every prior decision after force", async () => {
+    const { handler, kv } = await withPriorSummary("ses_forcekeep", 8, 5, "obs_4", [
+      summaryXml({ title: "forced", decisions: ["forced decision about limits"] }),
+    ]);
+
+    await handler({ sessionId: "ses_forcekeep", force: true });
+
+    const stored: any = await kv.get("summaries", "ses_forcekeep");
+    expect(stored.keyDecisions).toEqual(["prior decision", "forced decision about limits"]);
+  });
+
+  describe("decision dates", () => {
+    const PRIOR_DAY = "2026-01-01T00:00:00.000Z";
+    const priorDecisions = [
+      "Return status 429 when the rate limit of 100 requests per minute is exceeded",
+      "Store the audit log in SQLite",
+    ];
+
+    async function withDatedPrior(id: string, response: string) {
+      const ctx = await withPriorSummary(id, 8, 5, "obs_4", [response]);
+      const prior: any = await ctx.kv.get("summaries", id);
+      await ctx.kv.set("summaries", id, { ...prior, createdAt: PRIOR_DAY, keyDecisions: priorDecisions });
+      return ctx;
+    }
+
+    it("replaces a restated decision in place and gives it the new date", async () => {
+      const { handler, kv } = await withDatedPrior(
+        "ses_restate",
+        summaryXml({
+          title: "folded",
+          decisions: ["Return status 429 when the rate limit of 200 requests per minute is exceeded"],
+        }),
+      );
+
+      await handler({ sessionId: "ses_restate" });
+
+      const stored: any = await kv.get("summaries", "ses_restate");
+      expect(stored.keyDecisions).toEqual([
+        "Return status 429 when the rate limit of 200 requests per minute is exceeded",
+        "Store the audit log in SQLite",
+      ]);
+      expect(stored.decisionDates[0]).toBe(stored.lastObservationAt);
+      expect(stored.decisionDates[1]).toBe(PRIOR_DAY);
+    });
+
+    it("appends a decision that restates nothing, dated by its Observations", async () => {
+      const { handler, kv } = await withDatedPrior(
+        "ses_nonrestate",
+        summaryXml({ title: "folded", decisions: ["Retry webhooks three times"] }),
+      );
+
+      await handler({ sessionId: "ses_nonrestate" });
+
+      const stored: any = await kv.get("summaries", "ses_nonrestate");
+      expect(stored.keyDecisions).toEqual([...priorDecisions, "Retry webhooks three times"]);
+      expect(stored.decisionDates).toEqual([PRIOR_DAY, PRIOR_DAY, stored.lastObservationAt]);
+    });
   });
 
   it("keeps a decision-less fold of a prior summary that had none", async () => {

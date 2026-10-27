@@ -1,6 +1,6 @@
 import { jaccardOverlap, jaccardText } from "../state/schema.js";
 
-const RESTATEMENT_OVERLAP = 0.5;
+export const RESTATEMENT_OVERLAP = 0.5;
 
 // Records that restate a topic in nearly the same words are the same claim;
 // when their wording differs, the one touched later holds. Rank the older one

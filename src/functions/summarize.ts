@@ -5,7 +5,8 @@ import type {
   MemoryProvider,
   Session,
 } from "../types.js";
-import { KV } from "../state/schema.js";
+import { KV, jaccardSimilarity } from "../state/schema.js";
+import { RESTATEMENT_OVERLAP } from "./recency-cap.js";
 import { StateKV } from "../state/kv.js";
 import {
   SUMMARY_SYSTEM,
@@ -426,10 +427,32 @@ function parseSummaryXml(
   };
 }
 
-// A fold's reply lists only the decisions its new Observations made: a model
-// asked to rewrite the whole list drops most of it (#312).
-function appendDecisions(prior: string[], added: string[]): string[] {
-  return [...new Set([...prior, ...added].map((d) => d.trim()))];
+// The prior Summary's decisions are carried forward in code on every path;
+// the model's reply only adds to them, since a model asked to rewrite the list
+// drops most of it (#312, #335). A decision without a date reads as its
+// Summary's date. An added decision that restates a carried one (word-set
+// Jaccard >= RESTATEMENT_OVERLAP) replaces it in place and takes the new date.
+function carryDecisions(
+  prior: SessionSummary,
+  added: string[],
+  addedAt: string,
+): { keyDecisions: string[]; decisionDates: string[] } {
+  const priorAt = decidedAt(prior);
+  const carried = prior.keyDecisions.map((text, i) => ({
+    text: text.trim(),
+    at: prior.decisionDates?.[i] ?? priorAt,
+  }));
+  for (const raw of added) {
+    const text = raw.trim();
+    if (!text || carried.some((c) => c.text === text)) continue;
+    const restated = carried.find((c) => jaccardSimilarity(c.text, text) >= RESTATEMENT_OVERLAP);
+    if (restated) Object.assign(restated, { text, at: addedAt });
+    else carried.push({ text, at: addedAt });
+  }
+  return {
+    keyDecisions: carried.map((c) => c.text),
+    decisionDates: carried.map((c) => c.at),
+  };
 }
 
 const MAX_INJECTED_DECISION_CHARS = 600;
@@ -558,8 +581,10 @@ export function registerSummarizeFunction(
           const [tokens] = await countObservationTokens(provider, [prompt], budget, sessionId);
           if (fitsOneChunk([tokens!], budget)) foldPrompt = prompt;
         }
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          const fold = attempt === 1 ? foldPrompt : null;
+        // A failed fold is retried once as a fold, then the whole Session is read.
+        const plan = foldPrompt ? [foldPrompt, foldPrompt, null] : [null, null];
+        for (let attempt = 1; attempt <= plan.length; attempt++) {
+          const fold = plan[attempt - 1]!;
           let produced: { response: string; mode: "single" | "chunked" | "folded"; chunks: number };
           try {
             if (!fold) planned ??= await planChunks(provider, compressed, sessionId, concurrency);
@@ -611,7 +636,7 @@ export function registerSummarizeFunction(
             logger.warn("Failed to parse summary XML", { sessionId, attempt });
             continue;
           }
-          if (fold) parsed.keyDecisions = appendDecisions(existing!.keyDecisions, parsed.keyDecisions);
+          if (existing) Object.assign(parsed, carryDecisions(existing, parsed.keyDecisions, lastObservationAt));
           const validation = validateOutput(
             SummaryOutputSchema,
             {

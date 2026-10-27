@@ -203,6 +203,22 @@ describe("mem::prompt-context", () => {
     ]);
   });
 
+  it("dates a Summary without decision dates by its last Observation", async () => {
+    await kv.set(KV.summaries, "ses_old", {
+      sessionId: "ses_old",
+      project: "shipctl",
+      createdAt: "2026-10-09T12:00:00.000Z",
+      lastObservationAt: "2026-10-02T08:00:00.000Z",
+      title: "Token handling for staging auth",
+      keyDecisions: ["Fail closed when SHIPCTL_TOKEN is unset"],
+      filesModified: [],
+    });
+    hits = [{ id: "obs_a", score: 16 }];
+    const { context } = await run("staging auth fails when SHIPCTL_TOKEN is unset");
+    expect(context).toContain('Session "Token handling for staging auth" (2026-10-02):');
+    expect(context).toContain("- Fail closed when SHIPCTL_TOKEN is unset");
+  });
+
   it("carries a 500-character decision whole and cuts a 700-character one to 600 plus an ellipsis", async () => {
     await kv.set(KV.summaries, "ses_old", {
       sessionId: "ses_old",
