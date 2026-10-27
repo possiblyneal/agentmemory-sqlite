@@ -1,16 +1,14 @@
-import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { isAwaitingCompression } from "../../src/functions/compress-synthetic.js";
@@ -29,15 +27,16 @@ import {
   type SessionScore,
 } from "./replay-score.js";
 import {
-  isMainTranscriptName,
-  orderByStart,
-  parseTranscript,
   relativeToCwd,
   type ReplaySession,
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
 import { selectionOf } from "./replay-selection.js";
+import { loadSessions, type Loaded } from "./replay-load.js";
+import { DECISION_KEY_PATH, DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
+import { readDecisionKey, type DecisionKey } from "./decision-key.js";
+import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
 import { hookPayloads } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
@@ -47,7 +46,6 @@ import { parseMaintenance, type MaintenancePass } from "./replay-maintenance.js"
 
 const REPO_TMP = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp");
 const SEARCH_LIMIT = 5;
-const MAX_TRANSCRIPT_BYTES = 20_000_000;
 const DRAIN_POLL_MS = 500;
 const DRAIN_STALL_MS = 15 * 60_000;
 const SUMMARIZE_TIMEOUT_MS = 60 * 60_000;
@@ -69,6 +67,7 @@ interface Options {
   out: string;
   split: Split;
   keyedOnly: boolean;
+  decisionKey: boolean;
   saveCheckpoints: boolean;
   resume: boolean;
   fromCheckpoints?: string;
@@ -93,6 +92,7 @@ function parseOptions(): Options {
       out: { type: "string", default: join(REPO_TMP, "eval-replay") },
       split: { type: "string" },
       "keyed-only": { type: "boolean", default: false },
+      "decision-key": { type: "boolean", default: false },
       "save-checkpoints": { type: "boolean", default: false },
       resume: { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
@@ -174,6 +174,10 @@ function parseOptions(): Options {
     console.error(`--reply-scale must be a number >= 0, got: ${values["reply-scale"]}`);
     process.exit(2);
   }
+  if (values["decision-key"] && (values.backend === "hindsight" || values["keyed-only"])) {
+    console.error("--decision-key judges agentmemory's Injection text over every scored Session; drop --backend hindsight and --keyed-only");
+    process.exit(2);
+  }
   const maintenance = values.maintenance ? parseMaintenance(values.maintenance) : undefined;
   if (maintenance && "error" in maintenance) {
     console.error(maintenance.error);
@@ -193,6 +197,7 @@ function parseOptions(): Options {
     out,
     split: openSplit(values.split, "replay"),
     keyedOnly: values["keyed-only"] === true,
+    decisionKey: values["decision-key"] === true,
     saveCheckpoints: values["save-checkpoints"] === true,
     resume: values.resume === true,
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
@@ -202,71 +207,22 @@ function parseOptions(): Options {
   };
 }
 
-interface Loaded {
-  sessions: ReplaySession[];
-  perDirectory: Record<string, { files: number; skippedLarge: number }>;
-  perProject: Record<string, { replayable: number; replayed: number }>;
+interface DecisionScoring {
+  key: DecisionKey;
+  judge: Judge;
 }
 
-function mainCheckoutName(dir: string): string | undefined {
-  try {
-    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-      cwd: dir,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8",
-    }).trim();
-    return basename(common) === ".git" ? basename(dirname(common)) : undefined;
-  } catch {
-    return undefined;
-  }
+function openDecisionScoring(opts: Options): DecisionScoring | undefined {
+  if (!opts.decisionKey) return undefined;
+  return {
+    key: readDecisionKey(DECISION_KEY_PATH),
+    judge: createJudge(providerComplete(), openVerdictCache(DECISION_VERDICTS_PATH)),
+  };
 }
 
-// Mirrors the live hooks' resolveProject: every worktree of a repo files
-// under its main checkout's name. A deleted worktree resolves from its
-// nearest surviving ancestor inside the repo, or from the Orca layout
-// <...>/workspaces/<repo>/<worktree>; anything else keeps the importer's name.
-function repoProject(cwd: string, importerName: string): string {
-  let dir = cwd;
-  while (!existsSync(dir) && dir !== dirname(dir)) dir = dirname(dir);
-  return mainCheckoutName(dir) ?? cwd.match(/\/workspaces\/([^/]+)\/[^/]+/)?.[1] ?? importerName;
-}
-
-function loadSessions(opts: Options): Loaded {
-  const byProject = new Map<string, ReplaySession[]>();
-  const perDirectory: Loaded["perDirectory"] = {};
-  const projectByCwd = new Map<string, string>();
-  const seen = new Set<string>();
-  for (const dir of opts.projects) {
-    const path = join(opts.root, dir);
-    if (!existsSync(path)) {
-      console.error(`no such project directory: ${path}`);
-      process.exit(2);
-    }
-    const files = readdirSync(path).filter(isMainTranscriptName);
-    const stats = { files: files.length, skippedLarge: 0 };
-    for (const name of files) {
-      const file = join(path, name);
-      if (statSync(file).size > MAX_TRANSCRIPT_BYTES) {
-        stats.skippedLarge++;
-        continue;
-      }
-      const session = parseTranscript(readFileSync(file, "utf8"), file);
-      if (!session || session.userTurns.length < opts.minTurns || seen.has(session.id)) continue;
-      seen.add(session.id);
-      if (!projectByCwd.has(session.cwd)) projectByCwd.set(session.cwd, repoProject(session.cwd, session.project));
-      session.project = projectByCwd.get(session.cwd)!;
-      byProject.set(session.project, [...(byProject.get(session.project) ?? []), session]);
-    }
-    perDirectory[dir] = stats;
-  }
-  const picked: ReplaySession[] = [];
-  const perProject: Loaded["perProject"] = {};
-  for (const [project, sessions] of byProject) {
-    const chosen = orderByStart(sessions).slice(0, opts.cap);
-    perProject[project] = { replayable: sessions.length, replayed: chosen.length };
-    picked.push(...chosen);
-  }
-  return { sessions: orderByStart(picked), perDirectory, perProject };
+async function withDecisions(score: SessionScore, session: ReplaySession, probes: Probe[], scoring?: DecisionScoring): Promise<SessionScore> {
+  if (!scoring) return score;
+  return { ...score, decisions: await decisionOutcomes(session, scoring.key, probes, scoring.judge) };
 }
 
 const post = <T>(baseUrl: string, path: string, body: unknown) => daemonCall<T>(baseUrl, path, { body });
@@ -376,7 +332,7 @@ async function probeSession(
   };
   const injection = (path: string, body: unknown) => async () => {
     const { body: res, ms } = await post<{ context?: string }>(baseUrl, path, body);
-    return { latencyMs: ms, chars: res.context?.length ?? 0, items: [] };
+    return { latencyMs: ms, chars: res.context?.length ?? 0, items: [], text: res.context ?? "" };
   };
 
   await attempt("session-start", 0, injection("session/start", { sessionId: session.id, project: session.project, cwd: session.cwd }));
@@ -581,7 +537,7 @@ async function recordIngested(baseUrl: string, session: ReplaySession, resolver:
   resolver.sessions.set(session.id, session);
 }
 
-async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string): Promise<void> {
+async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string, decisions?: DecisionScoring): Promise<void> {
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const dir = opts.fromCheckpoints!;
   const checkpoints = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as Checkpoint[];
@@ -626,7 +582,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
-      const score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
+      const score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, probes, decisions);
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       console.log(
@@ -701,7 +657,8 @@ async function main(): Promise<void> {
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
   writeFileSync(ndjson, "");
-  if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson);
+  const decisions = openDecisionScoring(opts);
+  if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson, decisions);
 
   const checkpointDir = join(opts.out, "checkpoints");
   const manifestPath = join(checkpointDir, MANIFEST);
@@ -726,7 +683,7 @@ async function main(): Promise<void> {
         writeFileSync(manifestPath, JSON.stringify(checkpoints, null, 2));
       } else if (scored.has(session.id) && !opts.saveCheckpoints) {
         const probes = await backend.probe(session, opts.maxPrompts);
-        score = scoreSession(session, deriveAnswerKey(session, ingested), probes);
+        score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, probes, decisions);
         scores.push(score);
         appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       }

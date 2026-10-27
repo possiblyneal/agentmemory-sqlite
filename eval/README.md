@@ -241,6 +241,12 @@ To compare arms, save checkpoints once, then probe the same checkpoints per arm 
 
 Output under `tmp/eval-replay/` (gitignored, because it quotes private transcripts): `summary.json` (run config, providers, per-Goal-line numbers), `scores.ndjson` (one row per Session), `worst-cases.md` (up to 20 misses, noise items and leaks, each with Session id and turn). Only the aggregates go into a scorecard under `docs/benchmarks/`.
 
+#### Decision key
+
+`replay-answer-key.ts` finds a revisited decision only by phrase and word overlap, which matched 29 of 1,511 typed turns, so decision delivery needed its own key. `npm run eval:decision-key -- --projects=<dir>,... [--cap N] [--min-turns N] [--rebuild]` (`runner/decision-key-run.ts`; the core is `decision-key.ts`) loads the same Sessions replay would (`replay-load.ts`) and asks the daemon's own LLM provider (the one `eval:fold-drift` uses: `OPENAI_*` from the shell, else `~/.agentmemory/.env`) two questions per Session. First, which decisions the Operator made. Its input is only the typed turns (`replay-transcript.ts` already drops Harness Messages, compaction and continuation summaries, skill bodies and meta turns) and each `AskUserQuestion` call's questions, options and the Operator's answer (`decision-inputs.ts`); Agent prose never reaches it. Second, for each substantive typed prompt up to turn 40, which decisions from earlier Sessions of the same project bear on it (the newest 100 are offered). The result is written once to `tmp/eval-replay/decision-key.json`; a rerun reuses it and spends no LLM call unless `--rebuild`. The key is built over every loaded Session whatever the split; the split applies when replay scores.
+
+`eval:replay --decision-key` (agentmemory backend, not with `--keyed-only`) reads that file and, for each expected decision of each probed prompt, asks an LLM judge whether the session-start Injection and the prompt-context Injection of that prompt deliver it (`decision-judge.ts`; a paraphrase counts, an empty Injection never does). Verdicts are cached in `tmp/eval-replay/decision-verdicts.ndjson` by (decision id, sha256 of the injected text), so an unchanged rerun makes no judge call. `summary.json` gains `decisionRecall` (`items`, and `sessionStart`, `promptSubmit`, `either` as `{n, hit, share}`), pooled, under `byProject` and under `typical`. Both files quote the Operator and stay under `tmp/`; only aggregates are published.
+
 #### Freezing the corpus
 
 Claude Code deletes transcripts older than `cleanupPeriodDays` (default 30) from `~/.claude/projects`, so a later replay can select a different Session set and its numbers are not comparable. To compare runs, copy the projects directories once into a folder under `tmp/` (private, never committed), for example `mkdir -p tmp/replay-corpus && cp -rL ~/.claude/projects/<dir> tmp/replay-corpus/` (or `rsync -aL`), and pass `--root tmp/replay-corpus` to every run. Each run records `selection: { sessions, fingerprint }` in `summary.json` (and the checkpoint `run.json`); the fingerprint hashes the sorted ids of the scored Sessions. Two runs compare only when their fingerprints match: `eval:suite --against` prints a warning when they differ or one run predates the field, and still compares.
@@ -327,6 +333,12 @@ eval/
 │   ├── replay-transcript.ts       transcript JSONL → Session (prompts, files, turns, preceding reply)
 │   ├── replay-query-arm.ts        --query-arm: prompt + reply/prev-prompt text per arm
 │   ├── replay-answer-key.ts       files needed, repeated corrections, decisions revisited
+│   ├── replay-load.ts             --projects directories → ordered, project-resolved Sessions (replay and the decision key)
+│   ├── decision-key-run.ts        eval:decision-key CLI
+│   ├── decision-key.ts            LLM-built frozen decision key: extract decisions, label later prompts
+│   ├── decision-inputs.ts         typed turns + AskUserQuestion Q&A, the only extractor input
+│   ├── decision-judge.ts          LLM delivery judge, on-disk verdict cache, per-Session outcomes
+│   ├── decision-llm.ts            the daemon's provider as a completion function; key and cache paths
 │   ├── replay-checkpoints.ts      save-pass manifest, --resume checks, checkpoint write
 │   ├── replay-selection.ts        scored-Session fingerprint and the cross-corpus comparison warning
 │   ├── replay-hooks.ts            transcript → the /observe payloads the hooks would have sent (--llm)
