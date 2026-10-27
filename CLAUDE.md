@@ -487,3 +487,4 @@ The five canonical roles, each label string equal to its name. See `docs/agents/
 Single-context. `CONTEXT.md` holds the glossary — use its terms in specs, issues, and commit messages. ADRs live in `docs/adrs/`; read any whose scope covers what you are touching before editing. See `docs/agents/domain.md`.
 
 - [ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md) — this fork runs only the in-process SQLite Engine.
+- [ADR 0002](./docs/adrs/0002-local-embedder-on-worker-thread.md) — the local embedder runs on a worker thread (proposed).

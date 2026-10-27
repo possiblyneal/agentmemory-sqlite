@@ -65,8 +65,10 @@ answer is read against the question it answers.
 A Session Summary is current until an Observation arrives after it was written, and a
 current one is reused rather than reproduced. A stale one is folded forward: only the
 Observations after its recorded count are sent, with the prior summary, and the whole Session
-is re-read only on `force`, when that count no longer marks its last Observation, or when the
-new Observations exceed one chunk.
+is re-read only on `force`, when that count no longer marks its last Observation, when the
+new Observations exceed one chunk, or when the fold fails twice.
+Folding forward or re-reading never loses a decision the prior summary held: each decision is
+dated when it was first made, and a later decision that restates an earlier one replaces it.
 _Avoid_: session digest, recap
 
 **Lesson**:
