@@ -106,10 +106,15 @@ export function resolveLlmTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LLM_TIMEOUT_MS;
 }
 
+// `idle: true` turns the deadline into an inactivity bound once the headers
+// arrive: every body chunk re-arms it, so a streamed reply that keeps writing
+// is never cut off, and one that falls silent for `ms` still is (#329). Until
+// the headers arrive the deadline is the same total budget as without it.
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs?: number,
+  options?: { idle?: boolean },
 ): Promise<Response> {
   const ms =
     timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
@@ -122,16 +127,45 @@ export async function fetchWithTimeout(
   // the headers arrive, so a server that stalls mid-body is cut off too.
   const start = Date.now();
   const deadline = new AbortController();
-  setTimeout(
-    () => deadline.abort(new ProviderTimeoutError(`request timed out after ${ms}ms`)),
-    ms,
-  ).unref();
+  const expire = () =>
+    deadline.abort(
+      new ProviderTimeoutError(
+        options?.idle ? `request received nothing for ${ms}ms` : `request timed out after ${ms}ms`,
+      ),
+    );
+  let timer = setTimeout(expire, ms).unref();
   const signal = init.signal
     ? AbortSignal.any([init.signal, deadline.signal])
     : deadline.signal;
   const send = () =>
     fetch(url, { ...init, signal, dispatcher: deadlineOnlyDispatcher });
 
+  const response = await sendWithRetry(send, ms, start);
+  if (!options?.idle || !response.body) return response;
+  clearTimeout(timer);
+  timer = setTimeout(expire, ms).unref();
+  const rearm = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      clearTimeout(timer);
+      timer = setTimeout(expire, ms).unref();
+      controller.enqueue(chunk);
+    },
+    flush() {
+      clearTimeout(timer);
+    },
+  });
+  return new Response(response.body.pipeThrough(rearm), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+async function sendWithRetry(
+  send: () => Promise<Response>,
+  ms: number,
+  start: number,
+): Promise<Response> {
   let response: Response = await send();
   for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
     if (!RETRY_STATUS.has(response.status)) return response;

@@ -366,7 +366,11 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - Use `recordAudit()` for state-changing operations
 - Timestamps: capture once with `new Date().toISOString()` and reuse
 - Outbound LLM and embedding calls go through `fetchWithTimeout`, which honors the caller's
-  timeout exactly. One deadline covers every retry and the read of the response body. LLM
+  timeout exactly. One deadline covers every retry and the read of the response body; with
+  `{ idle: true }` it bounds only silence once headers arrive, each body chunk re-arming it.
+  The OpenAI LLM provider streams (`stream: true`) under the idle bound, so a long reply that
+  keeps writing finishes and a stalled one fails naming the chars received; a JSON reply from
+  a server that ignores `stream` is still read. LLM
   providers fall back to `AGENTMEMORY_LLM_TIMEOUT_MS`, then 60s (the OpenAI LLM provider
   resolves `OPENAI_TIMEOUT_MS` first); embedding providers pass `EMBED_TIMEOUT_MS` (30s), so
   a hung embedder fails fast and the index fill backfills the row. A 429, 503 or 529 is

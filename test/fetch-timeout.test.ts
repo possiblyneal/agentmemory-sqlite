@@ -101,6 +101,43 @@ describe("fetchWithTimeout", () => {
 // rides the global dispatcher fails within the server's delay. undici
 // rounds a sub-second timeout up to about 1 s, hence the 2 s delay.
 // ─────────────────────────────────────────────────────────────
+describe("fetchWithTimeout idle mode (#329)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // Headers after `headersAfter` ms, then `count` chunks each `gap` ms apart;
+  // a stalled body never closes after its last chunk.
+  function slowStream(headersAfter: number, gap: number, count: number, stall = false) {
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (_url: string, init?: RequestInit) => {
+      const signal = init!.signal as AbortSignal;
+      await new Promise((r) => setTimeout(r, headersAfter));
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          signal.addEventListener("abort", () => controller.error(signal.reason));
+          for (let i = 0; i < count; i++) {
+            await new Promise((r) => setTimeout(r, gap));
+            if (signal.aborted) return;
+            controller.enqueue(new TextEncoder().encode("x"));
+          }
+          if (!stall) controller.close();
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as typeof fetch);
+  }
+
+  it("reads a body that keeps writing past the total budget, the window starting at the headers", async () => {
+    slowStream(80, 60, 5);
+    const res = await fetchWithTimeout("https://example.com", {}, 100, { idle: true });
+    await expect(res.text()).resolves.toBe("xxxxx");
+  });
+
+  it("cuts off a body that falls silent", async () => {
+    slowStream(0, 0, 1, true);
+    const res = await fetchWithTimeout("https://example.com", {}, 50, { idle: true });
+    await expect(res.text()).rejects.toBeInstanceOf(ProviderTimeoutError);
+  });
+});
+
 describe("fetchWithTimeout against a slow server (#302)", () => {
   const GLOBAL_CEILING_MS = 100;
   const SERVER_DELAY_MS = 2000;
@@ -539,7 +576,7 @@ describe("OpenAIProvider timeout env precedence (#446)", () => {
     process.env["OPENAI_TIMEOUT_MS"] = "30";
     const provider = new OpenAIProvider("test-key", "gpt-5.6-luna", 1024);
     await expect(provider.compress("system", "user")).rejects.toThrow(
-      /timed out after 30ms/,
+      /no response within 30ms/,
     );
   });
 
@@ -547,7 +584,7 @@ describe("OpenAIProvider timeout env precedence (#446)", () => {
     process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "30";
     const provider = new OpenAIProvider("test-key", "gpt-5.6-luna", 1024);
     await expect(provider.compress("system", "user")).rejects.toThrow(
-      /timed out after 30ms/,
+      /no response within 30ms/,
     );
   });
 
@@ -559,7 +596,7 @@ describe("OpenAIProvider timeout env precedence (#446)", () => {
     process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "5000";
     const provider = new OpenAIProvider("test-key", "gpt-5.6-luna", 1024);
     await expect(provider.compress("system", "user")).rejects.toThrow(
-      /timed out after 30ms/,
+      /no response within 30ms/,
     );
   });
 

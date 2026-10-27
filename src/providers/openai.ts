@@ -144,13 +144,13 @@ export class OpenAIProvider implements MemoryProvider {
       ...this.extraBody,
       model: this.model,
       [this.outputTokenParam]: maxTokens,
-      // OpenAI API spec defines `stream` as defaulting to false, so omitting
-      // it should yield a JSON response. Some OpenAI-compatible proxies
-      // (notably 9Router < 0.4.56 — see decolua/9router#1260) default to
-      // text/event-stream when `stream` is absent, which crashes the
-      // `response.json()` call below with `Unexpected token 'd', "data: {"id"...`.
-      // Send it explicitly so non-spec endpoints route to non-streaming too.
-      stream: false,
+      // Streamed so the timeout bounds silence, not length: a long reply that
+      // keeps writing finishes, a stalled one is cut off (#329). A server that
+      // ignores it and answers JSON is read as JSON.
+      stream: true,
+      // Usage arrives in a stream only on request. Azure api-versions before
+      // 2024-09-01-preview reject the field, so Azure goes untallied.
+      ...(this.isAzure ? {} : { stream_options: { include_usage: true } }),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -166,6 +166,8 @@ export class OpenAIProvider implements MemoryProvider {
     // OPENAI_TIMEOUT_MS keeps its v0.9.17 meaning (OpenAI-scoped alias,
     // takes precedence); when unset we fall through to
     // AGENTMEMORY_LLM_TIMEOUT_MS and finally the 60s default. See rohitg00/agentmemory#446.
+    const hint =
+      "set OPENAI_TIMEOUT_MS (or AGENTMEMORY_LLM_TIMEOUT_MS) to raise the bound or check the provider status.";
     let response: Response;
     try {
       response = await fetchWithTimeout(
@@ -176,11 +178,12 @@ export class OpenAIProvider implements MemoryProvider {
           body: JSON.stringify(body),
         },
         this.timeoutMs,
+        { idle: true },
       );
     } catch (err) {
       if (err instanceof ProviderTimeoutError) {
         throw new ProviderTimeoutError(
-          `OpenAI API request timed out after ${this.timeoutMs}ms — set OPENAI_TIMEOUT_MS (or AGENTMEMORY_LLM_TIMEOUT_MS) to raise the bound or check the provider status.`,
+          `OpenAI API request got no response within ${this.timeoutMs}ms — ${hint}`,
         );
       }
       throw err;
@@ -191,13 +194,18 @@ export class OpenAIProvider implements MemoryProvider {
       throw new ProviderHttpError(`OpenAI API error (${response.status}): ${text}`, response.status);
     }
 
-    const data = (await response.json()) as {
-      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
-      choices?: Array<{
-        finish_reason?: string;
-        message?: { content?: string; reasoning?: string; reasoning_content?: string };
-      }>;
-    };
+    const progress = { chars: 0 };
+    let data: ChatCompletion;
+    try {
+      data = await readReply(response, progress);
+    } catch (err) {
+      if (err instanceof ProviderTimeoutError) {
+        throw new ProviderTimeoutError(
+          `OpenAI API reply received nothing for ${this.timeoutMs}ms after ${progress.chars} reply chars — ${hint}`,
+        );
+      }
+      throw err;
+    }
     this.tally.add(data.usage?.prompt_tokens, data.usage?.completion_tokens);
     const message = data.choices?.[0]?.message;
     const content = message?.content;
@@ -223,6 +231,86 @@ export class OpenAIProvider implements MemoryProvider {
       `OpenAI returned unexpected response: ${JSON.stringify(data).slice(0, 200)}`,
     );
   }
+}
+
+type ChatCompletion = {
+  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+  choices?: Array<{
+    finish_reason?: string;
+    message?: { content?: string; reasoning?: string; reasoning_content?: string };
+  }>;
+};
+
+type ChatChunk = {
+  usage?: ChatCompletion["usage"];
+  choices?: Array<{
+    finish_reason?: string | null;
+    delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null };
+  }>;
+};
+
+// Reads a streamed chat completion back into the shape of a non-streamed one,
+// counting reply chars in `progress` so a timeout can say how far it got. The
+// body, not its content-type, decides the form: a server that ignores `stream`
+// answers JSON, and some proxies label SSE as JSON or plain text.
+async function readReply(
+  response: Response,
+  progress: { chars: number },
+): Promise<ChatCompletion> {
+  let content = "";
+  let reasoning = "";
+  let finishReason: string | undefined;
+  let usage: ChatCompletion["usage"];
+  let done = false;
+  const take = (line: string) => {
+    if (/^(event:\s*)?error\b/.test(line)) {
+      throw new Error(`OpenAI API stream error: ${line}`);
+    }
+    if (!line.startsWith("data:")) return;
+    const payload = line.slice(5).trim();
+    if (payload === "") return;
+    if (payload === "[DONE]") {
+      done = true;
+      return;
+    }
+    const chunk = JSON.parse(payload) as ChatChunk & { error?: unknown };
+    if (chunk.error !== undefined) {
+      throw new Error(`OpenAI API stream error: ${JSON.stringify(chunk.error)}`);
+    }
+    if (chunk.usage) usage = chunk.usage;
+    const choice = chunk.choices?.[0];
+    if (!choice) return;
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+    const delta = choice.delta;
+    content += delta?.content ?? "";
+    reasoning += delta?.reasoning_content ?? delta?.reasoning ?? "";
+    progress.chars = content.length + reasoning.length;
+  };
+
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let json: boolean | undefined;
+  for await (const bytes of response.body as unknown as AsyncIterable<Uint8Array>) {
+    buffered += decoder.decode(bytes, { stream: true });
+    json ??= buffered.trimStart() === "" ? undefined : buffered.trimStart().startsWith("{");
+    if (json !== false) continue;
+    const lines = buffered.split("\n");
+    buffered = lines.pop()!;
+    lines.forEach(take);
+  }
+  buffered += decoder.decode();
+  if (json) return JSON.parse(buffered) as ChatCompletion;
+  take(buffered);
+
+  if (!done && !finishReason) {
+    throw new Error(
+      `OpenAI API stream ended without finishing after ${progress.chars} reply chars`,
+    );
+  }
+  return {
+    usage,
+    choices: [{ finish_reason: finishReason, message: { content, reasoning_content: reasoning } }],
+  };
 }
 
 // Resolves the outbound-fetch timeout for the OpenAI LLM path.

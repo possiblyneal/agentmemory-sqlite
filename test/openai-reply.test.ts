@@ -82,3 +82,110 @@ describe("OPENAI_EXTRA_BODY", () => {
     expect(() => new OpenAIProvider("k", "m", 10, baseUrl)).toThrow(/OPENAI_EXTRA_BODY/);
   });
 });
+
+describe("OpenAIProvider streamed reply (#329)", () => {
+  let sse: Server;
+  let sseUrl: string;
+  let chunks: Array<{ after: number; data: string }>;
+  let contentType: string;
+
+  const event = (delta: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    `data: ${JSON.stringify({ choices: [{ delta, finish_reason: null }], ...extra })}\n\n`;
+
+  beforeEach(async () => {
+    contentType = "text/event-stream";
+    sse = createServer((req, res) => {
+      req.resume();
+      req.on("end", async () => {
+        res.setHeader("Content-Type", contentType);
+        res.flushHeaders();
+        for (const { after, data } of chunks) {
+          await new Promise((r) => setTimeout(r, after));
+          if (res.destroyed) return;
+          res.write(data);
+        }
+        res.end();
+      });
+    });
+    await new Promise<void>((r) => sse.listen(0, "127.0.0.1", r));
+    sseUrl = `http://127.0.0.1:${(sse.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    sse.closeAllConnections();
+    await new Promise((r) => sse.close(r));
+  });
+
+  it("asks for a stream", async () => {
+    await new OpenAIProvider("k", "m", 10, baseUrl).summarize("s", "u").catch(() => {});
+    expect(received.stream).toBe(true);
+  });
+
+  it("finishes a reply that writes for longer than the timeout in total", async () => {
+    vi.stubEnv("OPENAI_TIMEOUT_MS", "150");
+    chunks = [
+      ...["a", "b", "c", "d", "e"].map((c) => ({ after: 60, data: event({ content: c }) })),
+      {
+        after: 0,
+        data:
+          `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 4, completion_tokens: 5 } })}\n\n` +
+          "data: [DONE]\n\n",
+      },
+    ];
+    const provider = new OpenAIProvider("k", "m", 10, sseUrl);
+    await expect(provider.summarize("s", "u")).resolves.toBe("abcde");
+    expect(provider.usage()[0]).toMatchObject({ promptTokens: 4, completionTokens: 5 });
+  });
+
+  it("times out a reply that falls silent, naming how far it got", async () => {
+    vi.stubEnv("OPENAI_TIMEOUT_MS", "100");
+    chunks = [
+      { after: 0, data: event({ content: "half" }) },
+      { after: 400, data: event({ content: " more" }) },
+    ];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(
+      /received nothing for 100ms after 4 reply chars/,
+    );
+  });
+
+  it("keeps the max_tokens guard for a streamed reasoning reply", async () => {
+    chunks = [
+      { after: 0, data: event({ reasoning_content: "half a thought" }) },
+      { after: 0, data: `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n` },
+    ];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(/length/);
+  });
+
+  const finish = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`;
+
+  it("reads a stream a proxy labels as JSON", async () => {
+    contentType = "application/json";
+    chunks = [{ after: 0, data: event({ content: "ok" }) + finish }];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).resolves.toBe("ok");
+  });
+
+  it("rejects a stream that closes without finishing", async () => {
+    chunks = [{ after: 0, data: event({ content: "partial" }) }];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(
+      /ended without finishing after 7 reply chars/,
+    );
+  });
+
+  it("rejects an error sent mid-stream", async () => {
+    chunks = [
+      { after: 0, data: event({ content: "partial" }) },
+      { after: 0, data: `data: ${JSON.stringify({ error: { message: "decode failed" } })}\n\n` },
+    ];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(
+      /stream error: .*decode failed/,
+    );
+  });
+
+  it("leaves stream_options out for Azure", async () => {
+    const provider = new OpenAIProvider("k", "m", 10, `${baseUrl}/openai/deployments/m`);
+    (provider as unknown as { isAzure: boolean }).isAzure = true;
+    await provider.summarize("s", "u").catch(() => {});
+    expect(received.stream_options).toBeUndefined();
+  });
+});
