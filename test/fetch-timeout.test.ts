@@ -539,7 +539,7 @@ describe("OpenAIProvider timeout env precedence (#446)", () => {
     process.env["OPENAI_TIMEOUT_MS"] = "30";
     const provider = new OpenAIProvider("test-key", "gpt-5.6-luna", 1024);
     await expect(provider.compress("system", "user")).rejects.toThrow(
-      /timed out after 30ms/,
+      /received nothing for 30ms/,
     );
   });
 
@@ -547,7 +547,7 @@ describe("OpenAIProvider timeout env precedence (#446)", () => {
     process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "30";
     const provider = new OpenAIProvider("test-key", "gpt-5.6-luna", 1024);
     await expect(provider.compress("system", "user")).rejects.toThrow(
-      /timed out after 30ms/,
+      /received nothing for 30ms/,
     );
   });
 
@@ -559,7 +559,7 @@ describe("OpenAIProvider timeout env precedence (#446)", () => {
     process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = "5000";
     const provider = new OpenAIProvider("test-key", "gpt-5.6-luna", 1024);
     await expect(provider.compress("system", "user")).rejects.toThrow(
-      /timed out after 30ms/,
+      /received nothing for 30ms/,
     );
   });
 

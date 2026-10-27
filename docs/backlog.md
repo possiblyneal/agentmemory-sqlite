@@ -73,7 +73,7 @@ effect. That test could not decide it, so it waits for free broker time.
   as a BM25 layer, B `4215e7b` adds an `appliesWhen` line written at summarize time. The
   replay scorecard (`docs/benchmarks/2026-10-22-summary-decision-index.md`) shows control, A
   and B equal on every hit metric, but its corpus held 2 decision key items, both already
-  found by search, and its Summaries predate the decision-merge fix (#301).
+  found by search.
 - **Experiment.** Rebase #298 onto main, run one `eval:replay --llm --save-checkpoints
   --keyed-only` save pass on build B (about 48 h on the broker, so only when #234's load
   allows), then probe control, A and B from the same checkpoints. Run #259's sdebench passes
