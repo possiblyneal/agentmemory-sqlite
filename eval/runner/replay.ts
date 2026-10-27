@@ -37,7 +37,7 @@ import { loadSessions, type Loaded } from "./replay-load.js";
 import { DECISION_KEY_PATH, DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
 import { readDecisionKey, type DecisionKey } from "./decision-key.js";
 import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
-import { hookPayloads } from "./replay-hooks.js";
+import { hookPayloads, hookSteps, runHookSteps, summarizeCounts } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
@@ -63,6 +63,7 @@ interface Options {
   instance: number;
   embeddings: EmbeddingMode;
   llm: boolean;
+  llmSummary: boolean;
   root: string;
   out: string;
   split: Split;
@@ -88,6 +89,7 @@ function parseOptions(): Options {
       instance: { type: "string", default: "9" },
       embeddings: { type: "string", default: "local" },
       llm: { type: "boolean", default: false },
+      "llm-summary": { type: "boolean", default: false },
       root: { type: "string", default: join(homedir(), ".claude/projects") },
       out: { type: "string", default: join(REPO_TMP, "eval-replay") },
       split: { type: "string" },
@@ -131,13 +133,18 @@ function parseOptions(): Options {
     process.exit(2);
   }
   // Hindsight extracts its memories with the LLM, so it always runs with one.
-  const llm = values.llm === true || values.backend === "hindsight";
+  const llmSummary = values["llm-summary"] === true;
+  if (llmSummary && (values.llm || values.backend === "hindsight")) {
+    console.error("--llm-summary is the Summary-only alternative to --llm and does not apply to --backend hindsight; pass one");
+    process.exit(2);
+  }
+  const llm = values.llm === true || llmSummary || values.backend === "hindsight";
   if (values.backend === "hindsight" && values.embeddings === "none") {
     console.error("--backend hindsight always embeds locally; drop --embeddings none");
     process.exit(2);
   }
   if (llm && !process.env.OPENAI_API_KEY) {
-    console.error("--llm and --backend hindsight need the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
+    console.error("--llm, --llm-summary and --backend hindsight need the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
     process.exit(2);
   }
   if (values["save-checkpoints"] && values["from-checkpoints"]) {
@@ -152,7 +159,7 @@ function parseOptions(): Options {
     console.error("checkpoints copy agentmemory's SQLite store; drop --backend hindsight");
     process.exit(2);
   }
-  if (values["from-checkpoints"] && values.llm) {
+  if (values["from-checkpoints"] && (values.llm || llmSummary)) {
     console.error("--from-checkpoints probes stores already compressed; drop --llm");
     process.exit(2);
   }
@@ -193,6 +200,7 @@ function parseOptions(): Options {
     instance: positive("instance", values.instance as string),
     embeddings: values.embeddings,
     llm,
+    llmSummary,
     root: resolve(values.root as string),
     out,
     split: openSplit(values.split, "replay"),
@@ -424,6 +432,30 @@ async function ingestThroughHooks(baseUrl: string, session: ReplaySession): Prom
   return { drainMs, summarized: body.success === true };
 }
 
+// --llm-summary: Observations arrive as the hooks send them and Compression
+// stays synthetic, but the Session is summarized at every Stop, so the
+// daemon's own fold logic decides between folding into the prior Summary and
+// re-reading the Session, as it does live. The wait for pending compression
+// is a no-op here but keeps the stop honest if the daemon compresses anyway.
+async function ingestWithStops(baseUrl: string, session: ReplaySession): Promise<{ summarizeCalls: number; summarized: number }> {
+  const steps = hookSteps(readFileSync(session.sourcePath!, "utf8"), session);
+  const counts = await runHookSteps(steps, {
+    observe: async (payload) => {
+      await post(baseUrl, "observe", payload);
+    },
+    drain: () => compressionDrained(baseUrl, session.id),
+    summarize: async () => {
+      const { body } = await daemonCall<{ success?: boolean }>(baseUrl, "summarize", {
+        body: { sessionId: session.id },
+        timeoutMs: SUMMARIZE_TIMEOUT_MS,
+      });
+      return body.success === true;
+    },
+  });
+  await post(baseUrl, "session/end", { sessionId: session.id });
+  return counts;
+}
+
 function llmProvider() {
   const base = process.env.OPENAI_BASE_URL;
   return {
@@ -609,15 +641,24 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
   // start writes no Injection record and delivers nothing to score.
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   if (opts.llm) process.env.AGENTMEMORY_AUTO_COMPRESS ??= "true";
-  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm, seed });
+  if (opts.llmSummary) process.env.AGENTMEMORY_AUTO_COMPRESS = "false";
+  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm, compress: !opts.llmSummary, seed });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
   let drainMsTotal = 0;
   let summarizedSessions = 0;
+  let ingestedSessions = 0;
+  let summarizeCalls = 0;
   return {
     probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver, opts.queryArm),
     async ingest(session) {
       let drain = "";
-      if (opts.llm) {
+      ingestedSessions++;
+      if (opts.llmSummary) {
+        const counts = await ingestWithStops(sandbox.baseUrl, session);
+        summarizeCalls += counts.summarizeCalls;
+        if (counts.summarized > 0) summarizedSessions++;
+        drain = ` stops=${counts.summarizeCalls} summarized=${counts.summarized}`;
+      } else if (opts.llm) {
         const { drainMs, summarized } = await ingestThroughHooks(sandbox.baseUrl, session);
         drainMsTotal += drainMs;
         if (summarized) summarizedSessions++;
@@ -632,8 +673,12 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
       return saveCheckpoint(sandbox.sqlitePath, dir, index, sessionId, ingested);
     },
     storeBytes: async () => storeBytes(sandbox.sqlitePath),
-    metrics: async () =>
-      opts.llm ? { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions } : undefined,
+    metrics: async () => {
+      if (!opts.llm) return undefined;
+      const llm = { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions };
+      if (!opts.llmSummary) return llm;
+      return { ...llm, ingestedSessions, summarizeCalls, folds: summarizeCounts(readFileSync(sandbox.logPath, "utf8")) };
+    },
     providers: () => agentmemoryProviders(opts),
     stop: () => sandbox.stop(),
   };

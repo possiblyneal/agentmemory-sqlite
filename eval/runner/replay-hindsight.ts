@@ -95,7 +95,7 @@ function retentionTranscript(messages: Message[], fullWindow: boolean): { text: 
   return parts.length === 0 || text.trim().length < 10 ? null : { text, count: parts.length };
 }
 
-function isInterrupt(entry: Entry): boolean {
+export function isInterrupt(entry: Entry): boolean {
   const content = (entry.message as Entry | undefined)?.content;
   const text = typeof content === "string" ? content : Array.isArray(content) ? textContent(content, "user") : "";
   return /^\[Request interrupted/.test(text.trim());
@@ -103,7 +103,7 @@ function isInterrupt(entry: Entry): boolean {
 
 // A prompt the Operator (or the harness) submitted opens a model turn; a
 // tool result, a meta entry or a compaction summary does not.
-function opensTurn(entry: Entry): boolean {
+export function opensTurn(entry: Entry): boolean {
   if (entry.type !== "user" || entry.isMeta === true || entry.isCompactSummary === true || entry.isSidechain === true) return false;
   const content = (entry.message as Entry | undefined)?.content;
   if (typeof content === "string") return true;

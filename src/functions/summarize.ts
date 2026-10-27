@@ -678,6 +678,7 @@ export function registerSummarizeFunction(
 
         logger.info("Session summarized", {
           sessionId,
+          mode,
           title: summary.title,
           decisions: summary.keyDecisions.length,
           qualityScore,
