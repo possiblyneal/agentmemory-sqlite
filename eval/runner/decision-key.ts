@@ -39,8 +39,9 @@ const LABEL_CHUNK = 20;
 const LABEL_TURNS = 40;
 // The newest earlier decisions of a project; older ones fall out of the label prompt.
 const MAX_CANDIDATES = 100;
-const ATTEMPTS = 2;
-const CONCURRENCY = 4;
+const ATTEMPTS = 3;
+const RETRY_PAUSE_MS = 20_000;
+const CONCURRENCY = 2;
 
 const EXTRACT_SYSTEM = `You read what a software Operator said to their coding Agent: prompts they typed and answers they gave to the Agent's multiple-choice questions.
 List the decisions the Operator made: a durable choice, rule, preference, constraint or direction that should still hold in later work.
@@ -67,6 +68,7 @@ async function askJson(complete: Complete, system: string, user: string): Promis
       return parseJsonObject(await complete(system, user));
     } catch (err) {
       last = err;
+      if (attempt < ATTEMPTS - 1) await new Promise((r) => setTimeout(r, RETRY_PAUSE_MS * (attempt + 1)));
     }
   }
   throw new Error(`LLM call failed ${ATTEMPTS} times: ${last instanceof Error ? last.message : String(last)}`);
