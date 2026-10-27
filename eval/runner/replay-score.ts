@@ -28,6 +28,8 @@ export interface Probe {
   latencyMs: number;
   chars: number;
   items: ProbeItem[];
+  // The Injection as the Agent would read it; set by the agentmemory probes.
+  text?: string;
   failed?: boolean;
 }
 
@@ -48,6 +50,14 @@ export interface KeyOutcome {
   searched: boolean;
 }
 
+// One expected decision of one prompt, and which Injection delivered it.
+export interface DecisionOutcome {
+  decisionId: string;
+  turn: number;
+  sessionStart: boolean;
+  promptSubmit: boolean;
+}
+
 export interface SessionScore {
   sessionId: string;
   project: string;
@@ -57,6 +67,7 @@ export interface SessionScore {
   injectionChars: number;
   items: ScoredItem[];
   outcomes: KeyOutcome[];
+  decisions?: DecisionOutcome[];
   latencies: Array<{ kind: ProbeKind; ms: number }>;
 }
 
@@ -176,6 +187,7 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
     }),
   );
   const corrections = outcomes.filter((o) => o.key.kind === "correction");
+  const decisions = scores.flatMap((s) => s.decisions ?? []);
   const injectionChars = scores.reduce((n, s) => n + s.injectionChars, 0);
   const used = items.filter((i) => i.used);
   const usedRefs = new Set(used.map((i) => i.ref));
@@ -205,6 +217,12 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
         search: share(terse.filter((o) => o.searched).length, terse.length),
         either: share(terse.filter((o) => o.injected || o.searched).length, terse.length),
       },
+    },
+    decisionRecall: {
+      items: decisions.length,
+      sessionStart: share(decisions.filter((d) => d.sessionStart).length, decisions.length),
+      promptSubmit: share(decisions.filter((d) => d.promptSubmit).length, decisions.length),
+      either: share(decisions.filter((d) => d.sessionStart || d.promptSubmit).length, decisions.length),
     },
     rightScope: {
       injectedItems: items.length,
