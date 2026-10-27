@@ -142,6 +142,8 @@ export async function fetchWithTimeout(
 
   const response = await sendWithRetry(send, ms, start);
   if (!options?.idle || !response.body) return response;
+  clearTimeout(timer);
+  timer = setTimeout(expire, ms).unref();
   const rearm = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       clearTimeout(timer);

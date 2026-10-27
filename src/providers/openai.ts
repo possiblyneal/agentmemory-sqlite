@@ -148,7 +148,9 @@ export class OpenAIProvider implements MemoryProvider {
       // keeps writing finishes, a stalled one is cut off (#329). A server that
       // ignores it and answers JSON is read as JSON.
       stream: true,
-      stream_options: { include_usage: true },
+      // Usage arrives in a stream only on request. Azure api-versions before
+      // 2024-09-01-preview reject the field, so Azure goes untallied.
+      ...(this.isAzure ? {} : { stream_options: { include_usage: true } }),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -164,10 +166,8 @@ export class OpenAIProvider implements MemoryProvider {
     // OPENAI_TIMEOUT_MS keeps its v0.9.17 meaning (OpenAI-scoped alias,
     // takes precedence); when unset we fall through to
     // AGENTMEMORY_LLM_TIMEOUT_MS and finally the 60s default. See rohitg00/agentmemory#446.
-    const timedOut = (received: number) =>
-      new ProviderTimeoutError(
-        `OpenAI API request received nothing for ${this.timeoutMs}ms after ${received} reply chars — set OPENAI_TIMEOUT_MS (or AGENTMEMORY_LLM_TIMEOUT_MS) to raise the bound or check the provider status.`,
-      );
+    const hint =
+      "set OPENAI_TIMEOUT_MS (or AGENTMEMORY_LLM_TIMEOUT_MS) to raise the bound or check the provider status.";
     let response: Response;
     try {
       response = await fetchWithTimeout(
@@ -181,7 +181,11 @@ export class OpenAIProvider implements MemoryProvider {
         { idle: true },
       );
     } catch (err) {
-      if (err instanceof ProviderTimeoutError) throw timedOut(0);
+      if (err instanceof ProviderTimeoutError) {
+        throw new ProviderTimeoutError(
+          `OpenAI API request got no response within ${this.timeoutMs}ms — ${hint}`,
+        );
+      }
       throw err;
     }
 
@@ -193,11 +197,13 @@ export class OpenAIProvider implements MemoryProvider {
     const progress = { chars: 0 };
     let data: ChatCompletion;
     try {
-      data = /text\/event-stream/.test(response.headers.get("content-type") ?? "")
-        ? await readStream(response, progress)
-        : ((await response.json()) as ChatCompletion);
+      data = await readReply(response, progress);
     } catch (err) {
-      if (err instanceof ProviderTimeoutError) throw timedOut(progress.chars);
+      if (err instanceof ProviderTimeoutError) {
+        throw new ProviderTimeoutError(
+          `OpenAI API reply received nothing for ${this.timeoutMs}ms after ${progress.chars} reply chars — ${hint}`,
+        );
+      }
       throw err;
     }
     this.tally.add(data.usage?.prompt_tokens, data.usage?.completion_tokens);
@@ -243,9 +249,11 @@ type ChatChunk = {
   }>;
 };
 
-// Folds a streamed chat completion back into the shape of a non-streamed one,
-// counting reply chars in `progress` so a timeout can say how far it got.
-async function readStream(
+// Reads a streamed chat completion back into the shape of a non-streamed one,
+// counting reply chars in `progress` so a timeout can say how far it got. The
+// body, not its content-type, decides the form: a server that ignores `stream`
+// answers JSON, and some proxies label SSE as JSON or plain text.
+async function readReply(
   response: Response,
   progress: { chars: number },
 ): Promise<ChatCompletion> {
@@ -253,11 +261,22 @@ async function readStream(
   let reasoning = "";
   let finishReason: string | undefined;
   let usage: ChatCompletion["usage"];
+  let done = false;
   const take = (line: string) => {
+    if (/^(event:\s*)?error\b/.test(line)) {
+      throw new Error(`OpenAI API stream error: ${line}`);
+    }
     if (!line.startsWith("data:")) return;
     const payload = line.slice(5).trim();
-    if (payload === "" || payload === "[DONE]") return;
-    const chunk = JSON.parse(payload) as ChatChunk;
+    if (payload === "") return;
+    if (payload === "[DONE]") {
+      done = true;
+      return;
+    }
+    const chunk = JSON.parse(payload) as ChatChunk & { error?: unknown };
+    if (chunk.error !== undefined) {
+      throw new Error(`OpenAI API stream error: ${JSON.stringify(chunk.error)}`);
+    }
     if (chunk.usage) usage = chunk.usage;
     const choice = chunk.choices?.[0];
     if (!choice) return;
@@ -270,14 +289,24 @@ async function readStream(
 
   const decoder = new TextDecoder();
   let buffered = "";
+  let json: boolean | undefined;
   for await (const bytes of response.body as unknown as AsyncIterable<Uint8Array>) {
     buffered += decoder.decode(bytes, { stream: true });
+    json ??= buffered.trimStart() === "" ? undefined : buffered.trimStart().startsWith("{");
+    if (json !== false) continue;
     const lines = buffered.split("\n");
     buffered = lines.pop()!;
     lines.forEach(take);
   }
-  take(buffered + decoder.decode());
+  buffered += decoder.decode();
+  if (json) return JSON.parse(buffered) as ChatCompletion;
+  take(buffered);
 
+  if (!done && !finishReason) {
+    throw new Error(
+      `OpenAI API stream ended without finishing after ${progress.chars} reply chars`,
+    );
+  }
   return {
     usage,
     choices: [{ finish_reason: finishReason, message: { content, reasoning_content: reasoning } }],

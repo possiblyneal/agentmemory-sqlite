@@ -87,15 +87,17 @@ describe("OpenAIProvider streamed reply (#329)", () => {
   let sse: Server;
   let sseUrl: string;
   let chunks: Array<{ after: number; data: string }>;
+  let contentType: string;
 
   const event = (delta: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
     `data: ${JSON.stringify({ choices: [{ delta, finish_reason: null }], ...extra })}\n\n`;
 
   beforeEach(async () => {
+    contentType = "text/event-stream";
     sse = createServer((req, res) => {
       req.resume();
       req.on("end", async () => {
-        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Content-Type", contentType);
         res.flushHeaders();
         for (const { after, data } of chunks) {
           await new Promise((r) => setTimeout(r, after));
@@ -153,5 +155,37 @@ describe("OpenAIProvider streamed reply (#329)", () => {
       { after: 0, data: `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n` },
     ];
     await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(/length/);
+  });
+
+  const finish = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`;
+
+  it("reads a stream a proxy labels as JSON", async () => {
+    contentType = "application/json";
+    chunks = [{ after: 0, data: event({ content: "ok" }) + finish }];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).resolves.toBe("ok");
+  });
+
+  it("rejects a stream that closes without finishing", async () => {
+    chunks = [{ after: 0, data: event({ content: "partial" }) }];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(
+      /ended without finishing after 7 reply chars/,
+    );
+  });
+
+  it("rejects an error sent mid-stream", async () => {
+    chunks = [
+      { after: 0, data: event({ content: "partial" }) },
+      { after: 0, data: `data: ${JSON.stringify({ error: { message: "decode failed" } })}\n\n` },
+    ];
+    await expect(new OpenAIProvider("k", "m", 10, sseUrl).summarize("s", "u")).rejects.toThrow(
+      /stream error: .*decode failed/,
+    );
+  });
+
+  it("leaves stream_options out for Azure", async () => {
+    const provider = new OpenAIProvider("k", "m", 10, `${baseUrl}/openai/deployments/m`);
+    (provider as unknown as { isAzure: boolean }).isAzure = true;
+    await provider.summarize("s", "u").catch(() => {});
+    expect(received.stream_options).toBeUndefined();
   });
 });
