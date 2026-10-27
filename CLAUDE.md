@@ -293,7 +293,7 @@ EmbeddingGemma 2 prefixes both) and, where its cosine scale differs from MiniLM'
 cosine that rejects the same share of random Observation pairs as MiniLM's 0.3, never against
 eval labels (`docs/benchmarks/2026-10-20-embeddinggemma-2.md`). A non-empty document prefix is
 part of `vectorSpace` (`withDocumentPrefix()`), so changing one re-embeds. Locally, BGE v1.5 pools
-by CLS and EmbeddingGemma 2 runs q4.
+by CLS and EmbeddingGemma 2 runs q4. The local provider runs inference on a worker thread (`local-worker.ts`, ADR 0002), so it never holds the event loop.
 
 A Memory is embedded as one vector per chunk (`memoryChunkJobs()`, `src/state/memory-utils.ts`;
 on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char overlap, each
@@ -487,4 +487,4 @@ The five canonical roles, each label string equal to its name. See `docs/agents/
 Single-context. `CONTEXT.md` holds the glossary — use its terms in specs, issues, and commit messages. ADRs live in `docs/adrs/`; read any whose scope covers what you are touching before editing. See `docs/agents/domain.md`.
 
 - [ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md) — this fork runs only the in-process SQLite Engine.
-- [ADR 0002](./docs/adrs/0002-local-embedder-on-worker-thread.md) — the local embedder runs on a worker thread (proposed).
+- [ADR 0002](./docs/adrs/0002-local-embedder-on-worker-thread.md) — the local embedder runs on a worker thread.

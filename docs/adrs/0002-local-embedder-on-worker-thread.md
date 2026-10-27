@@ -6,7 +6,7 @@ scope: [global]
 tags: [runtime, embeddings, latency]
 generated: { by: "agent/claude-opus-5-5", at: "2026-10-27T00:00:00Z" }
 superseded_by:
-status: proposed
+status: accepted
 ---
 
 # Run the Local Embedder on a Worker Thread
