@@ -19,7 +19,8 @@ import {
   type ProbeItem,
 } from "../eval/runner/replay-score.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint } from "../eval/runner/replay-checkpoints.js";
-import { hookPayloads } from "../eval/runner/replay-hooks.js";
+import { hookPayloads, hookSteps, runHookSteps, summarizeCounts } from "../eval/runner/replay-hooks.js";
+import { sandboxEnv } from "../eval/runner/sandbox.js";
 import {
   bankId,
   filesInText,
@@ -565,6 +566,94 @@ describe("hookPayloads", () => {
     });
     expect(payloads[2].data).toMatchObject({ tool_name: "Bash", tool_input: JSON.stringify({ command: "npm test" }) });
     expect((payloads[2].data.error as string).length).toBe(4000);
+  });
+});
+
+describe("hookSteps", () => {
+  const at = (n: number) => new Date(Date.parse("2026-09-01T10:00:00Z") + n * 1000).toISOString();
+  const line = (n: number, e: Record<string, unknown>) => JSON.stringify({ sessionId: "h2", cwd: CWD, timestamp: at(n), ...e });
+  const prompt = (n: number, text: string) => line(n, { type: "user", message: { role: "user", content: text } });
+  const call = (n: number, id: string) =>
+    line(n, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "On it." }, { type: "tool_use", id, name: "Bash", input: { command: "ls" } }] } });
+  const result = (n: number, id: string) =>
+    line(n, { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+  const reply = (n: number, text: string) => line(n, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
+  const text = [
+    prompt(0, "first task"), call(1, "a"), result(2, "a"), reply(3, "done one"),
+    prompt(4, "second task"), reply(5, "done two"),
+    prompt(6, "third task"), call(7, "b"), result(8, "b"), reply(9, "done three"),
+  ].join("\n");
+  const s = parseTranscript(text)!;
+
+  it("puts a stop where each Agent turn ends, after the Observations before it", () => {
+    expect(hookSteps(text, s).map((x) => (x.step === "stop" ? "stop" : x.payload.hookType))).toEqual([
+      "prompt_submit", "post_tool_use", "stop",
+      "prompt_submit", "stop",
+      "prompt_submit", "post_tool_use", "stop",
+    ]);
+  });
+
+  it("puts no stop after an interrupted turn", () => {
+    const interrupted = [
+      prompt(0, "start something long"), reply(1, "working"),
+      line(2, { type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
+      prompt(3, "never mind"), reply(4, "ok"),
+    ].join("\n");
+    expect(hookSteps(interrupted, parseTranscript(interrupted)!).filter((x) => x.step === "stop")).toHaveLength(1);
+  });
+
+  it("keeps hookPayloads to the observe steps in order", () => {
+    expect(hookPayloads(text, s)).toEqual(hookSteps(text, s).flatMap((x) => (x.step === "observe" ? [x.payload] : [])));
+  });
+
+  it("summarizes at each stop, seeing only the Observations posted so far", async () => {
+    const calls: string[] = [];
+    let posted = 0;
+    await runHookSteps(hookSteps(text, s), {
+      observe: async () => { posted++; },
+      drain: async () => { calls.push(`drain@${posted}`); },
+      summarize: async () => { calls.push(`summarize@${posted}`); return true; },
+    });
+    expect(calls).toEqual(["drain@2", "summarize@2", "drain@3", "summarize@3", "drain@5", "summarize@5"]);
+  });
+});
+
+describe("summarizeCounts", () => {
+  it("counts folds, full summaries and reuses from the daemon log", () => {
+    const log = [
+      '[agentmemory] info Session summarized {"sessionId":"a","mode":"single","title":"t"}',
+      '[agentmemory] info Session summarized {"sessionId":"a","mode":"folded","title":"t"}',
+      '[agentmemory] info Session summarized {"sessionId":"a","mode":"folded","title":"t"}',
+      '[agentmemory] info Session summarized {"sessionId":"b","mode":"chunked","title":"t"}',
+      '[agentmemory] info Session Summary current, reused {"sessionId":"a","observationCount":3}',
+      '[agentmemory] warn Summary has no decisions, retrying {"sessionId":"a"}',
+    ].join("\n");
+    expect(summarizeCounts(log)).toEqual({ folded: 2, full: 2, reused: 1 });
+  });
+});
+
+describe("sandboxEnv Summary-only LLM", () => {
+  const keys = ["OPENAI_API_KEY", "OPENAI_MODEL", "AGENTMEMORY_AUTO_COMPRESS"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("gives the daemon the provider with auto-compress off, whatever the shell says", () => {
+    process.env.OPENAI_API_KEY = "k";
+    process.env.OPENAI_MODEL = "m";
+    process.env.AGENTMEMORY_AUTO_COMPRESS = "true";
+    const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", true, false);
+    expect(env.OPENAI_MODEL).toBe("m");
+    expect(env.AGENTMEMORY_AUTO_COMPRESS).toBe("false");
+  });
+
+  it("leaves auto-compress to the shell for a full --llm run", () => {
+    process.env.AGENTMEMORY_AUTO_COMPRESS = "true";
+    expect(sandboxEnv("/h", "/s.sqlite", "/m", "none", true).AGENTMEMORY_AUTO_COMPRESS).toBe("true");
   });
 });
 

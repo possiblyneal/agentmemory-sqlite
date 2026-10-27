@@ -11,6 +11,7 @@ export type EmbeddingMode = "local" | "none";
 export interface Sandbox {
   baseUrl: string;
   sqlitePath: string;
+  logPath: string;
   // Resolves once the boot vector fill has embedded every row the store
   // arrived without, so a seeded store is searched with all its vectors.
   vectorsFilled(): Promise<void>;
@@ -91,6 +92,7 @@ export function sandboxEnv(
   modelCacheDir: string,
   embeddings: EmbeddingMode,
   llm: boolean,
+  compress = true,
 ) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
@@ -138,6 +140,7 @@ export function sandboxEnv(
       const value = process.env[key];
       if (value !== undefined) env[key] = value;
     }
+    if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
   }
   return env;
 }
@@ -146,6 +149,8 @@ export async function startSandbox(opts: {
   instance: number;
   embeddings: EmbeddingMode;
   llm?: boolean;
+  // false keeps Compression synthetic while the LLM provider stays configured.
+  compress?: boolean;
   // A store file the daemon starts from instead of an empty one.
   seed?: string;
   // Config rows written into the seeded store before the daemon boots.
@@ -192,6 +197,7 @@ export async function startSandbox(opts: {
         resolve(root, "models"),
         opts.embeddings,
         opts.llm === true,
+        opts.compress !== false,
       ),
       stdio: ["ignore", log, log],
     },
@@ -231,5 +237,5 @@ export async function startSandbox(opts: {
       await new Promise((r) => setTimeout(r, 200));
     }
   };
-  return { baseUrl, sqlitePath, vectorsFilled, stop };
+  return { baseUrl, sqlitePath, logPath, vectorsFilled, stop };
 }
