@@ -139,8 +139,23 @@ export interface FoldPrior {
   title: string
   narrative: string
   keyDecisions: string[]
+  decisionDates?: string[]
   filesModified: string[]
   concepts: string[]
+}
+
+// The fold lists only the newest carried decisions: every one is carried in
+// code anyway, and listing them all would push a long Session's fold past one
+// chunk, re-reading the whole Session at every stop.
+export const FOLD_SHOWN_DECISIONS = 40
+
+function newestDecisions(prior: FoldPrior): string[] {
+  const shown = prior.keyDecisions
+    .map((text, i) => ({ text, i, at: prior.decisionDates?.[i] ?? '' }))
+    .sort((a, b) => b.at.localeCompare(a.at) || b.i - a.i)
+    .slice(0, FOLD_SHOWN_DECISIONS)
+    .sort((a, b) => a.i - b.i)
+  return shown.map((d) => d.text)
 }
 
 export function buildFoldPrompt(
@@ -148,7 +163,12 @@ export function buildFoldPrompt(
   observations: SummaryObservation[],
   priorObservationCount: number,
 ): string {
-  const decisions = prior.keyDecisions.map((d) => `  - ${d}`).join('\n')
+  const shown = newestDecisions(prior)
+  const hidden = prior.keyDecisions.length - shown.length
+  const decisions = [
+    ...shown.map((d) => `  - ${d}`),
+    ...(hidden > 0 ? [`  (${hidden} earlier decisions are also kept)`] : []),
+  ].join('\n')
   const files = prior.filesModified.map((f) => `  - ${f}`).join('\n')
   const lines = observations.map((o, i) => renderSummaryObservation(o, priorObservationCount + i))
   return `Current summary (covers observations 1-${priorObservationCount}):

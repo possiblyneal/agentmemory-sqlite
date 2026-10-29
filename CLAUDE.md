@@ -249,7 +249,9 @@ before it existed, or a missing entry, reads as `decidedAt()` (`lastObservationA
 decision whose word-set Jaccard with a carried one is at least `RESTATEMENT_OVERLAP`
 (`src/functions/recency-cap.ts`, 0.5) replaces it in place and takes the new date, which is the
 last Observation's timestamp; any other is appended. A Summary with no prior is stored as the
-model wrote it.
+model wrote it. The fold prompt lists only the newest `FOLD_SHOWN_DECISIONS` (40)
+carried decisions by date (`src/prompts/summary.ts`), with a count of the rest, so a long
+Session's carried list cannot push its fold past one chunk.
 
 ### Pinned rules
 `mem::context` (session start; pre-compact posts the same `/agentmemory/context` at budget 1500)

@@ -1123,6 +1123,26 @@ describe("mem::summarize incremental fold", () => {
     expect(stored.keyDecisions).toEqual(["prior decision"]);
   });
 
+  it("lists only the newest 40 carried decisions in the fold prompt, keeping every one", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_foldmany", 8, 5, "obs_4", [
+      summaryXml({ title: "folded", decisions: ["new decision"] }),
+    ]);
+    const prior: any = await kv.get("summaries", "ses_foldmany");
+    const keyDecisions = Array.from({ length: 50 }, (_, i) => `carried rule number ${i}`);
+    const decisionDates = keyDecisions.map((_, i) => new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString());
+    await kv.set("summaries", "ses_foldmany", { ...prior, keyDecisions, decisionDates });
+
+    await handler({ sessionId: "ses_foldmany" });
+
+    expect(provider.calls).toHaveLength(1);
+    const { user } = provider.calls[0];
+    expect(user).toContain("carried rule number 10\n");
+    expect(user).not.toContain("carried rule number 9\n");
+    expect(user).toContain("(10 earlier decisions are also kept)");
+    const stored: any = await kv.get("summaries", "ses_foldmany");
+    expect(stored.keyDecisions).toEqual([...keyDecisions, "new decision"]);
+  });
+
   it("keeps every prior decision after a whole-Session re-read", async () => {
     const { handler, kv } = await withPriorSummary("ses_foldwhole", 8, 5, "obs_4", [
       "not xml",
