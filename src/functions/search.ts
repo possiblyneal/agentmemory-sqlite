@@ -549,10 +549,10 @@ export async function rebuildIndex(kv: StateKV): Promise<number> {
 export function createSessionLoader(
   kv: StateKV,
 ): (sessionId: string) => Promise<Session | null> {
-  const sessions = new Map<string, Session | null>()
-  return async (sessionId) => {
+  const sessions = new Map<string, Promise<Session | null>>()
+  return (sessionId) => {
     if (!sessions.has(sessionId)) {
-      sessions.set(sessionId, (await kv.get<Session>(KV.sessions, sessionId)) ?? null)
+      sessions.set(sessionId, kv.get<Session>(KV.sessions, sessionId).then((s) => s ?? null))
     }
     return sessions.get(sessionId)!
   }
