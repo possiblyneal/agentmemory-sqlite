@@ -1,25 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { recallSemanticFacts } from "../src/functions/semantic-recall.js";
 import { KV } from "../src/state/schema.js";
+import { mockKV } from "./helpers/mocks.js";
 import type { SemanticMemory } from "../src/types.js";
 
 function countingKV() {
-  const store = new Map<string, Map<string, unknown>>();
-  const scope = (s: string) => {
-    if (!store.has(s)) store.set(s, new Map());
-    return store.get(s)!;
-  };
+  const kv = mockKV();
   const sessionGets: string[] = [];
-  return {
-    sessionGets,
-    get: async <T>(s: string, k: string) => {
-      if (s === KV.sessions) sessionGets.push(k);
-      return (scope(s).get(k) as T) ?? null;
-    },
-    set: async <T>(s: string, k: string, v: T) => (scope(s).set(k, v), v),
-    delete: async (s: string, k: string) => void scope(s).delete(k),
-    list: async <T>(s: string) => Array.from(scope(s).values()) as T[],
+  const get = kv.get;
+  kv.get = async <T>(scope: string, key: string) => {
+    if (scope === KV.sessions) sessionGets.push(key);
+    return get<T>(scope, key);
   };
+  return Object.assign(kv, { sessionGets });
 }
 
 function fact(i: number, sourceSessionIds: string[]): SemanticMemory {
