@@ -19,8 +19,8 @@ import {
   type ProbeItem,
 } from "../eval/runner/replay-score.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint } from "../eval/runner/replay-checkpoints.js";
-import { hookPayloads, hookSteps, runHookSteps, summarizeCounts } from "../eval/runner/replay-hooks.js";
-import { sandboxEnv } from "../eval/runner/sandbox.js";
+import { hookPayloads, hookSteps, runHookSteps, summarizeCounts, summarizeOutcome } from "../eval/runner/replay-hooks.js";
+import { EVAL_LLM_TIMEOUT_MS, sandboxEnv } from "../eval/runner/sandbox.js";
 import {
   bankId,
   filesInText,
@@ -612,9 +612,20 @@ describe("hookSteps", () => {
     await runHookSteps(hookSteps(text, s), {
       observe: async () => { posted++; },
       drain: async () => { calls.push(`drain@${posted}`); },
-      summarize: async () => { calls.push(`summarize@${posted}`); return true; },
+      summarize: async () => { calls.push(`summarize@${posted}`); return "summarized"; },
     });
     expect(calls).toEqual(["drain@2", "summarize@2", "drain@3", "summarize@3", "drain@5", "summarize@5"]);
+  });
+
+  it("counts a failed summarize apart from one with nothing new", async () => {
+    const outcomes = [{ success: true }, { success: false, error: "no_observations" }, { success: false, error: "llm timeout" }];
+    let i = 0;
+    const counts = await runHookSteps(hookSteps(text, s), {
+      observe: async () => {},
+      drain: async () => {},
+      summarize: async () => summarizeOutcome(outcomes[i++]),
+    });
+    expect(counts).toEqual({ summarizeCalls: 3, summarized: 1, failed: 1 });
   });
 });
 
@@ -633,7 +644,7 @@ describe("summarizeCounts", () => {
 });
 
 describe("sandboxEnv Summary-only LLM", () => {
-  const keys = ["OPENAI_API_KEY", "OPENAI_MODEL", "AGENTMEMORY_AUTO_COMPRESS"];
+  const keys = ["OPENAI_API_KEY", "OPENAI_MODEL", "AGENTMEMORY_AUTO_COMPRESS", "OPENAI_TIMEOUT_MS", "AGENTMEMORY_LLM_TIMEOUT_MS"];
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   afterEach(() => {
     for (const k of keys) {
@@ -649,6 +660,14 @@ describe("sandboxEnv Summary-only LLM", () => {
     const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", true, false);
     expect(env.OPENAI_MODEL).toBe("m");
     expect(env.AGENTMEMORY_AUTO_COMPRESS).toBe("false");
+  });
+
+  it("fixes the daemon's LLM deadline at the eval's, whatever the shell says", () => {
+    process.env.OPENAI_TIMEOUT_MS = "1000";
+    process.env.AGENTMEMORY_LLM_TIMEOUT_MS = "1000";
+    const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", true, false);
+    expect(env.OPENAI_TIMEOUT_MS).toBe(String(EVAL_LLM_TIMEOUT_MS));
+    expect(env.AGENTMEMORY_LLM_TIMEOUT_MS).toBe(String(EVAL_LLM_TIMEOUT_MS));
   });
 
   it("leaves auto-compress to the shell for a full --llm run", () => {

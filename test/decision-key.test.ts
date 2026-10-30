@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { operatorInputs } from "../eval/runner/decision-inputs.js";
 import { buildDecisionKey, loadOrBuildKey, type Complete, type DecisionKey } from "../eval/runner/decision-key.js";
 import { createJudge, decisionOutcomes, openVerdictCache } from "../eval/runner/decision-judge.js";
+import { withRetries } from "../eval/runner/decision-llm.js";
 import { summarizeReplay, type Probe, type SessionScore } from "../eval/runner/replay-score.js";
 import { parseTranscript, type ReplaySession } from "../eval/runner/replay-transcript.js";
 
@@ -161,6 +162,20 @@ describe("judge cache", () => {
       throw new Error("should not be called");
     }, openVerdictCache(join(dir, "v.ndjson")));
     expect(await judge.delivers(decision, "  ")).toBe(false);
+  });
+});
+
+describe("withRetries", () => {
+  it("retries a thrown call and gives up after the last attempt", async () => {
+    let calls = 0;
+    const flaky: Complete = async () => {
+      if (++calls < 3) throw new TypeError("fetch failed");
+      return "ok";
+    };
+    expect(await withRetries(flaky, 3, 0)("s", "u")).toBe("ok");
+    calls = -10;
+    await expect(withRetries(flaky, 2, 0)("s", "u")).rejects.toThrow("fetch failed");
+    expect(calls).toBe(-8);
   });
 });
 

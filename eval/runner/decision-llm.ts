@@ -18,5 +18,21 @@ export function providerComplete(): Complete {
   if (isNoopProvider(provider)) {
     throw new Error("no LLM provider configured: set OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL in the shell or ~/.agentmemory/.env");
   }
-  return (system, user) => provider.summarize(system, user);
+  return withRetries((system, user) => provider.summarize(system, user));
+}
+
+// A replay is not resumable, so one dropped connection to a busy broker must
+// not end it: a thrown call is retried after a pause, and only the last
+// attempt's error escapes.
+export function withRetries(complete: Complete, attempts = 4, delayMs = 30_000): Complete {
+  return async (system, user) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await complete(system, user);
+      } catch (err) {
+        if (attempt >= attempts) throw err;
+        await new Promise((r) => setTimeout(r, delayMs * attempt));
+      }
+    }
+  };
 }

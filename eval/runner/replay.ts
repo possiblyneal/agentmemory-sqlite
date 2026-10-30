@@ -37,7 +37,7 @@ import { loadSessions, type Loaded } from "./replay-load.js";
 import { DECISION_KEY_PATH, DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
 import { readDecisionKey, type DecisionKey } from "./decision-key.js";
 import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
-import { hookPayloads, hookSteps, runHookSteps, summarizeCounts } from "./replay-hooks.js";
+import { hookPayloads, hookSteps, runHookSteps, summarizeCounts, summarizeOutcome } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
@@ -437,7 +437,10 @@ async function ingestThroughHooks(baseUrl: string, session: ReplaySession): Prom
 // daemon's own fold logic decides between folding into the prior Summary and
 // re-reading the Session, as it does live. The wait for pending compression
 // is a no-op here but keeps the stop honest if the daemon compresses anyway.
-async function ingestWithStops(baseUrl: string, session: ReplaySession): Promise<{ summarizeCalls: number; summarized: number }> {
+async function ingestWithStops(
+  baseUrl: string,
+  session: ReplaySession,
+): Promise<{ summarizeCalls: number; summarized: number; failed: number }> {
   const steps = hookSteps(readFileSync(session.sourcePath!, "utf8"), session);
   const counts = await runHookSteps(steps, {
     observe: async (payload) => {
@@ -445,11 +448,11 @@ async function ingestWithStops(baseUrl: string, session: ReplaySession): Promise
     },
     drain: () => compressionDrained(baseUrl, session.id),
     summarize: async () => {
-      const { body } = await daemonCall<{ success?: boolean }>(baseUrl, "summarize", {
+      const { body } = await daemonCall<{ success?: boolean; error?: string }>(baseUrl, "summarize", {
         body: { sessionId: session.id },
         timeoutMs: SUMMARIZE_TIMEOUT_MS,
       });
-      return body.success === true;
+      return summarizeOutcome(body);
     },
   });
   await post(baseUrl, "session/end", { sessionId: session.id });
@@ -648,6 +651,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
   let summarizedSessions = 0;
   let ingestedSessions = 0;
   let summarizeCalls = 0;
+  let failedSummarizeCalls = 0;
   return {
     probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver, opts.queryArm),
     async ingest(session) {
@@ -656,8 +660,9 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
       if (opts.llmSummary) {
         const counts = await ingestWithStops(sandbox.baseUrl, session);
         summarizeCalls += counts.summarizeCalls;
+        failedSummarizeCalls += counts.failed;
         if (counts.summarized > 0) summarizedSessions++;
-        drain = ` stops=${counts.summarizeCalls} summarized=${counts.summarized}`;
+        drain = ` stops=${counts.summarizeCalls} summarized=${counts.summarized} failed=${counts.failed}`;
       } else if (opts.llm) {
         const { drainMs, summarized } = await ingestThroughHooks(sandbox.baseUrl, session);
         drainMsTotal += drainMs;
@@ -677,7 +682,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
       if (!opts.llm) return undefined;
       const llm = { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions };
       if (!opts.llmSummary) return llm;
-      return { ...llm, ingestedSessions, summarizeCalls, folds: summarizeCounts(readFileSync(sandbox.logPath, "utf8")) };
+      return { ...llm, ingestedSessions, summarizeCalls, failedSummarizeCalls, folds: summarizeCounts(readFileSync(sandbox.logPath, "utf8")) };
     },
     providers: () => agentmemoryProviders(opts),
     stop: () => sandbox.stop(),

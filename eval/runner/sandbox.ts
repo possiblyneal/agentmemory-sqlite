@@ -72,14 +72,16 @@ async function isUp(baseUrl: string, timeoutMs: number): Promise<boolean> {
 // AGENTMEMORY_LOCAL_EMBEDDING_* (model, dimensions) is forwarded the same way,
 // so the shell picks which local model a run embeds with.
 // A run that opts into an LLM gets the OpenAI-compatible provider settings
-// from the shell, and nothing else that would pick a different provider.
+// from the shell, and nothing else that would pick a different provider. Its
+// LLM deadline is fixed at EVAL_LLM_TIMEOUT_MS whatever the shell says: on a
+// shared broker a 5-minute deadline failed calls a live daemon would retry
+// later, and a failed summarize contaminates the arm.
+export const EVAL_LLM_TIMEOUT_MS = 10 * 60_000;
 const LLM_ENV = [
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
   "OPENAI_MODEL",
   "OPENAI_REASONING_EFFORT",
-  "OPENAI_TIMEOUT_MS",
-  "AGENTMEMORY_LLM_TIMEOUT_MS",
   "AGENTMEMORY_LLM_MAX_CONCURRENCY",
   "AGENTMEMORY_AUTO_COMPRESS",
 ];
@@ -140,6 +142,8 @@ export function sandboxEnv(
       const value = process.env[key];
       if (value !== undefined) env[key] = value;
     }
+    env.OPENAI_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
+    env.AGENTMEMORY_LLM_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
     if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
   }
   return env;
