@@ -670,6 +670,10 @@ describe("sandboxEnv Summary-only LLM", () => {
     expect(env.AGENTMEMORY_LLM_TIMEOUT_MS).toBe(String(EVAL_LLM_TIMEOUT_MS));
   });
 
+  it("decodes greedily with a fixed seed", () => {
+    expect(JSON.parse(sandboxEnv("/h", "/s.sqlite", "/m", "none", true, false).OPENAI_EXTRA_BODY)).toEqual({ temperature: 0, seed: 42 });
+  });
+
   it("leaves auto-compress to the shell for a full --llm run", () => {
     process.env.AGENTMEMORY_AUTO_COMPRESS = "true";
     expect(sandboxEnv("/h", "/s.sqlite", "/m", "none", true).AGENTMEMORY_AUTO_COMPRESS).toBe("true");

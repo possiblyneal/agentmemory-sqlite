@@ -77,6 +77,9 @@ async function isUp(baseUrl: string, timeoutMs: number): Promise<boolean> {
 // shared broker a 5-minute deadline failed calls a live daemon would retry
 // later, and a failed summarize contaminates the arm.
 export const EVAL_LLM_TIMEOUT_MS = 10 * 60_000;
+// Greedy decoding with a fixed seed, so two arms differ by their code and not
+// by sampling: the broker's own default is temperature 1.
+export const EVAL_LLM_SAMPLING = JSON.stringify({ temperature: 0, seed: 42 });
 const LLM_ENV = [
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
@@ -144,6 +147,7 @@ export function sandboxEnv(
     }
     env.OPENAI_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
     env.AGENTMEMORY_LLM_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
+    env.OPENAI_EXTRA_BODY = EVAL_LLM_SAMPLING;
     if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
   }
   return env;

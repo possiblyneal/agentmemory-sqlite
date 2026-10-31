@@ -4,6 +4,7 @@ import { hydrateProcessEnvFromFile, loadConfig } from "../../src/config.js";
 import { createProvider } from "../../src/providers/index.js";
 import { isNoopProvider } from "../../src/providers/noop.js";
 import type { Complete } from "./decision-key.js";
+import { EVAL_LLM_SAMPLING } from "./sandbox.js";
 
 // Private, so under tmp/ like the rest of replay's output.
 export const DECISION_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../tmp/eval-replay");
@@ -11,9 +12,11 @@ export const DECISION_KEY_PATH = join(DECISION_DIR, "decision-key.json");
 export const DECISION_VERDICTS_PATH = join(DECISION_DIR, "decision-verdicts.ndjson");
 
 // The daemon's own provider, the one `eval:replay --llm` and `eval:fold-drift`
-// run on (OPENAI_* from the shell, else ~/.agentmemory/.env).
+// run on (OPENAI_* from the shell, else ~/.agentmemory/.env), decoding
+// greedily as the replay's daemon does.
 export function providerComplete(): Complete {
   hydrateProcessEnvFromFile();
+  process.env.OPENAI_EXTRA_BODY = EVAL_LLM_SAMPLING;
   const provider = createProvider(loadConfig().provider);
   if (isNoopProvider(provider)) {
     throw new Error("no LLM provider configured: set OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL in the shell or ~/.agentmemory/.env");
