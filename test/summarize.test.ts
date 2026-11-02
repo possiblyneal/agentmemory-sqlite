@@ -776,6 +776,48 @@ describe("mem::summarize chunking", () => {
     expect(await kv.get("summaries", "ses_invalid_twice")).toBeNull();
   });
 
+  it("tells the retry why the first reply was rejected, so a greedy model does not repeat it", async () => {
+    const unclosed = summaryXml({ title: "unclosed" }).replace(
+      `${VALID_NARRATIVE}</narrative>`,
+      `${VALID_NARRATIVE}</n`,
+    );
+    const provider = makeProvider([unclosed, summaryXml({ title: "second-attempt" })]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_note", obsCount: 1, provider });
+
+    await handler({ sessionId: "ses_note" });
+
+    const [first, second] = provider.calls;
+    expect(first!.user).not.toContain("rejected");
+    expect(second!.user.startsWith(first!.user)).toBe(true);
+    expect(second!.user).toContain("Your previous reply was rejected: narrative:");
+    expect(second!.user).toContain("every tag closed");
+    expect(((await kv.get("summaries", "ses_note")) as any).title).toBe("second-attempt");
+  });
+
+  it("tells the retry when the first reply did not parse", async () => {
+    const provider = makeProvider(["garbage", summaryXml({ title: "second-attempt" })]);
+    const { handler } = await setupHandler({ sessionId: "ses_note_parse", obsCount: 1, provider });
+
+    await handler({ sessionId: "ses_note_parse" });
+
+    expect(provider.calls[1]!.user).toContain("Your previous reply was rejected: it held no <summary> with a <title>");
+  });
+
+  it("logs the rejected reply on a schema failure", async () => {
+    const reply = summaryXml({ title: "short one", narrative: SHORT_NARRATIVE });
+    const provider = makeProvider([reply, reply]);
+    const { handler } = await setupHandler({ sessionId: "ses_invalid_logged", obsCount: 1, provider });
+    const { logger } = await import("../src/logger.js");
+    vi.mocked(logger.warn).mockClear();
+
+    await handler({ sessionId: "ses_invalid_logged" });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Summary validation failed",
+      expect.objectContaining({ reply, replyLength: reply.length }),
+    );
+  });
+
   it("returns parse_failed when the last attempt fails to parse after a schema failure", async () => {
     const provider = makeProvider([
       summaryXml({ title: "short", narrative: SHORT_NARRATIVE }),
