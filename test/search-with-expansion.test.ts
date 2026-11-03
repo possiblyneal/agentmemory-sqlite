@@ -13,6 +13,8 @@ import type { QueryExpansion } from "../src/types.js";
 // Both are checked against a stub index, so nothing here needs a provider, an
 // embedding key, or a live daemon.
 
+const STUB_TIMESTAMP = "2026-01-01T00:00:00.000Z";
+
 type Row = { obsId: string; sessionId: string; score: number };
 
 function stubIndexes(perQuery: Record<string, Row[]>) {
@@ -42,7 +44,7 @@ function hybrid(bm25: unknown) {
         id,
         sessionId: "s1",
         content: id,
-        timestamp: new Date().toISOString(),
+        timestamp: STUB_TIMESTAMP,
       }),
       list: async () => [],
       set: async () => undefined,
