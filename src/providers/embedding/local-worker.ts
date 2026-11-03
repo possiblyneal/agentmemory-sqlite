@@ -1,10 +1,9 @@
 import { parentPort, workerData } from "node:worker_threads";
+import { configureTransformers } from "../transformers-env.js";
 
 interface WorkerConfig {
   modelId: string;
   dtype: "q4" | "q8";
-  cacheDir: string;
-  remoteHost: string | null;
 }
 
 interface EmbedRequest {
@@ -33,10 +32,7 @@ async function loadExtractor(): Promise<FeatureExtractor> {
     }
     throw err;
   }
-  if (transformers.env) {
-    transformers.env.cacheDir = config.cacheDir;
-    if (config.remoteHost) transformers.env.remoteHost = config.remoteHost;
-  }
+  configureTransformers(transformers);
   return (await transformers.pipeline("feature-extraction", config.modelId, {
     dtype: config.dtype,
   })) as unknown as FeatureExtractor;

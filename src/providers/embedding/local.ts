@@ -1,6 +1,6 @@
 import type { EmbeddingProvider } from "../../types.js";
 import { Worker } from "node:worker_threads";
-import { getEnvVar, getModelCacheDir } from "../../config.js";
+import { getEnvVar } from "../../config.js";
 import { resolveDimensions } from "./_dimensions.js";
 import {
   BGE_V1_5,
@@ -113,14 +113,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
   private ensureWorker(): WorkerHandle {
     if (this.handle) return this.handle;
-    const mirror = getEnvVar("HF_ENDPOINT");
     const worker = new Worker(this.workerUrl, {
-      workerData: {
-        modelId: this.modelId,
-        dtype: this.profile.dtype,
-        cacheDir: getModelCacheDir(),
-        remoteHost: mirror ? (mirror.endsWith("/") ? mirror : `${mirror}/`) : null,
-      },
+      workerData: { modelId: this.modelId, dtype: this.profile.dtype },
     });
     worker.unref();
     const pending = new Map<number, Pending>();
