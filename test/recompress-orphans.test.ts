@@ -116,6 +116,21 @@ describe("mem::recompress-orphans", () => {
     expect(await kv.get(KV.compressPending, "evicted")).toBeNull();
   });
 
+  it("skips a target evicted while the pass compresses an earlier one", async () => {
+    let kv!: ReturnType<typeof mockKV>;
+    const ctx = setup(async (p) => {
+      if (p.observationId === "first") await kv.delete(KV.observations("ses_1"), "second");
+      return { success: true };
+    });
+    kv = ctx.kv;
+    await park(kv, "first");
+    await park(kv, "second");
+    const res = await ctx.run();
+    expect(ctx.compressed).toEqual(["first"]);
+    expect(res).toMatchObject({ recompressed: 1, stillFailing: 0 });
+    expect(await kv.get(KV.compressPending, "second")).toBeNull();
+  });
+
   it("refuses a pass while another is running, but not a dry run", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));

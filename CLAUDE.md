@@ -356,8 +356,9 @@ limit of 50, logging, never throwing, on failure, so a backlog left by a provide
 without a REST call. `POST /agentmemory/recompress-orphans` triggers the same function with its
 options (`limit`, `dryRun`, `requeueQuarantined`, `graceBypassBefore`); 10 straight failures with
 no success end a pass early. The function refuses a pass while another runs (`running: true`, 409
-over REST; a dry run is never refused), and drops a parked entry whose Observation was evicted or
-forgotten rather than compress it back into existence.
+over REST; a dry run is never refused), and rechecks each target just before compressing it: one whose
+Observation was evicted or forgotten is skipped and its parked entry dropped, so it is not
+compressed back into existence.
 
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:

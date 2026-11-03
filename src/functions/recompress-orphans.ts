@@ -104,8 +104,7 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
       const bypass = Number.isFinite(graceBypassBefore) && Number.isFinite(ts) && ts < graceBypassBefore;
       if (Number.isFinite(ts) && now - ts < GRACE_MS && !bypass) continue;
     }
-    // Evicted or forgotten while parked: compressing it now would resurrect it.
-    if (!(await kv.get(KV.observations(p.sessionId), p.observationId))) {
+    if (await isGone(kv, p.sessionId, p.observationId)) {
       if (!dryRun) await kv.delete(KV.compressPending, p.observationId);
       continue;
     }
@@ -135,6 +134,12 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
   let recompressed = 0;
   let stillFailing = 0;
   for (const t of targets) {
+    // A pass can run for many minutes; an Observation evicted since it was
+    // picked must not be written back by its compression.
+    if (await isGone(kv, t.sessionId, t.observationId)) {
+      await kv.delete(KV.compressPending, t.observationId);
+      continue;
+    }
     try {
       const result = (await sdk.trigger({
         function_id: "mem::compress",
@@ -174,6 +179,11 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
     recompressed,
     stillFailing,
   };
+}
+
+// Evicted or forgotten: compressing it now would resurrect it.
+async function isGone(kv: StateKV, sessionId: string, observationId: string): Promise<boolean> {
+  return !(await kv.get(KV.observations(sessionId), observationId));
 }
 
 export function createRecompressSweep(sdk: ISdk): () => Promise<void> {
