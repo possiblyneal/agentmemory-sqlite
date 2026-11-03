@@ -5,6 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerApiTriggers } from "../src/triggers/api.js";
+import { registerRecompressOrphansFunction } from "../src/functions/recompress-orphans.js";
 import { KV } from "../src/state/schema.js";
 
 const SECRET = "recompress-orphans-test-secret";
@@ -45,6 +46,7 @@ describe("api::recompress-orphans and the compression batch", () => {
     const kv = mockKV();
     const sdk = mockSdk();
     registerApiTriggers(sdk as never, kv as never, SECRET);
+    registerRecompressOrphansFunction(sdk as never, kv as never);
     const queuedAt = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
     for (const [id, at] of [["fresh", queuedAt(60_000)], ["stuck", queuedAt(2 * 60 * 60_000)]]) {
       await kv.set(KV.compressPending, id, {
