@@ -52,6 +52,13 @@ type WorkerMessage =
   | { type: "error"; id: number; message: string }
   | { type: "result"; id: number; vectors: Float32Array; dimensions: number };
 
+// Built, the worker is its own bundle beside this one; run from source (tsx),
+// it is the .ts file, which the worker loads through the inherited tsx loader.
+function defaultWorkerUrl(): URL {
+  const ext = import.meta.url.endsWith(".ts") ? "ts" : "mjs";
+  return new URL(`./local-worker.${ext}`, import.meta.url);
+}
+
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly name = "local";
   readonly dimensions: number;
@@ -64,7 +71,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private nextId = 0;
 
   constructor(options: LocalEmbeddingOptions = {}) {
-    this.workerUrl = options.workerUrl ?? new URL("./local-worker.mjs", import.meta.url);
+    this.workerUrl = options.workerUrl ?? defaultWorkerUrl();
     this.modelId = getEnvVar("AGENTMEMORY_LOCAL_EMBEDDING_MODEL") || DEFAULT_MODEL;
     this.dimensions = resolveDimensions(
       this.modelId,
@@ -107,6 +114,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       handle.pending.set(id, { resolve, reject });
+      handle.worker.ref();
       handle.worker.postMessage({ id, texts, pooling: this.profile.pooling });
     });
   }
@@ -116,7 +124,6 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     const worker = new Worker(this.workerUrl, {
       workerData: { modelId: this.modelId, dtype: this.profile.dtype },
     });
-    worker.unref();
     const pending = new Map<number, Pending>();
     let markReady!: () => void;
     let failReady!: (err: Error) => void;
@@ -128,6 +135,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     const handle: WorkerHandle = { worker, ready, pending };
     this.handle = handle;
 
+    // Ref'd while it loads or owes a reply, so a caller awaiting one keeps the
+    // process alive; unref'd when idle, so it never holds a finished process open.
+    let loaded = false;
+    const releaseIfIdle = () => {
+      if (loaded && pending.size === 0) worker.unref();
+    };
+
     const fail = (err: Error) => {
       if (this.handle === handle) this.handle = null;
       failReady(err);
@@ -136,11 +150,16 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       void worker.terminate();
     };
     worker.on("message", (message: WorkerMessage) => {
-      if (message.type === "ready") return markReady();
+      if (message.type === "ready") {
+        loaded = true;
+        releaseIfIdle();
+        return markReady();
+      }
       if (message.type === "load-error") return fail(new Error(message.message));
       const entry = pending.get(message.id);
       if (!entry) return;
       pending.delete(message.id);
+      releaseIfIdle();
       if (message.type === "error") return entry.reject(new Error(message.message));
       const { vectors, dimensions } = message;
       const out: Float32Array[] = [];

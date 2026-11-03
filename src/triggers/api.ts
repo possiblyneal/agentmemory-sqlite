@@ -2001,7 +2001,7 @@ export function registerApiTriggers(
       if (typeof body.graceBypassBefore === "string" && !Number.isFinite(new Date(body.graceBypassBefore).getTime())) {
         return { status_code: 400, body: { error: "graceBypassBefore must be an ISO timestamp" } };
       }
-      const result = await sdk.trigger({
+      const result = (await sdk.trigger({
         function_id: "mem::recompress-orphans",
         payload: {
           limit: body.limit,
@@ -2009,8 +2009,8 @@ export function registerApiTriggers(
           requeueQuarantined: body.requeueQuarantined,
           graceBypassBefore: body.graceBypassBefore,
         },
-      });
-      return { status_code: 200, body: result };
+      })) as { running?: boolean };
+      return { status_code: result.running ? 409 : 200, body: result };
     },
   );
   sdk.registerTrigger({

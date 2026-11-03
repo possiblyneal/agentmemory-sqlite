@@ -61,7 +61,12 @@ export function rejectionNote(reason: string): string {
   return `\n\nYour previous reply was rejected: ${reason}. Reply again with the complete <summary> XML, every tag closed.`
 }
 
-export const REDUCE_SYSTEM =`You are merging multiple partial summaries of the SAME coding session into one final session summary. The partials are chronological chunks of one continuous session — not separate sessions.
+// A reply with no decisions is valid, so the retry asks for a second look
+// rather than rejecting it: a rejection pushes the model to invent some.
+export const RECHECK_DECISIONS_NOTE =
+  '\n\nYour previous reply listed no <decision>. Check the observations again and list each decision the user stated; leave <decisions> empty if there are none. Reply with the complete <summary> XML, every tag closed.'
+
+export const REDUCE_SYSTEM = `You are merging multiple partial summaries of the SAME coding session into one final session summary. The partials are chronological chunks of one continuous session — not separate sessions.
 
 Output EXACTLY this XML format with no additional text:
 

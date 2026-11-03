@@ -1,6 +1,5 @@
 import { parseJsonlText } from "../../src/replay/jsonl-parser.js";
-import { isInterrupt, opensTurn } from "./replay-hindsight.js";
-import { isOperatorTurn, type ReplaySession } from "./replay-transcript.js";
+import { isInterrupt, isOperatorTurn, opensTurn, type ReplaySession } from "./replay-transcript.js";
 
 export interface HookPayload {
   hookType: "prompt_submit" | "post_tool_use" | "post_tool_failure";

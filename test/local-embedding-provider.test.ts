@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { LocalEmbeddingProvider } from "../src/providers/embedding/local.js";
@@ -16,6 +17,15 @@ describe("LocalEmbeddingProvider (worker thread)", () => {
     await expect(make().embed("hello")).rejects.toThrow(
       "Install @huggingface/transformers for local embeddings",
     );
+  });
+
+  it("keeps a bare script alive until its embed replies, then lets it exit", () => {
+    const script = new URL("./fixtures/embed-once.ts", import.meta.url);
+    const out = execFileSync(process.execPath, ["--import", "tsx", script.pathname], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+    expect(out).toContain("embedded 3");
   });
 
   it("returns one Float32Array per text, in order", async () => {

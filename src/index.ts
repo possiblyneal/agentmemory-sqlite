@@ -482,8 +482,8 @@ async function main() {
   // Observations a restart left waiting for a compression batch.
   if (isAutoCompressEnabled()) {
     void sdk.trigger({ function_id: "mem::compress-resume", payload: {}, action: TriggerAction.Void() });
-    setInterval(createRecompressSweep(sdk), 3_600_000).unref();
   }
+  setInterval(createRecompressSweep(sdk), 3_600_000).unref();
 
   // One-time repair of stores written before this fork: id lists that predate
   // their write-time bounds, duplicate file nodes, and the index shards the

@@ -11,6 +11,7 @@ import {
   SUMMARY_SYSTEM,
   buildSummaryPrompt,
   rejectionNote,
+  RECHECK_DECISIONS_NOTE,
   renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
@@ -658,7 +659,7 @@ export function registerSummarizeFunction(
             : (chunkCache.partials?.reduceInput.every((p) => p.keyDecisions.length === 0) ?? false);
           if (attempt === 1 && noDecisions && !inputHadNone) {
             logger.warn("Summary has no decisions, retrying", { sessionId, mode });
-            note = rejectionNote("its <decisions> listed no <decision>");
+            note = RECHECK_DECISIONS_NOTE;
             continue;
           }
           break;

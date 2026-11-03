@@ -49,6 +49,7 @@ describe("api::recompress-orphans and the compression batch", () => {
     registerRecompressOrphansFunction(sdk as never, kv as never);
     const queuedAt = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
     for (const [id, at] of [["fresh", queuedAt(60_000)], ["stuck", queuedAt(2 * 60 * 60_000)]]) {
+      await kv.set(KV.observations("ses_1"), id, { id, sessionId: "ses_1" });
       await kv.set(KV.compressPending, id, {
         observationId: id,
         sessionId: "ses_1",

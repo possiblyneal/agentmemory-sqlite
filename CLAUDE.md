@@ -41,6 +41,9 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
+  The local embedder's worker is its own entry, `dist/local-worker.mjs`, which `local.ts` loads
+  from beside its bundle (from source under tsx, `local-worker.ts`); keep the two in one output
+  directory.
 - **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu only: the daemon runs on the Operator's Linux machine, so do not add a macOS or Windows leg, nor re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
@@ -349,10 +352,12 @@ LLM-bound Observation takes `llm-batch` (`src/functions/compress-batch.ts`):
 
 With auto-compress on, the daemon retries parked compressions itself: `createRecompressSweep()`
 (`src/functions/recompress-orphans.ts`) runs `mem::recompress-orphans` hourly at its default
-limit of 50, skipping a pass while the previous one runs and logging, never throwing, on failure,
-so a backlog left by a provider outage drains without a REST call. `POST /agentmemory/recompress-orphans`
-triggers the same function with its options (`limit`, `dryRun`, `requeueQuarantined`,
-`graceBypassBefore`); 10 straight failures with no success end a pass early.
+limit of 50, logging, never throwing, on failure, so a backlog left by a provider outage drains
+without a REST call. `POST /agentmemory/recompress-orphans` triggers the same function with its
+options (`limit`, `dryRun`, `requeueQuarantined`, `graceBypassBefore`); 10 straight failures with
+no success end a pass early. The function refuses a pass while another runs (`running: true`, 409
+over REST; a dry run is never refused), and drops a parked entry whose Observation was evicted or
+forgotten rather than compress it back into existence.
 
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:

@@ -65,6 +65,7 @@ function setup(compress: (p: { observationId: string }) => Promise<unknown>) {
 }
 
 async function park(kv: ReturnType<typeof mockKV>, id: string, extra: object = {}) {
+  await kv.set(KV.observations("ses_1"), id, { id, sessionId: "ses_1" });
   await kv.set(KV.compressPending, id, {
     observationId: id,
     sessionId: "ses_1",
@@ -102,6 +103,36 @@ describe("mem::recompress-orphans", () => {
     expect(res.recompressed).toBeUndefined();
   });
 
+  it("drops a parked entry whose Observation is gone instead of resurrecting it", async () => {
+    const { kv, compressed, run } = setup(async () => ({ success: true }));
+    await park(kv, "kept");
+    await park(kv, "evicted");
+    await kv.delete(KV.observations("ses_1"), "evicted");
+    expect((await run({ dryRun: true })).parked).toBe(1);
+    expect(await kv.get(KV.compressPending, "evicted")).not.toBeNull();
+    const res = await run();
+    expect(compressed).toEqual(["kept"]);
+    expect(res).toMatchObject({ parked: 1, recompressed: 1 });
+    expect(await kv.get(KV.compressPending, "evicted")).toBeNull();
+  });
+
+  it("refuses a pass while another is running, but not a dry run", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { kv, compressed, run } = setup(async () => {
+      await gate;
+      return { success: true };
+    });
+    await park(kv, "p1");
+    const first = run();
+    expect(await run()).toMatchObject({ success: false, running: true });
+    expect((await run({ dryRun: true })).parked).toBe(1);
+    release();
+    await first;
+    expect(compressed).toEqual(["p1"]);
+    expect(await run()).toMatchObject({ success: true });
+  });
+
   it("bails out after 10 straight failures when none succeeded", async () => {
     const { kv, compressed, run } = setup(async () => ({ success: false }));
     for (let i = 0; i < 15; i++) await park(kv, `p${i}`);
@@ -124,22 +155,6 @@ describe("createRecompressSweep", () => {
     const trigger = vi.fn();
     await createRecompressSweep({ trigger } as never)();
     expect(trigger).not.toHaveBeenCalled();
-  });
-
-  it("skips a pass that starts while the previous one is running", async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    const trigger = vi.fn(async () => {
-      await gate;
-    });
-    const sweep = createRecompressSweep({ trigger } as never);
-    const first = sweep();
-    await sweep();
-    expect(trigger).toHaveBeenCalledTimes(1);
-    release();
-    await first;
-    await sweep();
-    expect(trigger).toHaveBeenCalledTimes(2);
   });
 
   it("logs a failed pass instead of throwing and runs the next one", async () => {
