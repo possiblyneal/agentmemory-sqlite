@@ -347,6 +347,13 @@ LLM-bound Observation takes `llm-batch` (`src/functions/compress-batch.ts`):
 - boot re-queues every `queued` entry (`mem::compress-resume`), so a restart loses nothing
 - the limits are constants, not env knobs; change them only with a measured reason
 
+With auto-compress on, the daemon retries parked compressions itself: `createRecompressSweep()`
+(`src/functions/recompress-orphans.ts`) runs `mem::recompress-orphans` hourly at its default
+limit of 50, skipping a pass while the previous one runs and logging, never throwing, on failure,
+so a backlog left by a provider outage drains without a REST call. `POST /agentmemory/recompress-orphans`
+triggers the same function with its options (`limit`, `dryRun`, `requeueQuarantined`,
+`graceBypassBefore`); 10 straight failures with no success end a pass early.
+
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:
 
