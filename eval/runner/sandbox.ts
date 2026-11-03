@@ -11,6 +11,7 @@ export type EmbeddingMode = "local" | "none";
 export interface Sandbox {
   baseUrl: string;
   sqlitePath: string;
+  logPath: string;
   // Resolves once the boot vector fill has embedded every row the store
   // arrived without, so a seeded store is searched with all its vectors.
   vectorsFilled(): Promise<void>;
@@ -71,14 +72,19 @@ async function isUp(baseUrl: string, timeoutMs: number): Promise<boolean> {
 // AGENTMEMORY_LOCAL_EMBEDDING_* (model, dimensions) is forwarded the same way,
 // so the shell picks which local model a run embeds with.
 // A run that opts into an LLM gets the OpenAI-compatible provider settings
-// from the shell, and nothing else that would pick a different provider.
+// from the shell, and nothing else that would pick a different provider. Its
+// LLM deadline is fixed at EVAL_LLM_TIMEOUT_MS whatever the shell says: on a
+// shared broker a 5-minute deadline failed calls a live daemon would retry
+// later, and a failed summarize contaminates the arm.
+export const EVAL_LLM_TIMEOUT_MS = 10 * 60_000;
+// Greedy decoding with a fixed seed, so two arms differ by their code and not
+// by sampling: the broker's own default is temperature 1.
+export const EVAL_LLM_SAMPLING = JSON.stringify({ temperature: 0, seed: 42 });
 const LLM_ENV = [
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
   "OPENAI_MODEL",
   "OPENAI_REASONING_EFFORT",
-  "OPENAI_TIMEOUT_MS",
-  "AGENTMEMORY_LLM_TIMEOUT_MS",
   "AGENTMEMORY_LLM_MAX_CONCURRENCY",
   "AGENTMEMORY_AUTO_COMPRESS",
 ];
@@ -91,6 +97,7 @@ export function sandboxEnv(
   modelCacheDir: string,
   embeddings: EmbeddingMode,
   llm: boolean,
+  compress = true,
 ) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
@@ -138,6 +145,10 @@ export function sandboxEnv(
       const value = process.env[key];
       if (value !== undefined) env[key] = value;
     }
+    env.OPENAI_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
+    env.AGENTMEMORY_LLM_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
+    env.OPENAI_EXTRA_BODY = EVAL_LLM_SAMPLING;
+    if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
   }
   return env;
 }
@@ -146,6 +157,8 @@ export async function startSandbox(opts: {
   instance: number;
   embeddings: EmbeddingMode;
   llm?: boolean;
+  // false keeps Compression synthetic while the LLM provider stays configured.
+  compress?: boolean;
   // A store file the daemon starts from instead of an empty one.
   seed?: string;
   // Config rows written into the seeded store before the daemon boots.
@@ -192,6 +205,7 @@ export async function startSandbox(opts: {
         resolve(root, "models"),
         opts.embeddings,
         opts.llm === true,
+        opts.compress !== false,
       ),
       stdio: ["ignore", log, log],
     },
@@ -231,5 +245,5 @@ export async function startSandbox(opts: {
       await new Promise((r) => setTimeout(r, 200));
     }
   };
-  return { baseUrl, sqlitePath, vectorsFilled, stop };
+  return { baseUrl, sqlitePath, logPath, vectorsFilled, stop };
 }

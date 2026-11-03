@@ -1,6 +1,6 @@
 import type { EmbeddingProvider } from "../../types.js";
+import { Worker } from "node:worker_threads";
 import { getEnvVar } from "../../config.js";
-import { configureTransformers } from "../transformers-env.js";
 import { resolveDimensions } from "./_dimensions.js";
 import {
   BGE_V1_5,
@@ -31,10 +31,33 @@ function profileFor(modelId: string): ModelProfile {
   return MODEL_PROFILES.find(([pattern]) => pattern.test(modelId))?.[1] ?? DEFAULT_PROFILE;
 }
 
-type FeatureExtractor = (
-  texts: string[],
-  options: { pooling: string; normalize: boolean },
-) => Promise<{ tolist: () => number[][] }>;
+interface Pending {
+  resolve: (vectors: Float32Array[]) => void;
+  reject: (err: Error) => void;
+}
+
+interface WorkerHandle {
+  worker: Worker;
+  ready: Promise<void>;
+  pending: Map<number, Pending>;
+}
+
+export interface LocalEmbeddingOptions {
+  workerUrl?: URL;
+}
+
+type WorkerMessage =
+  | { type: "ready" }
+  | { type: "load-error"; message: string }
+  | { type: "error"; id: number; message: string }
+  | { type: "result"; id: number; vectors: Float32Array; dimensions: number };
+
+// Built, the worker is its own bundle beside this one; run from source (tsx),
+// it is the .ts file, which the worker loads through the inherited tsx loader.
+function defaultWorkerUrl(): URL {
+  const ext = import.meta.url.endsWith(".ts") ? "ts" : "mjs";
+  return new URL(`./local-worker.${ext}`, import.meta.url);
+}
 
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly name = "local";
@@ -43,9 +66,12 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private readonly modelId: string;
   private readonly profile: ModelProfile;
   private readonly retrieval: RetrievalProfile;
-  private extractor: Promise<FeatureExtractor> | null = null;
+  private readonly workerUrl: URL;
+  private handle: WorkerHandle | null = null;
+  private nextId = 0;
 
-  constructor() {
+  constructor(options: LocalEmbeddingOptions = {}) {
+    this.workerUrl = options.workerUrl ?? defaultWorkerUrl();
     this.modelId = getEnvVar("AGENTMEMORY_LOCAL_EMBEDDING_MODEL") || DEFAULT_MODEL;
     this.dimensions = resolveDimensions(
       this.modelId,
@@ -71,7 +97,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   async warm(): Promise<void> {
-    await this.getExtractor();
+    await this.ensureWorker().ready;
   }
 
   async embed(text: string): Promise<Float32Array> {
@@ -83,38 +109,67 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     return this.extract(texts.map((text) => this.retrieval.documentPrefix + text));
   }
 
-  private async extract(texts: string[]): Promise<Float32Array[]> {
-    const extractor = await this.getExtractor();
-    const output = await extractor(texts, {
-      pooling: this.profile.pooling,
-      normalize: true,
+  private extract(texts: string[]): Promise<Float32Array[]> {
+    const handle = this.ensureWorker();
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      handle.pending.set(id, { resolve, reject });
+      handle.worker.ref();
+      handle.worker.postMessage({ id, texts, pooling: this.profile.pooling });
     });
-    return output.tolist().map((v) => new Float32Array(v));
   }
 
-  private getExtractor(): Promise<FeatureExtractor> {
-    this.extractor ??= this.loadExtractor().catch((err: unknown) => {
-      this.extractor = null;
-      throw err;
+  private ensureWorker(): WorkerHandle {
+    if (this.handle) return this.handle;
+    const worker = new Worker(this.workerUrl, {
+      workerData: { modelId: this.modelId, dtype: this.profile.dtype },
     });
-    return this.extractor;
-  }
+    const pending = new Map<number, Pending>();
+    let markReady!: () => void;
+    let failReady!: (err: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+      markReady = resolve;
+      failReady = reject;
+    });
+    ready.catch(() => {});
+    const handle: WorkerHandle = { worker, ready, pending };
+    this.handle = handle;
 
-  private async loadExtractor(): Promise<FeatureExtractor> {
-    let transformers: typeof import("@huggingface/transformers");
-    try {
-      transformers = await import("@huggingface/transformers");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") {
-        throw new Error(
-          "Install @huggingface/transformers for local embeddings: npm install @huggingface/transformers",
-        );
+    // Ref'd while it loads or owes a reply, so a caller awaiting one keeps the
+    // process alive; unref'd when idle, so it never holds a finished process open.
+    let loaded = false;
+    const releaseIfIdle = () => {
+      if (loaded && pending.size === 0) worker.unref();
+    };
+
+    const fail = (err: Error) => {
+      if (this.handle === handle) this.handle = null;
+      failReady(err);
+      for (const entry of pending.values()) entry.reject(err);
+      pending.clear();
+      void worker.terminate();
+    };
+    worker.on("message", (message: WorkerMessage) => {
+      if (message.type === "ready") {
+        loaded = true;
+        releaseIfIdle();
+        return markReady();
       }
-      throw err;
-    }
-    configureTransformers(transformers);
-    return (await transformers.pipeline("feature-extraction", this.modelId, {
-      dtype: this.profile.dtype,
-    })) as FeatureExtractor;
+      if (message.type === "load-error") return fail(new Error(message.message));
+      const entry = pending.get(message.id);
+      if (!entry) return;
+      pending.delete(message.id);
+      releaseIfIdle();
+      if (message.type === "error") return entry.reject(new Error(message.message));
+      const { vectors, dimensions } = message;
+      const out: Float32Array[] = [];
+      for (let at = 0; at < vectors.length; at += dimensions) {
+        out.push(vectors.slice(at, at + dimensions));
+      }
+      entry.resolve(out);
+    });
+    worker.on("error", (err) => fail(err instanceof Error ? err : new Error(String(err))));
+    worker.on("exit", (code) => fail(new Error(`Local embedding worker exited with code ${code}`)));
+    return handle;
   }
 }

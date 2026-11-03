@@ -41,6 +41,9 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   An installed plugin runs its own cached copy, and `claude plugin update` skips any update
   that leaves `plugin.json`'s version unchanged. A hook change therefore reaches Claude Code
   only after `claude plugin uninstall` and then `claude plugin install`.
+  The local embedder's worker is its own entry, `dist/local-worker.mjs`, which `local.ts` loads
+  from beside its bundle (from source under tsx, `local-worker.ts`); keep the two in one output
+  directory.
 - **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu only: the daemon runs on the Operator's Linux machine, so do not add a macOS or Windows leg, nor re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
@@ -293,7 +296,7 @@ EmbeddingGemma 2 prefixes both) and, where its cosine scale differs from MiniLM'
 cosine that rejects the same share of random Observation pairs as MiniLM's 0.3, never against
 eval labels (`docs/benchmarks/2026-10-20-embeddinggemma-2.md`). A non-empty document prefix is
 part of `vectorSpace` (`withDocumentPrefix()`), so changing one re-embeds. Locally, BGE v1.5 pools
-by CLS and EmbeddingGemma 2 runs q4.
+by CLS and EmbeddingGemma 2 runs q4. The local provider runs inference on a worker thread (`local-worker.ts`, ADR 0002), so it never holds the event loop.
 
 A Memory is embedded as one vector per chunk (`memoryChunkJobs()`, `src/state/memory-utils.ts`;
 on unless `AGENTMEMORY_MEMORY_CHUNKING=false`): ~1200-char chunks with 150-char overlap, each
@@ -347,6 +350,16 @@ LLM-bound Observation takes `llm-batch` (`src/functions/compress-batch.ts`):
 - boot re-queues every `queued` entry (`mem::compress-resume`), so a restart loses nothing
 - the limits are constants, not env knobs; change them only with a measured reason
 
+With auto-compress on, the daemon retries parked compressions itself: `createRecompressSweep()`
+(`src/functions/recompress-orphans.ts`) runs `mem::recompress-orphans` hourly at its default
+limit of 50, logging, never throwing, on failure, so a backlog left by a provider outage drains
+without a REST call. `POST /agentmemory/recompress-orphans` triggers the same function with its
+options (`limit`, `dryRun`, `requeueQuarantined`, `graceBypassBefore`); 10 straight failures with
+no success end a pass early. The function refuses a pass while another runs (`running: true`, 409
+over REST; a dry run is never refused), and rechecks each target just before compressing it: one whose
+Observation was evicted or forgotten is skipped and its parked entry dropped, so it is not
+compressed back into existence.
+
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:
 
@@ -390,7 +403,8 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/lessons.test.ts` for function tests
 - Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
-- `npm run eval:replay -- --projects=<dir>,...` replays the Operator's own `~/.claude/projects` transcripts into a throwaway daemon and scores each Goal line against an answer key derived from the transcripts, counting only turns the Operator typed (`eval/README.md`). `--llm` replays through the hook payloads into a daemon with LLM compression on, using the shell's OpenAI-compatible settings. It is not part of CI, and its output stays under `tmp/eval-replay/` because it quotes private transcripts; only aggregates reach `docs/benchmarks/`
+- `npm run eval:replay -- --projects=<dir>,...` replays the Operator's own `~/.claude/projects` transcripts into a throwaway daemon and scores each Goal line against an answer key derived from the transcripts, counting only turns the Operator typed (`eval/README.md`). `--llm` replays through the hook payloads into a daemon with LLM compression on, using the shell's OpenAI-compatible settings. `--llm-summary` does the same with compression left synthetic and summarizes at every Stop, so the daemon's fold logic runs as live; a run whose `summary.json` shows `failedSummarizeCalls` above 0 is not a measurement. It is not part of CI, and its output stays under `tmp/eval-replay/` because it quotes private transcripts; only aggregates reach `docs/benchmarks/`
+- `npm run eval:decision-key -- --projects=<dir>,...` builds a frozen, LLM-extracted decision answer key from typed turns and AskUserQuestion answers only (`tmp/eval-replay/decision-key.json`, reused unless `--rebuild`); `eval:replay --decision-key` then judges each Injection against it with cached verdicts and reports `decisionRecall` per surface (`eval/README.md`, Decision key). Both files are private
 - `eval:replay --query-arm <arm>` (with `--reply-chars`, `--reply-scale`) shapes only the prompt-context probe's query from the previous Agent reply or prompt, to measure terse-prompt Injection before the hook changes; `summary.json` also carries `byProject` and a `typical` rollup excluding `--atypical`, and a change ships on the pooled number only when it does not lose on `typical`
 - `npm run eval:fold-drift -- --store <checkpoint> (--sessions a,b | --longest N)` compares each Session's full summarize with a fold sequence over `--batch` slices and counts decisions lost, overall and dropped by each fold or fallback; it calls the configured LLM and writes `tmp/eval-fold-drift/`
 - Iterate on Recall with `npm run eval:suite -- --tier fast --against <label>` (~2 min: coding-life, PrecisionMemBench, LongMemEval sample; `full` adds replay). Every eval runner scores only the dev split by default; `--split holdout` or `all` (a published scorecard) needs `AGENTMEMORY_EVAL_HOLDOUT=<label>` and logs the look in `eval/holdout-ledger.ndjson`, which `eval:suite --holdout` does for you. Never change the split salt or share in `eval/runner/split.ts`; see `eval/README.md`
@@ -491,3 +505,4 @@ The five canonical roles, each label string equal to its name. See `docs/agents/
 Single-context. `CONTEXT.md` holds the glossary — use its terms in specs, issues, and commit messages. ADRs live in `docs/adrs/`; read any whose scope covers what you are touching before editing. See `docs/agents/domain.md`.
 
 - [ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md) — this fork runs only the in-process SQLite Engine.
+- [ADR 0002](./docs/adrs/0002-local-embedder-on-worker-thread.md) — the local embedder runs on a worker thread.

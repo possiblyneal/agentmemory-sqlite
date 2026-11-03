@@ -65,6 +65,15 @@ export default defineConfig([
     clean: false,
     sourcemap: false,
   },
+  // The local embedder's worker thread (ADR 0002). The provider resolves it
+  // next to whichever dist bundle it was inlined into.
+  {
+    entry: ["src/providers/embedding/local-worker.ts"],
+    outDir: "dist",
+    ...shared,
+    clean: false,
+    sourcemap: false,
+  },
   // Migration importer (plan step 8): reuses the daemon's store, hydration,
   // BM25 rebuild and fill-pass code, so it ships as its own dist entry.
   {

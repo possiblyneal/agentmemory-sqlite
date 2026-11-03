@@ -121,3 +121,27 @@ export function isMainTranscriptName(name: string): boolean {
 export function orderByStart(sessions: ReplaySession[]): ReplaySession[] {
   return [...sessions].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
+
+type Entry = Record<string, unknown>;
+
+function userText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return (content as Entry[])
+    .filter((b) => b?.type === "text" && typeof b.text === "string" && b.text.trim())
+    .map((b) => (b.text as string).trim())
+    .join("\n");
+}
+
+export function isInterrupt(entry: Entry): boolean {
+  return /^\[Request interrupted/.test(userText((entry.message as Entry | undefined)?.content).trim());
+}
+
+// A prompt the Operator (or the harness) submitted opens a model turn; a
+// tool result, a meta entry or a compaction summary does not.
+export function opensTurn(entry: Entry): boolean {
+  if (entry.type !== "user" || entry.isMeta === true || entry.isCompactSummary === true || entry.isSidechain === true) return false;
+  const content = (entry.message as Entry | undefined)?.content;
+  if (typeof content === "string") return true;
+  return Array.isArray(content) && content.some((b: Entry) => b?.type === "text");
+}

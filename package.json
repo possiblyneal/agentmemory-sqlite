@@ -33,6 +33,7 @@
     "eval:dolphinbench": "tsx eval/runner/dolphinbench.ts",
     "eval:coding-life": "tsx eval/runner/coding-life.ts",
     "eval:replay": "tsx eval/runner/replay.ts",
+    "eval:decision-key": "tsx eval/runner/decision-key-run.ts",
     "eval:beam": "tsx eval/runner/beam.ts",
     "eval:pmb": "tsx eval/runner/pmb.ts",
     "eval:suite": "tsx eval/runner/suite.ts",

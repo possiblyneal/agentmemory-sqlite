@@ -10,6 +10,8 @@ import { StateKV } from "../state/kv.js";
 import {
   SUMMARY_SYSTEM,
   buildSummaryPrompt,
+  rejectionNote,
+  RECHECK_DECISIONS_NOTE,
   renderSummaryObservation,
   REDUCE_SYSTEM,
   buildReducePrompt,
@@ -229,6 +231,7 @@ async function produceSummaryXml(
   project: string,
   concurrency: number,
   chunkPartials: { partials?: ChunkPartials },
+  note: string,
 ): Promise<{
   response: string;
   mode: "single" | "chunked";
@@ -238,7 +241,7 @@ async function produceSummaryXml(
   if (chunks.length === 1) {
     const response = await provider.summarize(
       SUMMARY_SYSTEM,
-      buildSummaryPrompt(chunks[0]!),
+      buildSummaryPrompt(chunks[0]!) + note,
     );
     return { response, mode: "single", chunks: 1 };
   }
@@ -251,6 +254,7 @@ async function produceSummaryXml(
     sessionId,
     project,
     concurrency,
+    note,
   );
   return { response, mode: "chunked", chunks: chunks.length, skipped };
 }
@@ -342,6 +346,7 @@ async function reducePartials(
   sessionId: string,
   project: string,
   concurrency: number,
+  note: string,
 ): Promise<string> {
   const budget = getChunkTokens() - PROMPT_OVERHEAD_TOKENS;
   let groups = groupPartials(partials, budget);
@@ -351,7 +356,7 @@ async function reducePartials(
     );
     groups = groupPartials(merged, budget);
   }
-  return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!));
+  return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!) + note);
 }
 
 // An intermediate merge gets the same second try as a chunk, so one malformed
@@ -427,6 +432,8 @@ function parseSummaryXml(
 }
 
 const MAX_INJECTED_DECISION_CHARS = 600;
+// Enough to hold a whole single-mode reply, so a rejected one can be read back.
+const MAX_LOGGED_REPLY_CHARS = 8000;
 
 export function cutDecision(decision: string): string {
   return decision.length > MAX_INJECTED_DECISION_CHARS
@@ -528,6 +535,7 @@ export function registerSummarizeFunction(
         let summary: SessionSummary | null = null;
         let lastError: "empty_provider_response" | "parse_failed" | "validation_failed" =
           "empty_provider_response";
+        let note = "";
         let mode: string = "single";
         let chunks = 1;
         const concurrency = Math.min(getChunkConcurrency(), data.maxChunkConcurrency ?? Infinity);
@@ -559,7 +567,7 @@ export function registerSummarizeFunction(
             if (!fold) planned ??= await planChunks(provider, compressed, sessionId, concurrency);
             produced = fold
               ? {
-                  response: await provider.summarize(FOLD_SYSTEM, fold),
+                  response: await provider.summarize(FOLD_SYSTEM, fold + note),
                   mode: "folded",
                   chunks: 1,
                 }
@@ -570,6 +578,7 @@ export function registerSummarizeFunction(
                   session.project,
                   concurrency,
                   chunkCache,
+                  note,
                 );
           } catch (err) {
             if (!summary) throw err;
@@ -584,6 +593,7 @@ export function registerSummarizeFunction(
           chunks = produced.chunks;
           if (!response || !response.trim()) {
             lastError = "empty_provider_response";
+            note = rejectionNote("it was empty");
             logger.warn("Empty provider response on summarize", {
               sessionId,
               provider: provider.name,
@@ -602,6 +612,7 @@ export function registerSummarizeFunction(
           );
           if (!parsed) {
             lastError = "parse_failed";
+            note = rejectionNote("it held no <summary> with a <title>");
             logger.warn("Failed to parse summary XML", { sessionId, attempt });
             continue;
           }
@@ -618,6 +629,7 @@ export function registerSummarizeFunction(
           );
           if (!validation.valid) {
             lastError = "validation_failed";
+            note = rejectionNote(validation.result.errors.join("; "));
             logger.warn("Summary validation failed", {
               sessionId,
               mode,
@@ -626,6 +638,8 @@ export function registerSummarizeFunction(
               errors: validation.result.errors,
               narrative: parsed.narrative.slice(0, 200),
               narrativeLength: parsed.narrative.length,
+              reply: response.slice(0, MAX_LOGGED_REPLY_CHARS),
+              replyLength: response.length,
             });
             continue;
           }
@@ -645,6 +659,7 @@ export function registerSummarizeFunction(
             : (chunkCache.partials?.reduceInput.every((p) => p.keyDecisions.length === 0) ?? false);
           if (attempt === 1 && noDecisions && !inputHadNone) {
             logger.warn("Summary has no decisions, retrying", { sessionId, mode });
+            note = RECHECK_DECISIONS_NOTE;
             continue;
           }
           break;
@@ -678,6 +693,7 @@ export function registerSummarizeFunction(
 
         logger.info("Session summarized", {
           sessionId,
+          mode,
           title: summary.title,
           decisions: summary.keyDecisions.length,
           qualityScore,

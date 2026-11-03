@@ -1,5 +1,5 @@
 import type { ProbeItem } from "./replay-score.js";
-import { relativeToCwd } from "./replay-transcript.js";
+import { isInterrupt, opensTurn, relativeToCwd } from "./replay-transcript.js";
 
 // What Hindsight's own Claude Code integration (hindsight-integrations/
 // claude-code 0.7.6) does with its default settings, with dynamicBankId on so
@@ -93,21 +93,6 @@ function retentionTranscript(messages: Message[], fullWindow: boolean): { text: 
   });
   const text = parts.join("\n\n");
   return parts.length === 0 || text.trim().length < 10 ? null : { text, count: parts.length };
-}
-
-function isInterrupt(entry: Entry): boolean {
-  const content = (entry.message as Entry | undefined)?.content;
-  const text = typeof content === "string" ? content : Array.isArray(content) ? textContent(content, "user") : "";
-  return /^\[Request interrupted/.test(text.trim());
-}
-
-// A prompt the Operator (or the harness) submitted opens a model turn; a
-// tool result, a meta entry or a compaction summary does not.
-function opensTurn(entry: Entry): boolean {
-  if (entry.type !== "user" || entry.isMeta === true || entry.isCompactSummary === true || entry.isSidechain === true) return false;
-  const content = (entry.message as Entry | undefined)?.content;
-  if (typeof content === "string") return true;
-  return Array.isArray(content) && content.some((b: Entry) => b?.type === "text");
 }
 
 export interface Retain {
