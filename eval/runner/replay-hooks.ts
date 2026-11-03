@@ -90,19 +90,32 @@ export function summarizeCounts(log: string): { folded: number; full: number; re
   return counts;
 }
 
+// A summarize call that found no Observations is not a failure; any other
+// unsuccessful reply is, and a run with failures did not summarize as live.
+export type SummarizeOutcome = "summarized" | "nothing-new" | "failed";
+
+export function summarizeOutcome(body: { success?: boolean; error?: string }): SummarizeOutcome {
+  if (body.success === true) return "summarized";
+  return body.error === "no_observations" ? "nothing-new" : "failed";
+}
+
 export interface HookStepIo {
   observe(payload: HookPayload): Promise<void>;
   drain(): Promise<void>;
-  summarize(): Promise<boolean>;
+  summarize(): Promise<SummarizeOutcome>;
 }
 
 // Plays the steps in transcript order. A stop waits for the Observations
 // posted so far to be compressed, then summarizes, so the daemon's own fold
-// logic sees what a live Stop would. Returns how many summarize calls ran and
-// how many produced a Summary.
-export async function runHookSteps(steps: HookStep[], io: HookStepIo): Promise<{ summarizeCalls: number; summarized: number }> {
+// logic sees what a live Stop would. Returns how many summarize calls ran, how
+// many produced a Summary and how many failed.
+export async function runHookSteps(
+  steps: HookStep[],
+  io: HookStepIo,
+): Promise<{ summarizeCalls: number; summarized: number; failed: number }> {
   let summarizeCalls = 0;
   let summarized = 0;
+  let failed = 0;
   for (const step of steps) {
     if (step.step === "observe") {
       await io.observe(step.payload);
@@ -110,7 +123,9 @@ export async function runHookSteps(steps: HookStep[], io: HookStepIo): Promise<{
     }
     await io.drain();
     summarizeCalls++;
-    if (await io.summarize()) summarized++;
+    const outcome = await io.summarize();
+    if (outcome === "summarized") summarized++;
+    if (outcome === "failed") failed++;
   }
-  return { summarizeCalls, summarized };
+  return { summarizeCalls, summarized, failed };
 }
