@@ -333,6 +333,49 @@ describe("mem::summarize chunking", () => {
     expect(stored?.title).toBe("merged");
   });
 
+  it("tells a chunk's retry why its first reply was rejected and logs that reply", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "ok1" }),
+      "<garbage/>",
+      summaryXml({ title: "ok2" }),
+      summaryXml({ title: "ok3" }),
+      summaryXml({ title: "merged" }),
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_chunk_note", obsCount: 250, provider });
+    const { logger } = await import("../src/logger.js");
+    vi.mocked(logger.warn).mockClear();
+
+    await handler({ sessionId: "ses_chunk_note" });
+
+    const [, first, retry] = provider.calls;
+    expect(first!.user).not.toContain("rejected");
+    expect(retry!.user.startsWith(first!.user)).toBe(true);
+    expect(retry!.user).toContain("Your previous reply was rejected: it held no <summary> with a <title>");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Summarize chunk parse failed",
+      expect.objectContaining({ chunk: "2/3", attempt: 1, reply: "<garbage/>", replyLength: 10 }),
+    );
+  });
+
+  it("tells a chunk's retry when its first reply was empty", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "ok1" }),
+      "  ",
+      summaryXml({ title: "ok2" }),
+      summaryXml({ title: "ok3" }),
+      summaryXml({ title: "merged" }),
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_chunk_empty", obsCount: 250, provider });
+
+    await handler({ sessionId: "ses_chunk_empty" });
+
+    expect(provider.calls[2]!.user).toContain("Your previous reply was rejected: it was empty");
+  });
+
   it("persistently-broken chunk is skipped, reduce still runs on remaining partials", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";

@@ -166,18 +166,22 @@ async function summarizeChunkWithRetry(
   idx: number,
   total: number,
 ): Promise<SessionSummary | null> {
+  let note = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const xml = await provider.summarize(
         SUMMARY_SYSTEM,
-        buildSummaryPrompt(chunk),
+        buildSummaryPrompt(chunk) + note,
       );
       const parsed = parseSummaryXml(xml, sessionId, project, chunk.length);
       if (parsed) return parsed;
+      note = rejectionNote(xml.trim() ? "it held no <summary> with a <title>" : "it was empty");
       logger.warn("Summarize chunk parse failed", {
         sessionId,
         chunk: `${idx + 1}/${total}`,
         attempt,
+        reply: xml.slice(0, MAX_LOGGED_REPLY_CHARS),
+        replyLength: xml.length,
       });
     } catch (err) {
       logger.warn("Summarize chunk LLM call failed", {
