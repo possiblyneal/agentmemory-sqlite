@@ -64,9 +64,11 @@ It reads the tail of each Agent reply, so a recap the user accepts is kept verba
 answer is read against the question it answers.
 A Session Summary is current until an Observation arrives after it was written, and a
 current one is reused rather than reproduced. A stale one is folded forward: only the
-Observations after its recorded count are sent, with the prior summary, and the whole Session
-is re-read only on `force`, when that count no longer marks its last Observation, when the
-new Observations exceed one chunk, or when the fold fails twice.
+Observations it has not seen (after its last Observation, or newer than what it covers) are
+sent, with the prior summary, so a Session at its cap still folds as Eviction removes covered
+Observations. The whole Session is re-read only on `force`, when neither its last Observation
+nor its coverage remains to place it, when the new Observations exceed one chunk, or when the
+fold fails twice.
 Folding forward or re-reading never loses a decision the prior summary held: each decision is
 dated when it was first made, and a later decision that restates an earlier one replaces it.
 _Avoid_: session digest, recap

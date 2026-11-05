@@ -1065,6 +1065,10 @@ describe("mem::summarize incremental fold", () => {
   ) {
     const provider = makeProvider(responses);
     const { handler, kv } = await setupHandler({ sessionId, obsCount, provider });
+    for (let i = 0; i < obsCount; i++) {
+      const o: any = await kv.get(`obs:${sessionId}`, `obs_${i}`);
+      await kv.set(`obs:${sessionId}`, o.id, { ...o, timestamp: obsAt(i) });
+    }
     await kv.set("summaries", sessionId, {
       sessionId,
       project: "test-project",
@@ -1076,9 +1080,12 @@ describe("mem::summarize incremental fold", () => {
       concepts: ["prior-concept"],
       observationCount: priorCount,
       lastObservationId: priorLastId,
+      coveredThrough: obsAt(priorCount),
     });
     return { handler, kv, provider };
   }
+
+  const obsAt = (i: number) => new Date(Date.UTC(2026, 10, 1, 0, 0, i)).toISOString();
 
   it("first call with no prior summary sends every Observation", async () => {
     const provider = makeProvider([summaryXml({ title: "first" })]);
@@ -1109,10 +1116,28 @@ describe("mem::summarize incremental fold", () => {
     expect(stored.lastObservationId).toBe("obs_7");
   });
 
-  it("re-summarizes the whole Session when the prior summary's last Observation is no longer at its count", async () => {
-    const { handler, provider } = await withPriorSummary("ses_moved", 8, 5, "obs_deleted");
+  it("folds only the uncovered Observations after the session cap evicted covered ones", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_capped", 8, 5);
+    for (const i of [0, 1, 4]) await kv.delete("obs:ses_capped", `obs_${i}`);
 
-    await handler({ sessionId: "ses_moved" });
+    await handler({ sessionId: "ses_capped" });
+
+    expect(provider.calls).toHaveLength(1);
+    const { user } = provider.calls[0];
+    expect(user).toContain("prior narrative text");
+    for (const i of [5, 6, 7]) expect(user).toContain(`obs ${i}\n`);
+    for (const i of [2, 3]) expect(user).not.toContain(`obs ${i}\n`);
+    const stored: any = await kv.get("summaries", "ses_capped");
+    expect(stored.observationCount).toBe(5);
+    expect(stored.lastObservationId).toBe("obs_7");
+  });
+
+  it("re-summarizes the whole Session when neither the prior summary's last Observation nor its coveredThrough remains", async () => {
+    const { handler, kv, provider } = await withPriorSummary("ses_old", 8, 5, "obs_deleted");
+    const { coveredThrough: _, ...prior }: any = await kv.get("summaries", "ses_old");
+    await kv.set("summaries", "ses_old", prior);
+
+    await handler({ sessionId: "ses_old" });
 
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0].user).toContain("Session observations (8 total)");

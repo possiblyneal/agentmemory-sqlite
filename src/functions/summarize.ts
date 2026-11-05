@@ -543,23 +543,27 @@ export function registerSummarizeFunction(
         let mode: string = "single";
         let chunks = 1;
         const concurrency = Math.min(getChunkConcurrency(), data.maxChunkConcurrency ?? Infinity);
-        // A live Session is summarized every turn, so when a prior summary
-        // still marks a real position in the Observation order, only the
-        // Observations after it are sent and folded into that summary. A
+        // A live Session is summarized every turn, so only the Observations
+        // the prior summary has not seen are sent and folded into it: those
+        // after its last Observation, and those its coveredThrough does not
+        // cover. Neither is a count, since a Session at its cap evicts a
+        // covered Observation for every new one, sometimes that last one. A
         // fold prompt (prior summary included) too big for one chunk, or a
         // fold whose first attempt fails, falls back to the whole Session.
-        const priorCount = existing?.observationCount ?? 0;
-        const foldable =
-          !data.force &&
-          existing !== null &&
-          priorCount > 0 &&
-          priorCount < compressed.length &&
-          compressed[priorCount - 1]!.id === existing.lastObservationId;
+        const priorLast = existing
+          ? compressed.findIndex((o) => o.id === existing.lastObservationId)
+          : -1;
+        const uncovered = compressed.filter(
+          (o, i) =>
+            (priorLast >= 0 && i > priorLast) ||
+            (!!existing?.coveredThrough && !summaryCovers(existing, o.timestamp)),
+        );
+        const foldable = !data.force && existing !== null && uncovered.length > 0;
         let foldPrompt: string | null = null;
         let planned: CompressedObservation[][] | null = null;
         const chunkCache: { partials?: ChunkPartials } = {};
         if (foldable) {
-          const prompt = buildFoldPrompt(existing, compressed.slice(priorCount), priorCount);
+          const prompt = buildFoldPrompt(existing, uncovered, existing.observationCount);
           const budget = getChunkTokens();
           const [tokens] = await countObservationTokens(provider, [prompt], budget, sessionId);
           if (fitsOneChunk([tokens!], budget)) foldPrompt = prompt;
