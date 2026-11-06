@@ -272,11 +272,22 @@ async function summarizeChunks(
 ): Promise<ChunkPartials> {
   // Results keep chunk order, so the reduce step sees partials in
   // chronological order even when some were skipped.
+  let done = 0;
   const partialByIdx = await mapWithConcurrency(
     chunks.map((chunk, idx) => ({ chunk, idx })),
     concurrency,
-    ({ chunk, idx }) =>
-      summarizeChunkWithRetry(provider, chunk, sessionId, project, idx, chunks.length),
+    async ({ chunk, idx }) => {
+      const startMs = Date.now();
+      const partial = await summarizeChunkWithRetry(provider, chunk, sessionId, project, idx, chunks.length);
+      logger.info("Summarize chunk done", {
+        sessionId,
+        chunk: `${idx + 1}/${chunks.length}`,
+        done: `${++done}/${chunks.length}`,
+        parsed: partial !== null,
+        ms: Date.now() - startMs,
+      });
+      return partial;
+    },
   );
 
   const skipped = partialByIdx.filter((p) => p === null).length;
@@ -355,11 +366,13 @@ async function reducePartials(
   const budget = getChunkTokens() - PROMPT_OVERHEAD_TOKENS;
   let groups = groupPartials(partials, budget);
   while (groups.length > 1) {
+    logger.info("Summarize merge round", { sessionId, groups: groups.length });
     const merged = await mapWithConcurrency(groups, concurrency, async (group) =>
       group.length === 1 ? group[0]! : mergeGroupWithRetry(provider, group, sessionId, project),
     );
     groups = groupPartials(merged, budget);
   }
+  logger.info("Summarize final reduce", { sessionId, partials: groups[0]!.length });
   return provider.summarize(REDUCE_SYSTEM, buildReducePrompt(groups[0]!) + note);
 }
 
