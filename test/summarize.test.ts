@@ -359,6 +359,32 @@ describe("mem::summarize chunking", () => {
     );
   });
 
+  it("logs each chunk as it finishes and the reduce that follows", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "ok1" }),
+      summaryXml({ title: "ok2" }),
+      summaryXml({ title: "ok3" }),
+      summaryXml({ title: "merged" }),
+    ]);
+    const { handler } = await setupHandler({ sessionId: "ses_chunk_progress", obsCount: 250, provider });
+    const { logger } = await import("../src/logger.js");
+    vi.mocked(logger.info).mockClear();
+
+    await handler({ sessionId: "ses_chunk_progress" });
+
+    const done = vi.mocked(logger.info).mock.calls.filter(([msg]) => msg === "Summarize chunk done");
+    expect(done.map(([, meta]) => (meta as { done: string }).done)).toEqual(["1/3", "2/3", "3/3"]);
+    expect(done[0]![1]).toEqual(
+      expect.objectContaining({ sessionId: "ses_chunk_progress", chunk: "1/3", parsed: true, ms: expect.any(Number) }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "Summarize final reduce",
+      expect.objectContaining({ sessionId: "ses_chunk_progress", partials: 3 }),
+    );
+  });
+
   it("tells a chunk's retry when its first reply was empty", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(100);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
