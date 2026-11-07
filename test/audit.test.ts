@@ -22,6 +22,16 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listTimestamps: async (scope: string) =>
+      Array.from(store.get(scope)?.entries() ?? []).map(([key, v]) => ({
+        key,
+        timestamp: (v as { timestamp: string }).timestamp,
+      })),
+    deleteMany: async (scope: string, keys: string[]): Promise<number> => {
+      let removed = 0;
+      for (const key of keys) if (store.get(scope)?.delete(key)) removed++;
+      return removed;
+    },
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -161,6 +171,34 @@ describe("Audit Functions", () => {
     expect(kv.listNewestCalls[0].opts.limit).toBe(100);
     await expect(queryAudit(kv as never, { dateFrom: "nope" })).rejects.toThrow("Invalid dateFrom");
     await expect(queryAudit(kv as never, { dateTo: "nope" })).rejects.toThrow("Invalid dateTo");
+  });
+
+  it("evictOldestAudit keeps equal-timestamp rows by insertion order and removes nothing under the cap", async () => {
+    process.env.AGENTMEMORY_AUDIT_MAX = "2";
+    try {
+      const timestamp = "2026-01-01T00:00:00.000Z";
+      for (const id of ["aud_a", "aud_b", "aud_c"]) {
+        await kv.set("mem:audit", id, { id, timestamp, operation: "observe", functionId: "f", targetIds: [], details: {} });
+      }
+      expect(await evictOldestAudit(kv as never)).toBe(1);
+      expect((await kv.list<{ id: string }>("mem:audit")).map((e) => e.id).sort()).toEqual(["aud_a", "aud_b"]);
+      expect(await evictOldestAudit(kv as never)).toBe(0);
+    } finally {
+      delete process.env.AGENTMEMORY_AUDIT_MAX;
+    }
+  });
+
+  it("evictOldestAudit does nothing when the audit store is off", async () => {
+    process.env.AGENTMEMORY_AUDIT_STORE = "off";
+    process.env.AGENTMEMORY_AUDIT_MAX = "1";
+    try {
+      const spy = vi.spyOn(kv, "listTimestamps");
+      expect(await evictOldestAudit(kv as never)).toBe(0);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.AGENTMEMORY_AUDIT_STORE;
+      delete process.env.AGENTMEMORY_AUDIT_MAX;
+    }
   });
 
   it("evictOldestAudit keeps the newest AGENTMEMORY_AUDIT_MAX entries", async () => {

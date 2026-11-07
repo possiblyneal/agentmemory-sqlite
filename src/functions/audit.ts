@@ -142,14 +142,16 @@ function auditMax(): number {
 export async function evictOldestAudit(kv: StateKV): Promise<number> {
   if (auditStoreOff()) return 0;
   const max = auditMax();
-  const all = await kv.list<AuditEntry>(KV.audit);
-  if (all.length <= max) return 0;
-  const oldest = [...all]
-    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-    .slice(0, all.length - max);
-  for (const entry of oldest) await kv.delete(KV.audit, entry.id);
-  logger.info("Audit log evicted beyond cap", { removed: oldest.length, kept: max });
-  return oldest.length;
+  const rows = await kv.listTimestamps(KV.audit);
+  if (rows.length <= max) return 0;
+  const doomed = rows
+    .map((row, order) => ({ key: row.key, order, stamp: row.timestamp ?? "" }))
+    .sort((a, b) => b.stamp.localeCompare(a.stamp) || a.order - b.order)
+    .slice(max)
+    .map((row) => row.key);
+  const removed = await kv.deleteMany(KV.audit, doomed);
+  logger.info("Audit log evicted beyond cap", { removed, kept: max });
+  return removed;
 }
 
 export async function queryAudit(

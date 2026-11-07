@@ -474,6 +474,33 @@ export class SqliteState {
     });
   }
 
+  // One page of (seq, key, $.timestamp) for the rows after `afterSeq`, in seq
+  // order, without returning any row value to JS. The caller pages with the
+  // last seq so no single call scans the whole scope.
+  listTimestamps(
+    scope: string,
+    afterSeq: number,
+    limit: number,
+  ): Array<{ seq: number; key: string; timestamp: string | null }> {
+    return this.db
+      .prepare(
+        "SELECT seq, key, json_extract(value, '$.timestamp') AS timestamp FROM kv WHERE scope = ? AND seq > ? ORDER BY seq LIMIT ?",
+      )
+      .all(scope, afterSeq, limit) as Array<{ seq: number; key: string; timestamp: string | null }>;
+  }
+
+  // delete() per key in one transaction, without reading the old rows back and
+  // without state events: it serves the audit log's retention, which nothing
+  // subscribes to. The caller bounds the chunk (StateKV.deleteMany, 500 keys).
+  deleteMany(scope: string, keys: string[]): number {
+    return this.transaction(() => {
+      const del = this.db.prepare("DELETE FROM kv WHERE scope = ? AND key = ?");
+      let removed = 0;
+      for (const key of keys) removed += Number(del.run(scope, key).changes);
+      return removed;
+    });
+  }
+
   // set() per row in one transaction, but only where the stored row's updatedAt
   // still equals the one the caller read (`updatedAt` on the entry; `value`
   // carries its own new one): a row rewritten since then (an Insight
@@ -568,8 +595,8 @@ async function cooperate<T>(result: T): Promise<T> {
 }
 
 // The function handlers, in the exact shapes `src/state/kv.ts` sends and the
-// engine returns (`state::set-many`, `state::set-many-if-unchanged` and `state::delete-many-if-unchanged` are
-// inproc-only; kv.ts never sends them to iii). Registered on the shim by `sdk.ts`.
+// engine returns (`state::set-many`, `state::set-many-if-unchanged` and `state::delete-many-if-unchanged`,
+// `state::list-timestamps` and `state::delete-many` are inproc-only; kv.ts never sends them to iii). Registered on the shim by `sdk.ts`.
 export function stateFunctions(
   store: SqliteState,
 ): Record<string, (payload: any) => Promise<unknown>> {
@@ -592,5 +619,8 @@ export function stateFunctions(
       cooperate(store.setManyIfUnchanged(p.scope, p.entries ?? [])),
     "state::delete-many-if-unchanged": async (p) =>
       cooperate(store.deleteManyIfUnchanged(p.scope, p.entries ?? [])),
+    "state::list-timestamps": async (p) =>
+      cooperate(store.listTimestamps(p.scope, p.afterSeq, p.limit)),
+    "state::delete-many": async (p) => cooperate(store.deleteMany(p.scope, p.keys ?? [])),
   };
 }
