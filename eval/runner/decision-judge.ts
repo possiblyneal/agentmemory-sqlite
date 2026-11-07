@@ -63,12 +63,15 @@ export function createJudge(complete: Complete, cache: VerdictCache): Judge {
 }
 
 // A Session's expected decisions, judged against the session-start Injection
-// and against the prompt-context Injection of the prompt they bear on.
+// and against the prompt-context Injection of the prompt they bear on. A
+// decision made in a Session that was not replayed before this one is in no
+// store the daemon could hold, so it is reported unreachable and not judged.
 export async function decisionOutcomes(
   session: ReplaySession,
   key: DecisionKey,
   probes: Probe[],
   judge: Judge,
+  replayed: ReadonlySet<string>,
 ): Promise<DecisionOutcome[]> {
   const byId = new Map(key.decisions.map((d) => [d.id, d]));
   const start = probes.find((p) => p.kind === "session-start" && !p.failed)?.text ?? "";
@@ -78,8 +81,12 @@ export async function decisionOutcomes(
     for (const id of expected.decisionIds) {
       const decision = byId.get(id);
       if (!decision) continue;
+      if (!replayed.has(decision.sessionId)) {
+        out.push({ decisionId: id, turn: expected.turn, reachable: false, sessionStart: false, promptSubmit: false });
+        continue;
+      }
       const [sessionStart, promptSubmit] = await Promise.all([judge.delivers(decision, start), judge.delivers(decision, prompt)]);
-      out.push({ decisionId: id, turn: expected.turn, sessionStart, promptSubmit });
+      out.push({ decisionId: id, turn: expected.turn, reachable: true, sessionStart, promptSubmit });
     }
   }
   return out;

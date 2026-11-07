@@ -228,9 +228,16 @@ function openDecisionScoring(opts: Options): DecisionScoring | undefined {
   };
 }
 
-async function withDecisions(score: SessionScore, session: ReplaySession, probes: Probe[], scoring?: DecisionScoring): Promise<SessionScore> {
+async function withDecisions(
+  score: SessionScore,
+  session: ReplaySession,
+  ingested: ReplaySession[],
+  probes: Probe[],
+  scoring?: DecisionScoring,
+): Promise<SessionScore> {
   if (!scoring) return score;
-  return { ...score, decisions: await decisionOutcomes(session, scoring.key, probes, scoring.judge) };
+  const replayed = new Set(ingested.map((s) => s.id));
+  return { ...score, decisions: await decisionOutcomes(session, scoring.key, probes, scoring.judge, replayed) };
 }
 
 const post = <T>(baseUrl: string, path: string, body: unknown) => daemonCall<T>(baseUrl, path, { body });
@@ -617,7 +624,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
-      const score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, probes, decisions);
+      const score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       console.log(
@@ -733,7 +740,7 @@ async function main(): Promise<void> {
         writeFileSync(manifestPath, JSON.stringify(checkpoints, null, 2));
       } else if (scored.has(session.id) && !opts.saveCheckpoints) {
         const probes = await backend.probe(session, opts.maxPrompts);
-        score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, probes, decisions);
+        score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
         scores.push(score);
         appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       }

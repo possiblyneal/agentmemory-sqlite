@@ -54,6 +54,7 @@ export interface KeyOutcome {
 export interface DecisionOutcome {
   decisionId: string;
   turn: number;
+  reachable: boolean;
   sessionStart: boolean;
   promptSubmit: boolean;
 }
@@ -187,7 +188,8 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
     }),
   );
   const corrections = outcomes.filter((o) => o.key.kind === "correction");
-  const decisions = scores.flatMap((s) => s.decisions ?? []);
+  const allDecisions = scores.flatMap((s) => s.decisions ?? []);
+  const decisions = allDecisions.filter((d) => d.reachable);
   const injectionChars = scores.reduce((n, s) => n + s.injectionChars, 0);
   const used = items.filter((i) => i.used);
   const usedRefs = new Set(used.map((i) => i.ref));
@@ -220,6 +222,7 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
     },
     decisionRecall: {
       items: decisions.length,
+      unreachable: allDecisions.length - decisions.length,
       sessionStart: share(decisions.filter((d) => d.sessionStart).length, decisions.length),
       promptSubmit: share(decisions.filter((d) => d.promptSubmit).length, decisions.length),
       either: share(decisions.filter((d) => d.sessionStart || d.promptSubmit).length, decisions.length),

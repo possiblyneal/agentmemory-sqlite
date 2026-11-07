@@ -188,8 +188,12 @@ describe("decision recall", () => {
   const key: DecisionKey = {
     version: 1,
     builtAt: "x",
-    decisions: [decision, { ...decision, id: "d2", text: "Totals are in cents." }],
-    expected: [{ sessionId: "s2", turn: 1, decisionIds: ["d1", "d2"] }],
+    decisions: [
+      decision,
+      { ...decision, id: "d2", text: "Totals are in cents." },
+      { ...decision, id: "d3", sessionId: "gone", text: "Ship on Fridays." },
+    ],
+    expected: [{ sessionId: "s2", turn: 1, decisionIds: ["d1", "d2", "d3"] }],
   };
   const complete: Complete = async (_system, u) => {
     const text = u.split("Injected text:\n")[1];
@@ -197,15 +201,23 @@ describe("decision recall", () => {
     return `{"delivers":${text.includes(wanted)}}`;
   };
 
-  it("judges each expected decision against the session-start and prompt-context Injection", async () => {
+  it("judges each reachable decision against the session-start and prompt-context Injection, and never judges one whose Session was not replayed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "decision-verdicts-"));
+    let calls = 0;
+    const counting: Complete = (system, u) => {
+      calls++;
+      return complete(system, u);
+    };
     try {
-      const judge = createJudge(complete, openVerdictCache(join(dir, "v.ndjson")));
-      const outcomes = await decisionOutcomes(session, key, [probe("session-start", 0, "all totals are cents"), probe("prompt-context", 1, "use the builder")], judge);
+      const judge = createJudge(counting, openVerdictCache(join(dir, "v.ndjson")));
+      const probes = [probe("session-start", 0, "all totals are cents"), probe("prompt-context", 1, "use the builder")];
+      const outcomes = await decisionOutcomes(session, key, probes, judge, new Set(["e1"]));
       expect(outcomes).toEqual([
-        { decisionId: "d1", turn: 1, sessionStart: false, promptSubmit: true },
-        { decisionId: "d2", turn: 1, sessionStart: true, promptSubmit: false },
+        { decisionId: "d1", turn: 1, reachable: true, sessionStart: false, promptSubmit: true },
+        { decisionId: "d2", turn: 1, reachable: true, sessionStart: true, promptSubmit: false },
+        { decisionId: "d3", turn: 1, reachable: false, sessionStart: false, promptSubmit: false },
       ]);
+      expect(calls).toBe(4);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -226,15 +238,17 @@ describe("decision recall", () => {
     });
     const scores = [
       score("a", "shop", [
-        { decisionId: "d1", turn: 1, sessionStart: true, promptSubmit: false },
-        { decisionId: "d2", turn: 1, sessionStart: false, promptSubmit: false },
+        { decisionId: "d1", turn: 1, reachable: true, sessionStart: true, promptSubmit: false },
+        { decisionId: "d2", turn: 1, reachable: true, sessionStart: false, promptSubmit: false },
+        { decisionId: "d4", turn: 1, reachable: false, sessionStart: false, promptSubmit: false },
       ]),
-      score("b", "agentmemory-sqlite", [{ decisionId: "d3", turn: 2, sessionStart: false, promptSubmit: true }]),
+      score("b", "agentmemory-sqlite", [{ decisionId: "d3", turn: 2, reachable: true, sessionStart: false, promptSubmit: true }]),
       score("c", "shop", undefined),
     ];
     const s = summarizeReplay(scores, { storeBytesStart: 0, storeBytesEnd: 0 });
     expect(s.decisionRecall).toEqual({
       items: 3,
+      unreachable: 1,
       sessionStart: { n: 3, hit: 1, share: 1 / 3 },
       promptSubmit: { n: 3, hit: 1, share: 1 / 3 },
       either: { n: 3, hit: 2, share: 2 / 3 },
