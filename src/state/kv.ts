@@ -2,6 +2,8 @@ import type { ISdk } from '../engine/types.js'
 import type { NewestMatchingOpts } from '../engine/inproc/state.js'
 
 export const SET_MANY_CHUNK = 100
+const DELETE_MANY_CHUNK = 500
+const TIMESTAMP_PAGE = 2000
 
 const GRAPH_SCOPE_PREFIX = 'mem:graph:'
 let graphWriteCount = 0
@@ -130,6 +132,40 @@ export class StateKV {
       }
       return deleted
     })
+  }
+
+  // Bounded batches like setMany. Deletes the keys unconditionally and returns
+  // how many rows it removed.
+  async deleteMany(scope: string, keys: string[]): Promise<number> {
+    return trackWrite(scope, async () => {
+      let removed = 0
+      for (let i = 0; i < keys.length; i += DELETE_MANY_CHUNK) {
+        removed += await this.sdk.trigger<{ scope: string; keys: string[] }, number>({
+          function_id: 'state::delete-many',
+          payload: { scope, keys: keys.slice(i, i + DELETE_MANY_CHUNK) },
+        })
+      }
+      return removed
+    })
+  }
+
+  // Every row's key and $.timestamp without its value, read in pages of
+  // TIMESTAMP_PAGE so no single call scans the whole scope.
+  async listTimestamps(scope: string): Promise<Array<{ key: string; timestamp: string | null }>> {
+    const rows: Array<{ key: string; timestamp: string | null }> = []
+    let afterSeq = 0
+    for (;;) {
+      const page = await this.sdk.trigger<
+        { scope: string; afterSeq: number; limit: number },
+        Array<{ seq: number; key: string; timestamp: string | null }>
+      >({
+        function_id: 'state::list-timestamps',
+        payload: { scope, afterSeq, limit: TIMESTAMP_PAGE },
+      })
+      for (const { key, timestamp } of page) rows.push({ key, timestamp })
+      if (page.length < TIMESTAMP_PAGE) return rows
+      afterSeq = page[page.length - 1].seq
+    }
   }
 
   async list<T = unknown>(scope: string): Promise<T[]> {
