@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 vi.mock("../src/logger.js", () => ({
@@ -19,6 +19,32 @@ function readText(relativePath: string): string {
 function countRestApiEndpoints(): number {
   const src = readText("src/triggers/api.ts");
   return Array.from(src.matchAll(/api_path:\s*["`]/g)).length;
+}
+
+const ledgerSection = (markdown: string) => markdown.split(/^## Ledger$/m)[1]?.split(/^## /m)[0] ?? "";
+
+function ledgerRows(markdown: string): string[][] {
+  return ledgerSection(markdown)
+    .split("\n")
+    .filter((line) => line.startsWith("|"))
+    .slice(2)
+    .map((line) =>
+      line
+        .replace(/^\||\|\s*$/g, "")
+        .split(/(?<!\\)\|/)
+        .map((cell) => cell.trim()),
+    );
+}
+
+function rowsMissingRetryIf(markdown: string): string[] {
+  return ledgerRows(markdown)
+    .filter(([, , , , , verdict, retryIf]) => /^(rejected|inconclusive)\b/.test(verdict) && (!retryIf || retryIf === "—"))
+    .map(([date, hypothesis]) => `${date} ${hypothesis}`);
+}
+
+function scorecardsMissingFromLedger(markdown: string, scorecards: string[]): string[] {
+  const section = ledgerSection(markdown);
+  return scorecards.filter((name) => !section.includes(`](./benchmarks/${name})`));
 }
 
 describe("Consistency checks", () => {
@@ -102,4 +128,48 @@ describe("Consistency checks", () => {
     }
   });
 
+});
+
+describe("Experiment ledger", () => {
+  const ledger = readText("docs/experiments.md");
+  const scorecards = readdirSync(join(ROOT, "docs/benchmarks")).filter(
+    (name) => name.endsWith(".md") && name !== "TEMPLATE.md",
+  );
+
+  it("links every scorecard from the ledger", () => {
+    expect(scorecardsMissingFromLedger(ledger, scorecards)).toEqual([]);
+  });
+
+  it("names a Retry if on every rejected or inconclusive row", () => {
+    expect(rowsMissingRetryIf(ledger)).toEqual([]);
+  });
+
+  it("flags a scorecard the ledger does not link", () => {
+    expect(
+      scorecardsMissingFromLedger(ledger, [...scorecards, "2099-01-01-unlisted.md"]),
+    ).toEqual(["2099-01-01-unlisted.md"]);
+  });
+
+  it("flags rejected and inconclusive rows without a Retry if", () => {
+    const fixture = [
+      "## Ledger",
+      "",
+      "| Date | Hypothesis | Source | Eval | Result | Verdict | Retry if | Evidence |",
+      "|---|---|---|---|---|---|---|---|",
+      "| 2026-01-01 | kept one | — | e | r | kept | — | x |",
+      "| 2026-01-02 | rejected, empty | — | e | r | rejected |  | x |",
+      "| 2026-01-03 | rejected, dash | — | e | r | rejected | — | x |",
+      "| 2026-01-04 | inconclusive, set | — | e | r | inconclusive | more items | x |",
+      "",
+      "## Candidate hypotheses",
+      "",
+      "| Hypothesis | Source |",
+      "|---|---|",
+      "| ignored | — |",
+    ].join("\n");
+    expect(rowsMissingRetryIf(fixture)).toEqual([
+      "2026-01-02 rejected, empty",
+      "2026-01-03 rejected, dash",
+    ]);
+  });
 });

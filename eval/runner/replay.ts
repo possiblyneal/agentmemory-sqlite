@@ -35,7 +35,8 @@ import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass 
 import { selectionOf } from "./replay-selection.js";
 import { loadSessions, type Loaded } from "./replay-load.js";
 import { DECISION_KEY_PATH, DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
-import { readDecisionKey, type DecisionKey } from "./decision-key.js";
+import { attributeDecision, readSummaryDecisions } from "./decision-attribution.js";
+import { keyedSessionIds, readDecisionKey, unreachableOrigins, unreachableWarning, type DecisionKey } from "./decision-key.js";
 import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
 import { hookPayloads, hookSteps, runHookSteps, summarizeCounts, summarizeOutcome } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
@@ -69,6 +70,7 @@ interface Options {
   split: Split;
   keyedOnly: boolean;
   decisionKey: boolean;
+  attribute: boolean;
   saveCheckpoints: boolean;
   resume: boolean;
   fromCheckpoints?: string;
@@ -95,6 +97,7 @@ function parseOptions(): Options {
       split: { type: "string" },
       "keyed-only": { type: "boolean", default: false },
       "decision-key": { type: "boolean", default: false },
+      attribute: { type: "boolean", default: false },
       "save-checkpoints": { type: "boolean", default: false },
       resume: { type: "boolean", default: false },
       "from-checkpoints": { type: "string" },
@@ -185,6 +188,10 @@ function parseOptions(): Options {
     console.error("--decision-key judges agentmemory's Injection text over every scored Session; drop --backend hindsight and --keyed-only");
     process.exit(2);
   }
+  if (values.attribute && !(values["decision-key"] && values["from-checkpoints"])) {
+    console.error("--attribute reads each origin Session's Summary from the restored checkpoint; pass --decision-key and --from-checkpoints");
+    process.exit(2);
+  }
   const maintenance = values.maintenance ? parseMaintenance(values.maintenance) : undefined;
   if (maintenance && "error" in maintenance) {
     console.error(maintenance.error);
@@ -206,6 +213,7 @@ function parseOptions(): Options {
     split: openSplit(values.split, "replay"),
     keyedOnly: values["keyed-only"] === true,
     decisionKey: values["decision-key"] === true,
+    attribute: values.attribute === true,
     saveCheckpoints: values["save-checkpoints"] === true,
     resume: values.resume === true,
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
@@ -228,9 +236,28 @@ function openDecisionScoring(opts: Options): DecisionScoring | undefined {
   };
 }
 
-async function withDecisions(score: SessionScore, session: ReplaySession, probes: Probe[], scoring?: DecisionScoring): Promise<SessionScore> {
+async function withDecisions(
+  score: SessionScore,
+  session: ReplaySession,
+  ingested: ReplaySession[],
+  probes: Probe[],
+  scoring?: DecisionScoring,
+): Promise<SessionScore> {
   if (!scoring) return score;
-  return { ...score, decisions: await decisionOutcomes(session, scoring.key, probes, scoring.judge) };
+  const replayed = new Set(ingested.map((s) => s.id));
+  return { ...score, decisions: await decisionOutcomes(session, scoring.key, probes, scoring.judge, replayed) };
+}
+
+async function withAttribution(score: SessionScore, key: DecisionKey, judge: Judge, sqlitePath: string): Promise<SessionScore> {
+  const byId = new Map(key.decisions.map((d) => [d.id, d]));
+  const decisions = await Promise.all(
+    (score.decisions ?? []).map(async (outcome) => {
+      const decision = byId.get(outcome.decisionId);
+      if (!outcome.reachable || !decision) return outcome;
+      return { ...outcome, where: await attributeDecision(decision, readSummaryDecisions(sqlitePath, decision.sessionId), judge) };
+    }),
+  );
+  return { ...score, decisions };
 }
 
 const post = <T>(baseUrl: string, path: string, body: unknown) => daemonCall<T>(baseUrl, path, { body });
@@ -617,7 +644,8 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
-      const score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, probes, decisions);
+      const decided = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
+      const score = opts.attribute && decisions ? await withAttribution(decided, decisions.key, decisions.judge, sandbox.sqlitePath) : decided;
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       console.log(
@@ -691,7 +719,8 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
 
 async function main(): Promise<void> {
   const opts = parseOptions();
-  const loaded = loadSessions(opts);
+  const decisions = openDecisionScoring(opts);
+  const loaded = loadSessions({ ...opts, include: decisions && keyedSessionIds(decisions.key) });
   const { perDirectory, perProject } = loaded;
   // Every Session is imported whichever split runs, but only the split's
   // Sessions are probed, and probing agentmemory writes Session and Injection
@@ -707,7 +736,11 @@ async function main(): Promise<void> {
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
   writeFileSync(ndjson, "");
-  const decisions = openDecisionScoring(opts);
+  if (decisions) {
+    const warning = unreachableWarning(unreachableOrigins(decisions.key, new Set(sessions.map((x) => x.id))));
+    if (warning) console.error(`warning: ${warning}`);
+  }
+  writeFileSync(join(opts.out, "sessions.json"), JSON.stringify(sessions.map((x) => x.id), null, 2));
   if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson, decisions);
 
   const checkpointDir = join(opts.out, "checkpoints");
@@ -733,7 +766,7 @@ async function main(): Promise<void> {
         writeFileSync(manifestPath, JSON.stringify(checkpoints, null, 2));
       } else if (scored.has(session.id) && !opts.saveCheckpoints) {
         const probes = await backend.probe(session, opts.maxPrompts);
-        score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, probes, decisions);
+        score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
         scores.push(score);
         appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
       }

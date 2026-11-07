@@ -164,3 +164,45 @@ export function readDecisionKey(path: string): DecisionKey {
   if (!existsSync(path)) throw new Error(`no decision key at ${path}; run \`npm run eval:decision-key -- --projects=...\` first`);
   return JSON.parse(readFileSync(path, "utf8")) as DecisionKey;
 }
+
+// Every Session the key names: the Sessions whose prompts carry expected
+// decisions and the Sessions those decisions were made in.
+export function keyedSessionIds(key: DecisionKey): Set<string> {
+  const byId = new Map(key.decisions.map((d) => [d.id, d]));
+  const ids = new Set<string>();
+  for (const e of key.expected) {
+    ids.add(e.sessionId);
+    for (const id of e.decisionIds) {
+      const decision = byId.get(id);
+      if (decision) ids.add(decision.sessionId);
+    }
+  }
+  return ids;
+}
+
+export interface UnreachableOrigin {
+  sessionId: string;
+  items: number;
+}
+
+// Key items whose decision was made in a Session the replay does not hold.
+export function unreachableOrigins(key: DecisionKey, replayed: ReadonlySet<string>): UnreachableOrigin[] {
+  const byId = new Map(key.decisions.map((d) => [d.id, d]));
+  const counts = new Map<string, number>();
+  for (const e of key.expected) {
+    for (const id of e.decisionIds) {
+      const decision = byId.get(id);
+      if (decision && !replayed.has(decision.sessionId)) counts.set(decision.sessionId, (counts.get(decision.sessionId) ?? 0) + 1);
+    }
+  }
+  return [...counts].map(([sessionId, items]) => ({ sessionId, items })).sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+}
+
+export function unreachableWarning(unreachable: UnreachableOrigin[]): string | undefined {
+  if (unreachable.length === 0) return undefined;
+  const items = unreachable.reduce((n, u) => n + u.items, 0);
+  return (
+    `the decision key names ${unreachable.length} Sessions outside the replayed set (${items} key items cannot be delivered): ` +
+    `${unreachable.map((u) => `${u.sessionId} (${u.items})`).join(", ")}. Add their transcripts to the projects.`
+  );
+}

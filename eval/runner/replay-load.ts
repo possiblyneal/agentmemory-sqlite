@@ -10,6 +10,7 @@ export interface LoadOptions {
   root: string;
   cap: number;
   minTurns: number;
+  include?: ReadonlySet<string>;
 }
 
 export interface Loaded {
@@ -61,7 +62,7 @@ export function loadSessions(opts: LoadOptions): Loaded {
         continue;
       }
       const session = parseTranscript(readFileSync(file, "utf8"), file);
-      if (!session || session.userTurns.length < opts.minTurns || seen.has(session.id)) continue;
+      if (!session || seen.has(session.id)) continue;
       seen.add(session.id);
       if (!projectByCwd.has(session.cwd)) projectByCwd.set(session.cwd, repoProject(session.cwd, session.project));
       session.project = projectByCwd.get(session.cwd)!;
@@ -69,12 +70,30 @@ export function loadSessions(opts: LoadOptions): Loaded {
     }
     perDirectory[dir] = stats;
   }
+  const { sessions, perProject } = selectSessions([...byProject.values()].flat(), opts);
+  return { sessions, perDirectory, perProject };
+}
+
+// Per project the earliest `cap` Sessions with `minTurns` turns; a Session in
+// `include` is kept whatever either says, so every origin of the decision key
+// is replayed.
+export function selectSessions(
+  sessions: ReplaySession[],
+  opts: Pick<LoadOptions, "cap" | "minTurns" | "include">,
+): Pick<Loaded, "sessions" | "perProject"> {
+  const forced = (s: ReplaySession) => opts.include?.has(s.id) === true;
+  const byProject = new Map<string, ReplaySession[]>();
+  for (const s of sessions) byProject.set(s.project, [...(byProject.get(s.project) ?? []), s]);
   const picked: ReplaySession[] = [];
   const perProject: Loaded["perProject"] = {};
-  for (const [project, sessions] of byProject) {
-    const chosen = orderByStart(sessions).slice(0, opts.cap);
-    perProject[project] = { replayable: sessions.length, replayed: chosen.length };
+  for (const [project, all] of byProject) {
+    const ordered = orderByStart(all);
+    const meetsMin = (s: ReplaySession) => s.userTurns.length >= opts.minTurns;
+    const normal = ordered.filter(meetsMin);
+    const chosen = new Set(normal.slice(0, opts.cap));
+    for (const s of ordered) if (forced(s)) chosen.add(s);
+    perProject[project] = { replayable: ordered.filter((s) => forced(s) || meetsMin(s)).length, replayed: chosen.size };
     picked.push(...chosen);
   }
-  return { sessions: orderByStart(picked), perDirectory, perProject };
+  return { sessions: orderByStart(picked), perProject };
 }
