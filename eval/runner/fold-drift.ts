@@ -6,7 +6,10 @@ import { hydrateProcessEnvFromFile, loadConfig, loadFallbackConfig } from "../..
 import { createFallbackProvider, createProvider } from "../../src/providers/index.js";
 import { KV } from "../../src/state/schema.js";
 import type { CompressedObservation, Session } from "../../src/types.js";
-import { measureFoldDrift, type FoldDriftResult } from "./fold-drift-core.js";
+import { createJudge, openVerdictCache } from "./decision-judge.js";
+import { readDecisionKey } from "./decision-key.js";
+import { DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
+import { measureFoldDrift, type DecisionLabel, type FoldDriftResult, type Judging } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
 
@@ -40,10 +43,11 @@ async function main(): Promise<void> {
       sessions: { type: "string" },
       longest: { type: "string" },
       batch: { type: "string", default: "50" },
+      "decision-key": { type: "string" },
     },
   });
   if (!values.store || (!values.sessions && !values.longest)) {
-    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N]");
+    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>]");
   }
   const batch = Math.max(1, parseInt(values.batch!, 10) || 50);
   const ids = values.sessions ? values.sessions.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -61,6 +65,10 @@ async function main(): Promise<void> {
   const projects = new Map(readScope<Session>(db, KV.sessions).map((s) => [s.id, s.project]));
   db.close();
 
+  const judging: Judging = {
+    judge: createJudge(providerComplete(), openVerdictCache(DECISION_VERDICTS_PATH)),
+    key: values["decision-key"] ? readDecisionKey(values["decision-key"]).decisions : [],
+  };
   const results: FoldDriftResult[] = [];
   const failed: Array<{ sessionId: string; error: string }> = [];
   for (const [sessionId, observations] of sessions) {
@@ -69,7 +77,7 @@ async function main(): Promise<void> {
         sessionId,
         project: projects.get(sessionId) ?? "unknown",
         batch,
-      });
+      }, judging);
       results.push(r);
       console.log(row(r));
     } catch (err) {
@@ -85,23 +93,38 @@ async function main(): Promise<void> {
       folded: t.folded + r.folded,
       missingExact: t.missingExact + r.missingExact,
       missingLoose: t.missingLoose + r.missingLoose,
+      missingJudged: t.missingJudged + (r.missingJudged ?? 0),
       droppedExact: t.droppedExact + r.droppedExact,
       droppedLoose: t.droppedLoose + r.droppedLoose,
       fallbackDroppedExact: t.fallbackDroppedExact + r.fallbackDroppedExact,
       fallbackDroppedLoose: t.fallbackDroppedLoose + r.fallbackDroppedLoose,
     }),
-    { full: 0, folded: 0, missingExact: 0, missingLoose: 0, droppedExact: 0, droppedLoose: 0, fallbackDroppedExact: 0, fallbackDroppedLoose: 0 },
+    { full: 0, folded: 0, missingExact: 0, missingLoose: 0, missingJudged: 0, droppedExact: 0, droppedLoose: 0, fallbackDroppedExact: 0, fallbackDroppedLoose: 0 },
   );
-  console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose} dropped-by-folds(exact)=${total.droppedExact} dropped-by-folds(jaccard>=0.5)=${total.droppedLoose} dropped-by-fallbacks(exact)=${total.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${total.fallbackDroppedLoose}`);
+  const labelTotal = labelCounts(results.flatMap((r) => r.labels ?? []));
+  console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose} missing(judged)=${total.missingJudged}${labelText(labelTotal)} dropped-by-folds(exact)=${total.droppedExact} dropped-by-folds(jaccard>=0.5)=${total.droppedLoose} dropped-by-fallbacks(exact)=${total.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${total.fallbackDroppedLoose}`);
 
   mkdirSync(OUT_DIR, { recursive: true });
   const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-  writeFileSync(file, JSON.stringify({ store: values.store, batch, total, sessions: results, failed }, null, 2));
+  writeFileSync(file, JSON.stringify({ store: values.store, batch, total, labelTotal, sessions: results, failed }, null, 2));
   console.log(`wrote ${file}`);
 }
 
+const LABELS: DecisionLabel[] = ["never-captured", "dropped-by-fold", "dropped-by-fallback", "kept"];
+
+function labelCounts(labels: Array<{ label: DecisionLabel }>): Record<DecisionLabel, number> {
+  const counts = Object.fromEntries(LABELS.map((l) => [l, 0])) as Record<DecisionLabel, number>;
+  for (const { label } of labels) counts[label]++;
+  return counts;
+}
+
+function labelText(counts: Record<DecisionLabel, number>): string {
+  const n = LABELS.reduce((sum, l) => sum + counts[l], 0);
+  return n === 0 ? "" : ` key:${LABELS.map((l) => `${l}=${counts[l]}`).join(" key:")}`;
+}
+
 function row(r: FoldDriftResult): string {
-  return `${r.sessionId} obs=${r.observations} full=${r.full} folded=${r.folded} folds=${r.folds} fallbacks=${r.fallbacks} missing(exact)=${r.missingExact} missing(jaccard>=0.5)=${r.missingLoose} dropped-by-folds(exact)=${r.droppedExact} dropped-by-folds(jaccard>=0.5)=${r.droppedLoose} dropped-by-fallbacks(exact)=${r.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${r.fallbackDroppedLoose}`;
+  return `${r.sessionId} obs=${r.observations} full=${r.full} folded=${r.folded} folds=${r.folds} fallbacks=${r.fallbacks} missing(exact)=${r.missingExact} missing(jaccard>=0.5)=${r.missingLoose} missing(judged)=${r.missingJudged}${labelText(labelCounts(r.labels ?? []))} dropped-by-folds(exact)=${r.droppedExact} dropped-by-folds(jaccard>=0.5)=${r.droppedLoose} dropped-by-fallbacks(exact)=${r.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${r.fallbackDroppedLoose}`;
 }
 
 main().catch((err) => {
