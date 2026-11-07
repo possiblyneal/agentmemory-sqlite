@@ -28,7 +28,7 @@ render order.
 | folds / full re-summaries | 231 / 198 | — | 309 / 120 |
 
 - main vs #335, paired by (decision, turn): both 28, main only 29, #335 only 6; exact McNemar
-  p = 2×10⁻⁵. main vs #335 + #336: main only 25, other only 13; p = 0.07.
+  p = 1.2×10⁻⁴. main vs #335 + #336: main only 25, other only 13; p = 0.07.
 - #336's session-start orderings all scored below main's 41: newest 24, oldest 29, model 30,
   match 18.
 - Carried Summaries averaged ~68 decisions, and the first 10 rendered were the oldest.
