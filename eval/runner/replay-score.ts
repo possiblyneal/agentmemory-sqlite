@@ -7,6 +7,7 @@ import {
   type KeyItem,
 } from "./replay-answer-key.js";
 import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
+import { MISS_LABELS, type MissLabel } from "./decision-attribution.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
 
 export type ProbeKind = "session-start" | "prompt-context" | "search";
@@ -57,6 +58,7 @@ export interface DecisionOutcome {
   reachable: boolean;
   sessionStart: boolean;
   promptSubmit: boolean;
+  where?: MissLabel;
 }
 
 export interface SessionScore {
@@ -165,6 +167,17 @@ function isTerseNeed(o: KeyOutcome): boolean {
   return o.key.kind === "file" && o.key.terse === true;
 }
 
+// Per label, the reachable items attributed to it and how many an Injection delivered.
+function attributionCounts(decisions: DecisionOutcome[]) {
+  if (!decisions.some((d) => d.where)) return undefined;
+  return Object.fromEntries(
+    MISS_LABELS.map((label) => {
+      const of = decisions.filter((d) => d.where === label);
+      return [label, { n: of.length, delivered: of.filter((d) => d.sessionStart || d.promptSubmit).length }];
+    }),
+  ) as Record<MissLabel, { n: number; delivered: number }>;
+}
+
 // Repositories the daemon rarely serves like the rest; the typical rollup leaves them out.
 export const DEFAULT_ATYPICAL_PROJECTS = ["agentmemory-sqlite", "medical-researcher"];
 
@@ -226,6 +239,7 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
       sessionStart: share(decisions.filter((d) => d.sessionStart).length, decisions.length),
       promptSubmit: share(decisions.filter((d) => d.promptSubmit).length, decisions.length),
       either: share(decisions.filter((d) => d.sessionStart || d.promptSubmit).length, decisions.length),
+      attribution: attributionCounts(decisions),
     },
     rightScope: {
       injectedItems: items.length,
