@@ -35,7 +35,7 @@ import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass 
 import { selectionOf } from "./replay-selection.js";
 import { loadSessions, type Loaded } from "./replay-load.js";
 import { DECISION_KEY_PATH, DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
-import { readDecisionKey, type DecisionKey } from "./decision-key.js";
+import { keyedSessionIds, readDecisionKey, unreachableOrigins, unreachableWarning, type DecisionKey } from "./decision-key.js";
 import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
 import { hookPayloads, hookSteps, runHookSteps, summarizeCounts, summarizeOutcome } from "./replay-hooks.js";
 import { startSandbox, type EmbeddingMode } from "./sandbox.js";
@@ -698,7 +698,8 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
 
 async function main(): Promise<void> {
   const opts = parseOptions();
-  const loaded = loadSessions(opts);
+  const decisions = openDecisionScoring(opts);
+  const loaded = loadSessions({ ...opts, include: decisions && keyedSessionIds(decisions.key) });
   const { perDirectory, perProject } = loaded;
   // Every Session is imported whichever split runs, but only the split's
   // Sessions are probed, and probing agentmemory writes Session and Injection
@@ -714,7 +715,11 @@ async function main(): Promise<void> {
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
   writeFileSync(ndjson, "");
-  const decisions = openDecisionScoring(opts);
+  if (decisions) {
+    const warning = unreachableWarning(unreachableOrigins(decisions.key, new Set(sessions.map((x) => x.id))));
+    if (warning) console.error(`warning: ${warning}`);
+  }
+  writeFileSync(join(opts.out, "sessions.json"), JSON.stringify(sessions.map((x) => x.id), null, 2));
   if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson, decisions);
 
   const checkpointDir = join(opts.out, "checkpoints");

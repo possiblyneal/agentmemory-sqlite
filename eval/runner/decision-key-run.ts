@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { operatorInputs } from "./decision-inputs.js";
-import { buildDecisionKey, loadOrBuildKey } from "./decision-key.js";
+import { buildDecisionKey, loadOrBuildKey, unreachableOrigins, unreachableWarning } from "./decision-key.js";
 import { DECISION_KEY_PATH, providerComplete } from "./decision-llm.js";
 import { loadSessions } from "./replay-load.js";
 
@@ -31,6 +31,8 @@ async function main(): Promise<void> {
     const entries = sessions.map((session) => ({ session, inputs: operatorInputs(readFileSync(session.sourcePath!, "utf8"), session) }));
     return buildDecisionKey(entries, complete);
   });
+  const warning = unreachableWarning(unreachableOrigins(key, new Set(sessions.map((s) => s.id))));
+  if (warning) console.error(`warning: ${warning}`);
   console.log(
     `${reused ? "reused" : "wrote"} ${DECISION_KEY_PATH}: ${key.decisions.length} decisions, ` +
       `${key.expected.length} prompts with expected decisions, ${key.expected.reduce((n, e) => n + e.decisionIds.length, 0)} items`,
