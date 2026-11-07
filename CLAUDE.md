@@ -36,7 +36,7 @@ test it with an eval in `eval/README.md`; ship it only on a measured gain.
 
 - `docs/experiments.md` is the ledger of every hypothesis tested, kept, rejected, inconclusive
   or a finding. Read it before choosing a lever; add a row when an experiment ends, with a
-  Retry if condition for anything not kept; never delete a rejected row.
+  Retry if condition for anything not kept; never delete a rejected row. `test/consistency.test.ts` fails when a scorecard has no row or a rejected or inconclusive row has no Retry if.
 - The numbers go in a dated scorecard under `docs/benchmarks/`, which the row links.
 - A change the measurements need (a runner, a metric, a corpus fix) is a ticket on this fork.
 
