@@ -135,3 +135,45 @@ Considered and not ranked: LLM query rewriting (2609.03467) and answer-time stat
   without contradicting it.
 - 2609.01852 suggests that dates and a newer-wins header help a capable model, but a small
   fallback model needs the conflict resolved before it reaches the prompt.
+
+## Decision capture (2026-11-07)
+
+Read for ticket #353: how published systems extract durable decisions, rules and preferences
+from long transcripts and keep them through incremental updates. The evidence driving it is
+[`2026-11-07-decision-loss`](../benchmarks/2026-11-07-decision-loss.md): 140 of 262 reachable
+key items are in no Session Summary, a one-pass Summary of 655 Observations keeps 3 decisions,
+and 63 distinct missing decisions split 47 never captured, 8 lost by folding. Each paper's
+abstract was read on arXiv, plus the passages named below where a mechanism is quoted.
+Numbers are the papers' own, not reproduced. Candidate levers are in
+[`../experiments.md`](../experiments.md) (Candidate hypotheses).
+
+| arXiv | What it does with a long transcript | Relevance to the 47 never captured and the folds |
+|---|---|---|
+| 2308.15022 Recursive summarizing | The model first memorizes small dialogue contexts, then recursively writes new memory from the previous memory plus the next context | This is our fold. The abstract reports response consistency, not retention of individual rules; it does not measure what each rewrite drops |
+| 2510.04618 ACE | Names two failures: brevity bias (concise summaries drop domain insight) and context collapse (monolithic LLM rewriting erodes detail). Cures them with itemized bullets: a Reflector distils lessons, a Curator emits compact delta entries, and lightweight non-LLM logic merges them into the context; embedding de-duplication runs after each delta or only when the window is full | Our 426 drop events over 83 folds (2026-10-25) are the collapse it describes. Its remedy is the append-in-code row we rejected on 2026-10-25 when no corpus scored decisions; that condition now holds |
+| 2510.00615 ACON | Compresses history and observations; refines the compression guideline in natural language from failures of the downstream agent, then distils the compressor into a smaller model. Peak tokens cut 26-54% with success held or improved | A way to improve the Summary prompt from labelled misses (our key) instead of by hand. It tunes against a task score, so overfitting to the key is the risk |
+| 2504.19413 Mem0 | Extraction runs on each new message pair, with an asynchronously refreshed conversation summary and the last m messages as context | Extraction input is user and assistant messages, per pair, with the summary as background and never as the store. The update step that followed (ADD, UPDATE, DELETE) is gone from Mem0's current release (repo section) |
+| 2508.19828 Memory-R1 | A learned Memory Manager chooses ADD, UPDATE, DELETE or NOOP per candidate. Its motivating example: a vanilla manager reads "I adopted another dog" as a contradiction and issues DELETE+ADD, fragmenting memory | Reconciliation by rewriting is where a rule is lost without a trace. Training a manager is out of scope here; the failure shape is the lesson |
+| 2509.25911 Mem-alpha | Agents read sequential chunks and learn to extract, store and update a core, episodic and semantic memory; the reward is question accuracy over the full interaction history | Confirms the ordered chunk pass. The reward is end-task accuracy, which our decision key approximates |
+| 2501.13956 Zep | Bi-temporal graph with four timestamps per edge. A new edge that contradicts an overlapping one sets the old edge's invalid time to the new edge's valid time, so new information wins and the old edge stays | Supersession by marking, never by deleting. Zep appears in the supersession table above on a site summary; this entry is from the paper |
+| 2509.13313 ReSum | Periodically calls an external tool to condense history into a summary the agent continues from; 4.5% over ReAct without training, a further 8.2% with ReSum-GRPO | The agent continues from the summary alone, so a loss is final, as with our Session Summary. Search agents, not coding transcripts |
+| 2510.18866 LightMem | A sensory stage filters and topic-groups input, a short-term stage summarizes each topic group, and a long-term stage updates offline ("sleep-time"). Up to 38x fewer tokens and 30x fewer API calls on LongMemEval | Topic-grouped windows are one way to cut a long Session before extraction; the offline update matches the Goal's "never on the critical path" |
+
+### What the papers say about the capture gap
+
+- **Rewriting, not extraction, is the documented loss.** 2510.04618 attributes erosion to
+  monolithic rewriting and 2508.19828 to DELETE+ADD; neither studies a first pass that never
+  extracts. Our 47 never-captured decisions are the part no paper here explains.
+- **Delta-and-merge-in-code is the only remedy with a stated mechanism** (2510.04618). The model
+  proposes additions and ordinary code merges them, so a rewrite cannot drop an entry. It trades
+  the loss for growth, which hurt our render on 2026-11-06: Summaries of ~68 decisions
+  delivered fewer items.
+- **Supersession is marked, not deleted** (2501.13956), the opposite of the fold's "unless a new
+  observation reverses it".
+- **Extraction input is the conversation, per pair or chunk, with a summary as context**
+  (2504.19413, 2509.25911), not a digest built from already-compressed records.
+- **No paper here measures decision recall from a long coding transcript.** Results are LoCoMo,
+  LongMemEval, AppWorld and search tasks; every number is a different task from ours.
+
+Not kept as levers: learned memory managers (2508.19828, 2509.25911) need training, and
+2509.13313's remedy is reinforcement learning for the agent that consumes the summary.

@@ -87,3 +87,49 @@ Not pursued:
 - **Pull designs** (memU, nocturne, LongMemory and MemPalace skills). They fail F5.
 - **Per-candidate LLM rerank.** The Injection Gate already reranks each candidate with a reranker
   model.
+
+## Decision capture (2026-11-07)
+
+Read for ticket #353, the same question as the dated section of
+[`memory-papers-survey.md`](./memory-papers-survey.md): how systems extract durable decisions
+and keep them across incremental updates. Evidence driving it:
+[`2026-11-07-decision-loss`](../benchmarks/2026-11-07-decision-loss.md). Read for ideas, never
+patches. Prompt or code files were read for Mem0, Letta, claude-mem and cognee; Graphiti through
+a DeepWiki page generated from its source plus the Zep paper (2501.13956); Hindsight and
+LangMem from their documentation only. Candidate levers:
+[`../experiments.md`](../experiments.md) (Candidate hypotheses).
+
+Today's Summary here: one XML record per Session (title, narrative, decisions, files,
+concepts), built from compressed Observations by one pass, a map-reduce over chunks, or a fold
+of new Observations into the prior record that the model rewrites in full
+(`src/prompts/summary.ts`, `src/functions/summarize.ts`).
+
+| System | Unit and input | Update path | Supersession | Relevant to us |
+|---|---|---|---|---|
+| [mem0ai/mem0](https://github.com/mem0ai/mem0) | Per call: the new messages (user and assistant both), a profile summary, up to 20 preceding messages (each cut to 300 chars) and up to 20 memories already extracted this session (`ADDITIVE_EXTRACTION_PROMPT`, `mem0/configs/prompts.py`) | v3 migration guide: one ADD-only LLM call; UPDATE and DELETE removed, `add()` returns ADD events only. The prompt lists existing memories "ONLY for deduplication and linking" and returns `linked_memory_ids` | A changed preference is a new memory linked to the old one; the old stays. Docs claim LoCoMo 71.4 to 91.6 and LongMemEval 67.8 to 93.4, self-reported, not reproduced | The prompt says to extract each topic separately so a dominant topic does not hide a secondary one, and to skip only a fact already captured, not an entity already known. The opposite of one rewritten list |
+| [letta-ai/letta](https://github.com/letta-ai/letta) | Compaction when the context fills: default `sliding_window` summarizes the oldest ~30% of messages and keeps ~70% verbatim; summary clipped at 50,000 chars (docs) | The new summary replaces the aged messages; `ANTHROPIC_SUMMARY_PROMPT` asks for task, state, discoveries including "decisions made and their rationale", next steps and user preferences | None; the latest summary is the record | Recent turns stay verbatim, so the freshest decisions never pass through a summarizer; only the aged slice is compressed |
+| [getzep/graphiti](https://github.com/getzep/graphiti) | One episode (a message or chunk) at a time; edges extracted against a reference time | Per extracted edge: an exact-match fast path appends the episode id to the existing edge; otherwise an LLM decides duplicate or contradiction against related existing edges (DeepWiki 5.3, `edge_operations.py`) | A contradicted edge has its invalid time set to the new edge's valid time, never deleted (2501.13956) | Every fact keeps a pointer to the episodes that support it, so a restated rule adds evidence instead of a copy |
+| [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight) | `retain()` extracts facts additively and also stores the original text, chunked (blog 2026-07-13); a retain mission narrows what is kept | Background consolidation compares each new fact with the observations recall found: restates (attached as evidence), chatter (skipped), changes or adds (sent to the LLM). A cheap decision model settles the first two and cut LLM calls about 40% at the same pass rate (docs) | Observations carry evidence quotes and a proof count and are "refined rather than overwritten"; near-duplicates merge at cosine 0.97 only after a check that reads both, so a differing number or negation keeps them apart | Raw facts stay and the consolidated layer is derived, so consolidation can be rerun when it loses something. The number and negation check is the guard our fold lacks |
+| [thedotmack/claude-mem](https://github.com/thedotmack/claude-mem) | A long-lived observer model sees each tool event (the session's user prompt is in its init and continuation prompts) and emits a typed `<observation>` at once; a `<summary>` (request, investigated, learned, completed, next steps, notes) is requested at a checkpoint (`src/sdk/prompts.ts`) | Observations are append-only; the checkpoint summary is a separate record | None in the file read | Extraction is per event while the observer still holds the Session in context, so no later pass has to rediscover a decision. Tool outputs are cut to head and tail at 16,000 chars |
+| [topoteretes/cognee](https://github.com/topoteretes/cognee) | Rules extracted from conversation text, one `Rule` node per rule, each linked to its source chunk (`rule_associated_from`, `coding_rule_associations.py`) | The nodeset's existing rules are read back (`get_existing_rules`) for the extraction prompt, so only unseen rules are added | Not in the file read | A dedicated rule extractor, apart from any narrative summary, with the rule list as the dedupe reference |
+| [langchain-ai/langmem](https://github.com/langchain-ai/langmem) | A background manager extracts memories from messages, with existing memories passed in | `PatchDoc` rewrites a memory keeping its id; `RemoveDoc` is off by default (a third-party tutorial for 0.0.30) | Overwrite in place; the tutorial warns that a misread update ("text me when urgent" read as "text me") loses the earlier preference and suggests `enable_updates=False` | The in-place rewrite is our fold's failure mode, in a library whose own tutorial advises against it for anything you cannot lose |
+
+### Reading across the systems
+
+- **Mem0, Graphiti and Hindsight keep captured items outside the model's rewrite.** Mem0 v3 is
+  ADD only, Graphiti appends evidence and closes edges by time, Hindsight keeps additive facts
+  under a derived layer. Mem0 dropped UPDATE and DELETE rather than tune them. Only LangMem
+  patches in place, with a warning.
+- **Extraction input is the conversation, not a digest.** Mem0 reads user and assistant
+  messages; claude-mem sees events as they happen. None builds decisions from an
+  already-compressed record as a second stage the way our Summary does, which is where the 47
+  never-captured may sit (the first Candidate hypothesis asks whether they are in the
+  Observations at all).
+- **A separate, decision-only call is common.** Mem0's sole operation is ADD, cognee returns
+  only rules, and claude-mem's observation has a `decision` type apart from its summary. Our one
+  prompt asks for title, narrative, files, concepts and decisions together.
+- **A dedupe reference without a rewrite.** Mem0 (existing memories), cognee (existing rules)
+  and Hindsight (observations recall found) show the model what is held and ask only for what
+  is new or changed.
+- **Not read:** Mem0's pre-v3 UPDATE prompt, Letta's sliding-window code and Hindsight's
+  consolidation prompt.
