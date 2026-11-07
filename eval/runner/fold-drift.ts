@@ -9,7 +9,7 @@ import type { CompressedObservation, Session } from "../../src/types.js";
 import { createJudge, openVerdictCache } from "./decision-judge.js";
 import { readDecisionKey } from "./decision-key.js";
 import { DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
-import { measureFoldDrift, type DecisionLabel, type FoldDriftResult, type Judging } from "./fold-drift-core.js";
+import { DECISION_LABELS, measureFoldDrift, type DecisionLabel, type FoldDriftResult, type Judging } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
 
@@ -110,17 +110,15 @@ async function main(): Promise<void> {
   console.log(`wrote ${file}`);
 }
 
-const LABELS: DecisionLabel[] = ["never-captured", "dropped-by-fold", "dropped-by-fallback", "kept"];
-
 function labelCounts(labels: Array<{ label: DecisionLabel }>): Record<DecisionLabel, number> {
-  const counts = Object.fromEntries(LABELS.map((l) => [l, 0])) as Record<DecisionLabel, number>;
+  const counts = Object.fromEntries(DECISION_LABELS.map((l) => [l, 0])) as Record<DecisionLabel, number>;
   for (const { label } of labels) counts[label]++;
   return counts;
 }
 
 function labelText(counts: Record<DecisionLabel, number>): string {
-  const n = LABELS.reduce((sum, l) => sum + counts[l], 0);
-  return n === 0 ? "" : ` key:${LABELS.map((l) => `${l}=${counts[l]}`).join(" key:")}`;
+  const n = DECISION_LABELS.reduce((sum, l) => sum + counts[l], 0);
+  return n === 0 ? "" : ` key:${DECISION_LABELS.map((l) => `${l}=${counts[l]}`).join(" key:")}`;
 }
 
 function row(r: FoldDriftResult): string {

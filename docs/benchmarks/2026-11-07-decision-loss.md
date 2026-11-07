@@ -6,6 +6,7 @@ directories, 41 Sessions, `--cap 40 --min-turns 2`, dev split); `eval:fold-drift
 **N:** 451 key items (decision, turn), 262 reachable
 **LLM:** local broker, `general-eval-b` profile, greedy decoding; same model judges
 **Embeddings:** on-device
+**Hardware:** not reported; the bench is LLM-bound and measures recall, not latency
 
 ## Headline
 
@@ -102,7 +103,7 @@ The 140 not-in-Summary items are 63 distinct decisions. Judged against the fresh
 ## Reproduce
 
 ```sh
-npm run eval:replay -- --projects=<frozen list> --cap 40 --min-turns 2 --llm-summary --save-checkpoints --out <arm>
+npm run eval:replay -- --projects=<frozen list> --cap 40 --min-turns 2 --llm-summary --decision-key --save-checkpoints --out <arm>
 npm run eval:replay -- --projects=<frozen list> --cap 40 --min-turns 2 --from-checkpoints <arm>/checkpoints --decision-key
 npm run eval:fold-drift -- --store <arm>/checkpoints/040-*.sqlite --sessions <18 ids> --batch 20
 ```

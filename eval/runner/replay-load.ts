@@ -88,10 +88,11 @@ export function selectSessions(
   const perProject: Loaded["perProject"] = {};
   for (const [project, all] of byProject) {
     const ordered = orderByStart(all);
-    const normal = ordered.filter((s) => s.userTurns.length >= opts.minTurns);
+    const meetsMin = (s: ReplaySession) => s.userTurns.length >= opts.minTurns;
+    const normal = ordered.filter(meetsMin);
     const chosen = new Set(normal.slice(0, opts.cap));
     for (const s of ordered) if (forced(s)) chosen.add(s);
-    perProject[project] = { replayable: normal.length + ordered.filter((s) => forced(s) && s.userTurns.length < opts.minTurns).length, replayed: chosen.size };
+    perProject[project] = { replayable: ordered.filter((s) => forced(s) || meetsMin(s)).length, replayed: chosen.size };
     picked.push(...chosen);
   }
   return { sessions: orderByStart(picked), perProject };

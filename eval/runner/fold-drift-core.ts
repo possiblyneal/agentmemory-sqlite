@@ -4,7 +4,7 @@ import type { CompressedObservation, MemoryProvider, Session, SessionSummary } f
 import { registerSummarizeFunction } from "../../src/functions/summarize.js";
 import { FOLD_SYSTEM } from "../../src/prompts/summary.js";
 import { KV, jaccardSimilarity } from "../../src/state/schema.js";
-import type { Judge } from "./decision-judge.js";
+import { asDecisionList, type Judge } from "./decision-judge.js";
 import type { Decision } from "./decision-key.js";
 
 export interface FoldDriftOptions {
@@ -20,7 +20,8 @@ export interface FoldStep {
   decisions: string[];
 }
 
-export type DecisionLabel = "never-captured" | "dropped-by-fold" | "dropped-by-fallback" | "kept";
+export const DECISION_LABELS = ["never-captured", "dropped-by-fold", "dropped-by-fallback", "kept"] as const;
+export type DecisionLabel = (typeof DECISION_LABELS)[number];
 
 export interface Judging {
   judge: Judge;
@@ -173,13 +174,11 @@ export async function measureFoldDrift(
   };
 }
 
-const asList = (decisions: string[]) => decisions.map((d) => `- ${d}`).join("\n");
-
 // A one-pass decision's judge id is a hash of its text, so a cached verdict is reused only for the same decision.
 const textId = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
-const deliveredBy = (judge: Judge, decision: Decision, decisions: string[]) =>
-  decisions.length > 0 ? judge.delivers(decision, asList(decisions)) : Promise.resolve(false);
+const deliveredBy = (judge: Judge, decision: Pick<Decision, "id" | "text">, decisions: string[]) =>
+  decisions.length > 0 ? judge.delivers(decision, asDecisionList(decisions)) : Promise.resolve(false);
 
 // Judged against the list a reader would be handed, so a paraphrase counts as kept.
 async function judgeDrift(
@@ -190,7 +189,7 @@ async function judgeDrift(
 ): Promise<{ missingJudged: number; labels: Array<{ decisionId: string; label: DecisionLabel }> }> {
   const folded = steps[steps.length - 1]?.decisions ?? [];
   const kept = await Promise.all(
-    full.map((text) => deliveredBy(judge, { id: textId(text), sessionId, project: "", source: "typed", text }, folded)),
+    full.map((text) => deliveredBy(judge, { id: textId(text), text }, folded)),
   );
   const labels: Array<{ decisionId: string; label: DecisionLabel }> = [];
   for (const decision of key.filter((d) => d.sessionId === sessionId)) {
@@ -202,14 +201,16 @@ async function judgeDrift(
 }
 
 // `held[i]`: step i delivers the decision. The loss is charged to the first step that
-// had it and then did not; one that no step ever had is charged to the last step.
+// had it and then did not. One only the one pass had is charged to the last step, or,
+// with no fold to blame (a single step), counted never-captured.
 function labelFor(held: boolean[], steps: FoldStep[], inOnePass: boolean): DecisionLabel {
   const last = held.length - 1;
-  if (!inOnePass) return "never-captured";
   if (held[last]) return "kept";
-  if (last === 0) return "never-captured";
   let lostAt = held.findIndex((h, i) => i > 0 && held[i - 1] && !h);
-  if (lostAt < 0) lostAt = last;
+  if (lostAt < 0) {
+    if (!inOnePass || last === 0) return "never-captured";
+    lostAt = last;
+  }
   return steps[lostAt]!.kind === "fallback" ? "dropped-by-fallback" : "dropped-by-fold";
 }
 

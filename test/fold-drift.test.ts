@@ -153,6 +153,20 @@ describe("measureFoldDrift judged by the decision judge", () => {
     expect(r.steps[1]!.decisions).toEqual([ALL[1]]);
   });
 
+  it("labels by the fold sequence a decision the one pass missed", async () => {
+    const provider: MemoryProvider = {
+      name: "fake",
+      compress: async () => "",
+      summarize: async (system: string, prompt: string) =>
+        system === FOLD_SYSTEM ? xml([ALL[1]!]) : xml(prompt.includes("(3 total)") ? [ALL[1]!, ALL[2]!] : [ALL[0]!]),
+    };
+    const r = await measureFoldDrift(provider, obs(6), opts, { judge: includesJudge(), key: keyed(ALL[1]!, ALL[2]!) });
+    expect(r.labels).toEqual([
+      { decisionId: "d0", label: "kept" },
+      { decisionId: "d1", label: "dropped-by-fold" },
+    ]);
+  });
+
   it("labels a decision lost in a fallback re-summarize dropped-by-fallback", async () => {
     let n = 0;
     const provider: MemoryProvider = {

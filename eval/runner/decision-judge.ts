@@ -42,8 +42,10 @@ export function openVerdictCache(path: string): VerdictCache {
 }
 
 export interface Judge {
-  delivers(decision: Decision, injected: string): Promise<boolean>;
+  delivers(decision: Pick<Decision, "id" | "text">, injected: string): Promise<boolean>;
 }
+
+export const asDecisionList = (decisions: string[]) => decisions.map((d) => `- ${d}`).join("\n");
 
 export function createJudge(complete: Complete, cache: VerdictCache): Judge {
   return {

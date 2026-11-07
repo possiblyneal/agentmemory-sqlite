@@ -18,9 +18,8 @@ interface LoadedRun {
   failedSummarizeCalls: number | undefined;
 }
 
-// A path to a probe output directory, or the label of an `eval:arm` run.
 function resolveRunDir(arg: string): string {
-  const candidates = [resolve(arg), join(ARMS, arg, "probe")];
+  const candidates = [resolve(arg), join(ARMS, arg, "out", "probe")];
   const dir = candidates.find((d) => existsSync(join(d, "scores.ndjson")) && existsSync(join(d, "summary.json")));
   if (!dir) throw new Error(`no probe output (scores.ndjson + summary.json) at ${candidates.join(" or ")}`);
   return dir;
@@ -34,8 +33,13 @@ function loadRun(arg: string): LoadedRun {
     .filter(Boolean)
     .map((line) => JSON.parse(line) as DecisionRow);
   // A probe pass summarizes nothing; the failures belong to the save pass it probed.
-  const runJson = summary.run.checkpoints && join(summary.run.checkpoints, "run.json");
-  const saved = runJson && existsSync(runJson) ? (JSON.parse(readFileSync(runJson, "utf8")) as Summary["run"]) : undefined;
+  // An arm's recorded path is inside its worktree, so its out/save copy is tried too.
+  let saved: Summary["run"] | undefined;
+  if (summary.run.checkpoints) {
+    const runJson = [join(summary.run.checkpoints, "run.json"), join(dir, "..", "save", "checkpoints", "run.json")].find((f) => existsSync(f));
+    if (!runJson) throw new Error(`${arg}: cannot read the save pass's run.json under ${summary.run.checkpoints}, so its failed summarize calls are unknown`);
+    saved = JSON.parse(readFileSync(runJson, "utf8")) as Summary["run"];
+  }
   const failedSummarizeCalls = summary.run.llm?.failedSummarizeCalls ?? saved?.llm?.failedSummarizeCalls;
   return { label: arg, rows, summary, failedSummarizeCalls };
 }

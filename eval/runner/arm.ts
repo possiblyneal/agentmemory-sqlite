@@ -11,17 +11,19 @@ const MAX_SAVE_ATTEMPTS = 40;
 const MAX_PROBE_ATTEMPTS = 6;
 const KEY_FILES = ["decision-key.json", "decision-verdicts.ndjson"];
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "inherit" });
-
 function run(cwd: string, cmd: string, args: string[]) {
   execFileSync(cmd, args, { cwd, stdio: "inherit" });
 }
 
-// Streams a replay pass to the console and a log; with `watch`, kills the pass at the
-// first Session whose summarize failed and resolves with that Session's index.
+// With `watch`, the pass is killed at the first Session whose summarize failed.
 function replayPass(tree: string, args: string[], log: string, watch: boolean): Promise<{ code: number | null; failedIndex?: number }> {
   return new Promise((done) => {
-    const child = spawn("npm", ["run", "eval:replay", "--", ...args], { cwd: tree, detached: true, env: { ...process.env, AGENTMEMORY_AUTO_COMPRESS: "false" } });
+    const child = spawn("npm", ["run", "eval:replay", "--", ...args], { cwd: tree, detached: true });
+    const stop = () => {
+      process.kill(-child.pid!, "SIGTERM");
+      process.exit(130);
+    };
+    process.once("SIGINT", stop).once("SIGTERM", stop);
     const out = createWriteStream(log, { flags: "a" });
     let failedIndex: number | undefined;
     child.stderr.pipe(out, { end: false });
@@ -36,6 +38,7 @@ function replayPass(tree: string, args: string[], log: string, watch: boolean): 
       }
     });
     child.on("close", (code) => {
+      process.off("SIGINT", stop).off("SIGTERM", stop);
       out.end();
       done({ code, failedIndex });
     });
@@ -60,8 +63,8 @@ async function main() {
   if (existsSync(armDir)) throw new Error(`${armDir} exists; pick a fresh --label or remove it`);
   mkdirSync(join(armDir, "out"), { recursive: true });
 
-  git(REPO_ROOT, "worktree", "add", "-b", `eval-arm/${label}`, tree, ref);
-  git(REPO_ROOT, "worktree", "lock", "--reason", `eval:arm ${label}`, tree);
+  run(REPO_ROOT, "git", ["worktree", "add", "-b", `eval-arm/${label}`, tree, ref]);
+  run(REPO_ROOT, "git", ["worktree", "lock", "--reason", `eval:arm ${label}`, tree]);
   run(tree, "npm", ["ci"]);
   run(tree, "npm", ["run", "build"]);
 
@@ -79,7 +82,7 @@ async function main() {
   for (let attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved; attempt++) {
     const resume = existsSync(join(checkpointDir, MANIFEST)) ? ["--resume"] : [];
     console.log(`save pass attempt ${attempt} ${resume.join(" ")}`);
-    const { code, failedIndex } = await replayPass(tree, [...replayArgs, "--save-checkpoints", ...resume, "--out", treeOut("save")], join(armDir, "save.log"), true);
+    const { code, failedIndex } = await replayPass(tree, [...replayArgs, "--decision-key", "--save-checkpoints", ...resume, "--out", treeOut("save")], join(armDir, "save.log"), true);
     if (failedIndex !== undefined) truncateSavePass(checkpointDir, failedIndex);
     saved = code === 0 && existsSync(join(checkpointDir, "run.json"));
   }

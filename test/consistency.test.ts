@@ -21,9 +21,10 @@ function countRestApiEndpoints(): number {
   return Array.from(src.matchAll(/api_path:\s*["`]/g)).length;
 }
 
+const ledgerSection = (markdown: string) => markdown.split(/^## Ledger$/m)[1]?.split(/^## /m)[0] ?? "";
+
 function ledgerRows(markdown: string): string[][] {
-  const section = markdown.split(/^## Ledger$/m)[1]?.split(/^## /m)[0] ?? "";
-  return section
+  return ledgerSection(markdown)
     .split("\n")
     .filter((line) => line.startsWith("|"))
     .slice(2)
@@ -42,8 +43,8 @@ function rowsMissingRetryIf(markdown: string): string[] {
 }
 
 function scorecardsMissingFromLedger(markdown: string, scorecards: string[]): string[] {
-  const section = markdown.split(/^## Ledger$/m)[1]?.split(/^## /m)[0] ?? "";
-  return scorecards.filter((name) => !section.includes(`benchmarks/${name}`));
+  const section = ledgerSection(markdown);
+  return scorecards.filter((name) => !section.includes(`](./benchmarks/${name})`));
 }
 
 describe("Consistency checks", () => {
