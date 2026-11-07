@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { operatorInputs } from "../eval/runner/decision-inputs.js";
 import { buildDecisionKey, loadOrBuildKey, type Complete, type DecisionKey } from "../eval/runner/decision-key.js";
-import { createJudge, decisionOutcomes, openVerdictCache } from "../eval/runner/decision-judge.js";
+import { DatabaseSync } from "node:sqlite";
+import { MAX_DECISIONS } from "../src/functions/prompt-context.js";
+import { attributeDecision, readSummaryDecisions, type MissLabel } from "../eval/runner/decision-attribution.js";
+import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "../eval/runner/decision-judge.js";
 import { withRetries } from "../eval/runner/decision-llm.js";
 import { summarizeReplay, type Probe, type SessionScore } from "../eval/runner/replay-score.js";
 import { parseTranscript, type ReplaySession } from "../eval/runner/replay-transcript.js";
@@ -256,5 +259,75 @@ describe("decision recall", () => {
     expect(s.byProject.shop.decisionRecall.items).toBe(2);
     expect(s.byProject["agentmemory-sqlite"].decisionRecall.promptSubmit.hit).toBe(1);
     expect(s.typical.summary.decisionRecall).toMatchObject({ items: 2, sessionStart: { hit: 1 }, either: { hit: 1 } });
+  });
+});
+
+describe("decision attribution", () => {
+  const decision = { id: "d1", sessionId: "e1", project: "shop", source: "typed" as const, text: "money is cents" };
+  const judge: Judge = { delivers: async (_d, injected) => injected.includes("cents") };
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => `filler ${i}`);
+
+  it("labels where a decision was lost from its origin Session's Summary", async () => {
+    expect(await attributeDecision(decision, undefined, judge)).toBe("no-summary");
+    expect(await attributeDecision(decision, filler(3), judge)).toBe("not-in-summary");
+    expect(await attributeDecision(decision, [...filler(MAX_DECISIONS), "totals in cents"], judge)).toBe("beyond-render-cap");
+    expect(await attributeDecision(decision, ["totals in cents", ...filler(20)], judge)).toBe("in-render-cap");
+  });
+
+  it("reads a Summary's key decisions from a store, or none", () => {
+    const dir = mkdtempSync(join(tmpdir(), "attribution-store-"));
+    try {
+      const path = join(dir, "s.sqlite");
+      const db = new DatabaseSync(path);
+      db.exec("create table kv (scope text, key text, value text)");
+      db.prepare("insert into kv values (?, ?, ?)").run("mem:summaries", "e1", JSON.stringify({ keyDecisions: ["a", "b"] }));
+      db.close();
+      expect(readSummaryDecisions(path, "e1")).toEqual(["a", "b"]);
+      expect(readSummaryDecisions(path, "missing")).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts reachable items per label with how many were delivered, pooled, by project and for typical", () => {
+    const d = (decisionId: string, where: MissLabel, delivered: boolean) => ({
+      decisionId,
+      turn: 1,
+      reachable: true,
+      sessionStart: delivered,
+      promptSubmit: false,
+      where,
+    });
+    const row = (id: string, project: string, outcome: ReturnType<typeof d>): SessionScore => ({
+      sessionId: id,
+      project,
+      startedAt: "2026-09-02T10:00:00Z",
+      turns: 1,
+      failedProbes: 0,
+      injectionChars: 0,
+      items: [],
+      outcomes: [],
+      decisions: [outcome],
+      latencies: [],
+    });
+    const scores = [
+      row("a", "shop", d("d1", "in-render-cap", true)),
+      row("b", "shop", d("d2", "in-render-cap", false)),
+      row("c", "agentmemory-sqlite", d("d3", "not-in-summary", false)),
+    ];
+    const s = summarizeReplay(scores, { storeBytesStart: 0, storeBytesEnd: 0 });
+    expect(s.decisionRecall.attribution).toEqual({
+      "no-summary": { n: 0, delivered: 0 },
+      "not-in-summary": { n: 1, delivered: 0 },
+      "beyond-render-cap": { n: 0, delivered: 0 },
+      "in-render-cap": { n: 2, delivered: 1 },
+    });
+    expect(s.byProject.shop.decisionRecall.attribution?.["in-render-cap"]).toEqual({ n: 2, delivered: 1 });
+    expect(s.typical.summary.decisionRecall.attribution?.["not-in-summary"].n).toBe(0);
+  });
+
+  it("omits attribution when no item was labelled", () => {
+    const s = summarizeReplay([], { storeBytesStart: 0, storeBytesEnd: 0 });
+    expect(s.decisionRecall.attribution).toBeUndefined();
   });
 });
