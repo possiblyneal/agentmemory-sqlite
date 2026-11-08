@@ -5,6 +5,10 @@ inconclusive, so a tried lever is not run again. Read it before choosing a lever
 when an experiment ends; never delete a rejected row. The numbers and method live in the
 linked scorecard (`docs/benchmarks/`) or issue; this file is the index and the verdict.
 
+An arm that `eval:fold-drift --baseline` stopped early is a partial run: its row says
+"stopped early after K of N Sessions (cleared or unreachable, gain G vs +T)" beside the verdict
+(`eval/README.md`, Fold drift).
+
 A rejected or inconclusive row names what would justify a retry. Rerun it only when that
 condition holds, and link the new row to the old one.
 
