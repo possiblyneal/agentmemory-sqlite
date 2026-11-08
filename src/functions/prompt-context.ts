@@ -6,6 +6,7 @@ import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { isTersePrompt, MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { gateByRelevance } from "./prompt-rerank.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
@@ -44,6 +45,14 @@ const EMPTY: PromptContextResult = { context: "", tokens: 0, injected: [] };
 
 function wordCount(prompt: string): number {
   return prompt.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+}
+
+// A terse prompt ("go ahead", "2") answers the Agent's last reply, so the
+// reply's end is what it is about (#310, docs/benchmarks/2026-11-08-terse-prompt-query.md).
+function queryFor(prompt: string, reply: string | undefined): string {
+  const trimmed = prompt.trim();
+  const tail = reply?.trim().slice(-MAX_REPLY_QUERY_CHARS).trim();
+  return tail && isTersePrompt(trimmed) ? `${trimmed}\n${tail}` : trimmed;
 }
 
 // mem::search returns Memories in the Observation shape, under the
@@ -238,9 +247,10 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
 export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::prompt-context",
-    async (data: { sessionId: string; prompt: string; project?: string }): Promise<PromptContextResult> => {
-      const prompt = data.prompt.trim();
-      if (wordCount(prompt) < MIN_PROMPT_WORDS || isHarnessMessage(prompt)) return EMPTY;
+    async (data: { sessionId: string; prompt: string; project?: string; reply?: string }): Promise<PromptContextResult> => {
+      if (isHarnessMessage(data.prompt.trim())) return EMPTY;
+      const prompt = queryFor(data.prompt, data.reply);
+      if (wordCount(prompt) < MIN_PROMPT_WORDS) return EMPTY;
 
       const [search, seen] = await Promise.all([
         sdk

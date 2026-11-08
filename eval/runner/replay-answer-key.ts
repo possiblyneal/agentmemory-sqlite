@@ -1,3 +1,4 @@
+import { contentTokens, isTersePrompt } from "../../src/utils/terse-prompt.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
 
 // `terse` marks a need first used after a reply like "go ahead" or "2": the
@@ -24,20 +25,23 @@ export interface EchoedTurn {
 
 export type KeyItem = FileNeed | EchoedTurn;
 
+// A file an earlier Session touched that a prompt's own work names, scored
+// against that prompt's Injection alone (#310). `terse` as for FileNeed; a
+// terse first prompt yields none.
+export interface TurnNeed {
+  file: string;
+  turn: number;
+  terse: boolean;
+}
+
 export interface AnswerKey {
   files: FileNeed[];
   corrections: EchoedTurn[];
   decisions: EchoedTurn[];
+  turnNeeds: TurnNeed[];
 }
 
-const STOPWORDS = new Set(
-  (
-    "the and for that this with you your are was were have has had not but can could would should " +
-    "will just from they them then than into about what when where which while there their here " +
-    "also its our out all any more some been being does did doing done get got make made use using " +
-    "please want need like let's lets one two now still"
-  ).split(" "),
-);
+export { contentTokens };
 
 export const MIN_SHARED_TOKENS = 3;
 // Claude Code loads these by convention, whether or not anything recalled them.
@@ -59,11 +63,6 @@ const DECISION = [
   /\bwe('ll| will) (use|go|keep)\b/i,
   /\blet'?s (use|go with|switch|keep|stick)\b/i,
 ];
-
-export function contentTokens(text: string): Set<string> {
-  const tokens = text.toLowerCase().match(/[a-z0-9][a-z0-9_./-]*[a-z0-9]|[a-z0-9]/g) ?? [];
-  return new Set(tokens.filter((t) => t.length >= 3 && !STOPWORDS.has(t)));
-}
 
 export function sharedTokens(a: Set<string>, b: Set<string>): number {
   let shared = 0;
@@ -127,14 +126,12 @@ export function isInstructionFile(file: string): boolean {
   return INSTRUCTION_FILES.has(file.slice(file.lastIndexOf("/") + 1));
 }
 
-// Too few content words to bear on anything: "yes", "go ahead", "2".
-export function isTerse(text: string): boolean {
-  return contentTokens(text).size < MIN_SHARED_TOKENS;
-}
+// Too few content words to bear on anything: the rule prompt-submit Injection uses.
+export const isTerse = isTersePrompt;
 
 // A terse turn counts only when a substantive prompt came before it in the
 // Session; a terse first prompt carries the need itself.
-function terseTurns(session: ReplaySession): Set<number> {
+export function terseTurns(session: ReplaySession): Set<number> {
   const terse = new Set<number>();
   let substantiveBefore = false;
   for (const t of session.userTurns) {
@@ -163,6 +160,19 @@ export function filesNeeded(session: ReplaySession, earlier: ReplaySession[]): F
     });
   }
   return [...needs.values()];
+}
+
+export function turnNeeds(session: ReplaySession, earlier: ReplaySession[]): TurnNeed[] {
+  const touched = new Set(earlier.flatMap((s) => [...touchedFiles(s)]));
+  const terse = terseTurns(session);
+  const scored = new Set(session.userTurns.filter((t) => terse.has(t.turn) || !isTerse(t.text)).map((t) => t.turn));
+  const seen = new Set<string>();
+  return session.fileMentions.flatMap(({ file, turn }) => {
+    const id = `${turn}\0${file}`;
+    if (!scored.has(turn) || !touched.has(file) || isInstructionFile(file) || seen.has(id)) return [];
+    seen.add(id);
+    return [{ file, turn, terse: terse.has(turn) }];
+  });
 }
 
 function echoedTurns(
@@ -198,6 +208,7 @@ export function deriveAnswerKey(session: ReplaySession, allEarlier: ReplaySessio
     files: filesNeeded(session, earlier),
     corrections: repeatedCorrections(session, earlier),
     decisions: decisionsRevisited(session, earlier),
+    turnNeeds: turnNeeds(session, earlier),
   };
 }
 

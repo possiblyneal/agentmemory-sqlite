@@ -26,7 +26,15 @@ export interface ReplaySession {
   startedAt: string;
   userTurns: UserTurn[];
   fileUses: FileUse[];
+  // Paths a turn's work names: in any tool call's input and in the Agent's
+  // own text, cwd-relative. Wider than fileUses, for the per-turn need.
+  fileMentions: FileMention[];
   sourcePath?: string;
+}
+
+export interface FileMention {
+  file: string;
+  turn: number;
 }
 
 const READ_TOOLS = new Set(["Read"]);
@@ -63,6 +71,12 @@ function toolFile(input: unknown): string | undefined {
   return typeof path === "string" ? path : undefined;
 }
 
+const PATH_MENTION = /(?:\/?[\w.@-]+\/)+[\w.@-]+\.\w+/g;
+
+function mentionedFiles(text: string, cwd: string): string[] {
+  return (text.match(PATH_MENTION) ?? []).flatMap((m) => relativeToCwd(m, cwd) ?? []);
+}
+
 function rawEntry(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
   const r = raw as Record<string, unknown>;
@@ -75,6 +89,10 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
   const parsed = parseJsonlText(text);
   const userTurns: UserTurn[] = [];
   const fileUses: FileUse[] = [];
+  const fileMentions: FileMention[] = [];
+  const mention = (text: string) => {
+    for (const file of mentionedFiles(text, parsed.cwd)) fileMentions.push({ file, turn: userTurns.length });
+  };
   let reply: string[] = [];
   for (const obs of parsed.observations) {
     const entry = rawEntry(obs.raw);
@@ -87,6 +105,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       reply = [];
     } else if (obs.hookType === "stop" && obs.assistantResponse) {
       reply.push(obs.assistantResponse.trim());
+      mention(obs.assistantResponse);
     } else if (obs.hookType === "post_tool_use" || obs.hookType === "post_tool_failure") {
       reply = [];
     } else if (obs.hookType === "pre_tool_use" && obs.toolName) {
@@ -94,6 +113,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       const abs = toolFile(obs.toolInput);
       const file = mode && abs ? relativeToCwd(abs, parsed.cwd) : null;
       if (mode && file) fileUses.push({ file, turn: userTurns.length, mode });
+      mention(JSON.stringify(obs.toolInput ?? {}));
     }
   }
   if (userTurns.length === 0) return null;
@@ -104,6 +124,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
     startedAt: userTurns[0].timestamp,
     userTurns,
     fileUses,
+    fileMentions,
     sourcePath,
   };
 }

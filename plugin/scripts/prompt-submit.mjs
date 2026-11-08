@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { open } from "node:fs/promises";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
 	const vars = {};
@@ -192,6 +193,52 @@ function recordMissedInjection(hook, reason) {
 	} catch {}
 }
 //#endregion
+//#region src/utils/terse-prompt.ts
+const STOPWORDS = new Set("the and for that this with you your are was were have has had not but can could would should will just from they them then than into about what when where which while there their here also its our out all any more some been being does did doing done get got make made use using please want need like let's lets one two now still".split(" "));
+const TERSE_BELOW_TOKENS = 3;
+const MAX_REPLY_QUERY_CHARS = 1e3;
+function contentTokens(text) {
+	const tokens = text.toLowerCase().match(/[a-z0-9][a-z0-9_./-]*[a-z0-9]|[a-z0-9]/g) ?? [];
+	return new Set(tokens.filter((t) => t.length >= 3 && !STOPWORDS.has(t)));
+}
+function isTersePrompt(text) {
+	return contentTokens(text).size < TERSE_BELOW_TOKENS;
+}
+//#endregion
+//#region src/hooks/_last-reply.ts
+const TAIL_BYTES = 256 * 1024;
+function blocks(entry) {
+	const content = entry.message?.content;
+	return Array.isArray(content) ? content : [];
+}
+async function lastAgentReply(transcriptPath) {
+	const file = await open(transcriptPath, "r");
+	try {
+		const { size } = await file.stat();
+		const length = Math.min(TAIL_BYTES, size);
+		const { buffer } = await file.read(Buffer.alloc(length), 0, length, size - length);
+		const reply = [];
+		for (const line of buffer.toString("utf8").split("\n").reverse()) {
+			let entry;
+			try {
+				entry = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if (entry.isSidechain) continue;
+			if (entry.type === "user") {
+				if (reply.length > 0 || blocks(entry).some((b) => b.type === "tool_result")) break;
+			} else if (entry.type === "assistant") {
+				const texts = blocks(entry).flatMap((b) => b.type === "text" && b.text ? [b.text] : []);
+				reply.unshift(...texts);
+			}
+		}
+		return reply.join("\n\n").trim().slice(-MAX_REPLY_QUERY_CHARS);
+	} finally {
+		await file.close();
+	}
+}
+//#endregion
 //#region src/hooks/prompt-submit.ts
 hydrateHookEnv();
 const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";
@@ -218,7 +265,7 @@ async function main() {
 	const project = resolveProject(cwd);
 	const prompt = data.prompt;
 	const timestamp = (/* @__PURE__ */ new Date()).toISOString();
-	if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") await injectContext(sessionId, project, prompt);
+	if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") await injectContext(sessionId, project, prompt, data.transcript_path);
 	fetch(`${REST_URL}/agentmemory/observe`, {
 		method: "POST",
 		headers: authHeaders(),
@@ -234,15 +281,21 @@ async function main() {
 	}).catch(() => {});
 	setTimeout(() => process.exit(0), 500).unref();
 }
-async function injectContext(sessionId, project, prompt) {
+async function replyFor(prompt, transcriptPath) {
+	if (!isTersePrompt(prompt) || typeof transcriptPath !== "string") return "";
+	return lastAgentReply(transcriptPath).catch(() => "");
+}
+async function injectContext(sessionId, project, prompt, transcriptPath) {
 	try {
+		const reply = await replyFor(prompt, transcriptPath);
 		const res = await fetch(`${REST_URL}/agentmemory/prompt-context`, {
 			method: "POST",
 			headers: authHeaders(),
 			body: JSON.stringify({
 				sessionId,
 				project,
-				prompt
+				prompt,
+				...reply && { reply }
 			}),
 			signal: AbortSignal.timeout(INJECT_TIMEOUT_MS)
 		});

@@ -3,6 +3,8 @@ import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
 import { INJECT_TIMEOUT_MS, recordMissedInjection, missReason } from "./_missed-injection.js";
+import { lastAgentReply } from "./_last-reply.js";
+import { isTersePrompt } from "../utils/terse-prompt.js";
 
 hydrateHookEnv();
 
@@ -42,7 +44,7 @@ async function main() {
   // Only Claude Code's UserPromptSubmit reads additionalContext from stdout;
   // other hosts run this script as telemetry. Subagent prompts are skipped.
   if (INJECT_CONTEXT && data.hook_event_name === "UserPromptSubmit" && !data.agent_id && typeof prompt === "string") {
-    await injectContext(sessionId, project, prompt);
+    await injectContext(sessionId, project, prompt, data.transcript_path);
   }
   // Observed after the Injection: indexed first, the prompt would match its
   // own search and dilute every earlier Session's score.
@@ -62,12 +64,20 @@ async function main() {
   setTimeout(() => process.exit(0), 500).unref();
 }
 
-async function injectContext(sessionId: string, project: string, prompt: string): Promise<void> {
+// A terse prompt carries the Agent's last reply for prompt-context to search
+// on; an unreadable transcript sends the prompt alone.
+async function replyFor(prompt: string, transcriptPath: unknown): Promise<string> {
+  if (!isTersePrompt(prompt) || typeof transcriptPath !== "string") return "";
+  return lastAgentReply(transcriptPath).catch(() => "");
+}
+
+async function injectContext(sessionId: string, project: string, prompt: string, transcriptPath: unknown): Promise<void> {
   try {
+    const reply = await replyFor(prompt, transcriptPath);
     const res = await fetch(`${REST_URL}/agentmemory/prompt-context`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ sessionId, project, prompt }),
+      body: JSON.stringify({ sessionId, project, prompt, ...(reply && { reply }) }),
       signal: AbortSignal.timeout(INJECT_TIMEOUT_MS),
     });
     if (!res.ok) {

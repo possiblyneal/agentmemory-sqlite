@@ -79,6 +79,31 @@ describe("mem::prompt-context", () => {
     expect(result).toEqual({ context: "", tokens: 0, injected: [] });
   });
 
+  describe("a terse prompt with the Agent's last reply", () => {
+    const withReply = (prompt: string, reply: string) =>
+      sdk.trigger("mem::prompt-context", { sessionId: "ses_1", project: "shipctl", prompt, reply }) as Promise<PromptContext>;
+
+    it("searches on the prompt and the reply's last 1000 chars", async () => {
+      hits = [{ id: "obs_a", score: 16 }];
+      const reply = `${"x".repeat(1500)} Shall I retry the deploy with SHIPCTL_TOKEN set in src/auth.rs?`;
+      const result = await withReply("yes, go ahead", `  ${reply}  `);
+      expect(searched[0].query).toBe(`yes, go ahead\n${reply.slice(-1000)}`);
+      expect(searched[0].query.length).toBe("yes, go ahead\n".length + 1000);
+      expect(result.injected.map((r) => r.id)).toEqual(["obs_a"]);
+    });
+
+    it("leaves a substantive prompt's query as typed", async () => {
+      hits = [{ id: "obs_a", score: 16 }];
+      await withReply("staging auth fails when SHIPCTL_TOKEN is unset", "Shall I retry the deploy?");
+      expect(searched[0].query).toBe("staging auth fails when SHIPCTL_TOKEN is unset");
+    });
+
+    it("still skips a terse prompt that comes with an empty reply", async () => {
+      await withReply("yes", "   ");
+      expect(searched).toEqual([]);
+    });
+  });
+
   it("injects nothing when even the best match is weak", async () => {
     hits = [{ id: "obs_a", score: 4.4 }];
     const result = await run("thanks, looks good, commit it");

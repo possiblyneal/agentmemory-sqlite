@@ -8,6 +8,8 @@ export interface QueryArmOptions {
   arm: QueryArm;
   chars: number;
   scale: number;
+  // Leave a substantive prompt's query unchanged, as a terse-only hook would.
+  terseOnly: boolean;
 }
 
 export interface QueryContext {
