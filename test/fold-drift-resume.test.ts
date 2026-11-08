@@ -46,7 +46,7 @@ function countingProvider(): MemoryProvider & { calls: number } {
 
 const IDS = ["s1", "s2", "s3", "s4"];
 const header = (over: Partial<RunHeader> = {}): RunHeader => ({ store: "a.sqlite", batch: 3, mode: "full", sessions: IDS, ...over });
-const tmpFile = () => join(mkdtempSync(join(process.cwd(), "tmp", "resume-")), "run.ndjson");
+const tmpFile = () => join(mkdtempSync(join(tmpdir(), "fold-drift-resume-")), "run.ndjson");
 
 const runFull = (provider: MemoryProvider, file: string, resume: boolean, h = header(), stopAfter = Infinity) => {
   let started = 0;
