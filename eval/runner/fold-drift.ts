@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +9,7 @@ import type { CompressedObservation, Session } from "../../src/types.js";
 import { createJudge, openVerdictCache } from "./decision-judge.js";
 import { readDecisionKey } from "./decision-key.js";
 import { DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
-import { DECISION_LABELS, measureFoldDrift, type DecisionLabel, type FoldDriftResult, type Judging } from "./fold-drift-core.js";
+import { DECISION_LABELS, measureFoldDrift, rescoreFoldDrift, type DecisionLabel, type FoldDriftResult, type Judging, type LlmProfile, type RescoreResult, type StoredFoldDrift } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
 
@@ -44,13 +44,15 @@ async function main(): Promise<void> {
       longest: { type: "string" },
       batch: { type: "string", default: "50" },
       "decision-key": { type: "string" },
+      rescore: { type: "string" },
     },
   });
-  if (!values.store || (!values.sessions && !values.longest)) {
-    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>]");
-  }
   const batch = Math.max(1, parseInt(values.batch!, 10) || 50);
   const ids = values.sessions ? values.sessions.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  if (values.rescore) return rescore(values.rescore, ids, batch, values.store, values["decision-key"]);
+  if (!values.store || (!values.sessions && !values.longest)) {
+    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>]\n       eval:fold-drift --rescore <output.json> --sessions id,... --decision-key <path> [--batch N] [--store <sqlite>]");
+  }
 
   hydrateProcessEnvFromFile();
   const config = loadConfig();
@@ -106,8 +108,39 @@ async function main(): Promise<void> {
 
   mkdirSync(OUT_DIR, { recursive: true });
   const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-  writeFileSync(file, JSON.stringify({ store: values.store, batch, total, labelTotal, sessions: results, failed }, null, 2));
+  writeFileSync(file, JSON.stringify({ store: values.store, batch, llm: llmProfile(), total, labelTotal, sessions: results, failed }, null, 2));
   console.log(`wrote ${file}`);
+}
+
+// The model and endpoint a run summarized on (the broker profile is its model name), recorded so a
+// later re-score can refuse a baseline made on other settings. Credentials in the URL are dropped.
+function llmProfile(): LlmProfile {
+  const url = new URL(process.env.OPENAI_BASE_URL ?? "http://unset");
+  return { model: process.env.OPENAI_MODEL ?? "unset", baseUrl: `${url.origin}${url.pathname}` };
+}
+
+// Judges the key against a previous output's stored lists; no summarize call is made.
+async function rescore(file: string, ids: string[], batch: number, store: string | undefined, keyPath: string | undefined): Promise<void> {
+  if (ids.length === 0 || !keyPath) {
+    throw new Error("usage: eval:fold-drift --rescore <output.json> --sessions id,... --decision-key <path> [--batch N] [--store <sqlite>]");
+  }
+  const stored = JSON.parse(readFileSync(file, "utf8")) as StoredFoldDrift;
+  hydrateProcessEnvFromFile();
+  const judging: Judging = {
+    judge: createJudge(providerComplete(), openVerdictCache(DECISION_VERDICTS_PATH)),
+    key: readDecisionKey(keyPath).decisions,
+  };
+  const result = await rescoreFoldDrift(stored, { sessionIds: ids, batch, store, llm: llmProfile() }, judging);
+  for (const s of result.sessions) console.log(rescoreRow(s.sessionId, s));
+  console.log(rescoreRow(`total sessions=${result.sessions.length}`, result.total));
+  mkdirSync(OUT_DIR, { recursive: true });
+  const out = join(OUT_DIR, `rescore-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+  writeFileSync(out, JSON.stringify({ mode: "rescore", from: file, batch, ...result }, null, 2));
+  console.log(`wrote ${out}`);
+}
+
+function rescoreRow(name: string, c: RescoreResult["total"]): string {
+  return `${name} key=${c.keyDecisions} in-one-pass=${c.inOnePass} in-folded=${c.inFolded} never-captured=${c.neverCaptured}`;
 }
 
 function labelCounts(labels: Array<{ label: DecisionLabel }>): Record<DecisionLabel, number> {

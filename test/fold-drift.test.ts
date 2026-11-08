@@ -4,7 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { measureFoldDrift } from "../eval/runner/fold-drift-core.js";
+import { measureFoldDrift, rescoreFoldDrift, type StoredFoldDrift } from "../eval/runner/fold-drift-core.js";
 import { FOLD_SYSTEM } from "../src/prompts/summary.js";
 import type { CompressedObservation, MemoryProvider } from "../src/types.js";
 import type { Judge } from "../eval/runner/decision-judge.js";
@@ -184,5 +184,82 @@ describe("measureFoldDrift judged by the decision judge", () => {
     const other = { ...keyed(ALL[0]!)[0]!, sessionId: "s2" };
     const r = await measureFoldDrift(fakeProvider(ALL), obs(6), opts, { judge: includesJudge(), key: [other] });
     expect(r.labels).toEqual([]);
+  });
+});
+
+const storedSession = (sessionId: string, full: string[], folded: string[]) => ({
+  sessionId,
+  fullSummary: { keyDecisions: full },
+  foldedSummary: { keyDecisions: folded },
+});
+
+const stored = (): StoredFoldDrift => ({
+  store: "ckpt.sqlite",
+  batch: 20,
+  sessions: [
+    storedSession("s1", [ALL[0]!, ALL[1]!], [ALL[1]!]),
+    storedSession("s2", [ALL[2]!], [ALL[2]!]),
+    storedSession("s3", [], []),
+  ],
+  llm: { model: "m", baseUrl: "http://broker/v1" },
+});
+
+const keyedBy = (...rows: Array<[string, string, string]>): Decision[] =>
+  rows.map(([id, sessionId, text]) => ({ id, sessionId, project: "p", source: "typed", text }));
+
+describe("rescoreFoldDrift", () => {
+  const key = keyedBy(
+    ["a", "s1", ALL[0]!],
+    ["b", "s1", ALL[1]!],
+    ["c", "s1", "Nobody wrote this"],
+    ["d", "s2", ALL[2]!],
+    ["e", "s3", "Lost in s3"],
+    ["f", "other", ALL[0]!],
+  );
+
+  it("counts, per Session and in total, key decisions in the one pass, in the fold, and in neither", async () => {
+    const r = await rescoreFoldDrift(stored(), { sessionIds: ["s1", "s2", "s3"], batch: 20 }, { judge: includesJudge(), key });
+    expect(r.sessions.map(({ sessionId, inOnePass, inFolded, neverCaptured }) => ({ sessionId, inOnePass, inFolded, neverCaptured }))).toEqual([
+      { sessionId: "s1", inOnePass: 2, inFolded: 1, neverCaptured: 1 },
+      { sessionId: "s2", inOnePass: 1, inFolded: 1, neverCaptured: 0 },
+      { sessionId: "s3", inOnePass: 0, inFolded: 0, neverCaptured: 1 },
+    ]);
+    expect(r.total).toEqual({ keyDecisions: 5, inOnePass: 3, inFolded: 2, neverCaptured: 2 });
+  });
+
+  it("scores only the requested Sessions when they are a subset of the stored ones", async () => {
+    const r = await rescoreFoldDrift(stored(), { sessionIds: ["s2"], batch: 20 }, { judge: includesJudge(), key });
+    expect(r.sessions.map((s) => s.sessionId)).toEqual(["s2"]);
+    expect(r.total.keyDecisions).toBe(1);
+  });
+
+  it("refuses a Session the stored run does not hold, naming it", async () => {
+    await expect(
+      rescoreFoldDrift(stored(), { sessionIds: ["s1", "s9"], batch: 20 }, { judge: includesJudge(), key }),
+    ).rejects.toThrow(/s9/);
+  });
+
+  it("refuses a batch that differs from the stored one, naming both", async () => {
+    await expect(
+      rescoreFoldDrift(stored(), { sessionIds: ["s1"], batch: 50 }, { judge: includesJudge(), key }),
+    ).rejects.toThrow(/batch.*20.*50/);
+  });
+
+  it("refuses a different store, naming both", async () => {
+    await expect(
+      rescoreFoldDrift(stored(), { sessionIds: ["s1"], batch: 20, store: "other.sqlite" }, { judge: includesJudge(), key }),
+    ).rejects.toThrow(/ckpt\.sqlite.*other\.sqlite/);
+  });
+
+  it("refuses a different model when the stored run recorded one", async () => {
+    await expect(
+      rescoreFoldDrift(stored(), { sessionIds: ["s1"], batch: 20, llm: { model: "m2", baseUrl: "http://broker/v1" } }, { judge: includesJudge(), key }),
+    ).rejects.toThrow(/model.*m.*m2/);
+  });
+
+  it("accepts a stored run that recorded no model", async () => {
+    const { llm: _llm, ...old } = stored();
+    const r = await rescoreFoldDrift(old, { sessionIds: ["s1"], batch: 20, llm: { model: "m2", baseUrl: "x" } }, { judge: includesJudge(), key });
+    expect(r.sessions).toHaveLength(1);
   });
 });

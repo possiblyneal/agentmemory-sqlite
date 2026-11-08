@@ -222,3 +222,92 @@ function missingFrom(from: string[], to: string[]): { exact: string[]; loose: st
   const loose = exact.filter((d) => !to.some((t) => jaccardSimilarity(d, t) >= LOOSE_JACCARD));
   return { exact, loose };
 }
+
+export interface LlmProfile {
+  model: string;
+  baseUrl: string;
+}
+
+export interface StoredFoldDrift {
+  store: string;
+  batch: number;
+  sessions: Array<{
+    sessionId: string;
+    fullSummary: { keyDecisions: string[] } | null;
+    foldedSummary: { keyDecisions: string[] } | null;
+  }>;
+  llm?: LlmProfile;
+}
+
+export interface RescoreRequest {
+  sessionIds: string[];
+  batch: number;
+  store?: string;
+  llm?: LlmProfile;
+}
+
+export interface RescoreCounts {
+  keyDecisions: number;
+  inOnePass: number;
+  inFolded: number;
+  neverCaptured: number;
+}
+
+export interface RescoreResult {
+  sessions: Array<{ sessionId: string } & RescoreCounts>;
+  total: RescoreCounts;
+}
+
+function refuseMismatch(stored: StoredFoldDrift, req: RescoreRequest): void {
+  const differences: string[] = [];
+  if (stored.batch !== req.batch) differences.push(`batch: stored ${stored.batch}, requested ${req.batch}`);
+  if (req.store !== undefined && stored.store !== req.store) {
+    differences.push(`store: stored ${stored.store}, requested ${req.store}`);
+  }
+  const held = new Set(stored.sessions.map((s) => s.sessionId));
+  const absent = req.sessionIds.filter((id) => !held.has(id));
+  if (absent.length > 0) differences.push(`Sessions not in the stored run: ${absent.join(", ")}`);
+  if (stored.llm && req.llm) {
+    if (stored.llm.model !== req.llm.model) differences.push(`model: stored ${stored.llm.model}, requested ${req.llm.model}`);
+    if (stored.llm.baseUrl !== req.llm.baseUrl) differences.push(`endpoint: stored ${stored.llm.baseUrl}, requested ${req.llm.baseUrl}`);
+  }
+  if (differences.length > 0) throw new Error(`stored run does not match the request (${differences.join("; ")})`);
+}
+
+// Scores a previous run's one-pass and final folded decision lists against the key; calls the
+// judge only. A decision in neither list is never-captured, the decision-loss scorecard's definition.
+export async function rescoreFoldDrift(
+  stored: StoredFoldDrift,
+  req: RescoreRequest,
+  { judge, key }: Judging,
+): Promise<RescoreResult> {
+  refuseMismatch(stored, req);
+  const wanted = new Set(req.sessionIds);
+  const sessions: RescoreResult["sessions"] = [];
+  for (const session of stored.sessions.filter((s) => wanted.has(s.sessionId))) {
+    const onePass = session.fullSummary?.keyDecisions ?? [];
+    const folded = session.foldedSummary?.keyDecisions ?? [];
+    const counts: RescoreCounts = { keyDecisions: 0, inOnePass: 0, inFolded: 0, neverCaptured: 0 };
+    for (const decision of key.filter((d) => d.sessionId === session.sessionId)) {
+      const [inOnePass, inFolded] = await Promise.all([
+        deliveredBy(judge, decision, onePass),
+        deliveredBy(judge, decision, folded),
+      ]);
+      counts.keyDecisions++;
+      if (inOnePass) counts.inOnePass++;
+      if (inFolded) counts.inFolded++;
+      if (!inOnePass && !inFolded) counts.neverCaptured++;
+    }
+    sessions.push({ sessionId: session.sessionId, ...counts });
+  }
+  const total = sessions.reduce<RescoreCounts>(
+    (t, s) => ({
+      keyDecisions: t.keyDecisions + s.keyDecisions,
+      inOnePass: t.inOnePass + s.inOnePass,
+      inFolded: t.inFolded + s.inFolded,
+      neverCaptured: t.neverCaptured + s.neverCaptured,
+    }),
+    { keyDecisions: 0, inOnePass: 0, inFolded: 0, neverCaptured: 0 },
+  );
+  return { sessions, total };
+}
