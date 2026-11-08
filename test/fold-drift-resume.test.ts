@@ -8,6 +8,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { measureFoldDrift, screenOnePass } from "../eval/runner/fold-drift-core.js";
+import { stopState } from "../eval/runner/fold-drift-stop.js";
 import { runCheckpointed, type RunHeader } from "../eval/runner/fold-drift-resume.js";
 import { FOLD_SYSTEM } from "../src/prompts/summary.js";
 import type { CompressedObservation, MemoryProvider } from "../src/types.js";
@@ -131,5 +132,65 @@ describe("runCheckpointed", () => {
     const uninterrupted = await run(whole, tmpFile(), false, Infinity);
     expect(second.calls).toBe(whole.calls - first.calls);
     expect(resumed.results).toEqual(uninterrupted.results);
+  });
+
+  describe("with a stop decision", () => {
+    const ordered = [
+      { sessionId: "s1", keyDecisions: 8, neverCaptured: 8 },
+      { sessionId: "s2", keyDecisions: 6, neverCaptured: 6 },
+      { sessionId: "s3", keyDecisions: 1, neverCaptured: 1 },
+    ];
+    const armCounts: Record<string, number> = { s1: 0, s2: 0, s3: 1 };
+    const stopHeader = header({ sessions: ["s1", "s2", "s3"], stop: { baseline: "base.json", threshold: 10 } });
+    const attempt = (file: string, resume: boolean, killAfter = Infinity, h = stopHeader) => {
+      const ran: string[] = [];
+      return {
+        ran,
+        outcome: runCheckpointed({
+          file,
+          header: h,
+          resume,
+          run: async (id) => {
+            if (ran.length >= killAfter) throw new Error("killed");
+            ran.push(id);
+            return { sessionId: id, count: armCounts[id]! };
+          },
+          stopAfter: (results) => {
+            const state = stopState(ordered, new Map(results.map((r) => [r.sessionId, r.count])), 10);
+            return state.stop ? state : null;
+          },
+        }),
+      };
+    };
+
+    it("ends the run at the Session that decides it", async () => {
+      const { ran, outcome } = attempt(tmpFile(), false);
+      const { stopped, results } = await outcome;
+      expect(ran).toEqual(["s1", "s2"]);
+      expect(results.map((r) => r.sessionId)).toEqual(["s1", "s2"]);
+      expect(stopped).toMatchObject({ stop: "cleared", gain: 14, skipped: ["s3"] });
+    });
+
+    it("reaches the same stop after a kill and after a resume past the deciding Session", async () => {
+      const file = tmpFile();
+      const killed = attempt(file, false, 1);
+      expect((await killed.outcome).failed).toHaveLength(2);
+      const resumed = attempt(file, true);
+      const { stopped } = await resumed.outcome;
+      expect(resumed.ran).toEqual(["s2"]);
+      expect(stopped).toMatchObject({ stop: "cleared", skipped: ["s3"] });
+
+      const again = attempt(file, true);
+      expect((await again.outcome).stopped).toMatchObject({ stop: "cleared", skipped: ["s3"] });
+      expect(again.ran).toEqual([]);
+    });
+
+    it("refuses a resume with another baseline, threshold or Session order", async () => {
+      const file = tmpFile();
+      await attempt(file, false).outcome;
+      await expect(attempt(file, true, Infinity, { ...stopHeader, stop: { baseline: "base.json", threshold: 5 } }).outcome).rejects.toThrow(/stop:/);
+      await expect(attempt(file, true, Infinity, { ...stopHeader, stop: undefined }).outcome).rejects.toThrow(/stop:/);
+      await expect(attempt(file, true, Infinity, { ...stopHeader, sessions: ["s2", "s1", "s3"] }).outcome).rejects.toThrow(/different order/);
+    });
   });
 });

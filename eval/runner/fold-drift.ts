@@ -10,6 +10,7 @@ import { createJudge, openVerdictCache } from "./decision-judge.js";
 import { readDecisionKey } from "./decision-key.js";
 import { DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
 import { runCheckpointed, type RunHeader } from "./fold-drift-resume.js";
+import { baselineSessions, orderByBaseline, stopLine, stopState, verdictOf, type BaselineSession, type StopState } from "./fold-drift-stop.js";
 import { DECISION_LABELS, SCREEN_MODE_TAG, measureFoldDrift, rescoreFoldDrift, screenOnePass, screenRow, screenTotal, type DecisionLabel, type FoldDriftResult, type Judging, type LlmProfile, type RescoreResult, type ScreenResult, type StoredFoldDrift } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
@@ -48,13 +49,15 @@ async function main(): Promise<void> {
       "one-pass": { type: "boolean", default: false },
       resume: { type: "string" },
       rescore: { type: "string" },
+      baseline: { type: "string" },
+      threshold: { type: "string", default: "10" },
     },
   });
   const batch = Math.max(1, parseInt(values.batch!, 10) || 50);
   const ids = values.sessions ? values.sessions.split(",").map((s) => s.trim()).filter(Boolean) : [];
   if (values.rescore) return rescore(values.rescore, ids, batch, values.store, values["decision-key"]);
   if (!values.store || (!values.sessions && !values.longest)) {
-    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>]\n       eval:fold-drift --rescore <output.json> --sessions id,... --decision-key <path> [--batch N] [--store <sqlite>]");
+    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>] [--one-pass] [--resume <run.ndjson>] [--baseline <output.json> [--threshold N]]\n       eval:fold-drift --rescore <output.json> --sessions id,... --decision-key <path> [--batch N] [--store <sqlite>]");
   }
 
   hydrateProcessEnvFromFile();
@@ -75,30 +78,56 @@ async function main(): Promise<void> {
     key: values["decision-key"] ? readDecisionKey(values["decision-key"]).decisions : [],
   };
   const screening = values["one-pass"];
-  const header: RunHeader = { store: values.store, batch, mode: screening ? "screen" : "full", sessions: [...sessions.keys()] };
+  const threshold = parseInt(values.threshold!, 10);
+  if (!(threshold >= 1)) throw new Error("--threshold must be a positive integer");
+  const ordered = values.baseline
+    ? await baselineOrder(values.baseline, [...sessions.keys()], { batch, store: values.store, screening, judging, keyPath: values["decision-key"] })
+    : null;
+  const header: RunHeader = {
+    store: values.store,
+    batch,
+    mode: screening ? "screen" : "full",
+    sessions: ordered ? ordered.map((b) => b.sessionId) : [...sessions.keys()],
+    ...(values.baseline ? { stop: { baseline: values.baseline, threshold } } : {}),
+  };
+  const stopAfter = ordered
+    ? (finished: Array<{ sessionId: string; labels?: Array<{ label: string }> }>) => {
+        const state = stopState(ordered, armCounts(finished), threshold);
+        return state.stop ? state : null;
+      }
+    : undefined;
+  const earlyStop = (results: Array<{ sessionId: string; labels?: Array<{ label: string }> }>, stopped: StopState | null) => {
+    if (!ordered) return {};
+    const state = stopped ?? stopState(ordered, armCounts(results), threshold);
+    const fields = { stoppedEarly: stopped !== null, stopReason: stopped?.stop ?? null, gain: state.gain, threshold, verdict: verdictOf(state.gain, threshold), baseline: values.baseline, skipped: stopped ? state.skipped : [] };
+    console.log(stopLine(state, stopped !== null));
+    return fields;
+  };
   const stem = values.resume
     ? values.resume.replace(/\.ndjson$/, "")
     : join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}${screening ? "-screen" : ""}`);
   const checkpoint = `${stem}.ndjson`;
   const project = (id: string) => projects.get(id) ?? "unknown";
   if (screening) {
-    const { results, failed } = await runCheckpointed<ScreenResult>({
+    const { results, failed, stopped } = await runCheckpointed<ScreenResult, StopState>({
       file: checkpoint,
       header,
       resume: !!values.resume,
+      stopAfter,
       run: (id) => screenOnePass(provider, sessions.get(id)!, { sessionId: id, project: project(id), batch }, judging),
       onResult: (r) => console.log(screenRow(r)),
       onFailure: (id, error) => console.log(`${SCREEN_MODE_TAG} ${id} failed: ${error}`),
     });
     console.log(screenTotal(results));
-    writeFileSync(`${stem}.json`, JSON.stringify({ mode: "screen", store: values.store, batch, sessions: results, failed }, null, 2));
+    writeFileSync(`${stem}.json`, JSON.stringify({ mode: "screen", store: values.store, batch, ...earlyStop(results, stopped), sessions: results, failed }, null, 2));
     console.log(`wrote ${stem}.json`);
     return;
   }
-  const { results, failed } = await runCheckpointed<FoldDriftResult>({
+  const { results, failed, stopped } = await runCheckpointed<FoldDriftResult, StopState>({
     file: checkpoint,
     header,
     resume: !!values.resume,
+    stopAfter,
     run: (id) => measureFoldDrift(provider, sessions.get(id)!, { sessionId: id, project: project(id), batch }, judging),
     onResult: (r) => console.log(row(r)),
     onFailure: (id, error) => console.log(`${id} failed: ${error}`),
@@ -121,8 +150,32 @@ async function main(): Promise<void> {
   const labelTotal = labelCounts(results.flatMap((r) => r.labels ?? []));
   console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose} missing(judged)=${total.missingJudged}${labelText(labelTotal)} dropped-by-folds(exact)=${total.droppedExact} dropped-by-folds(jaccard>=0.5)=${total.droppedLoose} dropped-by-fallbacks(exact)=${total.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${total.fallbackDroppedLoose}`);
 
-  writeFileSync(`${stem}.json`, JSON.stringify({ store: values.store, batch, llm: llmProfile(), total, labelTotal, sessions: results, failed }, null, 2));
+  writeFileSync(`${stem}.json`, JSON.stringify({ store: values.store, batch, llm: llmProfile(), total, labelTotal, ...earlyStop(results, stopped), sessions: results, failed }, null, 2));
   console.log(`wrote ${stem}.json`);
+}
+
+const armCounts = (finished: Array<{ sessionId: string; labels?: Array<{ label: string }> }>) =>
+  new Map(finished.map((r) => [r.sessionId, (r.labels ?? []).filter((l) => l.label === "never-captured").length]));
+
+// The baseline's per-Session never-captured counts for the selected Sessions, most first. A full
+// baseline output is scored against the key (cached verdicts); a --rescore output is used as it is.
+// A screen is compared with the baseline's not-in-one-pass count, a full run with its in-neither.
+async function baselineOrder(
+  file: string,
+  selected: string[],
+  o: { batch: number; store: string; screening: boolean; judging: Judging; keyPath: string | undefined },
+): Promise<BaselineSession[]> {
+  if (!o.keyPath) throw new Error("--baseline needs --decision-key: the arm's counts come from the key");
+  const stored = JSON.parse(readFileSync(file, "utf8")) as StoredFoldDrift & { mode?: string; sessions: RescoreResult["sessions"] };
+  const scored =
+    stored.mode === "rescore"
+      ? stored.sessions
+      : (await rescoreFoldDrift(stored, { sessionIds: selected, batch: o.batch, store: o.store, llm: llmProfile() }, o.judging)).sessions;
+  const held = new Set(scored.map((s) => s.sessionId));
+  const absent = selected.filter((id) => !held.has(id));
+  if (absent.length > 0) throw new Error(`Sessions not in the baseline: ${absent.join(", ")}`);
+  const wanted = new Set(selected);
+  return orderByBaseline(baselineSessions(scored.filter((s) => wanted.has(s.sessionId)), o.screening ? "screen" : "full"));
 }
 
 // The model and endpoint a run summarized on (the broker profile is its model name), recorded so a
