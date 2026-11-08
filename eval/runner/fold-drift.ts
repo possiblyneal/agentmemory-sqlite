@@ -5,11 +5,11 @@ import { DatabaseSync } from "node:sqlite";
 import { hydrateProcessEnvFromFile, loadConfig, loadFallbackConfig } from "../../src/config.js";
 import { createFallbackProvider, createProvider } from "../../src/providers/index.js";
 import { KV } from "../../src/state/schema.js";
-import type { CompressedObservation, Session } from "../../src/types.js";
+import type { CompressedObservation, MemoryProvider, Session } from "../../src/types.js";
 import { createJudge, openVerdictCache } from "./decision-judge.js";
 import { readDecisionKey } from "./decision-key.js";
 import { DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
-import { DECISION_LABELS, measureFoldDrift, type DecisionLabel, type FoldDriftResult, type Judging } from "./fold-drift-core.js";
+import { DECISION_LABELS, SCREEN_MODE_TAG, measureFoldDrift, screenOnePass, screenRow, screenTotal, type DecisionLabel, type FoldDriftResult, type Judging, type ScreenResult } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
 
@@ -44,10 +44,11 @@ async function main(): Promise<void> {
       longest: { type: "string" },
       batch: { type: "string", default: "50" },
       "decision-key": { type: "string" },
+      "one-pass": { type: "boolean", default: false },
     },
   });
   if (!values.store || (!values.sessions && !values.longest)) {
-    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>]");
+    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>] [--one-pass]");
   }
   const batch = Math.max(1, parseInt(values.batch!, 10) || 50);
   const ids = values.sessions ? values.sessions.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -69,6 +70,10 @@ async function main(): Promise<void> {
     judge: createJudge(providerComplete(), openVerdictCache(DECISION_VERDICTS_PATH)),
     key: values["decision-key"] ? readDecisionKey(values["decision-key"]).decisions : [],
   };
+  if (values["one-pass"]) {
+    await screen(provider, sessions, projects, batch, judging, values.store);
+    return;
+  }
   const results: FoldDriftResult[] = [];
   const failed: Array<{ sessionId: string; error: string }> = [];
   for (const [sessionId, observations] of sessions) {
@@ -107,6 +112,34 @@ async function main(): Promise<void> {
   mkdirSync(OUT_DIR, { recursive: true });
   const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
   writeFileSync(file, JSON.stringify({ store: values.store, batch, total, labelTotal, sessions: results, failed }, null, 2));
+  console.log(`wrote ${file}`);
+}
+
+async function screen(
+  provider: MemoryProvider,
+  sessions: Map<string, CompressedObservation[]>,
+  projects: Map<string, string>,
+  batch: number,
+  judging: Judging,
+  store: string,
+): Promise<void> {
+  const results: ScreenResult[] = [];
+  const failed: Array<{ sessionId: string; error: string }> = [];
+  for (const [sessionId, observations] of sessions) {
+    try {
+      const r = await screenOnePass(provider, observations, { sessionId, project: projects.get(sessionId) ?? "unknown", batch }, judging);
+      results.push(r);
+      console.log(screenRow(r));
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      failed.push({ sessionId, error });
+      console.log(`${SCREEN_MODE_TAG} ${sessionId} failed: ${error}`);
+    }
+  }
+  console.log(screenTotal(results));
+  mkdirSync(OUT_DIR, { recursive: true });
+  const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}-screen.json`);
+  writeFileSync(file, JSON.stringify({ mode: "screen", store, batch, sessions: results, failed }, null, 2));
   console.log(`wrote ${file}`);
 }
 

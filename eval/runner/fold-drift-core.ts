@@ -174,6 +174,55 @@ export async function measureFoldDrift(
   };
 }
 
+export const SCREEN_LABELS = ["captured", "never-captured"] as const;
+export type ScreenLabel = (typeof SCREEN_LABELS)[number];
+
+export const SCREEN_MODE_TAG = "[screen: one-pass only]";
+
+export interface ScreenResult {
+  mode: "screen";
+  sessionId: string;
+  observations: number;
+  full: number;
+  labels?: Array<{ decisionId: string; label: ScreenLabel }>;
+  fullSummary?: SessionSummary | null;
+}
+
+// Screening: only the one-pass summarize. Never-captured here is "the one-pass list
+// does not deliver it", a superset of the full run's never-captured (which also needs
+// the fold sequence to miss it).
+export async function screenOnePass(
+  provider: MemoryProvider,
+  observations: CompressedObservation[],
+  opts: FoldDriftOptions,
+  judging?: Judging,
+): Promise<ScreenResult> {
+  const fullSummary = await summarizer(provider, opts).run(observations);
+  const full = fullSummary?.keyDecisions ?? [];
+  const labels = judging
+    ? await Promise.all(
+        judging.key
+          .filter((d) => d.sessionId === opts.sessionId)
+          .map(async (d) => ({
+            decisionId: d.id,
+            label: ((await deliveredBy(judging.judge, d, full)) ? "captured" : "never-captured") as ScreenLabel,
+          })),
+      )
+    : undefined;
+  return { mode: "screen", sessionId: opts.sessionId, observations: observations.length, full: full.length, labels, fullSummary };
+}
+
+function screenCounts(labels: Array<{ label: ScreenLabel }>): string {
+  if (labels.length === 0) return "";
+  return SCREEN_LABELS.map((l) => ` key:${l}=${labels.filter((x) => x.label === l).length}`).join("");
+}
+
+export const screenRow = (r: ScreenResult): string =>
+  `${SCREEN_MODE_TAG} ${r.sessionId} obs=${r.observations} full=${r.full}${screenCounts(r.labels ?? [])}`;
+
+export const screenTotal = (results: ScreenResult[]): string =>
+  `${SCREEN_MODE_TAG} total sessions=${results.length} full=${results.reduce((n, r) => n + r.full, 0)}${screenCounts(results.flatMap((r) => r.labels ?? []))}`;
+
 // A one-pass decision's judge id is a hash of its text, so a cached verdict is reused only for the same decision.
 const textId = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
