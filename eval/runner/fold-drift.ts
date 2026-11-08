@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +9,7 @@ import type { CompressedObservation, MemoryProvider, Session } from "../../src/t
 import { createJudge, openVerdictCache } from "./decision-judge.js";
 import { readDecisionKey } from "./decision-key.js";
 import { DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
+import { runCheckpointed, type RunHeader } from "./fold-drift-resume.js";
 import { DECISION_LABELS, SCREEN_MODE_TAG, measureFoldDrift, screenOnePass, screenRow, screenTotal, type DecisionLabel, type FoldDriftResult, type Judging, type ScreenResult } from "./fold-drift-core.js";
 
 const OUT_DIR = "tmp/eval-fold-drift";
@@ -45,10 +46,11 @@ async function main(): Promise<void> {
       batch: { type: "string", default: "50" },
       "decision-key": { type: "string" },
       "one-pass": { type: "boolean", default: false },
+      resume: { type: "string" },
     },
   });
   if (!values.store || (!values.sessions && !values.longest)) {
-    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>] [--one-pass]");
+    throw new Error("usage: eval:fold-drift --store <sqlite> (--sessions id,... | --longest N) [--batch N] [--decision-key <path>] [--one-pass] [--resume <tmp/eval-fold-drift/*.ndjson>]");
   }
   const batch = Math.max(1, parseInt(values.batch!, 10) || 50);
   const ids = values.sessions ? values.sessions.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -70,27 +72,35 @@ async function main(): Promise<void> {
     judge: createJudge(providerComplete(), openVerdictCache(DECISION_VERDICTS_PATH)),
     key: values["decision-key"] ? readDecisionKey(values["decision-key"]).decisions : [],
   };
-  if (values["one-pass"]) {
-    await screen(provider, sessions, projects, batch, judging, values.store);
+  const screening = values["one-pass"];
+  const header: RunHeader = { store: values.store, batch, mode: screening ? "screen" : "full", sessions: [...sessions.keys()] };
+  const stem = values.resume
+    ? values.resume.replace(/\.ndjson$/, "")
+    : join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}${screening ? "-screen" : ""}`);
+  const checkpoint = `${stem}.ndjson`;
+  const project = (id: string) => projects.get(id) ?? "unknown";
+  if (screening) {
+    const { results, failed } = await runCheckpointed<ScreenResult>({
+      file: checkpoint,
+      header,
+      resume: !!values.resume,
+      run: (id) => screenOnePass(provider, sessions.get(id)!, { sessionId: id, project: project(id), batch }, judging),
+      onResult: (r) => console.log(screenRow(r)),
+      onFailure: (id, error) => console.log(`${SCREEN_MODE_TAG} ${id} failed: ${error}`),
+    });
+    console.log(screenTotal(results));
+    writeFileSync(`${stem}.json`, JSON.stringify({ mode: "screen", store: values.store, batch, sessions: results, failed }, null, 2));
+    console.log(`wrote ${stem}.json`);
     return;
   }
-  const results: FoldDriftResult[] = [];
-  const failed: Array<{ sessionId: string; error: string }> = [];
-  for (const [sessionId, observations] of sessions) {
-    try {
-      const r = await measureFoldDrift(provider, observations, {
-        sessionId,
-        project: projects.get(sessionId) ?? "unknown",
-        batch,
-      }, judging);
-      results.push(r);
-      console.log(row(r));
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      failed.push({ sessionId, error });
-      console.log(`${sessionId} failed: ${error}`);
-    }
-  }
+  const { results, failed } = await runCheckpointed<FoldDriftResult>({
+    file: checkpoint,
+    header,
+    resume: !!values.resume,
+    run: (id) => measureFoldDrift(provider, sessions.get(id)!, { sessionId: id, project: project(id), batch }, judging),
+    onResult: (r) => console.log(row(r)),
+    onFailure: (id, error) => console.log(`${id} failed: ${error}`),
+  });
 
   const total = results.reduce(
     (t, r) => ({
@@ -109,38 +119,8 @@ async function main(): Promise<void> {
   const labelTotal = labelCounts(results.flatMap((r) => r.labels ?? []));
   console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose} missing(judged)=${total.missingJudged}${labelText(labelTotal)} dropped-by-folds(exact)=${total.droppedExact} dropped-by-folds(jaccard>=0.5)=${total.droppedLoose} dropped-by-fallbacks(exact)=${total.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${total.fallbackDroppedLoose}`);
 
-  mkdirSync(OUT_DIR, { recursive: true });
-  const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-  writeFileSync(file, JSON.stringify({ store: values.store, batch, total, labelTotal, sessions: results, failed }, null, 2));
-  console.log(`wrote ${file}`);
-}
-
-async function screen(
-  provider: MemoryProvider,
-  sessions: Map<string, CompressedObservation[]>,
-  projects: Map<string, string>,
-  batch: number,
-  judging: Judging,
-  store: string,
-): Promise<void> {
-  const results: ScreenResult[] = [];
-  const failed: Array<{ sessionId: string; error: string }> = [];
-  for (const [sessionId, observations] of sessions) {
-    try {
-      const r = await screenOnePass(provider, observations, { sessionId, project: projects.get(sessionId) ?? "unknown", batch }, judging);
-      results.push(r);
-      console.log(screenRow(r));
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      failed.push({ sessionId, error });
-      console.log(`${SCREEN_MODE_TAG} ${sessionId} failed: ${error}`);
-    }
-  }
-  console.log(screenTotal(results));
-  mkdirSync(OUT_DIR, { recursive: true });
-  const file = join(OUT_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}-screen.json`);
-  writeFileSync(file, JSON.stringify({ mode: "screen", store, batch, sessions: results, failed }, null, 2));
-  console.log(`wrote ${file}`);
+  writeFileSync(`${stem}.json`, JSON.stringify({ store: values.store, batch, total, labelTotal, sessions: results, failed }, null, 2));
+  console.log(`wrote ${stem}.json`);
 }
 
 function labelCounts(labels: Array<{ label: DecisionLabel }>): Record<DecisionLabel, number> {
