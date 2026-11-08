@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mcnemarExact, pairDecisions, refuseFailedSummaries, type DecisionRow } from "../eval/runner/compare-core.js";
+import { cumulativeLine, mcnemarExact, pairDecisions, refuseFailedSummaries, type DecisionRow } from "../eval/runner/compare-core.js";
 
 const row = (sessionId: string, decisions: DecisionRow["decisions"]): DecisionRow => ({ sessionId, decisions });
 const d = (decisionId: string, turn: number, sessionStart: boolean, promptSubmit: boolean, reachable?: boolean) => ({
@@ -53,6 +53,30 @@ describe("pairDecisions", () => {
     const b = [row("s1", [d("x", 1, true, false), d("x", 5, false, false)])];
     expect(pairDecisions(a, b).aOnly).toBe(1);
     expect(pairDecisions(a, b).both).toBe(1);
+  });
+});
+
+describe("cumulativeLine", () => {
+  const byTurn = (decisionId: string, turn: number, promptSubmit: boolean, promptSubmitByTurn: boolean) => ({
+    ...d(decisionId, turn, false, promptSubmit),
+    promptSubmitByTurn,
+  });
+
+  it("pairs prompt-submit credited by turn, leaving the same-turn pairing to McNemar", () => {
+    const a = [row("s1", [byTurn("x", 2, false, true), byTurn("y", 3, false, false), byTurn("z", 4, true, true)])];
+    const b = [row("s1", [byTurn("x", 2, false, false), byTurn("y", 3, false, true), byTurn("z", 4, false, true)])];
+    expect(pairDecisions(a, b)).toMatchObject({ both: 0, aOnly: 1, bOnly: 0, neither: 2 });
+    expect(cumulativeLine({ label: "A", rows: a }, { label: "B", rows: b })).toBe(
+      "  delivered by turn: A 2   B 2   both 1   A-only 1   B-only 1   neither 0",
+    );
+  });
+
+  it("names a run probed before the by-turn flag existed", () => {
+    const old = [row("s1", [d("x", 2, false, true)])];
+    const fresh = [row("s1", [byTurn("x", 2, true, true)])];
+    expect(cumulativeLine({ label: "old", rows: old }, { label: "new", rows: fresh })).toBe(
+      "  delivered by turn: not recorded by old; rerun its probe",
+    );
   });
 });
 

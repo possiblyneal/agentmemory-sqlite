@@ -216,14 +216,62 @@ describe("decision recall", () => {
       const probes = [probe("session-start", 0, "all totals are cents"), probe("prompt-context", 1, "use the builder")];
       const outcomes = await decisionOutcomes(session, key, probes, judge, new Set(["e1"]));
       expect(outcomes).toEqual([
-        { decisionId: "d1", turn: 1, reachable: true, sessionStart: false, promptSubmit: true },
-        { decisionId: "d2", turn: 1, reachable: true, sessionStart: true, promptSubmit: false },
-        { decisionId: "d3", turn: 1, reachable: false, sessionStart: false, promptSubmit: false },
+        { decisionId: "d1", turn: 1, reachable: true, sessionStart: false, promptSubmit: true, promptSubmitByTurn: true },
+        { decisionId: "d2", turn: 1, reachable: true, sessionStart: true, promptSubmit: false, promptSubmitByTurn: false },
+        { decisionId: "d3", turn: 1, reachable: false, sessionStart: false, promptSubmit: false, promptSubmitByTurn: false },
       ]);
       expect(calls).toBe(4);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  describe("delivered by turn", () => {
+    const { session: compacted } = load("s3", "2026-09-03T10:00:00Z", [
+      user("add the orders repository"),
+      user("list orders"),
+      { ...user("This session is being continued from a previous conversation that ran out of context."), isCompactSummary: true },
+      user("now totals"),
+      user("ship it"),
+    ]);
+    const cents = { ...decision, id: "d2", text: "Totals are in cents." };
+    const probes = [
+      probe("prompt-context", 1, "use the builder"),
+      probe("prompt-context", 2, "totals in cents"),
+      probe("prompt-context", 3, "totals stay in cents"),
+      probe("prompt-context", 4, "nothing relevant"),
+    ];
+    const judged: number[] = [];
+    const judge: Judge = {
+      delivers: async (d, injected) => {
+        judged.push(probes.find((p) => p.text === injected)?.turn ?? -1);
+        return injected.includes(d.id === "d1" ? "builder" : "cents");
+      },
+    };
+    const outcome = async (id: string, turn: number) => {
+      const key: DecisionKey = { version: 1, builtAt: "x", decisions: [decision, cents], expected: [{ sessionId: "s3", turn, decisionIds: [id] }] };
+      const [o] = await decisionOutcomes(compacted, key, probes, judge, new Set(["e1"]));
+      return o;
+    };
+
+    it("records each compaction after the Operator turns before it", () => {
+      expect(compacted.compactedAfter).toEqual([2]);
+    });
+
+    it("credits a decision an earlier prompt-context Injection of the Session delivered, leaving same-turn unchanged", async () => {
+      expect(await outcome("d1", 2)).toMatchObject({ promptSubmit: false, promptSubmitByTurn: true });
+    });
+
+    it("does not credit a decision delivered only after its turn", async () => {
+      expect(await outcome("d2", 1)).toMatchObject({ promptSubmit: false, promptSubmitByTurn: false });
+    });
+
+    it("does not credit a decision delivered before a compaction that precedes its turn", async () => {
+      judged.length = 0;
+      expect(await outcome("d1", 4)).toMatchObject({ promptSubmit: false, promptSubmitByTurn: false });
+      expect(await outcome("d2", 4)).toMatchObject({ promptSubmit: false, promptSubmitByTurn: true });
+      expect(judged.filter((t) => t === 1 || t === 2)).toEqual([]);
+    });
   });
 
   it("aggregates recall per surface, by project and for typical", () => {
@@ -241,11 +289,11 @@ describe("decision recall", () => {
     });
     const scores = [
       score("a", "shop", [
-        { decisionId: "d1", turn: 1, reachable: true, sessionStart: true, promptSubmit: false },
-        { decisionId: "d2", turn: 1, reachable: true, sessionStart: false, promptSubmit: false },
-        { decisionId: "d4", turn: 1, reachable: false, sessionStart: false, promptSubmit: false },
+        { decisionId: "d1", turn: 1, reachable: true, sessionStart: true, promptSubmit: false, promptSubmitByTurn: false },
+        { decisionId: "d2", turn: 1, reachable: true, sessionStart: false, promptSubmit: false, promptSubmitByTurn: true },
+        { decisionId: "d4", turn: 1, reachable: false, sessionStart: false, promptSubmit: false, promptSubmitByTurn: false },
       ]),
-      score("b", "agentmemory-sqlite", [{ decisionId: "d3", turn: 2, reachable: true, sessionStart: false, promptSubmit: true }]),
+      score("b", "agentmemory-sqlite", [{ decisionId: "d3", turn: 2, reachable: true, sessionStart: false, promptSubmit: true, promptSubmitByTurn: true }]),
       score("c", "shop", undefined),
     ];
     const s = summarizeReplay(scores, { storeBytesStart: 0, storeBytesEnd: 0 });
@@ -254,6 +302,7 @@ describe("decision recall", () => {
       unreachable: 1,
       sessionStart: { n: 3, hit: 1, share: 1 / 3 },
       promptSubmit: { n: 3, hit: 1, share: 1 / 3 },
+      promptSubmitByTurn: { n: 3, hit: 2, share: 2 / 3 },
       either: { n: 3, hit: 2, share: 2 / 3 },
     });
     expect(s.byProject.shop.decisionRecall.items).toBe(2);
