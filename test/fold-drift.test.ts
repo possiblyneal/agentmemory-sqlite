@@ -4,7 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { measureFoldDrift } from "../eval/runner/fold-drift-core.js";
+import { measureFoldDrift, screenOnePass, screenRow, screenTotal } from "../eval/runner/fold-drift-core.js";
 import { FOLD_SYSTEM } from "../src/prompts/summary.js";
 import type { CompressedObservation, MemoryProvider } from "../src/types.js";
 import type { Judge } from "../eval/runner/decision-judge.js";
@@ -184,5 +184,80 @@ describe("measureFoldDrift judged by the decision judge", () => {
     const other = { ...keyed(ALL[0]!)[0]!, sessionId: "s2" };
     const r = await measureFoldDrift(fakeProvider(ALL), obs(6), opts, { judge: includesJudge(), key: [other] });
     expect(r.labels).toEqual([]);
+  });
+});
+
+describe("screenOnePass", () => {
+  const counting = (reply: () => string) => {
+    const calls: string[] = [];
+    const provider: MemoryProvider = {
+      name: "fake",
+      compress: async () => "",
+      summarize: async (system: string) => {
+        calls.push(system === FOLD_SYSTEM ? "fold" : "other");
+        return reply();
+      },
+    };
+    return { provider, calls };
+  };
+
+  it("makes only the one-pass summarize call, never a fold sequence", async () => {
+    const { provider, calls } = counting(() => xml(ALL));
+    const r = await screenOnePass(provider, obs(9), opts);
+    expect(calls).toEqual(["other"]);
+    expect(r.mode).toBe("screen");
+    expect(r.observations).toBe(9);
+    expect(r.full).toBe(3);
+  });
+
+  it("labels key decisions captured or never-captured against the one-pass list", async () => {
+    const { provider } = counting(() => xml([ALL[0]!, ALL[1]!]));
+    const r = await screenOnePass(provider, obs(6), opts, {
+      judge: includesJudge(),
+      key: keyed(ALL[0]!, "Something nobody wrote", ALL[1]!),
+    });
+    expect(r.labels).toEqual([
+      { decisionId: "d0", label: "captured" },
+      { decisionId: "d1", label: "never-captured" },
+      { decisionId: "d2", label: "captured" },
+    ]);
+  });
+
+  it("counts a paraphrase as captured and ignores other Sessions' key decisions", async () => {
+    const { provider } = counting(() => xml(["SQLite is the storage layer"]));
+    const other = { ...keyed(ALL[2]!)[0]!, sessionId: "s2" };
+    const r = await screenOnePass(provider, obs(3), opts, {
+      judge: includesJudge({ [ALL[0]!]: "sqlite is the storage layer" }),
+      key: [...keyed(ALL[0]!), other],
+    });
+    expect(r.labels).toEqual([{ decisionId: "d0", label: "captured" }]);
+  });
+
+  it("labels every key decision never-captured when the one pass yields no decisions", async () => {
+    const { provider } = counting(() => xml([]));
+    const r = await screenOnePass(provider, obs(3), opts, { judge: includesJudge(), key: keyed(ALL[0]!) });
+    expect(r.labels).toEqual([{ decisionId: "d0", label: "never-captured" }]);
+  });
+
+  it("leaves labels unset without a judge", async () => {
+    const { provider } = counting(() => xml(ALL));
+    expect((await screenOnePass(provider, obs(3), opts)).labels).toBeUndefined();
+  });
+});
+
+describe("screening report text", () => {
+  it("names the mode on a row and in the total", () => {
+    const r = {
+      sessionId: "s1",
+      observations: 4,
+      full: 2,
+      mode: "screen" as const,
+      labels: [
+        { decisionId: "d0", label: "captured" as const },
+        { decisionId: "d1", label: "never-captured" as const },
+      ],
+    };
+    expect(screenRow(r)).toBe("[screen: one-pass only] s1 obs=4 full=2 key:captured=1 key:never-captured=1");
+    expect(screenTotal([r])).toBe("[screen: one-pass only] total sessions=1 full=2 key:captured=1 key:never-captured=1");
   });
 });
