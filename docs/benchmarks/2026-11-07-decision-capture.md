@@ -56,6 +56,8 @@ answers are tool Observations), prompt Observations alone 3, both 5, only the tw
 
 ## Reproduce
 
+The judge script is a session-folder scratch script, not in the repo:
+
 ```sh
 npx tsx <session>/cand1/cand1.ts <session>/capture-split.ndjson <arm>/checkpoints/040-*.sqlite tmp/eval-replay/decision-key.json <out.ndjson>
 ```

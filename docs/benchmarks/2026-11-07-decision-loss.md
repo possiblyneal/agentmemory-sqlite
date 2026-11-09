@@ -50,6 +50,21 @@ judged in full and then as its first 10 decisions (the render cap):
 
 Even a decision in the first 10 is delivered only 61% of the time (42 of 69).
 
+### The 27 in-first-10 items not delivered
+
+main's decision-key probe was rerun on its checkpoints for the 6 Sessions that carry them, and
+every Injection text was matched by hash to its cached verdict, so no judge call was made. No
+item was lost to decision cutting (`cutDecision()`) or to a judge disagreement:
+
+| Surface | Cause | Items |
+|---|---|---|
+| session start | the Summary fell outside the 2000-token budget; Insights (1.1–2.1k chars) and Semantic Facts (0.5–0.9k) render before Summaries | 24 |
+| session start | origin Session outside the 10 newest | 3 |
+| prompt submit | Summary already injected intact at an earlier turn of the same Session, which the same-turn probe did not credit (since #358, `promptSubmitByTurn` does) | 19 |
+| prompt submit | never in the top 3 on a vague prompt | 8 |
+
+The reranker gate was off in the sandbox (`AGENTMEMORY_PROMPT_RERANK=off`).
+
 ## Capture versus fold
 
 `eval:fold-drift` re-summarized the 18 origin Sessions of the not-in-Summary items, once in one
