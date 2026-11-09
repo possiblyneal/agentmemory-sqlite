@@ -1,11 +1,13 @@
 import {
   MIN_SHARED_TOKENS,
   bearsOn,
-  contentTokens,
   sharedTokens,
+  terseTurns,
   type AnswerKey,
   type KeyItem,
+  type TurnNeed,
 } from "./replay-answer-key.js";
+import { contentTokens, isTersePrompt } from "../../src/utils/terse-prompt.js";
 import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
 import { MISS_LABELS, type MissLabel } from "./decision-attribution.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
@@ -75,6 +77,14 @@ export interface SessionScore {
   outcomes: KeyOutcome[];
   decisions?: DecisionOutcome[];
   latencies: Array<{ kind: ProbeKind; ms: number }>;
+  turnOwn?: TurnOwn;
+  injectionGate?: { calls: number; fallbacks: number };
+}
+
+// Each scored prompt's own prompt-context Injection: what a query arm changes.
+export interface TurnOwn {
+  needs: Array<TurnNeed & { injected: boolean }>;
+  probes: Array<{ turn: number; terse: boolean; chars: number }>;
 }
 
 // An earlier correction or decision is delivered when most of its words are in
@@ -98,6 +108,40 @@ function deliveredBy(probes: Probe[], key: KeyItem, injection: boolean): boolean
   return probes.some(
     (p) => (p.kind !== "search") === injection && p.turn <= deadline(key) && p.items.some((i) => delivers(i, key)),
   );
+}
+
+// Most Observations carry no `files`, so an item whose text names the path
+// delivers it too: the whole path, bare or under the Session's cwd, not part of
+// a longer path or name.
+function namesFile(item: ProbeItem, file: string, cwd: string): boolean {
+  if (item.files.includes(file)) return true;
+  const { text } = item;
+  const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
+  const startsPath = (before: string) => !/[\w./-]$/.test(before);
+  for (let at = text.indexOf(file); at !== -1; at = text.indexOf(file, at + 1)) {
+    const before = text.slice(0, at);
+    const whole = startsPath(before) || (before.endsWith(root) && startsPath(before.slice(0, -root.length)));
+    if (whole && !/^(\w|[.-]\w)/.test(text.slice(at + file.length))) return true;
+  }
+  return false;
+}
+
+// Only prompts that were probed count; a failed probe delivers nothing.
+function turnOwn(session: ReplaySession, key: AnswerKey, probes: Probe[]): TurnOwn {
+  const terse = terseTurns(session);
+  const byTurn = new Map(probes.filter((p) => p.kind === "prompt-context").map((p) => [p.turn, p]));
+  return {
+    needs: key.turnNeeds.flatMap((need) => {
+      const probe = byTurn.get(need.turn);
+      if (!probe) return [];
+      return [{ ...need, injected: probe.items.some((i) => namesFile(i, need.file, session.cwd)) }];
+    }),
+    probes: session.userTurns.flatMap((t) => {
+      const probe = byTurn.get(t.turn);
+      if (!probe || probe.failed || !(terse.has(t.turn) || !isTersePrompt(t.text))) return [];
+      return [{ turn: t.turn, terse: terse.has(t.turn), chars: probe.chars }];
+    }),
+  };
 }
 
 function itemUsed(item: ProbeItem, session: ReplaySession, key: AnswerKey): boolean {
@@ -140,6 +184,7 @@ export function scoreSession(session: ReplaySession, key: AnswerKey, probes: Pro
       searched: deliveredBy(probes, k, false),
     })),
     latencies: probes.filter((p) => !p.failed).map((p) => ({ kind: p.kind, ms: p.latencyMs })),
+    turnOwn: turnOwn(session, key, probes),
   };
 }
 
@@ -183,6 +228,18 @@ function attributionCounts(decisions: DecisionOutcome[]) {
 
 // Repositories the daemon rarely serves like the rest; the typical rollup leaves them out.
 export const DEFAULT_ATYPICAL_PROJECTS = ["agentmemory-sqlite", "medical-researcher"];
+
+function turnOwnSummary(scores: SessionScore[], terse: boolean) {
+  const needs = scores.flatMap((s) => s.turnOwn?.needs ?? []).filter((n) => n.terse === terse);
+  const probes = scores.flatMap((s) => s.turnOwn?.probes ?? []).filter((p) => p.terse === terse);
+  const chars = probes.reduce((n, p) => n + p.chars, 0);
+  return {
+    needs: share(needs.filter((n) => n.injected).length, needs.length),
+    prompts: probes.length,
+    injectionChars: chars,
+    charsPerPrompt: probes.length === 0 ? null : chars / probes.length,
+  };
+}
 
 function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
   const items = scores.flatMap((s) => s.items);
@@ -235,6 +292,7 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
         search: share(terse.filter((o) => o.searched).length, terse.length),
         either: share(terse.filter((o) => o.injected || o.searched).length, terse.length),
       },
+      turnOwn: { terse: turnOwnSummary(scores, true), substantive: turnOwnSummary(scores, false) },
     },
     decisionRecall: {
       items: decisions.length,

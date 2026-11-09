@@ -10,6 +10,7 @@ import {
   isCorrection,
   keyedSubset,
   repeatedCorrections,
+  turnNeeds,
 } from "../eval/runner/replay-answer-key.js";
 import {
   scoreSession,
@@ -42,6 +43,7 @@ const CWD = "/synthetic/shop";
 type Step =
   | { user: string; meta?: boolean }
   | { tool: string; file: string }
+  | { tool: string; input: Record<string, unknown> }
   | { assistant: string; thinking?: string }
   | { toolResult: string };
 
@@ -65,7 +67,7 @@ function transcript(sessionId: string, start: string, steps: Step[]): string {
           type: "assistant",
           message: {
             role: "assistant",
-            content: [{ type: "tool_use", id: `t${i}`, name: step.tool, input: { file_path: step.file } }],
+            content: [{ type: "tool_use", id: `t${i}`, name: step.tool, input: "input" in step ? step.input : { file_path: step.file } }],
           },
         };
       }
@@ -169,6 +171,26 @@ describe("parseTranscript", () => {
     ]);
   });
 
+  it("records the paths each turn's prompt, tool inputs and Agent text name, cwd-relative, with who named them", () => {
+    const s = session("s6", "2026-09-01T10:00:00Z", [
+      { user: "fix the total in src/cart.ts" },
+      { tool: "Bash", input: { command: `npx vitest run test/cart.test.ts && cat ${CWD}/src/money.ts /etc/hosts.d/x.conf` } },
+      { tool: "Bash", input: { command: "cat <<EOF\nsrc/heredoc.ts\nEOF" } },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { toolResult: "ok" },
+      { assistant: "Fixed rounding in src/money.ts." },
+      { user: "go" },
+    ]);
+    expect(s.fileMentions).toEqual([
+      { file: "src/cart.ts", turn: 1, source: "operator" },
+      { file: "test/cart.test.ts", turn: 1, source: "tool" },
+      { file: "src/money.ts", turn: 1, source: "tool" },
+      { file: "src/heredoc.ts", turn: 1, source: "tool" },
+      { file: "src/cart.ts", turn: 1, source: "tool" },
+      { file: "src/money.ts", turn: 1, source: "agent" },
+    ]);
+  });
+
   it("returns null for a transcript with no human turn", () => {
     expect(parseTranscript(transcript("s3", "2026-09-01T10:00:00Z", [{ toolResult: "x" }]))).toBeNull();
   });
@@ -238,6 +260,30 @@ describe("answer key: files needed", () => {
       { tool: "Read", file: `${CWD}/src/other.ts` },
     ]);
     expect(filesNeeded(current, [earlier])).toEqual([]);
+  });
+});
+
+describe("answer key: turn needs", () => {
+  const earlier = session("e1", "2026-09-01T10:00:00Z", [
+    { user: "build the cart" },
+    { tool: "Edit", file: `${CWD}/src/cart.ts` },
+    { tool: "Read", file: `${CWD}/CLAUDE.md` },
+  ]);
+
+  it("lists each scored prompt's earlier-touched files once with every source, flagging terse prompts and skipping a terse first prompt", () => {
+    const current = session("c1", "2026-09-02T10:00:00Z", [
+      { user: "ok" },
+      { assistant: "src/cart.ts" },
+      { user: "plan how the cart total in src/cart.ts should round" },
+      { assistant: "Plan: change src/cart.ts, read CLAUDE.md and src/new.ts." },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { user: "go ahead" },
+      { tool: "Edit", file: `${CWD}/src/cart.ts` },
+    ]);
+    expect(turnNeeds(current, [earlier])).toEqual([
+      { file: "src/cart.ts", turn: 2, terse: false, sources: ["operator", "agent", "tool"] },
+      { file: "src/cart.ts", turn: 3, terse: true, sources: ["tool"] },
+    ]);
   });
 });
 
@@ -455,6 +501,43 @@ describe("summarizeReplay", () => {
     expect(s.rightMoment.byKind.file.injection.n).toBe(2);
     expect(s.rightMoment.terse.injection).toEqual({ n: 1, hit: 0, share: 0 });
     expect(worstCases(withTerse).filter((c) => c.category === "miss").map((c) => c.sessionId)).toEqual(["c2"]);
+  });
+
+  it("scores a prompt's own need against that prompt's Injection alone, terse and substantive apart, with chars", () => {
+    const s = session("c4", "2026-09-20T10:00:00Z", [
+      { user: "plan how the cart total should round" },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+      { user: "go ahead" },
+      { tool: "Edit", file: `${CWD}/src/cart.ts` },
+    ]);
+    const cart = item({ ref: "observation:a", files: ["src/cart.ts"], text: "x".repeat(30) });
+    const score = scoreSession(s, deriveAnswerKey(s, [earlier]), [
+      probe("prompt-context", 1, [cart]),
+      probe("prompt-context", 2, [item({ ref: "observation:b", text: "y".repeat(10) })]),
+    ]);
+    expect(score.turnOwn?.needs).toEqual([
+      { file: "src/cart.ts", turn: 1, terse: false, sources: ["tool"], injected: true },
+      { file: "src/cart.ts", turn: 2, terse: true, sources: ["tool"], injected: false },
+    ]);
+    const own = summarizeReplay([score], { storeBytesStart: 0, storeBytesEnd: 0 }).rightMoment.turnOwn;
+    expect(own.substantive).toEqual({ needs: { n: 1, hit: 1, share: 1 }, prompts: 1, injectionChars: 30, charsPerPrompt: 30 });
+    expect(own.terse).toEqual({ needs: { n: 1, hit: 0, share: 0 }, prompts: 1, injectionChars: 10, charsPerPrompt: 10 });
+  });
+
+  it("credits an own-turn need to an item whose text names the file, not to a longer name ending in it", () => {
+    const s = session("c5", "2026-09-20T10:00:00Z", [
+      { user: "plan how the cart total should round" },
+      { tool: "Read", file: `${CWD}/src/cart.ts` },
+    ]);
+    const needsWith = (text: string) =>
+      scoreSession(s, deriveAnswerKey(s, [earlier]), [probe("prompt-context", 1, [item({ ref: "observation:t", text })])])
+        .turnOwn?.needs.map((n) => n.injected);
+    expect(needsWith(`ran: cat ${CWD}/src/cart.ts`)).toEqual([true]);
+    expect(needsWith("see `src/cart.ts`")).toEqual([true]);
+    expect(needsWith("see src/cart.tsx and mysrc/cart.ts")).toEqual([false]);
+    expect(needsWith("see lib/src/cart.ts and /other/src/cart.ts")).toEqual([false]);
+    expect(needsWith("see src/cart.ts.bak and src/cart.ts-old")).toEqual([false]);
+    expect(needsWith("fixed src/cart.ts.")).toEqual([true]);
   });
 
   describe("per project and typical", () => {

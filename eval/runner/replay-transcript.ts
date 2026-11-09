@@ -1,4 +1,7 @@
-import { CONTINUATION_SUMMARY, parseJsonlText } from "../../src/replay/jsonl-parser.js";
+import { parseJsonlText } from "../../src/replay/jsonl-parser.js";
+import { isOperatorTurn } from "../../src/utils/operator-turn.js";
+
+export { isOperatorTurn };
 
 export interface UserTurn {
   turn: number;
@@ -26,33 +29,27 @@ export interface ReplaySession {
   startedAt: string;
   userTurns: UserTurn[];
   fileUses: FileUse[];
+  // Paths a turn's work names: in any tool call's input and in the Agent's
+  // own text, cwd-relative. Wider than fileUses, for the per-turn need.
+  fileMentions: FileMention[];
   // Each compaction, as the number of Operator turns before it: the Agent's
   // context after it holds none of the Injections those turns received.
   compactedAfter: number[];
   sourcePath?: string;
 }
 
-const READ_TOOLS = new Set(["Read"]);
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-// Turns the Operator did not type as a request: slash-command wrappers, shell
-// escapes and their output, interrupts, a loaded skill's body, a compaction
-// summary, and a message relayed from another Session.
-const NOT_A_HUMAN_TURN = [
-  /^<command-(name|message|args)>/,
-  /^<local-command-/,
-  /^<bash-(input|stdout|stderr)>/,
-  /^\[Request interrupted/,
-  /^Caveat:/,
-  /^Base directory for this skill:/,
-  CONTINUATION_SUMMARY,
-  /^Another Claude session sent a message:\s*<teammate-message[\s>]/,
-];
-const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+// Who named the path: the Operator's typed prompt, the Agent's reply text, or
+// a tool call's input.
+export type MentionSource = "operator" | "agent" | "tool";
 
-export function isOperatorTurn(prompt: string): boolean {
-  return !NOT_A_HUMAN_TURN.some((re) => re.test(prompt)) && prompt.replace(SYSTEM_REMINDER, "").trim() !== "";
+export interface FileMention {
+  file: string;
+  turn: number;
+  source: MentionSource;
 }
 
+const READ_TOOLS = new Set(["Read"]);
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 export function relativeToCwd(file: string, cwd: string): string | null {
   if (!file.startsWith("/")) return file.replace(/^\.\//, "");
   const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
@@ -64,6 +61,19 @@ function toolFile(input: unknown): string | undefined {
   const o = input as Record<string, unknown>;
   const path = o.file_path ?? o.notebook_path;
   return typeof path === "string" ? path : undefined;
+}
+
+const PATH_MENTION = /(?:\/?[\w.@-]+\/)+[\w.@-]+\.\w+/g;
+
+function mentionedFiles(text: string, cwd: string): string[] {
+  return (text.match(PATH_MENTION) ?? []).flatMap((m) => relativeToCwd(m, cwd) ?? []);
+}
+
+function stringValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringValues);
+  if (value && typeof value === "object") return Object.values(value).flatMap(stringValues);
+  return [];
 }
 
 function rawEntry(raw: unknown): Record<string, unknown> {
@@ -78,6 +88,10 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
   const parsed = parseJsonlText(text);
   const userTurns: UserTurn[] = [];
   const fileUses: FileUse[] = [];
+  const fileMentions: FileMention[] = [];
+  const mention = (text: string, source: MentionSource) => {
+    for (const file of mentionedFiles(text, parsed.cwd)) fileMentions.push({ file, turn: userTurns.length, source });
+  };
   const compactedAfter: number[] = [];
   const placeCompactionsBefore = (index: number) => {
     while (compactedAfter.length < parsed.compactions.length && parsed.compactions[compactedAfter.length] <= index) {
@@ -95,8 +109,10 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       if (!isOperatorTurn(prompt)) continue;
       userTurns.push({ turn: userTurns.length + 1, text: prompt, timestamp: obs.timestamp, precedingReply: reply.join("\n\n") });
       reply = [];
+      mention(prompt, "operator");
     } else if (obs.hookType === "stop" && obs.assistantResponse) {
       reply.push(obs.assistantResponse.trim());
+      mention(obs.assistantResponse, "agent");
     } else if (obs.hookType === "post_tool_use" || obs.hookType === "post_tool_failure") {
       reply = [];
     } else if (obs.hookType === "pre_tool_use" && obs.toolName) {
@@ -104,6 +120,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       const abs = toolFile(obs.toolInput);
       const file = mode && abs ? relativeToCwd(abs, parsed.cwd) : null;
       if (mode && file) fileUses.push({ file, turn: userTurns.length, mode });
+      for (const value of stringValues(obs.toolInput)) mention(value, "tool");
     }
   }
   placeCompactionsBefore(parsed.observations.length);
@@ -115,6 +132,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
     startedAt: userTurns[0].timestamp,
     userTurns,
     fileUses,
+    fileMentions,
     compactedAfter,
     sourcePath,
   };

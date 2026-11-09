@@ -228,6 +228,19 @@ case "memory_your_tool": {
 ### Injection Gate
 Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated, nor is a Memory admitted by `withShadowingMemories` (Memory shadowing below). The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
+### Terse prompts
+A terse prompt ("go ahead", "2": under 3 content words, `isTersePrompt()` in
+`src/utils/terse-prompt.ts`, the same rule the replay eval scores with) answers the Agent's last
+reply. For one, the `prompt-submit` hook reads that reply, the text blocks after the last tool
+result and after the last typed Operator turn (`isOperatorTurn()`, `src/utils/operator-turn.ts`,
+shared with the replay eval), from the last 256 KiB of `transcript_path` (`lastAgentReply()`,
+`src/hooks/_last-reply.ts`) and sends its last `MAX_REPLY_QUERY_CHARS` (1000) as `reply`; a
+transcript unread within 200 ms sends the prompt alone. `api::prompt-context` whitelists and re-caps `reply`, and `mem::prompt-context`
+searches and gates on the prompt plus that reply only when the prompt is terse, so a substantive
+prompt's query is unchanged. The Injection Gate scores only the first `RERANK_QUERY_CHARS` (500)
+of that combined query, so for a terse prompt it sees the prompt and the start of the reply tail.
+Measured in `docs/benchmarks/2026-11-08-terse-prompt-query.md`.
+
 ### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`

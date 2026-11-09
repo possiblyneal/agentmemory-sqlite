@@ -25,6 +25,7 @@ import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.
 import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
+import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { ObserveRetryQueue } from "../functions/observe-retry.js";
 import {
   isGraphExtractionEnabled,
@@ -1127,7 +1128,7 @@ export function registerApiTriggers(
 
   sdk.registerFunction("api::prompt-context",
     async (
-      req: ApiRequest<{ sessionId: string; prompt: string; project?: string }>,
+      req: ApiRequest<{ sessionId: string; prompt: string; project?: string; reply?: string }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
@@ -1140,6 +1141,9 @@ export function registerApiTriggers(
           status_code: 400,
           body: { error: "sessionId (string) and prompt (string) are required" },
         };
+      }
+      if (req.body.reply !== undefined && typeof req.body.reply !== "string") {
+        return { status_code: 400, body: { error: "reply must be a string" } };
       }
       if (
         req.body.project !== undefined &&
@@ -1157,6 +1161,7 @@ export function registerApiTriggers(
           sessionId: req.body.sessionId,
           prompt: req.body.prompt,
           ...(project && { project }),
+          ...(req.body.reply && { reply: req.body.reply.slice(-MAX_REPLY_QUERY_CHARS) }),
         },
       });
       noteInjection(kv, { source: "prompt-submit", sessionId: req.body.sessionId, project }, result);
