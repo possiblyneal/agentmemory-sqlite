@@ -26,6 +26,9 @@ export interface ReplaySession {
   startedAt: string;
   userTurns: UserTurn[];
   fileUses: FileUse[];
+  // Each compaction, as the number of Operator turns before it: the Agent's
+  // context after it holds none of the Injections those turns received.
+  compactedAfter: number[];
   sourcePath?: string;
 }
 
@@ -75,8 +78,15 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
   const parsed = parseJsonlText(text);
   const userTurns: UserTurn[] = [];
   const fileUses: FileUse[] = [];
+  const compactedAfter: number[] = [];
+  const placeCompactionsBefore = (index: number) => {
+    while (compactedAfter.length < parsed.compactions.length && parsed.compactions[compactedAfter.length] <= index) {
+      compactedAfter.push(userTurns.length);
+    }
+  };
   let reply: string[] = [];
-  for (const obs of parsed.observations) {
+  for (const [i, obs] of parsed.observations.entries()) {
+    placeCompactionsBefore(i);
     const entry = rawEntry(obs.raw);
     if (entry.isSidechain === true) continue;
     if (obs.userPrompt !== undefined) {
@@ -96,6 +106,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       if (mode && file) fileUses.push({ file, turn: userTurns.length, mode });
     }
   }
+  placeCompactionsBefore(parsed.observations.length);
   if (userTurns.length === 0) return null;
   return {
     id: parsed.sessionId,
@@ -104,6 +115,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
     startedAt: userTurns[0].timestamp,
     userTurns,
     fileUses,
+    compactedAfter,
     sourcePath,
   };
 }
