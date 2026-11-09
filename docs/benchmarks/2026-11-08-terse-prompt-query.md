@@ -7,16 +7,55 @@ dev split, Turn needs (`rightMoment.turnOwn`) split by terse and substantive pro
 119 terse and 302 substantive Turn needs (80 and 184 `typical`)
 **K:** 1 probe per arm; arms paired by (Session, turn, file), exact McNemar
 **Embeddings:** local
-**LLM:** none; rerank gate off (`AGENTMEMORY_PROMPT_RERANK=off`)
-**Hardware:** Linux 6.12.107, 8 cores, Node v22.23.2; the arms ran four in parallel, so their latency is
-contended
+**LLM:** none for compression. The arms table ran with the rerank gate off; the gated table ran it
+on, against the live default (`http://ai.lan:9202/v1/rerank`, Qwen3 reranker 0.6B q8 on
+llama-server, min score 0.03, 1000 ms timeout)
+**Hardware:** Linux 6.12.107, 8 cores, Node v22.23.2. The arms table ran four arms in parallel, so
+its latency is contended. The before/shipped pairs ran two at a time, gated and ungated waves apart
 
 ## Headline
 
 Before this change, a terse prompt (under 3 content tokens) got no Injection at all: 0 of 119
 terse Turn needs. Querying with the prompt plus the last 1000 chars of the Agent's previous reply,
 only when the prompt is terse, delivers 23 of 119 (p < 0.001), and 16 of 80 on `typical`. Turns
-with a substantive prompt keep their query and score the same (21 vs 22 of 302, p = 1). Shipped.
+with a substantive prompt keep their query and score the same (21 vs 22 of 302, p = 1).
+
+With the Injection Gate on, as the live daemon runs, it delivers 17 of 119 (p < 0.001), 12 of
+80 on `typical`, and substantive turns tie at 24. Dropping needs that only the Agent's own text
+names leaves 21 of 115 ungated and 16 of 115 gated, both p < 0.001. Shipped.
+
+A view limited to files the Operator typed is empty: no terse Turn need and 1 substantive
+need come from the Operator's text. That view can neither confirm nor refute the result.
+
+## Gate on, and who named the file
+
+The control is the pre-change query (`--query-arm reply-tail --reply-chars 0`, the raw prompt
+with no `reply`; it reproduces the earlier control on every cell). The shipped arm is
+`--query-arm control` on this branch. Needs are delivered as control → shipped. The p value is
+exact McNemar on terse needs.
+
+| View | Gate | Pooled terse | p | Pooled subst. | Typical terse | Typical subst. |
+|---|---|---|---|---|---|---|
+| as scored (Agent text or tool input) | off | 0 → 23 / 119 | < 0.001 | 22 → 21 / 302 | 0 → 16 / 80 | 18 → 17 / 184 |
+| as scored | on | 0 → 17 / 119 | < 0.001 | 24 → 24 / 302 | 0 → 12 / 80 | 16 → 16 / 184 |
+| no Agent text (tool input or Operator) | off | 0 → 21 / 115 | < 0.001 | 22 → 21 / 291 | 0 → 14 / 78 | 18 → 17 / 178 |
+| no Agent text | on | 0 → 16 / 115 | < 0.001 | 24 → 24 / 291 | 0 → 11 / 78 | 16 → 16 / 178 |
+| Operator-typed only | either | 0 / 0 | — | 0 / 1 | 0 / 0 | 0 / 0 |
+
+| Arm | Gate | Used share | Prompt-context p50 / p95 / p99 | Over 1500 ms | Gate calls / fell open |
+|---|---|---|---|---|---|
+| control (before) | off | 5.7% | 30 / 220 / 365 ms | 0 | — |
+| shipped | off | 5.7% | 46 / 242 / 414 ms | 0 | — |
+| control (before) | on | 6.2% | 222 / 482 / 678 ms | 0 | 661 / 15 |
+| shipped | on | 6.0% | 280 / 513 / 739 ms | 0 | 841 / 0 |
+
+- The gate keeps 17 of the 23 ungated terse gains. That is above the bar for trying a reranker
+  query built from the reply's end, so that variant was not measured. The reranker sees the
+  first 500 chars of the query (`RERANK_QUERY_CHARS`): for a terse prompt, that is the prompt plus
+  the start of the reply tail.
+- Terse queries give the gate work it skipped before: a terse prompt used to return nothing
+  before the gate. Hence 841 calls against 661, and p50 rises 58 ms gated.
+- The 15 fall-opens in the gated control are cooldown fallbacks after a reranker failure.
 
 ## Arms
 
@@ -51,7 +90,8 @@ Turn needs delivered, terse / substantive. "All prompts" arms replace the query 
 
 ## Methodology
 
-- A Turn need is a file the Agent touches in the turn that an earlier Session also touched. Only
+- A Turn need is a file named in the turn (by the typed prompt, a tool call's input or the
+  Agent's text) that an earlier Session also touched. Each need records its sources. Only
   1.4% of Observations carry a `files` list, so an injected item also counts when its text names
   the path whole (`namesFile`, `eval/runner/replay-score.ts`).
 - Terse is `isTersePrompt()` (`src/utils/terse-prompt.ts`), shared by the eval and the daemon.
@@ -65,12 +105,13 @@ npm run build
 npm run eval:replay -- --projects=<dirs> --save-checkpoints <dir>
 npm run eval:replay -- --projects=<dirs> --from-checkpoints <dir> --query-arm reply-tail --reply-chars 1000 --terse-only
 npm run eval:replay -- --projects=<dirs> --from-checkpoints <dir> --query-arm control
+npm run eval:replay -- --projects=<dirs> --from-checkpoints <dir> --query-arm reply-tail --reply-chars 0
+# gate on: the same two with AGENTMEMORY_PROMPT_RERANK_URL=http://ai.lan:9202/v1/rerank in the shell
 ```
 
 ## Notes and caveats
 
-- Turn needs come partly from the turn's own Agent text, which can restate the preceding reply,
-  so the metric favours reply arms. The substantive-turn result does not depend on this.
-- The rerank gate was off; with it on, the gate scores the longer terse query, inside its
-  1000 ms cap.
+- The "no Agent text" view keeps a need that a tool call's input names, even when the Agent's
+  text names it too. A file the Agent opened after a "go ahead" is the work the reply planned,
+  so that view still credits a reply query for it. That case is the one this change targets.
 - Synthetic compression only; an `--llm` run was out of scope.

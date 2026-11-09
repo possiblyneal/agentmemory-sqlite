@@ -1,5 +1,5 @@
 import { contentTokens, isTersePrompt } from "../../src/utils/terse-prompt.js";
-import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
+import { touchedFiles, type MentionSource, type ReplaySession } from "./replay-transcript.js";
 
 // `terse` marks a need first used after a reply like "go ahead" or "2": the
 // need came from an earlier prompt of the same Session, so it is reported
@@ -27,11 +27,13 @@ export type KeyItem = FileNeed | EchoedTurn;
 
 // A file an earlier Session touched that a prompt's own work names, scored
 // against that prompt's Injection alone (#310). `terse` as for FileNeed; a
-// terse first prompt yields none.
+// terse first prompt yields none. `sources` says who named the file in that
+// turn, so a view can drop needs the Agent's own text may echo from its reply.
 export interface TurnNeed {
   file: string;
   turn: number;
   terse: boolean;
+  sources: MentionSource[];
 }
 
 export interface AnswerKey {
@@ -166,13 +168,15 @@ export function turnNeeds(session: ReplaySession, earlier: ReplaySession[]): Tur
   const touched = new Set(earlier.flatMap((s) => [...touchedFiles(s)]));
   const terse = terseTurns(session);
   const scored = new Set(session.userTurns.filter((t) => terse.has(t.turn) || !isTerse(t.text)).map((t) => t.turn));
-  const seen = new Set<string>();
-  return session.fileMentions.flatMap(({ file, turn }) => {
+  const needs = new Map<string, TurnNeed>();
+  for (const { file, turn, source } of session.fileMentions) {
+    if (!scored.has(turn) || !touched.has(file) || isInstructionFile(file)) continue;
     const id = `${turn}\0${file}`;
-    if (!scored.has(turn) || !touched.has(file) || isInstructionFile(file) || seen.has(id)) return [];
-    seen.add(id);
-    return [{ file, turn, terse: terse.has(turn) }];
-  });
+    const need = needs.get(id) ?? { file, turn, terse: terse.has(turn), sources: [] };
+    if (!need.sources.includes(source)) need.sources.push(source);
+    needs.set(id, need);
+  }
+  return [...needs.values()];
 }
 
 function echoedTurns(

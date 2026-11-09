@@ -171,9 +171,9 @@ describe("parseTranscript", () => {
     ]);
   });
 
-  it("records the paths each turn's tool inputs and Agent text name, cwd-relative", () => {
+  it("records the paths each turn's prompt, tool inputs and Agent text name, cwd-relative, with who named them", () => {
     const s = session("s6", "2026-09-01T10:00:00Z", [
-      { user: "fix the total" },
+      { user: "fix the total in src/cart.ts" },
       { tool: "Bash", input: { command: `npx vitest run test/cart.test.ts && cat ${CWD}/src/money.ts /etc/hosts.d/x.conf` } },
       { tool: "Read", file: `${CWD}/src/cart.ts` },
       { toolResult: "ok" },
@@ -181,10 +181,11 @@ describe("parseTranscript", () => {
       { user: "go" },
     ]);
     expect(s.fileMentions).toEqual([
-      { file: "test/cart.test.ts", turn: 1 },
-      { file: "src/money.ts", turn: 1 },
-      { file: "src/cart.ts", turn: 1 },
-      { file: "src/money.ts", turn: 1 },
+      { file: "src/cart.ts", turn: 1, source: "operator" },
+      { file: "test/cart.test.ts", turn: 1, source: "tool" },
+      { file: "src/money.ts", turn: 1, source: "tool" },
+      { file: "src/cart.ts", turn: 1, source: "tool" },
+      { file: "src/money.ts", turn: 1, source: "agent" },
     ]);
   });
 
@@ -267,19 +268,19 @@ describe("answer key: turn needs", () => {
     { tool: "Read", file: `${CWD}/CLAUDE.md` },
   ]);
 
-  it("lists each scored prompt's earlier-touched files once, flagging terse prompts and skipping a terse first prompt", () => {
+  it("lists each scored prompt's earlier-touched files once with every source, flagging terse prompts and skipping a terse first prompt", () => {
     const current = session("c1", "2026-09-02T10:00:00Z", [
       { user: "ok" },
       { assistant: "src/cart.ts" },
-      { user: "plan how the cart total should round" },
+      { user: "plan how the cart total in src/cart.ts should round" },
       { assistant: "Plan: change src/cart.ts, read CLAUDE.md and src/new.ts." },
       { tool: "Read", file: `${CWD}/src/cart.ts` },
       { user: "go ahead" },
       { tool: "Edit", file: `${CWD}/src/cart.ts` },
     ]);
     expect(turnNeeds(current, [earlier])).toEqual([
-      { file: "src/cart.ts", turn: 2, terse: false },
-      { file: "src/cart.ts", turn: 3, terse: true },
+      { file: "src/cart.ts", turn: 2, terse: false, sources: ["operator", "agent", "tool"] },
+      { file: "src/cart.ts", turn: 3, terse: true, sources: ["tool"] },
     ]);
   });
 });
@@ -513,8 +514,8 @@ describe("summarizeReplay", () => {
       probe("prompt-context", 2, [item({ ref: "observation:b", text: "y".repeat(10) })]),
     ]);
     expect(score.turnOwn?.needs).toEqual([
-      { file: "src/cart.ts", turn: 1, terse: false, injected: true },
-      { file: "src/cart.ts", turn: 2, terse: true, injected: false },
+      { file: "src/cart.ts", turn: 1, terse: false, sources: ["tool"], injected: true },
+      { file: "src/cart.ts", turn: 2, terse: true, sources: ["tool"], injected: false },
     ]);
     const own = summarizeReplay([score], { storeBytesStart: 0, storeBytesEnd: 0 }).rightMoment.turnOwn;
     expect(own.substantive).toEqual({ needs: { n: 1, hit: 1, share: 1 }, prompts: 1, injectionChars: 30, charsPerPrompt: 30 });

@@ -76,6 +76,7 @@ export interface SessionScore {
   decisions?: DecisionOutcome[];
   latencies: Array<{ kind: ProbeKind; ms: number }>;
   turnOwn?: TurnOwn;
+  injectionGate?: { calls: number; fallbacks: number };
 }
 
 // Each scored prompt's own prompt-context Injection: what a query arm changes.

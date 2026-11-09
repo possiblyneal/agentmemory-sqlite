@@ -32,9 +32,14 @@ export interface ReplaySession {
   sourcePath?: string;
 }
 
+// Who named the path: the Operator's typed prompt, the Agent's reply text, or
+// a tool call's input.
+export type MentionSource = "operator" | "agent" | "tool";
+
 export interface FileMention {
   file: string;
   turn: number;
+  source: MentionSource;
 }
 
 const READ_TOOLS = new Set(["Read"]);
@@ -90,8 +95,8 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
   const userTurns: UserTurn[] = [];
   const fileUses: FileUse[] = [];
   const fileMentions: FileMention[] = [];
-  const mention = (text: string) => {
-    for (const file of mentionedFiles(text, parsed.cwd)) fileMentions.push({ file, turn: userTurns.length });
+  const mention = (text: string, source: MentionSource) => {
+    for (const file of mentionedFiles(text, parsed.cwd)) fileMentions.push({ file, turn: userTurns.length, source });
   };
   let reply: string[] = [];
   for (const obs of parsed.observations) {
@@ -103,9 +108,10 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       if (!isOperatorTurn(prompt)) continue;
       userTurns.push({ turn: userTurns.length + 1, text: prompt, timestamp: obs.timestamp, precedingReply: reply.join("\n\n") });
       reply = [];
+      mention(prompt, "operator");
     } else if (obs.hookType === "stop" && obs.assistantResponse) {
       reply.push(obs.assistantResponse.trim());
-      mention(obs.assistantResponse);
+      mention(obs.assistantResponse, "agent");
     } else if (obs.hookType === "post_tool_use" || obs.hookType === "post_tool_failure") {
       reply = [];
     } else if (obs.hookType === "pre_tool_use" && obs.toolName) {
@@ -113,7 +119,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       const abs = toolFile(obs.toolInput);
       const file = mode && abs ? relativeToCwd(abs, parsed.cwd) : null;
       if (mode && file) fileUses.push({ file, turn: userTurns.length, mode });
-      mention(JSON.stringify(obs.toolInput ?? {}));
+      mention(JSON.stringify(obs.toolInput ?? {}), "tool");
     }
   }
   if (userTurns.length === 0) return null;

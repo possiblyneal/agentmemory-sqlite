@@ -658,7 +658,8 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
-      const decided = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
+      const base = { ...scoreSession(session, deriveAnswerKey(session, ingested), probes), ...(await injectionGate(sandbox.baseUrl)) };
+      const decided = await withDecisions(base, session, ingested, probes, decisions);
       const score = opts.attribute && decisions ? await withAttribution(decided, decisions.key, decisions.judge, sandbox.sqlitePath) : decided;
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
@@ -679,6 +680,17 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
     projects: loaded.perProject,
     minutes: (Date.now() - t0) / 60_000,
   });
+}
+
+// The sandbox's Injection Gate counters since boot, one sandbox per checkpoint;
+// absent when the gate is off.
+async function injectionGate(baseUrl: string): Promise<Pick<SessionScore, "injectionGate">> {
+  const { body } = await daemonCall<{ checks?: Array<{ name: string; message: string }> }>(baseUrl, "diagnostics", {
+    body: { categories: ["injections"] },
+  });
+  const message = body.checks?.find((c) => c.name === "injection-gate")?.message ?? "";
+  const counts = /(\d+) calls, (\d+) fallbacks/.exec(message);
+  return counts ? { injectionGate: { calls: Number(counts[1]), fallbacks: Number(counts[2]) } } : {};
 }
 
 async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> {
