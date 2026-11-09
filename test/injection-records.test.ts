@@ -159,6 +159,21 @@ describe("REST Injection paths write a record", () => {
     expect(record).toMatchObject({ source: "prompt-submit", sessionId: "s1", injected: [], tokens: 0 });
   });
 
+  it("forwards the Agent's last reply to prompt-context capped at 1000 chars, and refuses a non-string", async () => {
+    const payloads: unknown[] = [];
+    sdk.registerFunction("mem::prompt-context", async (data: unknown) => {
+      payloads.push(data);
+      return { context: "", tokens: 0, injected: [] };
+    });
+    const reply = `${"x".repeat(1500)}end`;
+
+    await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "yes", reply, extra: 1 } });
+    const bad = await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "yes", reply: 7 } });
+
+    expect(payloads).toEqual([{ sessionId: "s1", prompt: "yes", reply: reply.slice(-1000) }]);
+    expect(bad.status_code).toBe(400);
+  });
+
   describe("session start", () => {
     beforeEach(() => {
       sdk.registerFunction("mem::context", async () => ({

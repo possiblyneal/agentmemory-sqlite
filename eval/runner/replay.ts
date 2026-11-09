@@ -14,6 +14,7 @@ import { parseArgs } from "node:util";
 import { isAwaitingCompression } from "../../src/functions/compress-synthetic.js";
 import type { CompressedObservation } from "../../src/types.js";
 import { deriveAnswerKey, keyedSubset } from "./replay-answer-key.js";
+import { isTersePrompt } from "../../src/utils/terse-prompt.js";
 import {
   scoreSession,
   summarizeReplay,
@@ -105,6 +106,7 @@ function parseOptions(): Options {
       "query-arm": { type: "string", default: "control" },
       "reply-chars": { type: "string", default: "1000" },
       "reply-scale": { type: "string", default: "0" },
+      "terse-only": { type: "boolean", default: false },
       atypical: { type: "string", default: DEFAULT_ATYPICAL_PROJECTS.join(",") },
     },
   });
@@ -219,7 +221,12 @@ function parseOptions(): Options {
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
     maintenance,
     atypical: (values.atypical as string).split(",").map((p) => p.trim()).filter(Boolean),
-    queryArm: { arm: queryArm, chars: positive("reply-chars", values["reply-chars"] as string, 0), scale: replyScale },
+    queryArm: {
+      arm: queryArm,
+      chars: positive("reply-chars", values["reply-chars"] as string, 0),
+      scale: replyScale,
+      terseOnly: values["terse-only"] === true,
+    },
   };
 }
 
@@ -372,13 +379,21 @@ async function probeSession(
 
   await attempt("session-start", 0, injection("session/start", { sessionId: session.id, project: session.project, cwd: session.cwd }));
   for (const [i, turn] of session.userTurns.slice(0, maxPrompts).entries()) {
+    const arm = queryArm.terseOnly && !isTersePrompt(turn.text) ? "control" : queryArm.arm;
     const prompt = composeQuery(
-      queryArm.arm,
+      arm,
       { prompt: turn.text, reply: turn.precedingReply, prevPrompt: session.userTurns[i - 1]?.text ?? "" },
       queryArm.chars,
       queryArm.scale,
     );
-    await attempt("prompt-context", turn.turn, injection("prompt-context", { sessionId: session.id, prompt, project: session.project }));
+    // `control` sends the reply as the prompt-submit hook does; an arm's own
+    // query replaces it.
+    const reply = arm === "control" && turn.precedingReply ? { reply: turn.precedingReply } : {};
+    await attempt(
+      "prompt-context",
+      turn.turn,
+      injection("prompt-context", { sessionId: session.id, prompt, project: session.project, ...reply }),
+    );
     await attempt("search", turn.turn, async () => {
       const { body, ms } = await post<{ results?: SearchRow[] }>(baseUrl, "smart-search", {
         query: turn.text,
@@ -644,7 +659,8 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
-      const decided = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
+      const base = { ...scoreSession(session, deriveAnswerKey(session, ingested), probes), ...(await injectionGate(sandbox.baseUrl)) };
+      const decided = await withDecisions(base, session, ingested, probes, decisions);
       const score = opts.attribute && decisions ? await withAttribution(decided, decisions.key, decisions.judge, sandbox.sqlitePath) : decided;
       scores.push(score);
       appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
@@ -665,6 +681,17 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
     projects: loaded.perProject,
     minutes: (Date.now() - t0) / 60_000,
   });
+}
+
+// The sandbox's Injection Gate counters since boot, one sandbox per checkpoint;
+// absent when the gate is off.
+async function injectionGate(baseUrl: string): Promise<Pick<SessionScore, "injectionGate">> {
+  const { body } = await daemonCall<{ checks?: Array<{ name: string; message: string }> }>(baseUrl, "diagnostics", {
+    body: { categories: ["injections"] },
+  });
+  const message = body.checks?.find((c) => c.name === "injection-gate")?.message ?? "";
+  const counts = /(\d+) calls, (\d+) fallbacks/.exec(message);
+  return counts ? { injectionGate: { calls: Number(counts[1]), fallbacks: Number(counts[2]) } } : {};
 }
 
 async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> {
@@ -731,7 +758,7 @@ async function main(): Promise<void> {
   const scored = new Set(selectSplit("replay", loaded.sessions, opts.split, (s) => s.id, (s) => s.project).map((s) => s.id));
   const sessions = opts.keyedOnly ? keyedSubset(loaded.sessions, scored) : loaded.sessions;
   if (opts.keyedOnly) console.log(`--keyed-only: ${sessions.length} of ${loaded.sessions.length} Sessions carry or answer a key item`);
-  console.log(`query arm: ${opts.queryArm.arm} (reply-chars ${opts.queryArm.chars}, reply-scale ${opts.queryArm.scale})`);
+  console.log(`query arm: ${opts.queryArm.arm} (reply-chars ${opts.queryArm.chars}, reply-scale ${opts.queryArm.scale}${opts.queryArm.terseOnly ? ", terse-only" : ""})`);
   console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");

@@ -3,6 +3,7 @@ import { resolveGitProject } from "../hooks/_project.js";
 import type { HookType, RawObservation } from "../types.js";
 import { fingerprintId, generateId } from "../state/schema.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { CONTINUATION_SUMMARY } from "../utils/operator-turn.js";
 
 interface JsonlEntry {
   type?: string;
@@ -25,6 +26,8 @@ export interface ParsedTranscript {
   startedAt: string;
   endedAt: string;
   observations: RawObservation[];
+  // Each main-thread compaction summary, as the number of observations before it in the file.
+  compactions: number[];
 }
 
 // Memoized per import run: transcripts repeat the same cwd on every line.
@@ -52,10 +55,9 @@ function deriveProject(cwd: string): string {
 }
 
 // After a compaction Claude Code opens the next context with its own summary
-// of the conversation so far, written as a user turn. The Operator never
-// typed it, and it restates the whole Session, so it is not stored.
-export const CONTINUATION_SUMMARY = /^This session is being continued from a previous conversation/;
-
+// of the conversation so far, written as a user turn (CONTINUATION_SUMMARY).
+// The Operator never typed it, and it restates the whole Session, so it is
+// not stored.
 function isContinuationSummary(entry: JsonlEntry, text: string): boolean {
   return entry.isCompactSummary === true || CONTINUATION_SUMMARY.test(text.trimStart());
 }
@@ -126,6 +128,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
   let lastTs = "";
 
   const observations: RawObservation[] = [];
+  const compactions: number[] = [];
 
   for (const { entry, line } of entries) {
     let position = 0;
@@ -156,7 +159,9 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
         }
       } else {
         const text = toText(content);
-        if (text.trim().length > 0 && !isHarnessMessage(text) && !isContinuationSummary(entry, text)) {
+        if (isContinuationSummary(entry, text)) {
+          if (entry.isSidechain !== true) compactions.push(observations.length);
+        } else if (text.trim().length > 0 && !isHarnessMessage(text)) {
           observations.push({
             id: nextId(),
             sessionId: sessionId || "imported",
@@ -212,5 +217,6 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
     startedAt: firstTs || nowIso,
     endedAt: lastTs || nowIso,
     observations,
+    compactions,
   };
 }
