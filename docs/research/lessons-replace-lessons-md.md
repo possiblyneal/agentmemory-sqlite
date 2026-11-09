@@ -71,7 +71,7 @@ Evidence (`/ship` gained its Lessons step in devex b70f06d on 2026-10-24; transc
   knowledge-base's 4 Lessons are about other things; medical-researcher has none.
 
 What remains unknown: capture recall. `eval:replay` (synthetic) cannot measure it: replay
-import derives Lessons only from assistant sentences starting with a trigger word
+import derives Lessons only from assistant and user sentences starting with a trigger word
 (`extractLessons`, `src/functions/replay.ts:80-130`, saved at 0.4 as `consolidation`), while
 `/ship` saves them by an Agent MCP call that replay never makes.
 
@@ -91,8 +91,9 @@ active week with no never-delete exception. Both are proposals, not validated.**
 Evidence:
 
 - **Exposure**: a simulation of the current ranking over the live store pins only 42 of 197
-  Lessons in any project. At about 193 tokens each, the 800-token share holds 1–6 Lessons
-  (devex 3, homelab 2, inference-runtime-broker 2, glydr 1, template 3). The 0.8 imports
+  Lessons in any project. At about 193 tokens each, the 800-token share holds about 4 Lessons
+  before any pinned rule; the simulation pins devex 3, homelab 2, inference-runtime-broker 2,
+  glydr 1, template 3. The 0.8 imports
   outrank `/ship` Lessons (19 of the 111 below 0.8 are ever pinned), and the 4 project-less
   Lessons take 4 of compass's 5 slots.
 - **Injection records** (41 Sessions since 11-01, 7-day retention): session start injected
@@ -118,8 +119,9 @@ Proposals:
 - **Retention**: reinforcing on every touch would keep almost every Lesson forever, since
   most tagged files recur within 2 active weeks. Decay at about 0.025 per active week instead
   (0.5 reaches 0.1 in 16 active weeks, beyond the longest observed gap of 7), reinforce on
-  "used" as defined above, and delete the 0.05 floor so a reinforced Lesson also expires 16
-  active weeks after its last use.
+  "used" as defined above, and drop both the 0.05 floor and the delete's
+  `reinforcements === 0` condition (`lessons.ts:365`), so a reinforced Lesson also expires
+  (confidence − 0.1) / 0.025 active weeks after its last use: 16 from 0.5, 28 from 0.8.
 
 What remains unknown: whether "used" by file touch means the Lesson helped, and gaps longer
 than the store's 12 active weeks.
@@ -162,7 +164,7 @@ Before more go:
 - **Silent loss**: an imported 0.8 Lesson that is never reinforced decays to 0.1 in 14 active
   weeks and is hard-deleted, and nothing reinforces it but an exact re-save. The retired
   files' contents will go without notice.
-- **Exposure**: 42 of 197 Lessons are ever shown; imports crowd out `/ship` Lessons, and
+- **Exposure**: 42 of 197 Lessons are ever pinned (56 were shown in a week of Injection records); imports crowd out `/ship` Lessons, and
   project-less Lessons fill small projects' slots.
 - **No prompt-time path**: a Lesson reaches the Agent only at session start and pre-compact.
 - **Placement**: split project names, Lessons with no project, and the save-delivery leak.
