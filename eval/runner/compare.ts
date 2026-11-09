@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mcnemarExact, pairDecisions, refuseFailedSummaries, type DecisionRow } from "./compare-core.js";
+import { cumulativeLine, mcnemarExact, pairDecisions, refuseFailedSummaries, type DecisionRow } from "./compare-core.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const ARMS = join(REPO_ROOT, "tmp", "eval-arms");
@@ -73,6 +73,7 @@ function main() {
   console.log(`  B ${runB.label}: ${p.bDelivered}`);
   console.log(`  both ${p.both}   A-only ${p.aOnly}   B-only ${p.bOnly}   neither ${p.neither}`);
   console.log(`  exact McNemar p (two-sided) = ${mcnemarExact(p.aOnly, p.bOnly).toPrecision(3)}`);
+  console.log(cumulativeLine(runA, runB));
 
   const left = numericLeaves(runA.summary.summary);
   const right = numericLeaves(runB.summary.summary);

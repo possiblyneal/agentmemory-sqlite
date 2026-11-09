@@ -64,10 +64,28 @@ export function createJudge(complete: Complete, cache: VerdictCache): Judge {
   };
 }
 
+// The prompt-context Injections before `turn` that the Agent still holds at
+// it: those since the last compaction before it, newest first.
+function earlierInWindow(session: ReplaySession, prompts: Probe[], turn: number): Probe[] {
+  const since = Math.max(0, ...session.compactedAfter.filter((c) => c < turn));
+  return prompts.filter((p) => p.turn > since && p.turn < turn).sort((a, b) => b.turn - a.turn);
+}
+
+// A decision missed at its own turn is still delivered by that turn when an
+// earlier Injection in its window delivers it; the judge stops at the first.
+async function deliveredEarlier(decision: Decision, earlier: Probe[], judge: Judge): Promise<boolean> {
+  for (const probe of earlier) {
+    if (await judge.delivers(decision, probe.text ?? "")) return true;
+  }
+  return false;
+}
+
 // A Session's expected decisions, judged against the session-start Injection
-// and against the prompt-context Injection of the prompt they bear on. A
-// decision made in a Session that was not replayed before this one is in no
-// store the daemon could hold, so it is reported unreachable and not judged.
+// and against the prompt-context Injection of the prompt they bear on, and
+// for promptSubmitByTurn against the Session's earlier prompt-context
+// Injections too. A decision made in a Session that was not replayed before
+// this one is in no store the daemon could hold, so it is reported
+// unreachable and not judged.
 export async function decisionOutcomes(
   session: ReplaySession,
   key: DecisionKey,
@@ -77,18 +95,21 @@ export async function decisionOutcomes(
 ): Promise<DecisionOutcome[]> {
   const byId = new Map(key.decisions.map((d) => [d.id, d]));
   const start = probes.find((p) => p.kind === "session-start" && !p.failed)?.text ?? "";
+  const prompts = probes.filter((p) => p.kind === "prompt-context" && !p.failed);
   const out: DecisionOutcome[] = [];
   for (const expected of key.expected.filter((e) => e.sessionId === session.id)) {
-    const prompt = probes.find((p) => p.kind === "prompt-context" && p.turn === expected.turn && !p.failed)?.text ?? "";
+    const prompt = prompts.find((p) => p.turn === expected.turn)?.text ?? "";
+    const earlier = earlierInWindow(session, prompts, expected.turn);
     for (const id of expected.decisionIds) {
       const decision = byId.get(id);
       if (!decision) continue;
       if (!replayed.has(decision.sessionId)) {
-        out.push({ decisionId: id, turn: expected.turn, reachable: false, sessionStart: false, promptSubmit: false });
+        out.push({ decisionId: id, turn: expected.turn, reachable: false, sessionStart: false, promptSubmit: false, promptSubmitByTurn: false });
         continue;
       }
       const [sessionStart, promptSubmit] = await Promise.all([judge.delivers(decision, start), judge.delivers(decision, prompt)]);
-      out.push({ decisionId: id, turn: expected.turn, reachable: true, sessionStart, promptSubmit });
+      const promptSubmitByTurn = promptSubmit || (await deliveredEarlier(decision, earlier, judge));
+      out.push({ decisionId: id, turn: expected.turn, reachable: true, sessionStart, promptSubmit, promptSubmitByTurn });
     }
   }
   return out;

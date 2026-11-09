@@ -60,6 +60,9 @@ export interface DecisionOutcome {
   reachable: boolean;
   sessionStart: boolean;
   promptSubmit: boolean;
+  // Delivered by a prompt-context Injection of its Session at its turn or an
+  // earlier one since the last compaction before it.
+  promptSubmitByTurn: boolean;
   where?: MissLabel;
 }
 
@@ -296,6 +299,7 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
       unreachable: allDecisions.length - decisions.length,
       sessionStart: share(decisions.filter((d) => d.sessionStart).length, decisions.length),
       promptSubmit: share(decisions.filter((d) => d.promptSubmit).length, decisions.length),
+      promptSubmitByTurn: share(decisions.filter((d) => d.promptSubmitByTurn).length, decisions.length),
       either: share(decisions.filter((d) => d.sessionStart || d.promptSubmit).length, decisions.length),
       attribution: attributionCounts(decisions),
     },

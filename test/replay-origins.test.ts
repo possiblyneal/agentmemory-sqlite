@@ -5,7 +5,7 @@ import type { ReplaySession } from "../eval/runner/replay-transcript.js";
 
 function session(id: string, project: string, startedAt: string, turns: number): ReplaySession {
   const userTurns = Array.from({ length: turns }, (_, i) => ({ turn: i + 1, text: `t${i}` }));
-  return { id, project, cwd: `/w/${project}`, startedAt, userTurns: userTurns as ReplaySession["userTurns"], fileUses: [] };
+  return { id, project, cwd: `/w/${project}`, startedAt, userTurns: userTurns as ReplaySession["userTurns"], fileUses: [], compactedAfter: [] };
 }
 
 describe("selectSessions", () => {

@@ -26,6 +26,8 @@ export interface ParsedTranscript {
   startedAt: string;
   endedAt: string;
   observations: RawObservation[];
+  // Each main-thread compaction summary, as the number of observations before it in the file.
+  compactions: number[];
 }
 
 // Memoized per import run: transcripts repeat the same cwd on every line.
@@ -126,6 +128,7 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
   let lastTs = "";
 
   const observations: RawObservation[] = [];
+  const compactions: number[] = [];
 
   for (const { entry, line } of entries) {
     let position = 0;
@@ -156,7 +159,9 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
         }
       } else {
         const text = toText(content);
-        if (text.trim().length > 0 && !isHarnessMessage(text) && !isContinuationSummary(entry, text)) {
+        if (isContinuationSummary(entry, text)) {
+          if (entry.isSidechain !== true) compactions.push(observations.length);
+        } else if (text.trim().length > 0 && !isHarnessMessage(text)) {
           observations.push({
             id: nextId(),
             sessionId: sessionId || "imported",
@@ -212,5 +217,6 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
     startedAt: firstTs || nowIso,
     endedAt: lastTs || nowIso,
     observations,
+    compactions,
   };
 }
