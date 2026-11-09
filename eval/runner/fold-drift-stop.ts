@@ -1,6 +1,10 @@
 import type { RescoreResult } from "./fold-drift-core.js";
+import type { RunMode } from "./fold-drift-resume.js";
 
-export type RunKind = "full" | "screen";
+export interface LabelledResult {
+  sessionId: string;
+  labels?: Array<{ label: string; inOnePass?: boolean }>;
+}
 
 export interface BaselineSession {
   sessionId: string;
@@ -20,12 +24,23 @@ export interface StopState {
 // The baseline's count for a Session, on the scale the arm's run reports. A full run's
 // never-captured is in neither list; a screen's is not in the one-pass list, so a screen
 // is compared with the baseline's not-in-one-pass count.
-export function baselineSessions(rescored: RescoreResult["sessions"], kind: RunKind): BaselineSession[] {
+export function baselineSessions(rescored: RescoreResult["sessions"], mode: RunMode): BaselineSession[] {
   return rescored.map((s) => ({
     sessionId: s.sessionId,
     keyDecisions: s.keyDecisions,
-    neverCaptured: kind === "screen" ? s.keyDecisions - s.inOnePass : s.neverCaptured,
+    neverCaptured: mode === "screen" ? s.keyDecisions - s.inOnePass : s.neverCaptured,
   }));
+}
+
+// The arm's count per finished Session, on the baseline's scale. A full run counts a key
+// decision in neither the one-pass nor the final folded list, as the re-score does, so one a
+// fold held and the last step dropped counts only when the one pass missed it too.
+export function armCounts(finished: LabelledResult[], mode: RunMode): Map<string, number> {
+  const missed =
+    mode === "screen"
+      ? (l: { label: string }) => l.label === "never-captured"
+      : (l: { label: string; inOnePass?: boolean }) => l.label !== "kept" && !l.inOnePass;
+  return new Map(finished.map((r) => [r.sessionId, (r.labels ?? []).filter(missed).length]));
 }
 
 // Most never-captured first; Sessions with equal counts keep their given order.
@@ -65,9 +80,33 @@ export function stopState(ordered: BaselineSession[], armCounts: ReadonlyMap<str
 export const verdictOf = (gain: number, threshold: number): "cleared" | "not cleared" =>
   gain >= threshold ? "cleared" : "not cleared";
 
-export function stopLine(state: StopState, stoppedEarly: boolean): string {
-  const verdict = verdictOf(state.gain, state.threshold);
-  return stoppedEarly
-    ? `stopped early: ${state.stop}, gain=${state.gain} threshold=${state.threshold} verdict=${verdict}, skipped ${state.skipped.length}: ${state.skipped.join(",")}`
-    : `ran all sessions: gain=${state.gain} threshold=${state.threshold} verdict=${verdict}`;
+export interface StopReport {
+  stoppedEarly: boolean;
+  stopReason: StopReason | null;
+  gain: number;
+  threshold: number;
+  verdict: "cleared" | "not cleared" | "undecided";
+  skipped: string[];
+  failed: string[];
+}
+
+// A failed Session counts as unfinished, so the verdict stands only when its outcome could
+// not change it (`state.stop`); otherwise the run is undecided.
+export function stopReport(state: StopState, stoppedEarly: boolean, failed: string[]): StopReport {
+  return {
+    stoppedEarly,
+    stopReason: stoppedEarly ? state.stop : null,
+    gain: state.gain,
+    threshold: state.threshold,
+    verdict: failed.length > 0 && !state.stop ? "undecided" : verdictOf(state.gain, state.threshold),
+    skipped: stoppedEarly ? state.skipped : [],
+    failed,
+  };
+}
+
+export function stopLine(r: StopReport): string {
+  const failed = r.failed.length > 0 ? `, failed ${r.failed.length}: ${r.failed.join(",")}` : "";
+  return r.stoppedEarly
+    ? `stopped early: ${r.stopReason}, gain=${r.gain} threshold=${r.threshold} verdict=${r.verdict}, skipped ${r.skipped.length}: ${r.skipped.join(",")}${failed}`
+    : `ran all sessions: gain=${r.gain} threshold=${r.threshold} verdict=${r.verdict}${failed}`;
 }

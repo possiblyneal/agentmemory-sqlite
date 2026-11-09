@@ -46,7 +46,15 @@ function countingProvider(): MemoryProvider & { calls: number } {
 }
 
 const IDS = ["s1", "s2", "s3", "s4"];
-const header = (over: Partial<RunHeader> = {}): RunHeader => ({ store: "a.sqlite", batch: 3, mode: "full", sessions: IDS, ...over });
+const header = (over: Partial<RunHeader> = {}): RunHeader => ({
+  store: "a.sqlite",
+  batch: 3,
+  mode: "full",
+  sessions: IDS,
+  decisionKey: null,
+  llm: { model: "m", baseUrl: "http://broker/v1" },
+  ...over,
+});
 const tmpFile = () => join(mkdtempSync(join(tmpdir(), "fold-drift-resume-")), "run.ndjson");
 
 const runFull = (provider: MemoryProvider, file: string, resume: boolean, h = header(), stopAfter = Infinity) => {
@@ -96,6 +104,15 @@ describe("runCheckpointed", () => {
     const resumed = await runFull(provider, file, true, header({ sessions: ["s1", "s2"] }));
     expect(resumed.results.map((r) => r.sessionId)).toEqual(["s1", "s2"]);
     expect(provider.calls).toBeGreaterThan(0);
+  });
+
+  it("refuses a resume whose decision key or LLM profile differs, naming each", async () => {
+    const file = tmpFile();
+    await runFull(countingProvider(), file, false);
+    const provider = countingProvider();
+    await expect(runFull(provider, file, true, header({ decisionKey: "key.json" }))).rejects.toThrow(/decision key: .*none.*key\.json/);
+    await expect(runFull(provider, file, true, header({ llm: { model: "m2", baseUrl: "http://broker/v1" } }))).rejects.toThrow(/llm: .*"m".*"m2"/);
+    expect(provider.calls).toBe(0);
   });
 
   it("refuses a resume whose store, batch, mode or Sessions differ, naming each", async () => {

@@ -23,6 +23,12 @@ export interface FoldStep {
 export const DECISION_LABELS = ["never-captured", "dropped-by-fold", "dropped-by-fallback", "kept"] as const;
 export type DecisionLabel = (typeof DECISION_LABELS)[number];
 
+export interface KeyLabel {
+  decisionId: string;
+  label: DecisionLabel;
+  inOnePass: boolean;
+}
+
 export interface Judging {
   judge: Judge;
   key: Decision[];
@@ -44,7 +50,7 @@ export interface FoldDriftResult {
   missing: string[];
   steps: FoldStep[];
   missingJudged?: number;
-  labels?: Array<{ decisionId: string; label: DecisionLabel }>;
+  labels?: KeyLabel[];
   fullSummary: SessionSummary | null;
   foldedSummary: SessionSummary | null;
 }
@@ -235,16 +241,16 @@ async function judgeDrift(
   sessionId: string,
   full: string[],
   steps: FoldStep[],
-): Promise<{ missingJudged: number; labels: Array<{ decisionId: string; label: DecisionLabel }> }> {
+): Promise<{ missingJudged: number; labels: KeyLabel[] }> {
   const folded = steps[steps.length - 1]?.decisions ?? [];
   const kept = await Promise.all(
     full.map((text) => deliveredBy(judge, { id: textId(text), text }, folded)),
   );
-  const labels: Array<{ decisionId: string; label: DecisionLabel }> = [];
+  const labels: KeyLabel[] = [];
   for (const decision of key.filter((d) => d.sessionId === sessionId)) {
     const inOnePass = await deliveredBy(judge, decision, full);
     const held = await Promise.all(steps.map((s) => deliveredBy(judge, decision, s.decisions)));
-    labels.push({ decisionId: decision.id, label: labelFor(held, steps, inOnePass) });
+    labels.push({ decisionId: decision.id, label: labelFor(held, steps, inOnePass), inOnePass });
   }
   return { missingJudged: kept.filter((k) => !k).length, labels };
 }
@@ -277,15 +283,20 @@ export interface LlmProfile {
   baseUrl: string;
 }
 
-export interface StoredFoldDrift {
+// What a stored output was run against, enough to refuse reusing it for a different run.
+export interface RunIdentity {
   store: string;
   batch: number;
+  sessions: Array<{ sessionId: string }>;
+  llm?: LlmProfile;
+}
+
+export interface StoredFoldDrift extends RunIdentity {
   sessions: Array<{
     sessionId: string;
     fullSummary: { keyDecisions: string[] } | null;
     foldedSummary: { keyDecisions: string[] } | null;
   }>;
-  llm?: LlmProfile;
 }
 
 export interface RescoreRequest {
@@ -307,7 +318,7 @@ export interface RescoreResult {
   total: RescoreCounts;
 }
 
-function refuseMismatch(stored: StoredFoldDrift, req: RescoreRequest): void {
+function refuseMismatch(stored: RunIdentity, req: RescoreRequest): void {
   const differences: string[] = [];
   if (stored.batch !== req.batch) differences.push(`batch: stored ${stored.batch}, requested ${req.batch}`);
   if (req.store !== undefined && stored.store !== req.store) {
@@ -321,6 +332,26 @@ function refuseMismatch(stored: StoredFoldDrift, req: RescoreRequest): void {
     if (stored.llm.baseUrl !== req.llm.baseUrl) differences.push(`endpoint: stored ${stored.llm.baseUrl}, requested ${req.llm.baseUrl}`);
   }
   if (differences.length > 0) throw new Error(`stored run does not match the request (${differences.join("; ")})`);
+}
+
+// A --rescore output: the stored run's identity, carried over so it can stand as a baseline.
+export interface StoredRescore extends RescoreResult {
+  mode: "rescore";
+  from: string;
+  store: string;
+  batch: number;
+  llm?: LlmProfile;
+  decisionKey: string;
+}
+
+// A rescore output used as a baseline is refused as its stored run would be, and also when it
+// was scored against another decision key, since its counts come from that key.
+export function refuseRescoreMismatch(stored: StoredRescore, req: RescoreRequest, keyPath: string): StoredRescore {
+  refuseMismatch(stored, req);
+  if (stored.decisionKey !== keyPath) {
+    throw new Error(`baseline was re-scored against decision key ${stored.decisionKey ?? "unrecorded"}, this run uses ${keyPath}`);
+  }
+  return stored;
 }
 
 // Scores a previous run's one-pass and final folded decision lists against the key; calls the

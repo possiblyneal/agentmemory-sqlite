@@ -4,7 +4,8 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { measureFoldDrift, rescoreFoldDrift, screenOnePass, screenRow, screenTotal, type StoredFoldDrift } from "../eval/runner/fold-drift-core.js";
+import { armCounts } from "../eval/runner/fold-drift-stop.js";
+import { measureFoldDrift, refuseRescoreMismatch, rescoreFoldDrift, screenOnePass, screenRow, screenTotal, type StoredFoldDrift, type StoredRescore } from "../eval/runner/fold-drift-core.js";
 import { FOLD_SYSTEM } from "../src/prompts/summary.js";
 import type { CompressedObservation, MemoryProvider } from "../src/types.js";
 import type { Judge } from "../eval/runner/decision-judge.js";
@@ -145,26 +146,39 @@ describe("measureFoldDrift judged by the decision judge", () => {
       key: keyed(ALL[0]!, ALL[1]!, "Something nobody wrote"),
     });
     expect(r.labels).toEqual([
-      { decisionId: "d0", label: "dropped-by-fold" },
-      { decisionId: "d1", label: "kept" },
-      { decisionId: "d2", label: "never-captured" },
+      { decisionId: "d0", label: "dropped-by-fold", inOnePass: true },
+      { decisionId: "d1", label: "kept", inOnePass: true },
+      { decisionId: "d2", label: "never-captured", inOnePass: false },
     ]);
     expect(r.steps.map((s) => s.kind)).toEqual(["first", "fold"]);
     expect(r.steps[1]!.decisions).toEqual([ALL[1]]);
   });
 
+  const onePassMisses: MemoryProvider = {
+    name: "fake",
+    compress: async () => "",
+    summarize: async (system: string, prompt: string) =>
+      system === FOLD_SYSTEM ? xml([ALL[1]!]) : xml(prompt.includes("(3 total)") ? [ALL[1]!, ALL[2]!] : [ALL[0]!]),
+  };
+
   it("labels by the fold sequence a decision the one pass missed", async () => {
-    const provider: MemoryProvider = {
-      name: "fake",
-      compress: async () => "",
-      summarize: async (system: string, prompt: string) =>
-        system === FOLD_SYSTEM ? xml([ALL[1]!]) : xml(prompt.includes("(3 total)") ? [ALL[1]!, ALL[2]!] : [ALL[0]!]),
-    };
-    const r = await measureFoldDrift(provider, obs(6), opts, { judge: includesJudge(), key: keyed(ALL[1]!, ALL[2]!) });
+    const r = await measureFoldDrift(onePassMisses, obs(6), opts, { judge: includesJudge(), key: keyed(ALL[1]!, ALL[2]!) });
     expect(r.labels).toEqual([
-      { decisionId: "d0", label: "kept" },
-      { decisionId: "d1", label: "dropped-by-fold" },
+      { decisionId: "d0", label: "kept", inOnePass: false },
+      { decisionId: "d1", label: "dropped-by-fold", inOnePass: false },
     ]);
+  });
+
+  it("counts a decision held mid-fold but dropped at the end alike for the arm and the re-scored baseline", async () => {
+    const judging = { judge: includesJudge(), key: keyed(ALL[1]!, ALL[2]!) };
+    const r = await measureFoldDrift(onePassMisses, obs(6), opts, judging);
+    const rescored = await rescoreFoldDrift(
+      { store: "ckpt.sqlite", batch: opts.batch, sessions: [{ sessionId: "s1", fullSummary: r.fullSummary, foldedSummary: r.foldedSummary }] },
+      { sessionIds: ["s1"], batch: opts.batch },
+      judging,
+    );
+    expect(armCounts([r], "full").get("s1")).toBe(1);
+    expect(rescored.total.neverCaptured).toBe(1);
   });
 
   it("labels a decision lost in a fallback re-summarize dropped-by-fallback", async () => {
@@ -177,7 +191,7 @@ describe("measureFoldDrift judged by the decision judge", () => {
     };
     const r = await measureFoldDrift(provider, obs(6), opts, { judge: includesJudge(), key: keyed(ALL[0]!) });
     expect(r.steps.map((s) => s.kind)).toEqual(["first", "fallback"]);
-    expect(r.labels).toEqual([{ decisionId: "d0", label: "dropped-by-fallback" }]);
+    expect(r.labels).toEqual([{ decisionId: "d0", label: "dropped-by-fallback", inOnePass: true }]);
   });
 
   it("ignores key decisions from other Sessions", async () => {
@@ -336,5 +350,30 @@ describe("rescoreFoldDrift", () => {
     const { llm: _llm, ...old } = stored();
     const r = await rescoreFoldDrift(old, { sessionIds: ["s1"], batch: 20, llm: { model: "m2", baseUrl: "x" } }, { judge: includesJudge(), key });
     expect(r.sessions).toHaveLength(1);
+  });
+});
+
+describe("refuseRescoreMismatch", () => {
+  const rescored = (): StoredRescore => ({
+    mode: "rescore",
+    from: "run.json",
+    store: "ckpt.sqlite",
+    batch: 20,
+    llm: { model: "m", baseUrl: "http://broker/v1" },
+    decisionKey: "key.json",
+    sessions: [{ sessionId: "s1", keyDecisions: 1, inOnePass: 1, inFolded: 1, neverCaptured: 0 }],
+    total: { keyDecisions: 1, inOnePass: 1, inFolded: 1, neverCaptured: 0 },
+  });
+  const req = { sessionIds: ["s1"], batch: 20, store: "ckpt.sqlite", llm: { model: "m", baseUrl: "http://broker/v1" } };
+
+  it("accepts a rescore output made on this run's store, batch, model and key", () => {
+    expect(refuseRescoreMismatch(rescored(), req, "key.json").sessions).toHaveLength(1);
+  });
+
+  it("refuses a different store, batch, model or decision key, naming both", () => {
+    expect(() => refuseRescoreMismatch(rescored(), { ...req, store: "other.sqlite" }, "key.json")).toThrow(/ckpt\.sqlite.*other\.sqlite/);
+    expect(() => refuseRescoreMismatch(rescored(), { ...req, batch: 50 }, "key.json")).toThrow(/batch.*20.*50/);
+    expect(() => refuseRescoreMismatch(rescored(), { ...req, llm: { model: "m2", baseUrl: "http://broker/v1" } }, "key.json")).toThrow(/model.*m.*m2/);
+    expect(() => refuseRescoreMismatch(rescored(), req, "key2.json")).toThrow(/key\.json.*key2\.json/);
   });
 });

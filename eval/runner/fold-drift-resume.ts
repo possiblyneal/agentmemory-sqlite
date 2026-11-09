@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { LlmProfile } from "./fold-drift-core.js";
 
 export type RunMode = "full" | "screen";
 
@@ -8,6 +9,8 @@ export interface RunHeader {
   batch: number;
   mode: RunMode;
   sessions: string[];
+  decisionKey: string | null;
+  llm: LlmProfile;
   stop?: { baseline: string; threshold: number };
 }
 
@@ -24,6 +27,12 @@ export function headerMismatch(prior: RunHeader, current: RunHeader): string[] {
   if (prior.store !== current.store) diffs.push(`store: output has ${prior.store}, this run has ${current.store}`);
   if (prior.batch !== current.batch) diffs.push(`batch: output has ${prior.batch}, this run has ${current.batch}`);
   if (prior.mode !== current.mode) diffs.push(`mode: output has ${prior.mode}, this run has ${current.mode}`);
+  if (prior.decisionKey !== current.decisionKey) {
+    diffs.push(`decision key: output has ${prior.decisionKey ?? "none"}, this run has ${current.decisionKey ?? "none"}`);
+  }
+  if (JSON.stringify(prior.llm) !== JSON.stringify(current.llm)) {
+    diffs.push(`llm: output has ${JSON.stringify(prior.llm) ?? "none"}, this run has ${JSON.stringify(current.llm)}`);
+  }
   if (JSON.stringify(prior.stop) !== JSON.stringify(current.stop)) {
     diffs.push(`stop: output has ${JSON.stringify(prior.stop) ?? "none"}, this run has ${JSON.stringify(current.stop) ?? "none"}`);
   }

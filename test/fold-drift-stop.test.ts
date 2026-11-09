@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { baselineSessions, orderByBaseline, stopState, verdictOf, type BaselineSession } from "../eval/runner/fold-drift-stop.js";
+import { armCounts, baselineSessions, orderByBaseline, stopLine, stopReport, stopState, verdictOf, type BaselineSession } from "../eval/runner/fold-drift-stop.js";
 
 const base = (sessionId: string, neverCaptured: number, keyDecisions = neverCaptured): BaselineSession => ({ sessionId, keyDecisions, neverCaptured });
 
@@ -82,5 +82,45 @@ describe("stopState", () => {
               else if (early.stop === "unreachable") expect(verdictOf(fullGain, threshold)).toBe("not cleared");
               else expect(verdict).toBe(verdictOf(fullGain, threshold));
             }
+  });
+});
+
+describe("armCounts", () => {
+  const finished = [
+    {
+      sessionId: "a",
+      labels: [
+        { label: "never-captured", inOnePass: false },
+        { label: "dropped-by-fold", inOnePass: false },
+        { label: "dropped-by-fold", inOnePass: true },
+        { label: "kept", inOnePass: false },
+      ],
+    },
+  ];
+  it("counts not-in-one-pass for a screen and in-neither for a full run", () => {
+    expect(armCounts([{ sessionId: "a", labels: [{ label: "never-captured" }, { label: "in-one-pass" }] }], "screen").get("a")).toBe(1);
+    expect(armCounts(finished, "full").get("a")).toBe(2);
+  });
+});
+
+describe("stopReport", () => {
+  const ordered = [base("a", 8, 8), base("b", 6, 6), base("c", 1, 1)];
+
+  it("is undecided when a Session failed and no stop decided the verdict", () => {
+    const state = stopState(ordered, new Map([["a", 0], ["c", 1]]), 10);
+    const report = stopReport(state, false, ["b"]);
+    expect(report).toMatchObject({ verdict: "undecided", failed: ["b"], skipped: [] });
+    expect(stopLine(report)).toMatch(/verdict=undecided, failed 1: b/);
+  });
+
+  it("keeps a stop's verdict when a failed Session could not change it", () => {
+    const state = stopState(ordered, new Map([["a", 0], ["b", 0]]), 10);
+    expect(state.stop).toBe("cleared");
+    expect(stopReport(state, true, ["x"])).toMatchObject({ verdict: "cleared", stopReason: "cleared", skipped: ["c"], failed: ["x"] });
+  });
+
+  it("gives the plain verdict when nothing failed", () => {
+    const state = stopState(ordered, new Map([["a", 8], ["b", 6], ["c", 1]]), 10);
+    expect(stopReport(state, false, [])).toMatchObject({ verdict: "not cleared", failed: [] });
   });
 });
