@@ -53,9 +53,9 @@ function deriveProject(cwd: string): string {
 }
 
 // After a compaction Claude Code opens the next context with its own summary
-// of the conversation so far, written as a user turn. The Operator never
-// typed it, and it restates the whole Session, so it is not stored.
-
+// of the conversation so far, written as a user turn (CONTINUATION_SUMMARY).
+// The Operator never typed it, and it restates the whole Session, so it is
+// not stored.
 function isContinuationSummary(entry: JsonlEntry, text: string): boolean {
   return entry.isCompactSummary === true || CONTINUATION_SUMMARY.test(text.trimStart());
 }
