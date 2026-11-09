@@ -3,7 +3,7 @@ import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
 import { INJECT_TIMEOUT_MS, recordMissedInjection, missReason } from "./_missed-injection.js";
-import { lastAgentReply } from "./_last-reply.js";
+import { lastAgentReply, withinDeadline } from "./_last-reply.js";
 import { isTersePrompt } from "../utils/terse-prompt.js";
 
 hydrateHookEnv();
@@ -64,11 +64,13 @@ async function main() {
   setTimeout(() => process.exit(0), 500).unref();
 }
 
+const REPLY_READ_TIMEOUT_MS = 200;
+
 // A terse prompt carries the Agent's last reply for prompt-context to search
 // on; an unreadable transcript sends the prompt alone.
 async function replyFor(prompt: string, transcriptPath: unknown): Promise<string> {
   if (!isTersePrompt(prompt) || typeof transcriptPath !== "string") return "";
-  return lastAgentReply(transcriptPath).catch(() => "");
+  return withinDeadline(lastAgentReply(transcriptPath, prompt), REPLY_READ_TIMEOUT_MS);
 }
 
 async function injectContext(sessionId: string, project: string, prompt: string, transcriptPath: unknown): Promise<void> {

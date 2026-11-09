@@ -1,4 +1,7 @@
-import { CONTINUATION_SUMMARY, parseJsonlText } from "../../src/replay/jsonl-parser.js";
+import { parseJsonlText } from "../../src/replay/jsonl-parser.js";
+import { isOperatorTurn } from "../../src/utils/operator-turn.js";
+
+export { isOperatorTurn };
 
 export interface UserTurn {
   turn: number;
@@ -44,25 +47,6 @@ export interface FileMention {
 
 const READ_TOOLS = new Set(["Read"]);
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-// Turns the Operator did not type as a request: slash-command wrappers, shell
-// escapes and their output, interrupts, a loaded skill's body, a compaction
-// summary, and a message relayed from another Session.
-const NOT_A_HUMAN_TURN = [
-  /^<command-(name|message|args)>/,
-  /^<local-command-/,
-  /^<bash-(input|stdout|stderr)>/,
-  /^\[Request interrupted/,
-  /^Caveat:/,
-  /^Base directory for this skill:/,
-  CONTINUATION_SUMMARY,
-  /^Another Claude session sent a message:\s*<teammate-message[\s>]/,
-];
-const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
-
-export function isOperatorTurn(prompt: string): boolean {
-  return !NOT_A_HUMAN_TURN.some((re) => re.test(prompt)) && prompt.replace(SYSTEM_REMINDER, "").trim() !== "";
-}
-
 export function relativeToCwd(file: string, cwd: string): string | null {
   if (!file.startsWith("/")) return file.replace(/^\.\//, "");
   const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
@@ -80,6 +64,13 @@ const PATH_MENTION = /(?:\/?[\w.@-]+\/)+[\w.@-]+\.\w+/g;
 
 function mentionedFiles(text: string, cwd: string): string[] {
   return (text.match(PATH_MENTION) ?? []).flatMap((m) => relativeToCwd(m, cwd) ?? []);
+}
+
+function stringValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringValues);
+  if (value && typeof value === "object") return Object.values(value).flatMap(stringValues);
+  return [];
 }
 
 function rawEntry(raw: unknown): Record<string, unknown> {
@@ -119,7 +110,7 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       const abs = toolFile(obs.toolInput);
       const file = mode && abs ? relativeToCwd(abs, parsed.cwd) : null;
       if (mode && file) fileUses.push({ file, turn: userTurns.length, mode });
-      mention(JSON.stringify(obs.toolInput ?? {}), "tool");
+      for (const value of stringValues(obs.toolInput)) mention(value, "tool");
     }
   }
   if (userTurns.length === 0) return null;

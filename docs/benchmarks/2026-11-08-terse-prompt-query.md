@@ -15,8 +15,8 @@ its latency is contended. The before/shipped pairs ran two at a time, gated and 
 
 ## Headline
 
-Before this change, a terse prompt (under 3 content tokens) got no Injection at all: 0 of 119
-terse Turn needs. Querying with the prompt plus the last 1000 chars of the Agent's previous reply,
+Before this change, a terse prompt (under 3 content tokens) delivered none of its Turn needs:
+0 of 119. Querying with the prompt plus the last 1000 chars of the Agent's previous reply,
 only when the prompt is terse, delivers 23 of 119 (p < 0.001), and 16 of 80 on `typical`. Turns
 with a substantive prompt keep their query and score the same (21 vs 22 of 302, p = 1).
 
@@ -42,12 +42,12 @@ exact McNemar on terse needs.
 | no Agent text | on | 0 → 16 / 115 | < 0.001 | 24 → 24 / 291 | 0 → 11 / 78 | 16 → 16 / 178 |
 | Operator-typed only | either | 0 / 0 | — | 0 / 1 | 0 / 0 | 0 / 0 |
 
-| Arm | Gate | Used share | Prompt-context p50 / p95 / p99 | Over 1500 ms | Gate calls / fell open |
-|---|---|---|---|---|---|
-| control (before) | off | 5.7% | 30 / 220 / 365 ms | 0 | — |
-| shipped | off | 5.7% | 46 / 242 / 414 ms | 0 | — |
-| control (before) | on | 6.2% | 222 / 482 / 678 ms | 0 | 661 / 15 |
-| shipped | on | 6.0% | 280 / 513 / 739 ms | 0 | 841 / 0 |
+| Arm | Gate | Used share | Injected chars per prompt, terse / subst. | Prompt-context p50 / p95 / p99 | Over 1500 ms | Gate calls / fell open |
+|---|---|---|---|---|---|---|
+| control (before) | off | 5.7% | 353 / 974 | 30 / 220 / 365 ms | 0 | — |
+| shipped | off | 5.7% | 1,112 / 965 | 46 / 242 / 414 ms | 0 | — |
+| control (before) | on | 6.2% | 170 / 651 | 222 / 482 / 678 ms | 0 | 661 / 15 |
+| shipped | on | 6.0% | 742 / 633 | 280 / 513 / 739 ms | 0 | 841 / 0 |
 
 - The gate keeps 17 of the 23 ungated terse gains. That is above the bar for trying a reranker
   query built from the reply's end, so that variant was not measured. The reranker sees the
@@ -62,20 +62,20 @@ exact McNemar on terse needs.
 Turn needs delivered, terse / substantive. "All prompts" arms replace the query on every turn;
 "terse-only" arms replace it only on a terse prompt and send the raw prompt otherwise.
 
-| Arm | Pooled terse | Pooled subst. | Typical terse | Typical subst. | Used share | Prompt-context p99 |
-|---|---|---|---|---|---|---|
-| control (before) | 0 / 119 | 22 / 302 | 0 / 80 | 18 / 184 | 5.7% | 505 ms |
-| reply-tail, all | 22 | 33 | 16 | 23 | 4.0% | — |
-| reply-terms, all | 23 | 37 | 16 | 26 | — | — |
-| reply-head, all | 20 | 34 | 14 | 26 | — | — |
-| reply-last, all | 13 | 27 | 12 | 22 | — | — |
-| reply-tail 300, all | 16 | 37 | 14 | 27 | — | — |
-| prev-prompt, all | 6 | 24 | 6 | 18 | — | — |
-| **reply-tail, terse-only** | **23** | **21** | **16** | **17** | **5.7%** | 813 ms |
-| reply-terms, terse-only | 22 | 22 | 14 | 18 | 5.3% | 899 ms |
-| reply-head, terse-only | 17 | 21 | 11 | 17 | — | 992 ms |
-| prev-prompt, terse-only | 9 | 22 | 8 | 18 | — | — |
-| shipped path (control on branch) | 23 | 21 | 16 | 17 | 5.7% | 425 ms |
+| Arm | Pooled terse | Pooled subst. | Typical terse | Typical subst. | Used share | Injected chars per prompt, terse / subst. | Prompt-context p99 |
+|---|---|---|---|---|---|---|---|
+| control (before) | 0 / 119 | 22 / 302 | 0 / 80 | 18 / 184 | 5.7% | 353 / 973 | 505 ms |
+| reply-tail, all | 22 | 33 | 16 | 23 | 4.0% | 1,076 / 1,047 | — |
+| reply-terms, all | 23 | 37 | 16 | 26 | — | 882 / 1,040 | — |
+| reply-head, all | 20 | 34 | 14 | 26 | — | 1,088 / 1,038 | — |
+| reply-last, all | 13 | 27 | 12 | 22 | — | 1,109 / 1,085 | — |
+| reply-tail 300, all | 16 | 37 | 14 | 27 | — | 1,165 / 1,095 | — |
+| prev-prompt, all | 6 | 24 | 6 | 18 | — | 894 / 987 | — |
+| **reply-tail, terse-only** | **23** | **21** | **16** | **17** | **5.7%** | **1,112 / 965** | 813 ms |
+| reply-terms, terse-only | 22 | 22 | 14 | 18 | 5.3% | 894 / 972 | 899 ms |
+| reply-head, terse-only | 17 | 21 | 11 | 17 | — | 1,106 / 965 | 992 ms |
+| prev-prompt, terse-only | 9 | 22 | 8 | 18 | — | 887 / 972 | — |
+| shipped path (control on branch) | 23 | 21 | 16 | 17 | 5.7% | 1,112 / 965 | 425 ms |
 
 - Terse-only reply-tail vs control: terse 23 gained, 0 lost; substantive 1 lost, 0 gained.
 - On typical terse turns, items the Agent then used: control 3 of 179 injected, reply-tail
@@ -85,8 +85,12 @@ Turn needs delivered, terse / substantive. "All prompts" arms replace the query 
 - The shipped path (hook sends `reply`, daemon composes the query) pairs identically to
   reply-tail terse-only on every cell. Probed alone, its prompt-context p50 is 46 ms against
   control's 32, p99 425 ms against 505, with 0 calls past the hook's 1500 ms against 2.
-- A terse query averages 1,112 chars with the reply against 353 without. The arms' p99 column
-  was measured with four arms in parallel; overHookTimeout there ran 2 to 6 per arm.
+- Injected chars per prompt are the prompt-context context length averaged over the 274 terse and
+  649 substantive scored prompts. A terse prompt gets about 3x the context it got (1,112 vs 353
+  chars ungated); the 23 terse needs come with that cost, while substantive prompts get slightly
+  less. Every arm that delivers more terse needs also injects more, so none wins on volume alone:
+  reply-terms terse-only delivers 22 at 894 chars. The arms' p99 column was measured with four
+  arms in parallel; overHookTimeout there ran 2 to 6 per arm.
 
 ## Methodology
 
@@ -115,3 +119,7 @@ npm run eval:replay -- --projects=<dirs> --from-checkpoints <dir> --query-arm re
   text names it too. A file the Agent opened after a "go ahead" is the work the reply planned,
   so that view still credits a reply query for it. That case is the one this change targets.
 - Synthetic compression only; an `--llm` run was out of scope.
+- Not measured: two scoring fixes made in review after these runs. `namesFile` no longer credits a
+  longer path ending in the file or a name extending it (`lib/src/cart.ts`, `src/cart.ts.bak`),
+  and tool-input mentions are read from each string value, so a path that starts a line in a
+  heredoc counts. Both apply to every arm alike; the numbers above predate them.

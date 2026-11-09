@@ -16,6 +16,8 @@ import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
 // (BM25-only): gold matches score 6.7–25, bare acknowledgements and
 // unrelated prompts top out near 4.5. BM25 scores grow with corpus size, so
 // the relative cutoff does most of the work on a large store.
+// MIN_PROMPT_WORDS floors the final query; isTersePrompt only decides whether
+// the Agent's reply is appended to it.
 const MIN_PROMPT_WORDS = 3;
 const MIN_SCORE = 5;
 const MIN_SCORE_RATIO_TO_BEST = 0.5;

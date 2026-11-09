@@ -43,8 +43,8 @@ export interface AnswerKey {
   turnNeeds: TurnNeed[];
 }
 
-export { contentTokens };
-
+// Tokens two texts must share to match; a different count from the terse rule's
+// TERSE_BELOW_TOKENS, which counts one prompt's own tokens.
 export const MIN_SHARED_TOKENS = 3;
 // Claude Code loads these by convention, whether or not anything recalled them.
 const INSTRUCTION_FILES = new Set(["CLAUDE.md", "AGENTS.md", "CONTEXT.md", "GLOSSARY.md", "LESSONS.md"]);
@@ -128,16 +128,13 @@ export function isInstructionFile(file: string): boolean {
   return INSTRUCTION_FILES.has(file.slice(file.lastIndexOf("/") + 1));
 }
 
-// Too few content words to bear on anything: the rule prompt-submit Injection uses.
-export const isTerse = isTersePrompt;
-
 // A terse turn counts only when a substantive prompt came before it in the
 // Session; a terse first prompt carries the need itself.
 export function terseTurns(session: ReplaySession): Set<number> {
   const terse = new Set<number>();
   let substantiveBefore = false;
   for (const t of session.userTurns) {
-    if (!isTerse(t.text)) substantiveBefore = true;
+    if (!isTersePrompt(t.text)) substantiveBefore = true;
     else if (substantiveBefore) terse.add(t.turn);
   }
   return terse;
@@ -167,7 +164,7 @@ export function filesNeeded(session: ReplaySession, earlier: ReplaySession[]): F
 export function turnNeeds(session: ReplaySession, earlier: ReplaySession[]): TurnNeed[] {
   const touched = new Set(earlier.flatMap((s) => [...touchedFiles(s)]));
   const terse = terseTurns(session);
-  const scored = new Set(session.userTurns.filter((t) => terse.has(t.turn) || !isTerse(t.text)).map((t) => t.turn));
+  const scored = new Set(session.userTurns.filter((t) => terse.has(t.turn) || !isTersePrompt(t.text)).map((t) => t.turn));
   const needs = new Map<string, TurnNeed>();
   for (const { file, turn, source } of session.fileMentions) {
     if (!scored.has(turn) || !touched.has(file) || isInstructionFile(file)) continue;

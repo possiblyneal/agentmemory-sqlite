@@ -175,6 +175,7 @@ describe("parseTranscript", () => {
     const s = session("s6", "2026-09-01T10:00:00Z", [
       { user: "fix the total in src/cart.ts" },
       { tool: "Bash", input: { command: `npx vitest run test/cart.test.ts && cat ${CWD}/src/money.ts /etc/hosts.d/x.conf` } },
+      { tool: "Bash", input: { command: "cat <<EOF\nsrc/heredoc.ts\nEOF" } },
       { tool: "Read", file: `${CWD}/src/cart.ts` },
       { toolResult: "ok" },
       { assistant: "Fixed rounding in src/money.ts." },
@@ -184,6 +185,7 @@ describe("parseTranscript", () => {
       { file: "src/cart.ts", turn: 1, source: "operator" },
       { file: "test/cart.test.ts", turn: 1, source: "tool" },
       { file: "src/money.ts", turn: 1, source: "tool" },
+      { file: "src/heredoc.ts", turn: 1, source: "tool" },
       { file: "src/cart.ts", turn: 1, source: "tool" },
       { file: "src/money.ts", turn: 1, source: "agent" },
     ]);
@@ -533,6 +535,9 @@ describe("summarizeReplay", () => {
     expect(needsWith(`ran: cat ${CWD}/src/cart.ts`)).toEqual([true]);
     expect(needsWith("see `src/cart.ts`")).toEqual([true]);
     expect(needsWith("see src/cart.tsx and mysrc/cart.ts")).toEqual([false]);
+    expect(needsWith("see lib/src/cart.ts and /other/src/cart.ts")).toEqual([false]);
+    expect(needsWith("see src/cart.ts.bak and src/cart.ts-old")).toEqual([false]);
+    expect(needsWith("fixed src/cart.ts.")).toEqual([true]);
   });
 
   describe("per project and typical", () => {

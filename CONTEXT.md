@@ -157,6 +157,12 @@ non-2xx reply or malformed body it falls back to the BM25 selection and sits out
 cooldown. A gate fallback is not a Missed Injection, because the daemon still answered.
 _Avoid_: rerank filter, relevance filter
 
+**Terse prompt**:
+An Operator prompt with fewer than 3 content words, such as "yes", "go ahead" or "2". It names
+too little to search on and answers the Agent's last reply, so prompt-submit Injection searches
+on the prompt plus that reply's end.
+_Avoid_: short prompt, acknowledgement
+
 **Injection Record**:
 The daemon's note of one answered Injection: the path that served it (session start, context,
 or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,

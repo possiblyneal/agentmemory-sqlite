@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { renderInput, type OperatorInput } from "./decision-inputs.js";
-import { isTerse } from "./replay-answer-key.js";
+import { isTersePrompt } from "../../src/utils/terse-prompt.js";
 import type { ReplaySession } from "./replay-transcript.js";
 
 export type Complete = (system: string, user: string) => Promise<string>;
@@ -116,7 +116,7 @@ async function labelPrompts(
   candidates: Decision[],
   complete: Complete,
 ): Promise<Expected[]> {
-  const prompts = session.userTurns.filter((t) => t.turn <= LABEL_TURNS && !isTerse(t.text));
+  const prompts = session.userTurns.filter((t) => t.turn <= LABEL_TURNS && !isTersePrompt(t.text));
   if (candidates.length === 0 || prompts.length === 0) return [];
   const known = new Set(candidates.map((d) => d.id));
   const list = candidates.map((d) => `${d.id}: ${d.text}`).join("\n");

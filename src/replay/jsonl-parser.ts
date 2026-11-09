@@ -3,6 +3,7 @@ import { resolveGitProject } from "../hooks/_project.js";
 import type { HookType, RawObservation } from "../types.js";
 import { fingerprintId, generateId } from "../state/schema.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { CONTINUATION_SUMMARY } from "../utils/operator-turn.js";
 
 interface JsonlEntry {
   type?: string;
@@ -54,7 +55,6 @@ function deriveProject(cwd: string): string {
 // After a compaction Claude Code opens the next context with its own summary
 // of the conversation so far, written as a user turn. The Operator never
 // typed it, and it restates the whole Session, so it is not stored.
-export const CONTINUATION_SUMMARY = /^This session is being continued from a previous conversation/;
 
 function isContinuationSummary(entry: JsonlEntry, text: string): boolean {
   return entry.isCompactSummary === true || CONTINUATION_SUMMARY.test(text.trimStart());

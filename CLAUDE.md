@@ -232,11 +232,14 @@ Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateB
 A terse prompt ("go ahead", "2": under 3 content words, `isTersePrompt()` in
 `src/utils/terse-prompt.ts`, the same rule the replay eval scores with) answers the Agent's last
 reply. For one, the `prompt-submit` hook reads that reply, the text blocks after the last tool
-result, from the last 256 KiB of `transcript_path` (`lastAgentReply()`, `src/hooks/_last-reply.ts`)
-and sends its last `MAX_REPLY_QUERY_CHARS` (1000) as `reply`; an unreadable transcript sends the
-prompt alone. `api::prompt-context` whitelists and re-caps `reply`, and `mem::prompt-context`
+result and after the last typed Operator turn (`isOperatorTurn()`, `src/utils/operator-turn.ts`,
+shared with the replay eval), from the last 256 KiB of `transcript_path` (`lastAgentReply()`,
+`src/hooks/_last-reply.ts`) and sends its last `MAX_REPLY_QUERY_CHARS` (1000) as `reply`; a
+transcript unread within 200 ms sends the prompt alone. `api::prompt-context` whitelists and re-caps `reply`, and `mem::prompt-context`
 searches and gates on the prompt plus that reply only when the prompt is terse, so a substantive
-prompt's query is unchanged. Measured in `docs/benchmarks/2026-11-08-terse-prompt-query.md`.
+prompt's query is unchanged. The Injection Gate scores only the first `RERANK_QUERY_CHARS` (500)
+of that combined query, so for a terse prompt it sees the prompt and the start of the reply tail.
+Measured in `docs/benchmarks/2026-11-08-terse-prompt-query.md`.
 
 ### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an

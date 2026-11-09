@@ -1,14 +1,13 @@
 import {
   MIN_SHARED_TOKENS,
   bearsOn,
-  contentTokens,
-  isTerse,
   sharedTokens,
   terseTurns,
   type AnswerKey,
   type KeyItem,
   type TurnNeed,
 } from "./replay-answer-key.js";
+import { contentTokens, isTersePrompt } from "../../src/utils/terse-prompt.js";
 import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
 import { MISS_LABELS, type MissLabel } from "./decision-attribution.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
@@ -109,14 +108,17 @@ function deliveredBy(probes: Probe[], key: KeyItem, injection: boolean): boolean
 }
 
 // Most Observations carry no `files`, so an item whose text names the path
-// (not inside a longer name) delivers it too.
-function namesFile(item: ProbeItem, file: string): boolean {
+// delivers it too: the whole path, bare or under the Session's cwd, not part of
+// a longer path or name.
+function namesFile(item: ProbeItem, file: string, cwd: string): boolean {
   if (item.files.includes(file)) return true;
   const { text } = item;
+  const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
+  const startsPath = (before: string) => !/[\w./-]$/.test(before);
   for (let at = text.indexOf(file); at !== -1; at = text.indexOf(file, at + 1)) {
-    const before = at === 0 || !/[\w.-]/.test(text[at - 1]);
-    const after = !/\w/.test(text[at + file.length] ?? "");
-    if (before && after) return true;
+    const before = text.slice(0, at);
+    const whole = startsPath(before) || (before.endsWith(root) && startsPath(before.slice(0, -root.length)));
+    if (whole && !/^(\w|[.-]\w)/.test(text.slice(at + file.length))) return true;
   }
   return false;
 }
@@ -129,11 +131,11 @@ function turnOwn(session: ReplaySession, key: AnswerKey, probes: Probe[]): TurnO
     needs: key.turnNeeds.flatMap((need) => {
       const probe = byTurn.get(need.turn);
       if (!probe) return [];
-      return [{ ...need, injected: probe.items.some((i) => namesFile(i, need.file)) }];
+      return [{ ...need, injected: probe.items.some((i) => namesFile(i, need.file, session.cwd)) }];
     }),
     probes: session.userTurns.flatMap((t) => {
       const probe = byTurn.get(t.turn);
-      if (!probe || probe.failed || !(terse.has(t.turn) || !isTerse(t.text))) return [];
+      if (!probe || probe.failed || !(terse.has(t.turn) || !isTersePrompt(t.text))) return [];
       return [{ turn: t.turn, terse: terse.has(t.turn), chars: probe.chars }];
     }),
   };

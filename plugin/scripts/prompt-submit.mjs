@@ -193,6 +193,31 @@ function recordMissedInjection(hook, reason) {
 	} catch {}
 }
 //#endregion
+//#region src/utils/harness-message.ts
+const TAGS = "task-notification|teammate-message|cross-session-message|agent-message";
+const OPENS_WITH_TAG = new RegExp(`^<(${TAGS})[\\s>]`);
+const LEADING_ELEMENT = new RegExp(`^<(${TAGS})[\\s>][\\s\\S]*?</\\1>\\s*`);
+function isHarnessMessage(prompt) {
+	let rest = prompt.trim();
+	if (!OPENS_WITH_TAG.test(rest)) return false;
+	for (let m; m = LEADING_ELEMENT.exec(rest);) rest = rest.slice(m[0].length);
+	return rest === "" || OPENS_WITH_TAG.test(rest);
+}
+const NOT_A_HUMAN_TURN = [
+	/^<command-(name|message|args)>/,
+	/^<local-command-/,
+	/^<bash-(input|stdout|stderr)>/,
+	/^\[Request interrupted/,
+	/^Caveat:/,
+	/^Base directory for this skill:/,
+	/^This session is being continued from a previous conversation/,
+	/^Another Claude session sent a message:\s*<teammate-message[\s>]/
+];
+const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+function isOperatorTurn(prompt) {
+	return !NOT_A_HUMAN_TURN.some((re) => re.test(prompt)) && prompt.replace(SYSTEM_REMINDER, "").trim() !== "";
+}
+//#endregion
 //#region src/utils/terse-prompt.ts
 const STOPWORDS = new Set("the and for that this with you your are was were have has had not but can could would should will just from they them then than into about what when where which while there their here also its our out all any more some been being does did doing done get got make made use using please want need like let's lets one two now still".split(" "));
 const TERSE_BELOW_TOKENS = 3;
@@ -211,13 +236,20 @@ function blocks(entry) {
 	const content = entry.message?.content;
 	return Array.isArray(content) ? content : [];
 }
-async function lastAgentReply(transcriptPath) {
+function typedText(entry) {
+	const content = entry.message?.content;
+	if (typeof content !== "string" || entry.isMeta || entry.isCompactSummary) return void 0;
+	const text = content.trim();
+	return isOperatorTurn(text) && !isHarnessMessage(text) ? text : void 0;
+}
+async function lastAgentReply(transcriptPath, prompt) {
 	const file = await open(transcriptPath, "r");
 	try {
 		const { size } = await file.stat();
 		const length = Math.min(TAIL_BYTES, size);
 		const { buffer } = await file.read(Buffer.alloc(length), 0, length, size - length);
 		const reply = [];
+		let passedCurrent = false;
 		for (const line of buffer.toString("utf8").split("\n").reverse()) {
 			let entry;
 			try {
@@ -228,6 +260,10 @@ async function lastAgentReply(transcriptPath) {
 			if (entry.isSidechain) continue;
 			if (entry.type === "user") {
 				if (reply.length > 0 || blocks(entry).some((b) => b.type === "tool_result")) break;
+				const typed = typedText(entry);
+				if (typed === void 0) continue;
+				if (passedCurrent || typed !== prompt.trim()) break;
+				passedCurrent = true;
 			} else if (entry.type === "assistant") {
 				const texts = blocks(entry).flatMap((b) => b.type === "text" && b.text ? [b.text] : []);
 				reply.unshift(...texts);
@@ -237,6 +273,9 @@ async function lastAgentReply(transcriptPath) {
 	} finally {
 		await file.close();
 	}
+}
+function withinDeadline(read, ms) {
+	return Promise.race([read.catch(() => ""), new Promise((resolve) => setTimeout(() => resolve(""), ms).unref())]);
 }
 //#endregion
 //#region src/hooks/prompt-submit.ts
@@ -281,9 +320,10 @@ async function main() {
 	}).catch(() => {});
 	setTimeout(() => process.exit(0), 500).unref();
 }
+const REPLY_READ_TIMEOUT_MS = 200;
 async function replyFor(prompt, transcriptPath) {
 	if (!isTersePrompt(prompt) || typeof transcriptPath !== "string") return "";
-	return lastAgentReply(transcriptPath).catch(() => "");
+	return withinDeadline(lastAgentReply(transcriptPath, prompt), REPLY_READ_TIMEOUT_MS);
 }
 async function injectContext(sessionId, project, prompt, transcriptPath) {
 	try {

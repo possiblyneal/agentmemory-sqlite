@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { isAwaitingCompression } from "../../src/functions/compress-synthetic.js";
 import type { CompressedObservation } from "../../src/types.js";
-import { deriveAnswerKey, isTerse, keyedSubset } from "./replay-answer-key.js";
+import { deriveAnswerKey, keyedSubset } from "./replay-answer-key.js";
+import { isTersePrompt } from "../../src/utils/terse-prompt.js";
 import {
   scoreSession,
   summarizeReplay,
@@ -378,7 +379,7 @@ async function probeSession(
 
   await attempt("session-start", 0, injection("session/start", { sessionId: session.id, project: session.project, cwd: session.cwd }));
   for (const [i, turn] of session.userTurns.slice(0, maxPrompts).entries()) {
-    const arm = queryArm.terseOnly && !isTerse(turn.text) ? "control" : queryArm.arm;
+    const arm = queryArm.terseOnly && !isTersePrompt(turn.text) ? "control" : queryArm.arm;
     const prompt = composeQuery(
       arm,
       { prompt: turn.text, reply: turn.precedingReply, prevPrompt: session.userTurns[i - 1]?.text ?? "" },
