@@ -42,7 +42,8 @@ function reachableItems(rows: DecisionRow[], credit: PromptCredit): Map<string, 
 export const recordsByTurn = (rows: DecisionRow[]): boolean =>
   rows.every((row) => (row.decisions ?? []).every((d) => d.reachable === false || d.promptSubmitByTurn !== undefined));
 
-// Items delivered by either surface, paired over those both runs scored as reachable.
+// Items delivered by either surface, prompt submit credited per `credit`, paired over those
+// both runs scored as reachable.
 export function pairDecisions(a: DecisionRow[], b: DecisionRow[], credit: PromptCredit = "same-turn"): Pairing {
   const aItems = reachableItems(a, credit);
   const bItems = reachableItems(b, credit);

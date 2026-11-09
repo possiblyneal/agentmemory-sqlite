@@ -78,8 +78,15 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
   const parsed = parseJsonlText(text);
   const userTurns: UserTurn[] = [];
   const fileUses: FileUse[] = [];
+  const compactedAfter: number[] = [];
+  const placeCompactionsBefore = (index: number) => {
+    while (compactedAfter.length < parsed.compactions.length && parsed.compactions[compactedAfter.length] <= index) {
+      compactedAfter.push(userTurns.length);
+    }
+  };
   let reply: string[] = [];
-  for (const obs of parsed.observations) {
+  for (const [i, obs] of parsed.observations.entries()) {
+    placeCompactionsBefore(i);
     const entry = rawEntry(obs.raw);
     if (entry.isSidechain === true) continue;
     if (obs.userPrompt !== undefined) {
@@ -99,38 +106,18 @@ export function parseTranscript(text: string, sourcePath?: string): ReplaySessio
       if (mode && file) fileUses.push({ file, turn: userTurns.length, mode });
     }
   }
+  placeCompactionsBefore(parsed.observations.length);
   if (userTurns.length === 0) return null;
   return {
-    compactedAfter: compactions(text, userTurns),
     id: parsed.sessionId,
     project: parsed.project,
     cwd: parsed.cwd,
     startedAt: userTurns[0].timestamp,
     userTurns,
     fileUses,
+    compactedAfter,
     sourcePath,
   };
-}
-
-// The parser drops compaction summaries, so they are found on the raw lines
-// and placed among the Operator turns by timestamp.
-function compactions(text: string, userTurns: UserTurn[]): number[] {
-  const out: number[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let entry: Entry;
-    try {
-      entry = JSON.parse(line) as Entry;
-    } catch {
-      continue;
-    }
-    if (entry.type !== "user" || entry.isSidechain === true || typeof entry.timestamp !== "string") continue;
-    const summary = entry.isCompactSummary === true || CONTINUATION_SUMMARY.test(userText((entry.message as Entry | undefined)?.content).trimStart());
-    if (!summary) continue;
-    const at = entry.timestamp;
-    out.push(userTurns.filter((t) => t.timestamp < at).length);
-  }
-  return out;
 }
 
 export function touchedFiles(session: ReplaySession): Set<string> {

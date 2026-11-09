@@ -258,6 +258,16 @@ describe("decision recall", () => {
       expect(compacted.compactedAfter).toEqual([2]);
     });
 
+    it("places a compaction by line order when kept messages after it carry earlier timestamps", () => {
+      const { session } = load("s4", "2026-09-04T10:00:00Z", [
+        user("add the orders repository"),
+        { ...user("This session is being continued from a previous conversation that ran out of context."), isCompactSummary: true },
+        { ...user("list orders"), timestamp: "2026-09-04T09:00:00.000Z" },
+        user("now totals"),
+      ]);
+      expect(session.compactedAfter).toEqual([1]);
+    });
+
     it("credits a decision an earlier prompt-context Injection of the Session delivered, leaving same-turn unchanged", async () => {
       expect(await outcome("d1", 2)).toMatchObject({ promptSubmit: false, promptSubmitByTurn: true });
     });
