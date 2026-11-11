@@ -560,10 +560,10 @@ describe("Lessons", () => {
       expect(result.decayed).toBe(0);
     });
 
-    it("deletes low-confidence unreinforced lessons", async () => {
+    it("floors a low-confidence unreinforced Lesson at 0.05 instead of deleting it (#376)", async () => {
       const saved = (await sdk.trigger("mem::lesson-save", {
         content: "Weak lesson",
-        confidence: 0.12,
+        confidence: 0.08,
       })) as { lesson: Lesson };
 
       const lesson = await kv.get<Lesson>("mem:lessons", saved.lesson.id);
@@ -575,9 +575,11 @@ describe("Lessons", () => {
         decayed: number;
       };
 
-      expect(result.deleted).toBe(1);
-      expect(result.decayed).toBe(0);
-      expect(await kv.get("mem:lessons", saved.lesson.id)).toBeNull();
+      expect(result.deleted).toBe(0);
+      expect(result.decayed).toBe(1);
+      const after = await kv.get<Lesson>("mem:lessons", saved.lesson.id);
+      expect(after!.confidence).toBe(0.05);
+      expect(after!.reinforcements).toBe(0);
     });
 
     it("uses lastDecayedAt for incremental delta (not full age)", async () => {

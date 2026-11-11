@@ -139,16 +139,16 @@ describe("Lesson decay on Project Time", () => {
     expect(after!.lastDecayedAt).toBeUndefined();
   });
 
-  it("deletes an unreinforced Lesson after twelve active weeks", async () => {
+  it("keeps an unreinforced Lesson at the 0.05 floor after twelve active weeks (#376)", async () => {
     const id = await saveLesson("active rule", "/repo");
     await startSessions("/repo", weeks(1, 12));
 
     await sweepAt(12);
 
-    expect(await lesson(id)).toBeNull();
+    expect((await lesson(id))!.confidence).toBe(0.05);
     const audit = await kv.list<{ functionId: string; operation: string; targetIds: string[] }>(KV.audit);
-    const entry = audit.find((a) => a.functionId === "mem::lesson-decay-sweep");
-    expect(entry).toMatchObject({ operation: "lesson_delete", targetIds: [id] });
+    const entries = audit.filter((a) => a.functionId === "mem::lesson-decay-sweep");
+    expect(entries).toEqual([expect.objectContaining({ operation: "lesson_strengthen", targetIds: [id] })]);
   });
 
   it("does not decay one project's Lessons for work in another", async () => {
@@ -166,7 +166,7 @@ describe("Lesson decay on Project Time", () => {
 
     await sweepAt(12);
 
-    expect(await lesson(id)).toBeNull();
+    expect((await lesson(id))!.confidence).toBe(0.05);
   });
 
   it("carries no pending debt out of dormant weeks", async () => {
@@ -187,7 +187,7 @@ describe("Lesson decay on Project Time", () => {
 
     await sweepAt(12);
 
-    expect(await lesson(id)).toBeNull();
+    expect((await lesson(id))!.confidence).toBe(0.05);
   });
 
   it("backfills activity from Sessions and Session Summaries without a jump", async () => {

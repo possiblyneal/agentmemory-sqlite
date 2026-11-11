@@ -418,10 +418,6 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         if (newConfidence !== lesson.confidence) {
           const beforeConfidence = lesson.confidence;
           const confidence = Math.round(newConfidence * 1000) / 1000;
-          if (confidence <= 0.1 && lesson.reinforcements === 0) {
-            expired.push({ key: lesson.id, updatedAt: lesson.updatedAt });
-            continue;
-          }
           const readUpdatedAt = lesson.updatedAt;
           lesson.confidence = confidence;
           lesson.lastDecayedAt = timestamp;

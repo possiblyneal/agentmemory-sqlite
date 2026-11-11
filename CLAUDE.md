@@ -295,6 +295,16 @@ closest one instead of writing a row, as an exact re-save does: it takes the new
 context and the union of tags, keeps its id, and is audited `lesson_strengthen` with
 `reason: "re-discovery"` and `match: "restated" | "exact"` (#378).
 
+### Lesson retention
+`mem::lesson-decay-sweep` lowers a Lesson's confidence by its `decayRate` per active week of
+Project Time down to a floor of 0.05, reinforced or not, and never deletes a live Lesson for
+low confidence (#376): a decayed Lesson sinks below the session-start top 10 of a project
+with fresher ones, and stays recallable. The
+sweep deletes only rows an earlier version marked `deleted`; a live Lesson goes only through
+`memory_lesson_delete` or an import `replace`. Revisit deletion once #378's re-discovery audits show which Lessons
+Agents re-learn. The Decay rule's `applyDecay`/`repairDecay` pair covers Semantic and Procedural
+Memories, not Lessons.
+
 ### Supersession in Recall
 `docs/supersession.md` maps each record kind and surface to its fixture; the rules it describes:
 - **Near-twin cap** — `capBehindNewer` (`src/functions/recency-cap.ts`): of two hits whose text
