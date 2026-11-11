@@ -34,6 +34,7 @@ const ENV_KEYS = [
   "AGENTMEMORY_PROMPT_RERANK_URL",
   "AGENTMEMORY_PROMPT_RERANK_MIN",
   "AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS",
+  "AGENTMEMORY_PROMPT_LESSON_MIN",
 ];
 
 describe("mem::prompt-context reranker gate", () => {
@@ -297,11 +298,12 @@ describe("getPromptRerankConfig", () => {
     }
   });
 
-  it("defaults to on with the ai host, 0.03 and 1000 ms", () => {
+  it("defaults to on with the ai host, 0.03, a 0.5 Lesson floor and 1000 ms", () => {
     expect(getPromptRerankConfig()).toEqual({
       enabled: true,
       url: "http://ai.lan:9202/v1/rerank",
       minScore: 0.03,
+      lessonMinScore: 0.5,
       timeoutMs: 1000,
     });
   });
@@ -325,11 +327,13 @@ describe("getPromptRerankConfig", () => {
   it("accepts valid overrides", () => {
     process.env.AGENTMEMORY_PROMPT_RERANK_URL = "http://10.0.0.5:9000/v1/rerank";
     process.env.AGENTMEMORY_PROMPT_RERANK_MIN = "0.2";
+    process.env.AGENTMEMORY_PROMPT_LESSON_MIN = "0.7";
     process.env.AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS = "250";
     expect(getPromptRerankConfig()).toEqual({
       enabled: true,
       url: "http://10.0.0.5:9000/v1/rerank",
       minScore: 0.2,
+      lessonMinScore: 0.7,
       timeoutMs: 250,
     });
   });

@@ -132,6 +132,7 @@ export function sandboxEnv(
       "AGENTMEMORY_PROMPT_RERANK",
       "AGENTMEMORY_PROMPT_RERANK_URL",
       "AGENTMEMORY_PROMPT_RERANK_MIN",
+      "AGENTMEMORY_PROMPT_LESSON_MIN",
       "AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS",
     ]) {
       const value = process.env[key];

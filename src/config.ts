@@ -600,11 +600,15 @@ export interface PromptRerankConfig {
   enabled: boolean;
   url: string;
   minScore: number;
+  lessonMinScore: number;
   timeoutMs: number;
 }
 
 const PROMPT_RERANK_DEFAULT_URL = "http://ai.lan:9202/v1/rerank";
 const PROMPT_RERANK_DEFAULT_MIN_SCORE = 0.03;
+// About half the Lessons scoring 0.5 or more bore on the prompt, a third at
+// 0.03 (#317, docs/benchmarks/2026-11-11-prompt-submit-lessons.md).
+const PROMPT_LESSON_DEFAULT_MIN_SCORE = 0.5;
 // The hook aborts Injection at 1500 ms and mem::search shares that budget,
 // so the gate may only shorten its wait, never lengthen it.
 const PROMPT_RERANK_MAX_TIMEOUT_MS = 1000;
@@ -632,6 +636,7 @@ export function getPromptRerankConfig(): PromptRerankConfig {
     enabled: !["false", "0", "off"].includes(gate),
     url: httpUrl(env["AGENTMEMORY_PROMPT_RERANK_URL"], PROMPT_RERANK_DEFAULT_URL),
     minScore: positiveNumber(env["AGENTMEMORY_PROMPT_RERANK_MIN"], PROMPT_RERANK_DEFAULT_MIN_SCORE),
+    lessonMinScore: positiveNumber(env["AGENTMEMORY_PROMPT_LESSON_MIN"], PROMPT_LESSON_DEFAULT_MIN_SCORE),
     timeoutMs: Math.ceil(
       Math.min(
         PROMPT_RERANK_MAX_TIMEOUT_MS,

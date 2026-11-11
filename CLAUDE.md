@@ -226,7 +226,7 @@ case "memory_your_tool": {
 ```
 
 ### Injection Gate
-Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated, nor is a Memory admitted by `withShadowingMemories` (Memory shadowing below). The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
+Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hook's 1500 ms `INJECT_TIMEOUT_MS`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated, nor is a Memory admitted by `withShadowingMemories` (Memory shadowing below). The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. One Lesson can take one of the 3 places: the best BM25 match among this project's and Global Lessons that this Session has not been given yet, after the near-twin cap (`searchLessons()`, `src/functions/lessons.ts`), takes the pool's last place, so the pool stays at 10. It is injected only when the reranker scores it at least `AGENTMEMORY_PROMPT_LESSON_MIN` (0.5), higher than the Observation floor because about half the Lessons above it bear on the prompt (`docs/benchmarks/2026-11-11-prompt-submit-lessons.md`). When the gate is off or failed, no Lesson is injected. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 
 ### Terse prompts
 A terse prompt ("go ahead", "2": under 3 content words, `isTersePrompt()` in
@@ -246,7 +246,7 @@ After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`)
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a
 `summary` ref. Each decision is cut to 600 chars with a trailing `…` (`cutDecision()` in
-`src/functions/summarize.ts`, shared with session start). A Memory hit, an Observation the
+`src/functions/summarize.ts`, shared with session start). A Memory hit, a Lesson, an Observation the
 Summary does not cover, and one whose Summary is missing, unreadable or has no decisions are
 given as themselves. The decisions come first, one block per Session dated by its Summary's
 `lastObservationAt`, the time of the last Observation it summarized (else `coveredThrough`,
@@ -256,7 +256,7 @@ summarized again), and ordered newest first, under a header telling the Agent th
 hold, with their exact values, even where the current code does not follow them yet, and that
 the newer of two conflicting rules holds. A Memory hit dated (`updatedAt`) after the oldest
 rendered Session takes its place among the Sessions by date, so it is not rendered behind a
-decision it may supersede; the header sits before the first Session block. Older Memories and
+decision it may supersede; the header sits before the first Session block. Older Memories, Lessons and
 Observations follow the Sessions. The top 3 are counted in rendered units from a 30-hit
 search: a covered Session is one unit however many of its Observations hit.
 Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
@@ -315,7 +315,7 @@ Memories, not Lessons.
   `mem::search` and `HybridSearch` (`mem::smart-search`, again after query expansion's merge),
   pairing only Observations of one project (their Session's, else its Summary's; unknown pairs
   within its Session). Session start (`mem::context`) caps the project's Lessons the same way
-  before taking its top 10.
+  before taking its top 10, and prompt submit before choosing its one Lesson candidate.
 - **Memory shadowing** — `shadowedMemoryIds`/`newerAboveShadowed` (`src/functions/memory-shadow.ts`),
   in smart-search and prompt-context after their floors: an older Memory of the same type and
   Global marker sharing ≥ 2 distinctive terms covering 0.3 of the smaller term set sits directly

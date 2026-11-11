@@ -1,5 +1,5 @@
 import type { ISdk } from "../engine/types.js";
-import type { InjectedRef, Memory, SessionSummary } from "../types.js";
+import type { InjectedRef, Lesson, Memory, SessionSummary } from "../types.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
@@ -7,7 +7,10 @@ import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { isTersePrompt, MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
+import { getPromptRerankConfig } from "../config.js";
+import { lessonToObservation } from "../state/memory-utils.js";
 import { gateByRelevance } from "./prompt-rerank.js";
+import { searchLessons } from "./lessons.js";
 import { injectedInSession, refKey, withFiles } from "./injections.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { cutDecision, decidedAt, summaryCovers } from "./summarize.js";
@@ -25,7 +28,12 @@ const MAX_RESULTS = 3;
 const MAX_NARRATIVE_CHARS = 400;
 export const MAX_DECISIONS = 10;
 const SEARCH_LIMIT = 30;
+// The reranker's latency grows past 10 documents, so a Lesson takes the last
+// place in the pool rather than adding one (docs/benchmarks/2026-10-20-gate-pool.md).
 const GATE_POOL = 10;
+// Enough to find one Lesson not already pinned at session start.
+const LESSON_LOOKAHEAD = 20;
+const MAX_LESSON_CHARS = 1200;
 const AMENDMENT_MIN_RATIO = 0.35;
 const AMENDMENT_MIN_LEAD = 1.25;
 
@@ -44,6 +52,19 @@ export interface PromptContextResult {
 }
 
 const EMPTY: PromptContextResult = { context: "", tokens: 0, injected: [] };
+
+function lessonCandidate(lesson: Lesson): Candidate {
+  return {
+    hit: { score: 0, sessionId: "lesson", observation: lessonToObservation(lesson) },
+    ref: { kind: "lesson", id: lesson.id },
+    lesson,
+  };
+}
+
+function lessonText({ content, context }: Lesson): string {
+  const text = `Lesson from past work: ${content.slice(0, MAX_LESSON_CHARS)}${context ? ` (shows up as: ${context})` : ""}`;
+  return escapeXml(text);
+}
 
 function wordCount(prompt: string): number {
   return prompt.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
@@ -65,7 +86,7 @@ async function candidateFor(kv: StateKV, hit: NarratedHit): Promise<Candidate> {
   return { hit, ref, ...(memory && { memoryAt: memory.updatedAt ?? memory.createdAt }) };
 }
 
-type Candidate = { hit: NarratedHit; ref: InjectedRef; memoryAt?: string };
+type Candidate = { hit: NarratedHit; ref: InjectedRef; memoryAt?: string; lesson?: Lesson };
 type Resolved = Candidate & { summary: SessionSummary | null };
 
 // An Observation a Session Summary covers is a fragment of a conversation
@@ -214,9 +235,9 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
   }
   const oldestAt = sessions.reduce((min, e) => (e.at < min ? e.at : min), "\uffff");
   const timeline: Entry[] = [...sessions];
-  for (const { hit, ref, summary, memoryAt } of chosen) {
+  for (const { hit, ref, summary, memoryAt, lesson } of chosen) {
     if (summary) continue;
-    const text = escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS));
+    const text = lesson ? lessonText(lesson) : escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS));
     if (memoryAt && memoryAt > oldestAt) {
       timeline.push({ at: memoryAt, memory: { text, ref } });
     } else {
@@ -254,7 +275,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const prompt = queryFor(data.prompt, data.reply);
       if (wordCount(prompt) < MIN_PROMPT_WORDS) return EMPTY;
 
-      const [search, seen] = await Promise.all([
+      const [search, seen, lessons] = await Promise.all([
         sdk
           .trigger<{ query: string; limit: number; project?: string }, { results: SearchHit[] }>({
             function_id: "mem::search",
@@ -265,6 +286,7 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
             },
           }),
         injectedInSession(kv, data.sessionId),
+        searchLessons(kv, prompt, data.project, LESSON_LOOKAHEAD),
       ]);
 
       // This Session's own Observations are already in the Agent's context.
@@ -278,7 +300,17 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       const candidates = (await Promise.all(strong.map((r) => candidateFor(kv, r)))).filter(
         ({ ref }) => !seen.has(refKey(ref)),
       );
-      const passed = await gateByRelevance(prompt, candidates, ({ hit }) => hit.observation, GATE_POOL);
+      // A Lesson is injected only on the reranker's word, above its own floor,
+      // and never in the BM25 fallback.
+      const lesson = lessons.find((l) => !seen.has(refKey({ kind: "lesson", id: l.id })));
+      const pool = lesson
+        ? [...candidates.slice(0, GATE_POOL - 1), lessonCandidate(lesson)]
+        : candidates.slice(0, GATE_POOL);
+      const gate = await gateByRelevance(prompt, pool, ({ hit }) => hit.observation);
+      const { lessonMinScore } = getPromptRerankConfig();
+      const passed = gate
+        ? gate.filter(({ item, score }) => !item.lesson || score >= lessonMinScore).map(({ item }) => item)
+        : candidates;
       const passedIds = new Set(passed.map(({ hit }) => hit.observation.id));
       const leftOut = earlier.filter(
         (r): r is NarratedHit => !!r.observation.narrative && !passedIds.has(r.observation.id),
