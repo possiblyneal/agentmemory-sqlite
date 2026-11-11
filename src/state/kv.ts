@@ -168,6 +168,15 @@ export class StateKV {
     }
   }
 
+  // Changes whenever a row of the scope is written or deleted, by any path,
+  // so a cached view of the scope can tell it is stale.
+  async writeGeneration(scope: string): Promise<number> {
+    return this.sdk.trigger<{ scope: string }, number>({
+      function_id: 'state::write-generation',
+      payload: { scope },
+    })
+  }
+
   async list<T = unknown>(scope: string): Promise<T[]> {
     return this.sdk.trigger<{ scope: string }, T[]>({
       function_id: 'state::list',

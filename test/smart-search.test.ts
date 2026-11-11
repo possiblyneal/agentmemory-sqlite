@@ -12,12 +12,13 @@ import type {
   CompactSearchResult,
   Session,
 } from "../src/types.js";
-import { keyedLookups } from "./helpers/mocks.js";
+import { keyedLookups, pagedReads } from "./helpers/mocks.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
     ...keyedLookups(store),
+    ...pagedReads(store),
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
