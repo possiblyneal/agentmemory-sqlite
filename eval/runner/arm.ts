@@ -19,6 +19,13 @@ function killGroup(pid: number, signal: NodeJS.Signals) {
   }
 }
 
+function savePassFinishedClean(checkpointDir: string): boolean {
+  const runJson = join(checkpointDir, "run.json");
+  if (!existsSync(runJson)) return false;
+  const run = JSON.parse(readFileSync(runJson, "utf8")) as { llm?: { failedSummarizeCalls?: number } };
+  return (run.llm?.failedSummarizeCalls ?? 0) === 0;
+}
+
 function run(cwd: string, cmd: string, args: string[]) {
   execFileSync(cmd, args, { cwd, stdio: "inherit" });
 }
@@ -59,6 +66,7 @@ function truncateSavePass(checkpointDir: string, failedIndex: number) {
   const manifestPath = join(checkpointDir, MANIFEST);
   const { keep, remove } = resumePlan(JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[], failedIndex);
   for (const file of remove) rmSync(join(checkpointDir, file), { force: true });
+  rmSync(join(checkpointDir, "run.json"), { force: true });
   if (keep.length > 0) writeFileSync(manifestPath, JSON.stringify(keep, null, 2));
   else rmSync(manifestPath);
   console.log(`failed summarize in Session ${failedIndex + 1}: ${keep.length > 0 ? `resuming from ${keep.at(-1)!.file}` : "no clean checkpoint left, restarting"}`);
@@ -70,13 +78,14 @@ async function main() {
   const tree = join(armDir, "tree");
   const save = join(armDir, "out", "save");
   const probe = join(armDir, "out", "probe");
-  if (existsSync(tree)) {
+  const ready = join(armDir, "ready");
+  if (existsSync(armDir) && !existsSync(ready)) throw new Error(`${armDir} exists but its setup never finished; remove the arm or pick a fresh --label`);
+  if (existsSync(ready)) {
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: tree, encoding: "utf8" }).trim();
     const wanted = execFileSync("git", ["rev-parse", `${ref}^{commit}`], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
     if (head !== wanted) throw new Error(`${tree} is at ${head}, not ${ref}; pick a fresh --label or remove the arm`);
     console.log(`continuing arm ${label} in ${tree}`);
   } else {
-    if (existsSync(armDir)) throw new Error(`${armDir} exists without its tree; pick a fresh --label or remove it`);
     mkdirSync(join(armDir, "out"), { recursive: true });
     run(REPO_ROOT, "git", ["worktree", "add", "-b", `eval-arm/${label}`, tree, ref]);
     run(REPO_ROOT, "git", ["worktree", "lock", "--reason", `eval:arm ${label}`, tree]);
@@ -89,17 +98,18 @@ async function main() {
       const from = join(REPO_ROOT, "tmp", "eval-replay", file);
       if (existsSync(from)) copyFileSync(from, join(tree, "tmp", "eval-replay", file));
     }
+    writeFileSync(ready, `${ref}\n`);
   }
   const treeOut = (name: string) => join(tree, "tmp", "arm-out", name);
 
   const checkpointDir = join(save, "checkpoints");
-  let saved = existsSync(join(checkpointDir, "run.json"));
+  let saved = savePassFinishedClean(checkpointDir);
   for (let attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved; attempt++) {
     const resume = existsSync(join(checkpointDir, MANIFEST)) ? ["--resume"] : [];
     console.log(`save pass attempt ${attempt} ${resume.join(" ")}`);
     const { code, failedIndex } = await replayPass(tree, [...replayArgs, "--decision-key", "--save-checkpoints", ...resume, "--out", treeOut("save")], join(armDir, "save.log"), true);
     if (failedIndex !== undefined) truncateSavePass(checkpointDir, failedIndex);
-    saved = code === 0 && existsSync(join(checkpointDir, "run.json"));
+    saved = code === 0 && savePassFinishedClean(checkpointDir);
   }
   if (!saved) throw new Error(`save pass did not finish in ${MAX_SAVE_ATTEMPTS} attempts; see ${join(armDir, "save.log")}`);
 
