@@ -289,6 +289,11 @@ cwd's project; read and filter tools keep their own wording. `mem::lesson-save` 
 REST and MCP) a `project` that no Session and no stored Lesson uses, and the shim appends the
 current project to that error. `scripts/repair-lesson-projects.ts` moved the Lessons saved under
 guessed names before the guard; it is a dry run unless given `--apply`.
+A Lesson save whose content overlaps a live Lesson of the same project, or a global one, by
+`RESTATEMENT_OVERLAP` (word-set Jaccard ≥ 0.5, `src/functions/recency-cap.ts`) reinforces the
+closest one instead of writing a row, as an exact re-save does: it takes the new wording and
+context and the union of tags, keeps its id, and is audited `lesson_strengthen` with
+`reason: "re-discovery"` and `match: "restated" | "exact"` (#378).
 
 ### Supersession in Recall
 `docs/supersession.md` maps each record kind and surface to its fixture; the rules it describes:

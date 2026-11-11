@@ -1,7 +1,7 @@
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
-import { KV, fingerprintId } from "../state/schema.js";
-import { capBehindNewer } from "./recency-cap.js";
+import { KV, fingerprintId, jaccardOverlap, jaccardText } from "../state/schema.js";
+import { capBehindNewer, RESTATEMENT_OVERLAP } from "./recency-cap.js";
 import type { Lesson, Session } from "../types.js";
 import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
@@ -86,6 +86,29 @@ export function unknownProjectError(project: string): string {
   );
 }
 
+// #378: an Agent re-saving a Lesson in new words has re-discovered it, so the
+// save reinforces the closest live restatement in its project or the global ones.
+async function findNearTwin(
+  kv: StateKV,
+  content: string,
+  project: string | undefined,
+): Promise<Lesson | undefined> {
+  await ensureLessonIndex(kv);
+  const text = jaccardText(content);
+  let best: Lesson | undefined;
+  let bestOverlap = RESTATEMENT_OVERLAP;
+  for (const lesson of lessonRecords.values()) {
+    const lessonProject = lesson.project ?? undefined;
+    if (lesson.deleted || (lessonProject !== undefined && lessonProject !== project)) continue;
+    const overlap = jaccardOverlap(text, jaccardText(lesson.content));
+    if (overlap > bestOverlap || (overlap === bestOverlap && !best)) {
+      best = lesson;
+      bestOverlap = overlap;
+    }
+  }
+  return best && { ...best, tags: [...best.tags] };
+}
+
 export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::lesson-save", 
     async (data: {
@@ -105,13 +128,24 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: unknownProjectError(data.project) };
       }
 
-      const fp = fingerprintId("lsn", data.content.trim().toLowerCase());
-      const existing = await kv.get<Lesson>(KV.lessons, fp);
+      const content = data.content.trim();
+      const fp = fingerprintId("lsn", content.toLowerCase());
+      const exact = await kv.get<Lesson>(KV.lessons, fp);
+      const existing =
+        exact && !exact.deleted ? exact : await findNearTwin(kv, content, data.project);
+      // A Lesson keeps the id of its first wording, so an exact id match can
+      // hold a later restatement; either way the save's wording is current.
+      const restated = existing !== undefined && existing.content !== content;
 
-      if (existing && !existing.deleted) {
+      if (existing) {
         reinforceLesson(existing);
         let indexedTextChanged = false;
-        if (data.context && !existing.context) {
+        if (restated) {
+          existing.content = content;
+          if (data.context?.trim()) existing.context = data.context.trim();
+          existing.tags = [...new Set([...existing.tags, ...(data.tags ?? [])])];
+          indexedTextChanged = true;
+        } else if (data.context && !existing.context) {
           existing.context = data.context;
           indexedTextChanged = true;
         }
@@ -124,9 +158,10 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         noteLessonMutation();
 
         try {
-          await recordAudit(kv, "lesson_strengthen", "mem::lesson-save", [
-            existing.id,
-          ]);
+          await recordAudit(kv, "lesson_strengthen", "mem::lesson-save", [existing.id], {
+            reason: "re-discovery",
+            match: restated ? "restated" : "exact",
+          });
         } catch {}
 
         return {
@@ -146,7 +181,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const now = new Date().toISOString();
       const lesson: Lesson = {
         id: fp,
-        content: data.content.trim(),
+        content,
         context: data.context?.trim() || "",
         confidence,
         reinforcements: 0,

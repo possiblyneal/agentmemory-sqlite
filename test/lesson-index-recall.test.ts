@@ -127,7 +127,7 @@ describe("lesson recall through the lesson index", () => {
     expect(res.lessons.map((l) => l.id)).not.toContain(saved.lesson.id);
   });
 
-  it("a save landing while the index build is in flight is not lost", async () => {
+  it("a save issued while the index build is in flight is not lost", async () => {
     const { sdk, kv } = await setup();
     await kv.set("mem:lessons", "lsn_early", {
       id: "lsn_early",
@@ -149,14 +149,15 @@ describe("lesson recall through the lesson index", () => {
     });
     await new Promise((r) => setTimeout(r, 0));
 
-    const saved = (await sdk.trigger("mem::lesson-save", {
+    const pendingSave = sdk.trigger("mem::lesson-save", {
       content: "cache invalidation generation counters beat timestamps",
       confidence: 0.9,
-    })) as { success: boolean; lesson: { id: string } };
-    expect(saved.success).toBe(true);
+    }) as Promise<{ success: boolean; lesson: { id: string } }>;
+    await new Promise((r) => setTimeout(r, 0));
 
     release();
-    await pendingRecall;
+    const [saved] = await Promise.all([pendingSave, pendingRecall]);
+    expect(saved.success).toBe(true);
 
     const res = (await sdk.trigger("mem::lesson-recall", {
       query: "cache invalidation generation",
