@@ -53,6 +53,19 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
   return lessonIndex ?? ensureLessonIndex(kv);
 }
 
+// Live Lessons of the project, and global ones, by BM25 relevance, each
+// capped behind a newer near-twin as Lesson recall does.
+export async function searchLessons(kv: StateKV, query: string, project: string | undefined, limit: number): Promise<Lesson[]> {
+  const idx = await ensureLessonIndex(kv);
+  const scored = idx
+    .search(query, Math.max(limit * 10, 100))
+    .map((h) => ({ lesson: lessonRecords.get(h.obsId), score: h.score }))
+    .filter((s): s is { lesson: Lesson; score: number } => !!s.lesson && !s.lesson.deleted && (!project || !s.lesson.project || s.lesson.project === project))
+    .slice(0, limit);
+  capBehindNewer(scored, (s) => s.lesson.content, (s) => lastActiveAt(s.lesson));
+  return scored.sort((a, b) => b.score - a.score).map((s) => s.lesson);
+}
+
 export function lastActiveAt(lesson: Lesson): number {
   return new Date(lesson.lastReinforcedAt ?? lesson.createdAt).getTime();
 }

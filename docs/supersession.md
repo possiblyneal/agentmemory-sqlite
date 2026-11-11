@@ -14,7 +14,7 @@ Surfaces: **search** is `mem::smart-search` (also what `memory_smart_search` ret
 |---|---|---|---|
 | Memory | stale hidden for a near-restatement (T1); stale hidden when `mem::evolve` replaced it (T5); stale demoted when a contradiction shares at least two terms (T3) | not reachable (T7) | stale hidden for a near-restatement (T2); stale hidden when `mem::evolve` replaced it (T6); stale demoted when a contradiction shares at least two terms, admitted from below the relevance floor (T4) |
 | Semantic Fact | unkeyed: stale capped behind the newer fact (T8); keyed: stale hidden (T8k) | unkeyed: stale demoted by the recency factor (T9); keyed: stale hidden (T9k) | not reachable (T10) |
-| Lesson | stale hidden: a near-twin re-save takes its place (T11) | stale hidden: a near-twin re-save takes its place (T12, T12r); a pair stored before that is capped behind the newer Lesson (T12p) | not reachable (T10) |
+| Lesson | stale hidden: a near-twin re-save takes its place (T11) | stale hidden: a near-twin re-save takes its place (T12, T12r); a pair stored before that is capped behind the newer Lesson (T12p) | stale capped behind the newer Lesson before the one Lesson is chosen (T10l) |
 | Insight | stale demoted when it shares the newer one's title (T13) | stale demoted, newer Insight first (T14) | not reachable (T10) |
 | Session Summary decision | not reachable (T15) | stale demoted when summaries were written in work order (T17); newest work first even when summarized earlier (T18) | stale demoted, newest Session first (T16); stale demoted behind a newer Memory (T19) |
 | Observation | stale demoted by the recency factor (T20, T21); stale capped below the newer near-twin of its own project (T21b, T21c) | stale demoted, newer Session first (T24) | stale capped below the newer near-twin (T22); stale demoted when equal (T23) |
@@ -37,7 +37,8 @@ one is first. "Ranked first" means the stale record leads, or is the only one re
 | T9 | Semantic Fact: session start lists the newer Semantic Fact ahead of the contradicted one | passes |
 | T8k | Semantic Fact (keyed, `test/semantic-supersession.test.ts`): consolidation closes the live fact on a new object under the same key, and `recallSemanticFacts` (smart-search) leaves it out; a different subject, relation or project does not supersede; an unkeyed fact is untouched | passes |
 | T9k | Semantic Fact (keyed, same file): session start reads the same `recallSemanticFacts`, so it shares T8k's filter | passes |
-| T10 | prompt-submit does not reach Semantic Facts, Lessons or Insights: prompt-submit gives none of them | passes |
+| T10 | prompt-submit does not reach Semantic Facts or Insights, nor a Lesson with the Injection Gate off: prompt-submit gives none of them | passes |
+| T10l | Lesson (`test/prompt-context-lessons.test.ts`): prompt-submit reranks the newer of two near-twin Lessons, even when the older matches the prompt better | passes |
 | T11 | Lesson: smart-search returns the newer Lesson ahead of the contradicted one | passes |
 | T12 | Lesson: session start lists the newer wording in place of the contradicted one | passes |
 | T12r | Lesson saved just after a more-reinforced one: session start lists the newer wording in place of the contradicted one | passes |
@@ -126,7 +127,8 @@ an explicit save reinforces one. Session start ranks by project-weighted
 confidence over the same boost, from `lastReinforcedAt` else `createdAt`, and applies the same cap
 to the project's Lessons before taking the top 10, so a stale Lesson is capped behind a newer near-twin
 however often it was reinforced (T12p). Since #378 the cap matters only for pairs stored before
-that, or across a scope the save does not merge; a stale Lesson reinforced after it still leads.
+that, or across a scope the save does not merge; a stale Lesson reinforced after it still leads. Prompt submit takes its one Lesson candidate by BM25
+relevance under the same cap (`searchLessons()`), so a stale near-twin cannot take the place (T10l).
 
 **Insights.** Written by `mem::reflect` from concept clusters. The reflect prompt lists the cluster's
 existing Insights, and the model may answer one as `reinforces="<id>"`, which reinforces that Insight

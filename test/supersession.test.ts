@@ -293,7 +293,7 @@ describe("supersession: Semantic Fact", () => {
   });
 });
 
-describe("supersession: prompt-submit does not reach Semantic Facts, Lessons or Insights", () => {
+describe("supersession: prompt-submit does not reach Semantic Facts or Insights, nor a Lesson with the Injection Gate off", () => {
   it("prompt-submit gives none of them, so a contradicted one cannot appear", async () => {
     await kv.set(KV.semantic, "sem_stale", semanticFact("sem_stale", `The team agreed to ${STALE}`, 0.8, OLD));
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });

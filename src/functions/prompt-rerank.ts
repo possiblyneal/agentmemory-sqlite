@@ -107,7 +107,7 @@ function recordFailure(reason: FailureReason, url: string): void {
 export async function relevantOrder(
   prompt: string,
   documents: string[],
-): Promise<number[] | null> {
+): Promise<Array<{ index: number; score: number }> | null> {
   const config = getPromptRerankConfig();
   if (!config.enabled) return null;
 
@@ -139,22 +139,21 @@ export async function relevantOrder(
     return scores
       .map((score, index) => ({ score, index }))
       .filter(({ score }) => score >= config.minScore)
-      .sort((a, b) => b.score - a.score)
-      .map(({ index }) => index);
+      .sort((a, b) => b.score - a.score);
   } catch (err) {
     recordFailure(failureReason(err), config.url);
     return null;
   }
 }
 
+// Each item the reranker scored at or above the gate floor, best first;
+// null when the gate is off or failed, so the caller keeps its BM25 selection.
 export async function gateByRelevance<T>(
   query: string,
   items: T[],
   observationOf: (item: T) => Parameters<typeof rerankDocument>[0],
-  pool = items.length,
-): Promise<T[]> {
-  if (items.length === 0) return items;
-  const pooled = items.slice(0, pool);
-  const order = await relevantOrder(query, pooled.map((item) => rerankDocument(observationOf(item))));
-  return order ? order.map((index) => pooled[index]) : items;
+): Promise<Array<{ item: T; score: number }> | null> {
+  if (items.length === 0) return [];
+  const order = await relevantOrder(query, items.map((item) => rerankDocument(observationOf(item))));
+  return order && order.map(({ index, score }) => ({ item: items[index], score }));
 }
