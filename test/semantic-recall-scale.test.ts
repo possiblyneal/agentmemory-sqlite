@@ -74,4 +74,16 @@ describe("recallSemanticFacts term matching", () => {
     const kv = await store([fact("sem_cfg", "tsconfig.json sets strict mode")]);
     expect(await texts(kv, "(tsconfig.json)?")).toEqual(["tsconfig.json sets strict mode"]);
   });
+
+  it("matches a term with punctuation inside only where the whole term starts a word", async () => {
+    const kv = await store([
+      fact("sem_cfg", "tsconfig.json sets strict mode"),
+      fact("sem_base", "tsconfig.base extends nothing"),
+      fact("sem_inner", "the old.tsconfig.json was removed"),
+    ]);
+    expect(await texts(kv, "tsconfig.json")).toEqual([
+      "tsconfig.json sets strict mode",
+      "the old.tsconfig.json was removed",
+    ]);
+  });
 });

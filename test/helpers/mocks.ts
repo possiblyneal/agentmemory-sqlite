@@ -25,6 +25,25 @@ export function keyedLookups(store: Store) {
   };
 }
 
+// The StateKV reads that page through a scope. The write generation changes on
+// every call, so a cached view of a scope is always rebuilt and never stale.
+export function pagedReads(store: Store) {
+  let generation = 0;
+  return {
+    listPage: async <T>(
+      scope: string,
+      after: string | undefined,
+      limit: number,
+    ): Promise<Array<{ key: string; value: T }>> =>
+      [...(store.get(scope)?.entries() ?? [])]
+        .filter(([key]) => key > (after ?? ""))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .slice(0, limit)
+        .map(([key, value]) => ({ key, value: value as T })),
+    writeGeneration: async (_scope: string): Promise<number> => ++generation,
+  };
+}
+
 export function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
   return {
@@ -55,16 +74,7 @@ export function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
-    listPage: async <T>(
-      scope: string,
-      after: string | undefined,
-      limit: number,
-    ): Promise<Array<{ key: string; value: T }>> =>
-      [...(store.get(scope)?.entries() ?? [])]
-        .filter(([key]) => key > (after ?? ""))
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .slice(0, limit)
-        .map(([key, value]) => ({ key, value: value as T })),
+    ...pagedReads(store),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];

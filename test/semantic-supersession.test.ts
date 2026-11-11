@@ -14,6 +14,7 @@ import { registerConsolidationPipelineFunction } from "../src/functions/consolid
 import { recallSemanticFacts } from "../src/functions/semantic-recall.js";
 import { KV } from "../src/state/schema.js";
 import type { SessionSummary, SemanticMemory, AuditEntry } from "../src/types.js";
+import { pagedReads } from "./helpers/mocks.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -28,6 +29,7 @@ function mockKV() {
     delete: async (s: string, k: string) => void scope(s).delete(k),
     deleteManyIfUnchanged: async () => [] as string[],
     list: async <T>(s: string) => Array.from(scope(s).values()) as T[],
+    ...pagedReads(store),
   };
 }
 

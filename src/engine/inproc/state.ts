@@ -165,6 +165,9 @@ export class SqliteState {
   // The vector store uses it to invalidate imported (`legacy`) rows whose
   // content was just rewritten, in the same transaction as the rewrite.
   private writeHook: ((scope: string, key: string) => void) | null = null;
+  // Rows written or deleted per scope since this store opened, so a reader's
+  // in-memory view of a scope can tell it is stale.
+  private writeCounts = new Map<string, number>();
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
@@ -184,6 +187,14 @@ export class SqliteState {
 
   onWrite(hook: (scope: string, key: string) => void): void {
     this.writeHook = hook;
+  }
+
+  writeGeneration(scope: string): number {
+    return this.writeCounts.get(scope) ?? 0;
+  }
+
+  private noteWrite(scope: string): void {
+    this.writeCounts.set(scope, this.writeGeneration(scope) + 1);
   }
 
   // Called by the shim for each `type:"state"` trigger. A trigger without a
@@ -409,6 +420,7 @@ export class SqliteState {
            value = excluded.value, updated_at = excluded.updated_at`,
       )
       .run(scope, key, json, Date.now());
+    this.noteWrite(scope);
     this.writeHook?.(scope, key);
     return json;
   }
@@ -497,6 +509,7 @@ export class SqliteState {
       const del = this.db.prepare("DELETE FROM kv WHERE scope = ? AND key = ?");
       let removed = 0;
       for (const key of keys) removed += Number(del.run(scope, key).changes);
+      this.noteWrite(scope);
       return removed;
     });
   }
@@ -553,6 +566,7 @@ export class SqliteState {
       this.db
         .prepare("DELETE FROM kv WHERE scope = ? AND key = ?")
         .run(scope, key);
+      this.noteWrite(scope);
       return { found: prev.found, old_value: prev.value };
     });
     // iii only fires the trigger when a row was actually removed.
@@ -596,7 +610,7 @@ async function cooperate<T>(result: T): Promise<T> {
 
 // The function handlers, in the exact shapes `src/state/kv.ts` sends and the
 // engine returns (`state::set-many`, `state::set-many-if-unchanged` and `state::delete-many-if-unchanged`,
-// `state::list-timestamps` and `state::delete-many` are inproc-only; kv.ts never sends them to iii). Registered on the shim by `sdk.ts`.
+// `state::list-timestamps`, `state::delete-many` and `state::write-generation` are inproc-only; kv.ts never sends them to iii). Registered on the shim by `sdk.ts`.
 export function stateFunctions(
   store: SqliteState,
 ): Record<string, (payload: any) => Promise<unknown>> {
@@ -622,5 +636,6 @@ export function stateFunctions(
     "state::list-timestamps": async (p) =>
       cooperate(store.listTimestamps(p.scope, p.afterSeq, p.limit)),
     "state::delete-many": async (p) => cooperate(store.deleteMany(p.scope, p.keys ?? [])),
+    "state::write-generation": async (p) => store.writeGeneration(p.scope),
   };
 }
