@@ -282,6 +282,14 @@ recency with the other blocks. A Semantic Fact whose text equals a rule actually
 dropped. An exact-repeat save with a valid `type` (`mem::remember`) sets the existing Memory's
 type, so re-saving a Memory as a rule pins it.
 
+### Write tools and `project`
+Write tools (`memory_save`, `memory_lesson_save`, the slot writes) describe `project` with
+`PROJECT_WRITE_DESCRIPTION` (`src/mcp/tools-registry.ts`): leave it out, so the shim fills the
+cwd's project; read and filter tools keep their own wording. `mem::lesson-save` refuses (400 over
+REST and MCP) a `project` that no Session and no stored Lesson uses, and the shim appends the
+current project to that error. `scripts/repair-lesson-projects.ts` moved the Lessons saved under
+guessed names before the guard; it is a dry run unless given `--apply`.
+
 ### Supersession in Recall
 `docs/supersession.md` maps each record kind and surface to its fixture; the rules it describes:
 - **Near-twin cap** — `capBehindNewer` (`src/functions/recency-cap.ts`): of two hits whose text

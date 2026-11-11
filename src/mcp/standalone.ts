@@ -461,6 +461,27 @@ function serverAnswered(err: unknown): boolean {
 
 let cwdProject: string | undefined;
 
+// #377: the daemon refuses a Lesson under a project nothing uses, but only this
+// shim knows the cwd's project, so it names the project a retry without one gets.
+function withCurrentProject(
+  err: unknown,
+  toolName: string,
+  args: Record<string, unknown>,
+  current: string,
+): unknown {
+  if (
+    toolName !== "memory_lesson_save" ||
+    !(err instanceof Error) ||
+    (err as { status?: unknown }).status !== 400 ||
+    !err.message.includes("Unknown project") ||
+    args["project"] === current
+  ) {
+    return err;
+  }
+  err.message += ` The current project is "${current}".`;
+  return err;
+}
+
 export async function handleToolCall(
   toolName: string,
   rawArgs: Record<string, unknown>,
@@ -487,7 +508,7 @@ export async function handleToolCall(
           `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`,
         );
         if (!serverAnswered(err)) invalidateHandle();
-        throw err;
+        throw withCurrentProject(err, toolName, args, cwdProject);
       }
     }
     throw new Error(
