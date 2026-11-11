@@ -91,7 +91,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 1. `src/state/schema.ts` — add to the KV object
 2. `src/types.ts` — add the corresponding interface
 
-**When adding a field to `SemanticMemory`:** keep the XML shape in `SEMANTIC_MERGE_SYSTEM` (`src/prompts/consolidation.ts`) and the parser in `consolidateSemantic` (`src/functions/consolidation-pipeline.ts`) in step, and make `recallSemanticFacts` (`src/functions/semantic-recall.ts`) honour it. A keyed fact (`subject`, `relation`, `object`, `project`) closes a live same-key fact of the same project whose object differs (`isLatest: false`, `supersededBy`); recall and Reflect skip closed facts.
+**When adding a field to `SemanticMemory`:** keep the XML shape in `SEMANTIC_MERGE_SYSTEM` (`src/prompts/consolidation.ts`) and the parser in `consolidateSemantic` (`src/functions/consolidation-pipeline.ts`) in step, and make `recallSemanticFacts` (`src/functions/semantic-recall.ts`) honour it. A keyed fact (`subject`, `relation`, `object`, `project`) closes a live same-key fact of the same project whose object differs (`isLatest: false`, `supersededBy`); recall and Reflect skip closed facts. Recall matches a query term (stopwords dropped, edge punctuation stripped) only at the start of a word in the fact, returns nothing for a query of stopwords alone, and runs the near-twin cap over the top `CAP_POOL` (50) project facts by score, never the whole store (#373).
 
 **When adding a field that Decay reads or writes (strength, lastAccessedAt, lastDecayedAt):**
 1. `src/types.ts` — `SemanticMemory` and `ProceduralMemory`

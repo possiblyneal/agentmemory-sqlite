@@ -109,8 +109,10 @@ same cap as Lessons, shared as `capBehindNewer` in `src/functions/recency-cap.ts
 text overlaps another hit's by Jaccard 0.5 or more and was first stated (`createdAt`) earlier is
 capped just below that newer hit, however recently consolidation reinforced it (T8); at session
 start, with no query, confidence is also divided by 1 + 0.01 x days since `updatedAt` (T9). The
-cap runs after the project filter, so another project's fact never demotes this one's. There is
-no backfill.
+cap runs after the project filter, so another project's fact never demotes this one's. It runs
+over the 50 best-scoring facts of the project (`CAP_POOL`, at least the limit), since it compares
+every pair: a stale fact whose newer twin scores below that pool is not capped, and both then
+compete on score alone. There is no backfill.
 
 **Lessons.** Saved under a fingerprint of the lowercased content, so only an identical lesson
 strengthens one. A contradicting lesson is a new row. Recall ranks by `confidence x relevance x
