@@ -73,7 +73,7 @@ export function reinforceLesson(lesson: Lesson): void {
 async function isKnownProject(kv: StateKV, project: string): Promise<boolean> {
   await ensureLessonIndex(kv);
   for (const lesson of lessonRecords.values()) {
-    if (lesson.project === project) return true;
+    if (!lesson.deleted && lesson.project === project) return true;
   }
   const sessions = await kv.list<Session>(KV.sessions);
   return sessions.some((s) => s.project === project);

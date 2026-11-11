@@ -128,6 +128,22 @@ describe("Lessons", () => {
       expect(result.success).toBe(true);
     });
 
+    it("rejects a project only a deleted Lesson uses", async () => {
+      await kv.set("mem:lessons", "lsn_gone", {
+        id: "lsn_gone", content: "gone", context: "", confidence: 0.5, reinforcements: 0,
+        source: "manual", sourceIds: [], project: "forgotten", tags: [], deleted: true,
+        createdAt: "2026-11-01T00:00:00.000Z", updatedAt: "2026-11-01T00:00:00.000Z", decayRate: 0.05,
+      });
+      resetLessonIndex();
+
+      const result = (await sdk.trigger("mem::lesson-save", {
+        content: "Lesson under a forgotten project",
+        project: "forgotten",
+      })) as { success: boolean };
+
+      expect(result.success).toBe(false);
+    });
+
     it("saves a Lesson with no project without checking one", async () => {
       const result = (await sdk.trigger("mem::lesson-save", {
         content: "Global lesson",
