@@ -75,7 +75,8 @@ _Avoid_: session digest, recap
 
 **Lesson**:
 A short, reusable rule learned from experience — a correction or practice worth applying in
-later Sessions. Its confidence rises when reinforced and decays when unused.
+later Sessions. Its confidence rises when reinforced and decays when unused, down to a floor;
+Decay never deletes one.
 _Avoid_: rule, tip, learning
 
 **Semantic Fact**:
