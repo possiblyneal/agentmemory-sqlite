@@ -104,6 +104,7 @@ async function main() {
 
   const checkpointDir = join(save, "checkpoints");
   let saved = savePassFinishedClean(checkpointDir);
+  if (!saved) rmSync(join(checkpointDir, "run.json"), { force: true });
   for (let attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved; attempt++) {
     const resume = existsSync(join(checkpointDir, MANIFEST)) ? ["--resume"] : [];
     console.log(`save pass attempt ${attempt} ${resume.join(" ")}`);
