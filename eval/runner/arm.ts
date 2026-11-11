@@ -11,6 +11,14 @@ const MAX_SAVE_ATTEMPTS = 40;
 const MAX_PROBE_ATTEMPTS = 6;
 const KEY_FILES = ["decision-key.json", "decision-verdicts.ndjson"];
 
+function killGroup(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(-pid, signal);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
+  }
+}
+
 function run(cwd: string, cmd: string, args: string[]) {
   execFileSync(cmd, args, { cwd, stdio: "inherit" });
 }
@@ -20,12 +28,13 @@ function replayPass(tree: string, args: string[], log: string, watch: boolean): 
   return new Promise((done) => {
     const child = spawn("npm", ["run", "eval:replay", "--", ...args], { cwd: tree, detached: true });
     const stop = () => {
-      process.kill(-child.pid!, "SIGTERM");
+      killGroup(child.pid!, "SIGTERM");
       process.exit(130);
     };
     process.once("SIGINT", stop).once("SIGTERM", stop);
     const out = createWriteStream(log, { flags: "a" });
     let failedIndex: number | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
     child.stderr.pipe(out, { end: false });
     createInterface({ input: child.stdout }).on("line", (line) => {
       console.log(line);
@@ -33,11 +42,12 @@ function replayPass(tree: string, args: string[], log: string, watch: boolean): 
       const idx = watch && failedIndex === undefined ? failedSessionIndex(line) : undefined;
       if (idx !== undefined) {
         failedIndex = idx;
-        process.kill(-child.pid!, "SIGTERM");
-        setTimeout(() => process.kill(-child.pid!, "SIGKILL"), 10_000).unref();
+        killGroup(child.pid!, "SIGTERM");
+        killTimer = setTimeout(() => killGroup(child.pid!, "SIGKILL"), 10_000).unref();
       }
     });
     child.on("close", (code) => {
+      clearTimeout(killTimer);
       process.off("SIGINT", stop).off("SIGTERM", stop);
       out.end();
       done({ code, failedIndex });
@@ -60,25 +70,30 @@ async function main() {
   const tree = join(armDir, "tree");
   const save = join(armDir, "out", "save");
   const probe = join(armDir, "out", "probe");
-  if (existsSync(armDir)) throw new Error(`${armDir} exists; pick a fresh --label or remove it`);
-  mkdirSync(join(armDir, "out"), { recursive: true });
-
-  run(REPO_ROOT, "git", ["worktree", "add", "-b", `eval-arm/${label}`, tree, ref]);
-  run(REPO_ROOT, "git", ["worktree", "lock", "--reason", `eval:arm ${label}`, tree]);
-  run(tree, "npm", ["ci"]);
-  run(tree, "npm", ["run", "build"]);
-
-  // The runner only accepts --out under its own tmp/; link that to the arm's out/.
-  mkdirSync(join(tree, "tmp", "eval-replay"), { recursive: true });
-  symlinkSync(join(armDir, "out"), join(tree, "tmp", "arm-out"));
-  for (const file of KEY_FILES) {
-    const from = join(REPO_ROOT, "tmp", "eval-replay", file);
-    if (existsSync(from)) copyFileSync(from, join(tree, "tmp", "eval-replay", file));
+  if (existsSync(tree)) {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: tree, encoding: "utf8" }).trim();
+    const wanted = execFileSync("git", ["rev-parse", `${ref}^{commit}`], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+    if (head !== wanted) throw new Error(`${tree} is at ${head}, not ${ref}; pick a fresh --label or remove the arm`);
+    console.log(`continuing arm ${label} in ${tree}`);
+  } else {
+    if (existsSync(armDir)) throw new Error(`${armDir} exists without its tree; pick a fresh --label or remove it`);
+    mkdirSync(join(armDir, "out"), { recursive: true });
+    run(REPO_ROOT, "git", ["worktree", "add", "-b", `eval-arm/${label}`, tree, ref]);
+    run(REPO_ROOT, "git", ["worktree", "lock", "--reason", `eval:arm ${label}`, tree]);
+    run(tree, "npm", ["ci"]);
+    run(tree, "npm", ["run", "build"]);
+    // The runner only accepts --out under its own tmp/; link that to the arm's out/.
+    mkdirSync(join(tree, "tmp", "eval-replay"), { recursive: true });
+    symlinkSync(join(armDir, "out"), join(tree, "tmp", "arm-out"));
+    for (const file of KEY_FILES) {
+      const from = join(REPO_ROOT, "tmp", "eval-replay", file);
+      if (existsSync(from)) copyFileSync(from, join(tree, "tmp", "eval-replay", file));
+    }
   }
   const treeOut = (name: string) => join(tree, "tmp", "arm-out", name);
 
   const checkpointDir = join(save, "checkpoints");
-  let saved = false;
+  let saved = existsSync(join(checkpointDir, "run.json"));
   for (let attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved; attempt++) {
     const resume = existsSync(join(checkpointDir, MANIFEST)) ? ["--resume"] : [];
     console.log(`save pass attempt ${attempt} ${resume.join(" ")}`);
