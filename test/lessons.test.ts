@@ -79,10 +79,79 @@ describe("Lessons", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let kv: ReturnType<typeof mockKV>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sdk = mockSdk();
     kv = mockKV();
+    resetLessonIndex();
     registerLessonsFunctions(sdk as never, kv as never);
+    for (const project of ["/test", "/app", "/other"]) {
+      await kv.set("mem:sessions", `ses${project}`, { id: `ses${project}`, project });
+    }
+  });
+
+  describe("mem::lesson-save project guard (#377)", () => {
+    it("rejects a project no Session or Lesson uses, and stores nothing", async () => {
+      const result = (await sdk.trigger("mem::lesson-save", {
+        content: "Guessed project lesson",
+        project: "guessed-name",
+      })) as { success: boolean; error: string };
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unknown project "guessed-name"');
+      expect(result.error).toContain("Leave project out");
+      expect(await kv.list("mem:lessons")).toHaveLength(0);
+    });
+
+    it("accepts a project a Session uses", async () => {
+      const result = (await sdk.trigger("mem::lesson-save", {
+        content: "Session project lesson",
+        project: "/app",
+      })) as { success: boolean; lesson: Lesson };
+
+      expect(result.success).toBe(true);
+      expect(result.lesson.project).toBe("/app");
+    });
+
+    it("accepts a project only a stored Lesson uses", async () => {
+      await kv.set("mem:lessons", "lsn_old", {
+        id: "lsn_old", content: "old", context: "", confidence: 0.5, reinforcements: 0,
+        source: "manual", sourceIds: [], project: "imported", tags: [],
+        createdAt: "2026-11-01T00:00:00.000Z", updatedAt: "2026-11-01T00:00:00.000Z", decayRate: 0.05,
+      });
+      resetLessonIndex();
+
+      const result = (await sdk.trigger("mem::lesson-save", {
+        content: "Second imported lesson",
+        project: "imported",
+      })) as { success: boolean };
+
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects a project only a deleted Lesson uses", async () => {
+      await kv.set("mem:lessons", "lsn_gone", {
+        id: "lsn_gone", content: "gone", context: "", confidence: 0.5, reinforcements: 0,
+        source: "manual", sourceIds: [], project: "forgotten", tags: [], deleted: true,
+        createdAt: "2026-11-01T00:00:00.000Z", updatedAt: "2026-11-01T00:00:00.000Z", decayRate: 0.05,
+      });
+      resetLessonIndex();
+
+      const result = (await sdk.trigger("mem::lesson-save", {
+        content: "Lesson under a forgotten project",
+        project: "forgotten",
+      })) as { success: boolean };
+
+      expect(result.success).toBe(false);
+    });
+
+    it("saves a Lesson with no project without checking one", async () => {
+      const result = (await sdk.trigger("mem::lesson-save", {
+        content: "Global lesson",
+      })) as { success: boolean; lesson: Lesson };
+
+      expect(result.success).toBe(true);
+      expect(result.lesson.project).toBeUndefined();
+    });
   });
 
   describe("mem::lesson-save", () => {

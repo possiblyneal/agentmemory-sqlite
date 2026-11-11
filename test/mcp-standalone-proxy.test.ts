@@ -697,4 +697,28 @@ describe("agentmemory mcp — current project default", () => {
     await handleToolCall("memory_recall", { query: "x", project: "other" });
     expect(bodies.map((b) => b["project"])).toEqual(["cwd-project", "other"]);
   });
+
+  it("saves a Lesson that names no project under the cwd project (#377)", async () => {
+    const bodies: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      bodies.push(JSON.parse((init?.body as string) || "{}"));
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "{}" }] }), { status: 200 });
+    });
+    await handleToolCall("memory_lesson_save", { content: "pin lockfiles" });
+    expect(bodies[0].arguments["project"]).toBe("cwd-project");
+  });
+
+  it("names the cwd project when the daemon refuses a guessed Lesson project (#377)", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      return new Response(
+        JSON.stringify({ error: 'Unknown project "guessed": no Session or Lesson uses it.' }),
+        { status: 400 },
+      );
+    });
+    await expect(
+      handleToolCall("memory_lesson_save", { content: "pin lockfiles", project: "guessed" }),
+    ).rejects.toThrow('The current project is "cwd-project".');
+  });
 });

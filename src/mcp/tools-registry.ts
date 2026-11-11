@@ -16,6 +16,13 @@ export const PROJECT_OMITTED_CLAUSE = "Leave it out to use the current project; 
 
 export const PROJECT_FILTER_DESCRIPTION = `${PROJECT_NAME_DESCRIPTION} ${PROJECT_OMITTED_CLAUSE}`;
 
+// #377: told to supply the checkout's basename, Agents saved under names no
+// Session uses (a missing -<6 hex> suffix, an Orca workspace name).
+export const PROJECT_WRITE_DESCRIPTION =
+  "Leave it out: the current project is used. Name a project only to write into a different " +
+  "project whose exact name you have seen on a stored record; never derive one from a " +
+  "directory name. Not a filesystem path.";
+
 // rohitg00/agentmemory#1108: a project slot belongs to one project.
 const SLOT_PROJECT_SENTENCE =
   "Leave project out to use the current project's slots; a label the project lacks falls back to the global slot.";
@@ -102,7 +109,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "string",
           description: "Comma-separated relevant file paths",
         },
-        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        project: { type: "string", description: PROJECT_WRITE_DESCRIPTION },
         global: {
           type: "boolean",
           description:
@@ -621,7 +628,7 @@ export const V070_TOOLS: McpToolDef[] = [
           type: "number",
           description: "Initial confidence 0.0-1.0 (default 0.5)",
         },
-        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        project: { type: "string", description: PROJECT_WRITE_DESCRIPTION },
         tags: { type: "string", description: "Comma-separated tags" },
       },
       required: ["content"],
@@ -748,7 +755,7 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
         description: { type: "string", description: "What this slot is for" },
         pinned: { type: "string", description: "'false' to exclude from context injection; default true" },
         scope: { type: "string", description: "'project' (default) or 'global' (shared across projects)" },
-        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        project: { type: "string", description: PROJECT_WRITE_DESCRIPTION },
       },
       required: ["label"],
     },
@@ -762,7 +769,7 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
       properties: {
         label: { type: "string", description: "Slot label" },
         text: { type: "string", description: "Text to append" },
-        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        project: { type: "string", description: PROJECT_WRITE_DESCRIPTION },
       },
       required: ["label", "text"],
     },
@@ -776,7 +783,7 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
         label: { type: "string", description: "Slot label" },
         content: { type: "string", description: "New full content" },
         expectedVersion: { type: "number", description: "Slot version you read; replace fails with a version conflict if the slot has changed since" },
-        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        project: { type: "string", description: PROJECT_WRITE_DESCRIPTION },
       },
       required: ["label", "content"],
     },
@@ -788,7 +795,7 @@ export const V010_SLOTS_TOOLS: McpToolDef[] = [
       type: "object",
       properties: {
         label: { type: "string", description: "Slot label" },
-        project: { type: "string", description: PROJECT_NAME_DESCRIPTION },
+        project: { type: "string", description: PROJECT_WRITE_DESCRIPTION },
       },
       required: ["label"],
     },

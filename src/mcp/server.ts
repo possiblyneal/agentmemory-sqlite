@@ -942,10 +942,13 @@ export function registerMcpEndpoints(
               content: args.content,
               context: args.context || "",
               confidence: args.confidence,
-              project: args.project,
+              project: typeof args.project === "string" && args.project.trim() ? args.project.trim() : undefined,
               tags: lessonTags,
               source: "manual",
-            } });
+            } }) as { success?: boolean; error?: string };
+            if (lessonSaveResult?.success === false) {
+              return { status_code: 400, body: { error: lessonSaveResult.error } };
+            }
             return { status_code: 200, body: { content: [{ type: "text", text: JSON.stringify(lessonSaveResult, null, 2) }] } };
           }
 

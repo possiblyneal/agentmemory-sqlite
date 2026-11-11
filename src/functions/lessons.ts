@@ -2,7 +2,7 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, fingerprintId } from "../state/schema.js";
 import { capBehindNewer } from "./recency-cap.js";
-import type { Lesson } from "../types.js";
+import type { Lesson, Session } from "../types.js";
 import { SearchIndex } from "../state/search-index.js";
 import { lessonToObservation } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
@@ -68,6 +68,24 @@ export function reinforceLesson(lesson: Lesson): void {
   lesson.updatedAt = now;
 }
 
+// #377: a project the Agent names is a guess, and a guessed name files the
+// Lesson where no Session's start ever shows it.
+async function isKnownProject(kv: StateKV, project: string): Promise<boolean> {
+  await ensureLessonIndex(kv);
+  for (const lesson of lessonRecords.values()) {
+    if (!lesson.deleted && lesson.project === project) return true;
+  }
+  const sessions = await kv.list<Session>(KV.sessions);
+  return sessions.some((s) => s.project === project);
+}
+
+export function unknownProjectError(project: string): string {
+  return (
+    `Unknown project "${project}": no Session or Lesson uses it. ` +
+    "Leave project out to save under the current project."
+  );
+}
+
 export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::lesson-save", 
     async (data: {
@@ -82,6 +100,9 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       data = scrubFields(data, "content", "context");
       if (!data.content?.trim()) {
         return { success: false, error: "content is required" };
+      }
+      if (data.project !== undefined && !(await isKnownProject(kv, data.project))) {
+        return { success: false, error: unknownProjectError(data.project) };
       }
 
       const fp = fingerprintId("lsn", data.content.trim().toLowerCase());

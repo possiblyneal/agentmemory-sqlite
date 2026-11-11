@@ -2993,11 +2993,12 @@ export function registerApiTriggers(
         content: body.content,
         context: body.context || "",
         confidence: typeof body.confidence === "number" ? body.confidence : undefined,
-        project: typeof body.project === "string" ? body.project : undefined,
+        project: typeof body.project === "string" && body.project.trim() ? body.project.trim() : undefined,
         tags,
         source: "manual",
       },
-    })) as { action?: string };
+    })) as { success?: boolean; action?: string; error?: string };
+    if (result?.success === false) return { status_code: 400, body: { error: result.error } };
     const statusCode = result?.action === "created" ? 201 : 200;
     return { status_code: statusCode, body: result };
   });

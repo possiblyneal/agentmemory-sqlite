@@ -9,6 +9,7 @@ import {
   PROJECT_NAME_DESCRIPTION,
   PROJECT_FILTER_DESCRIPTION,
   PROJECT_OMITTED_CLAUSE,
+  PROJECT_WRITE_DESCRIPTION,
 } from "../src/mcp/tools-registry.js";
 import { registerMcpEndpoints } from "../src/mcp/server.js";
 
@@ -25,9 +26,12 @@ const FILTER_TOOLS = [
   "memory_insight_list",
 ];
 
-const SLOT_TOOLS = [
-  "memory_slot_list",
-  "memory_slot_get",
+const SLOT_READ_TOOLS = ["memory_slot_list", "memory_slot_get"];
+
+// #377: write tools tell the Agent to leave project out.
+const WRITE_TOOLS = [
+  "memory_save",
+  "memory_lesson_save",
   "memory_slot_create",
   "memory_slot_append",
   "memory_slot_replace",
@@ -53,12 +57,22 @@ describe("MCP project argument description", () => {
     expect(PROJECT_NAME_DESCRIPTION).toContain("Not a filesystem path");
   });
 
-  it("every project property carries the shared description", () => {
+  it("every read tool's project property carries the shared description", () => {
     const descriptions = projectDescriptions();
-    expect(descriptions.size).toBeGreaterThan(FILTER_TOOLS.length);
+    expect(descriptions.size).toBeGreaterThan(FILTER_TOOLS.length + WRITE_TOOLS.length);
     for (const [tool, description] of descriptions) {
+      if (WRITE_TOOLS.includes(tool)) continue;
       expect(description, tool).toContain(PROJECT_NAME_DESCRIPTION);
     }
+  });
+
+  it("write tools say to leave project out and never to derive it from a directory", () => {
+    const descriptions = projectDescriptions();
+    for (const tool of WRITE_TOOLS) {
+      expect(descriptions.get(tool), tool).toBe(PROJECT_WRITE_DESCRIPTION);
+    }
+    expect(PROJECT_WRITE_DESCRIPTION).toMatch(/^Leave it out/);
+    expect(PROJECT_WRITE_DESCRIPTION).not.toContain("main checkout");
   });
 
   it("filter tools say that leaving project out uses the current project", () => {
@@ -73,9 +87,9 @@ describe("MCP project argument description", () => {
     }
   });
 
-  it("slot tools carry the shared description exactly (rohitg00/agentmemory#1108)", () => {
+  it("slot read tools carry the shared description exactly (rohitg00/agentmemory#1108)", () => {
     const descriptions = projectDescriptions();
-    for (const tool of SLOT_TOOLS) {
+    for (const tool of SLOT_READ_TOOLS) {
       expect(descriptions.get(tool), tool).toBe(PROJECT_NAME_DESCRIPTION);
     }
   });
