@@ -319,11 +319,34 @@ describe("supersession: Lesson", () => {
     expect(lessons[0].content).toContain(FRESH);
   });
 
-  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
-    for (const lesson of await kv.list<Lesson>(KV.lessons)) {
-      const stamp = lesson.content.includes(STALE) ? OLD : NEW;
-      await kv.set(KV.lessons, lesson.id, { ...lesson, createdAt: stamp, updatedAt: stamp, lastReinforcedAt: lesson.reinforcements ? stamp : undefined });
+  it("session start lists the newer wording in place of the contradicted one", async () => {
+    const context = await sessionStart();
+    expect(context).toContain(FRESH);
+    expect(context).not.toContain(STALE);
+  });
+});
+
+describe("supersession: Lesson pair stored before near-twin re-saves merged", () => {
+  beforeEach(async () => {
+    vi.setSystemTime(new Date(OLD));
+    for (let i = 0; i < 3; i++) {
+      await sdk.trigger("mem::lesson-save", { content: `Rule: ${STALE}`, project: PROJECT });
     }
+    const [stale] = await kv.list<Lesson>(KV.lessons);
+    await kv.set(KV.lessons, "lsn_fresh", {
+      ...stale,
+      id: "lsn_fresh",
+      content: `Rule: ${FRESH}`,
+      confidence: 0.5,
+      reinforcements: 0,
+      createdAt: NEW,
+      updatedAt: NEW,
+      lastReinforcedAt: undefined,
+    });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00.000Z"));
+  });
+
+  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
     expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
   });
 });
@@ -337,8 +360,10 @@ describe("supersession: Lesson saved just after a more-reinforced one", () => {
     await sdk.trigger("mem::lesson-save", { content: `Rule: ${FRESH}`, project: PROJECT });
   });
 
-  it("session start lists the newer Lesson ahead of the contradicted one", async () => {
-    expect(ranksBefore(await sessionStart(), FRESH, STALE)).toBe(true);
+  it("session start lists the newer wording in place of the contradicted one", async () => {
+    const context = await sessionStart();
+    expect(context).toContain(FRESH);
+    expect(context).not.toContain(STALE);
   });
 });
 

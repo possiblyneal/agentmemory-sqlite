@@ -89,6 +89,73 @@ describe("Lessons", () => {
     }
   });
 
+  describe("mem::lesson-save near-twin re-save (#378)", () => {
+    const ORIGINAL =
+      "Wrap commit body lines at about ninety columns because commitlint rejects body lines over one hundred characters";
+    const REWORDED =
+      "Wrap commit body lines near ninety columns since commitlint rejects body lines over one hundred characters";
+
+    it("reinforces the existing Lesson with the new wording, context and the union of tags", async () => {
+      const first = (await sdk.trigger("mem::lesson-save", {
+        content: ORIGINAL, context: "old context", project: "/app", tags: ["git"],
+      })) as { lesson: Lesson };
+      const second = (await sdk.trigger("mem::lesson-save", {
+        content: REWORDED, context: "new context", project: "/app", tags: ["commitlint", "git"],
+      })) as { action: string; lesson: Lesson };
+
+      expect(second.action).toBe("strengthened");
+      expect(second.lesson.id).toBe(first.lesson.id);
+      expect(second.lesson.reinforcements).toBe(1);
+      expect(second.lesson.lastReinforcedAt).toBeDefined();
+      expect(second.lesson.content).toBe(REWORDED);
+      expect(second.lesson.context).toBe("new context");
+      expect(second.lesson.tags).toEqual(["git", "commitlint"]);
+      expect(await kv.list("mem:lessons")).toHaveLength(1);
+
+      const recalled = (await sdk.trigger("mem::lesson-recall", { query: "ninety columns", project: "/app" })) as {
+        lessons: Lesson[];
+      };
+      expect(recalled.lessons.map((l) => l.content)).toEqual([REWORDED]);
+
+      const audit = (await kv.list("mem:audit")) as Array<{ operation: string; targetIds: string[]; details: Record<string, unknown> }>;
+      const row = audit.find((r) => r.operation === "lesson_strengthen");
+      expect(row?.targetIds).toEqual([first.lesson.id]);
+      expect(row?.details).toMatchObject({ reason: "re-discovery", match: "restated" });
+    });
+
+    it("reinforces a global near-twin from a project save", async () => {
+      const global = (await sdk.trigger("mem::lesson-save", { content: ORIGINAL })) as { lesson: Lesson };
+      const second = (await sdk.trigger("mem::lesson-save", { content: REWORDED, project: "/app" })) as {
+        action: string; lesson: Lesson;
+      };
+
+      expect(second.action).toBe("strengthened");
+      expect(second.lesson.id).toBe(global.lesson.id);
+    });
+
+    it("keeps a different Lesson in the same project separate", async () => {
+      await sdk.trigger("mem::lesson-save", { content: ORIGINAL, project: "/app" });
+      const other = (await sdk.trigger("mem::lesson-save", {
+        content: "Run the integration tests against a throwaway daemon, never the live store",
+        project: "/app",
+      })) as { action: string };
+
+      expect(other.action).toBe("created");
+      expect(await kv.list("mem:lessons")).toHaveLength(2);
+    });
+
+    it("keeps a near-twin in another project separate", async () => {
+      await sdk.trigger("mem::lesson-save", { content: ORIGINAL, project: "/app" });
+      const other = (await sdk.trigger("mem::lesson-save", { content: REWORDED, project: "/other" })) as {
+        action: string; lesson: Lesson;
+      };
+
+      expect(other.action).toBe("created");
+      expect(other.lesson.project).toBe("/other");
+      expect(await kv.list("mem:lessons")).toHaveLength(2);
+    });
+  });
+
   describe("mem::lesson-save project guard (#377)", () => {
     it("rejects a project no Session or Lesson uses, and stores nothing", async () => {
       const result = (await sdk.trigger("mem::lesson-save", {
@@ -318,17 +385,23 @@ describe("Lessons", () => {
       });
       afterEach(() => vi.useRealTimers());
 
-      it("ranks ahead of the reinforced contradicted Lesson", async () => {
+      it("replaces the reinforced contradicted wording (#378)", async () => {
         await save("Deploy from the main branch release", "2026-09-01T10:00:00.000Z");
         await save("Deploy from the main branch release", "2026-09-01T11:00:00.000Z");
         await save("Deploy from the main branch release", "2026-09-01T12:00:00.000Z");
         await save("Deploy from the staging branch release", "2026-10-10T10:00:00.000Z");
         vi.setSystemTime(new Date("2026-10-20T10:00:00.000Z"));
 
-        expect(await recall()).toEqual([
-          "Deploy from the staging branch release",
-          "Deploy from the main branch release",
-        ]);
+        expect(await recall()).toEqual(["Deploy from the staging branch release"]);
+      });
+
+      it("ranks ahead of a contradicted Lesson it does not restate", async () => {
+        await save("Deploy releases from the main branch after the nightly build", "2026-09-01T10:00:00.000Z");
+        await save("Deploy releases from the main branch after the nightly build", "2026-09-01T11:00:00.000Z");
+        await save("Ship from staging now: main is frozen for the audit", "2026-10-10T10:00:00.000Z");
+        vi.setSystemTime(new Date("2026-10-20T10:00:00.000Z"));
+
+        expect((await recall()).length).toBe(2);
       });
 
       it("does not demote an older Lesson on an unrelated topic", async () => {
@@ -362,7 +435,7 @@ describe("Lessons", () => {
   describe("mem::lesson-list total", () => {
     it("counts every matching Lesson, not just the returned page", async () => {
       for (let i = 0; i < 60; i++) {
-        await sdk.trigger("mem::lesson-save", { content: `Lesson number ${i}`, project: "/app" });
+        await sdk.trigger("mem::lesson-save", { content: `Lesson topic${i} rule${i}`, project: "/app" });
       }
       const result = (await sdk.trigger("mem::lesson-list", {})) as { lessons: Lesson[]; total: number };
 
@@ -373,9 +446,9 @@ describe("Lessons", () => {
 
   describe("mem::lesson-list", () => {
     beforeEach(async () => {
-      await sdk.trigger("mem::lesson-save", { content: "Lesson A", confidence: 0.9, project: "/app" });
-      await sdk.trigger("mem::lesson-save", { content: "Lesson B", confidence: 0.3, project: "/app" });
-      await sdk.trigger("mem::lesson-save", { content: "Lesson C", confidence: 0.7, source: "consolidation" });
+      await sdk.trigger("mem::lesson-save", { content: "Alpha deploys go first", confidence: 0.9, project: "/app" });
+      await sdk.trigger("mem::lesson-save", { content: "Bravo builds run nightly", confidence: 0.3, project: "/app" });
+      await sdk.trigger("mem::lesson-save", { content: "Charlie checks stay green", confidence: 0.7, source: "consolidation" });
     });
 
     it("lists all lessons sorted by confidence", async () => {
