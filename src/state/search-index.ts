@@ -4,6 +4,7 @@ import { getSynonyms } from "./synonyms.js";
 import { STOP_WORDS } from "./stopwords.js";
 import { dateTermsForQuery, dateTermsForTimestamp } from "./date-terms.js";
 import { segmentCjk, hasCjk, cjkBigrams } from "./cjk-segmenter.js";
+import { yieldToEventLoop } from "../utils/event-loop.js";
 
 interface IndexEntry {
   obsId: string;
@@ -151,7 +152,7 @@ export class SearchIndex {
     let step = steps.next();
     while (!step.done) {
       if (performance.now() - sliceStart >= sliceMs) {
-        await new Promise((resolve) => setImmediate(resolve));
+        await yieldToEventLoop();
         sliceStart = performance.now();
       }
       step = steps.next();
@@ -432,18 +433,21 @@ export class SearchIndex {
     if (bucket.size === 0) this.termsByLead.delete(lead);
   }
 
-  // Indexed terms that start with `prefix` and are longer than it.
-  private *termsExtending(prefix: string): Generator<string> {
+  // Indexed terms that start with `prefix` and are longer than it, in sorted
+  // order so tied scores rank as they did over the sorted vocabulary.
+  private termsExtending(prefix: string): string[] {
     const buckets =
       prefix.length >= BUCKET_CHARS
         ? [this.termsByLead.get(prefix.slice(0, BUCKET_CHARS)) ?? []]
         : Array.from(this.termsByLead.entries())
             .filter(([lead]) => lead.startsWith(prefix))
             .map(([, bucket]) => bucket);
+    const terms: string[] = [];
     for (const bucket of buckets) {
       for (const term of bucket) {
-        if (term.length > prefix.length && term.startsWith(prefix)) yield term;
+        if (term.length > prefix.length && term.startsWith(prefix)) terms.push(term);
       }
     }
+    return terms.sort();
   }
 }

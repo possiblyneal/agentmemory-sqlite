@@ -26,12 +26,7 @@ import {
   isNonLatestFilterEnabled,
 } from "../config.js";
 import { getCounters } from "../telemetry/setup.js";
-
-// Each phase of mem::search (BM25 scoring, loading candidates, the near-twin
-// cap) is tens of milliseconds over a large store; yielding between them keeps
-// /livez and hook requests served while a search runs (#371).
-const yieldToEventLoop = (): Promise<void> =>
-  new Promise((resolve) => setImmediate(resolve))
+import { yieldToEventLoop } from "../utils/event-loop.js";
 
 let index: SearchIndex | null = null
 let vectorIndex: VectorIndex | null = null

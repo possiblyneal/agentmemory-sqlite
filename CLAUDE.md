@@ -377,7 +377,9 @@ each indexed Observation (#371). `mem::search` and `HybridSearch` score through
 scoring has run and ranks exactly as `search()`; a document removed while it yielded is left
 out. `mem::search` also yields after BM25, after loading candidates and after the near-twin
 cap. `capBehindNewer` skips a pair whose smaller word set is under half the larger, which can
-never reach `RESTATEMENT_OVERLAP`. Measured in `docs/benchmarks/2026-11-11-search-event-loop.md`.
+never reach `RESTATEMENT_OVERLAP`. Lessons (`lessons.ts`), `mem::remember` and maintenance
+still call `search()` synchronously, holding the loop for one scoring pass; yield with `yieldToEventLoop()`
+(`src/utils/event-loop.ts`). Measured in `docs/benchmarks/2026-11-11-search-event-loop.md`.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression

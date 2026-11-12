@@ -1,6 +1,6 @@
 # 2026-11-11 — Search on the event loop
 
-**Commit:** this PR (#371) against main `7681665e`
+**Commit:** this PR (#386, closes #371) against main `7681665e`
 **Bench:** a throwaway daemon (`--instance 37`, eviction, auto-compress and the reranker off,
 local embedder) on a fresh copy of one backup of the live store per arm: 97,301 indexed
 records, about 477k BM25 terms. Each arm waits for the index fill to finish, then a probe polls
@@ -61,6 +61,8 @@ back in one event-loop turn, and ranking builds and sorts one object per matched
 
 ## Content
 
-Results are unchanged: `searchCooperatively()` ranks as `search()` does (test), and the
+Results are unchanged: `searchCooperatively()` ranks as `search()` does (test), prefix
+expansion visits matching terms in sorted order as main's sorted vocabulary did, so tied
+scores keep their order, and the
 `capBehindNewer` prune skips only pairs whose Jaccard is below 0.5 by construction.
 `eval:gate` is +0.000 on every metric; prompt-submit p95 7 ms, session-start p95 4 ms.

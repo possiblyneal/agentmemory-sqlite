@@ -31,13 +31,34 @@ describe("SearchIndex vocabulary under live writes", () => {
     }
     idx.search("tok1x1", 10);
 
-    const start = performance.now();
-    for (let i = 0; i < 20; i++) {
-      idx.add(doc(`obs_live_${i}`, `livewrite${i} entry`));
-      expect(ids(idx, `livewrite${i}`)).toContain(`obs_live_${i}`);
-    }
-    expect(performance.now() - start).toBeLessThan(1_000);
+    const time = (write: boolean): number => {
+      const start = performance.now();
+      for (let i = 0; i < 20; i++) {
+        if (write) idx.add(doc(`obs_live_${i}`, `livewrite${i} entry`));
+        idx.search(`livewrite${i}`, 50);
+      }
+      return performance.now() - start;
+    };
+    const readOnly = time(false);
+    const withWrites = time(true);
+    expect(ids(idx, "livewrite19")).toEqual(["obs_live_19"]);
+    // A vocabulary re-sort per search made the writing loop ~100x the
+    // read-only one; the margin absorbs a loaded CI machine.
+    expect(withWrites).toBeLessThan(10 * readOnly + 200);
   }, 30_000);
+
+  it("returns the head of the full ranking for a small limit, ties in index order", () => {
+    const idx = new SearchIndex();
+    for (let d = 0; d < 3_000; d++) {
+      idx.add(doc(`obs_${d}`, `alpha beta gamma delta epsilon note${d % 50} item${d}`));
+    }
+    const query = "alpha beta gamma delta epsilon note7";
+    const full = idx.search(query, 3_000);
+    expect(full.length).toBeGreaterThan(300);
+    for (const limit of [1, 7, 60, 300]) {
+      expect(idx.search(query, limit)).toEqual(full.slice(0, limit));
+    }
+  });
 
   it("expands a prefix to a term first indexed after an earlier search", () => {
     const idx = new SearchIndex();
@@ -86,15 +107,6 @@ describe("SearchIndex.searchCooperatively", () => {
     expect(await idx.searchCooperatively(query, 40, undefined, 0)).toEqual(idx.search(query, 40));
   });
 
-  it("returns the head of the full ranking for a small limit, ties in index order", async () => {
-    const idx = bigIndex();
-    const full = idx.search(query, 3_000);
-    expect(full.length).toBeGreaterThan(300);
-    for (const limit of [1, 7, 60, 300]) {
-      expect(idx.search(query, limit)).toEqual(full.slice(0, limit));
-    }
-  });
-
   it("lets queued I/O run between query terms once its slice is spent", async () => {
     const idx = bigIndex();
     let turns = 0;
@@ -119,4 +131,3 @@ describe("SearchIndex.searchCooperatively", () => {
     expect(ids).toContain("obs_57");
   });
 });
-
