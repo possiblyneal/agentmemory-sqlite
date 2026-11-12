@@ -367,6 +367,20 @@ day-month with an optional year, and month-year. A bare month is not matched; `m
 short forms count only beside an ordinal, a year, or after "on". The in-process Engine rebuilds
 BM25 from content at boot, so there is no migration.
 
+### Search on the event loop
+Search runs on the daemon's one event loop, which also answers `/livez` and the hooks. BM25
+prefix expansion reads the vocabulary from buckets keyed by a term's first 2 characters, kept
+current on every `add`/`remove` (`termsExtending()`, `src/state/search-index.ts`); never rebuild
+or sort the whole vocabulary per search, which over ~477k terms held the loop for seconds after
+each indexed Observation (#371). `mem::search` and `HybridSearch` score through
+`searchCooperatively()`, which yields with `setImmediate` between query terms once 10 ms of
+scoring has run and ranks exactly as `search()`; a document removed while it yielded is left
+out. `mem::search` also yields after BM25, after loading candidates and after the near-twin
+cap. `capBehindNewer` skips a pair whose smaller word set is under half the larger, which can
+never reach `RESTATEMENT_OVERLAP`. Lessons (`lessons.ts`), `mem::remember` and maintenance
+still call `search()` synchronously, holding the loop for one scoring pass; yield with `yieldToEventLoop()`
+(`src/utils/event-loop.ts`). Measured in `docs/benchmarks/2026-11-11-search-event-loop.md`.
+
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression
 only when it has content and `isReadOnlyObservation()` (`src/functions/observe.ts`) is false.

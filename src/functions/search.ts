@@ -26,6 +26,7 @@ import {
   isNonLatestFilterEnabled,
 } from "../config.js";
 import { getCounters } from "../telemetry/setup.js";
+import { yieldToEventLoop } from "../utils/event-loop.js";
 
 let index: SearchIndex | null = null
 let vectorIndex: VectorIndex | null = null
@@ -721,7 +722,8 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(effectiveLimit * 10, 100)
         : Math.max(effectiveLimit * 3, 30)
-      const results = idx.search(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
+      const results = await idx.searchCooperatively(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
+      await yieldToEventLoop()
 
       const loadSession = createSessionLoader(kv)
       const inProject = projectFilter
@@ -785,6 +787,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           return memoryToObservation(mem)
         })
       )
+      await yieldToEventLoop()
       const enriched: SearchResult[] = []
       for (let i = 0; i < candidates.length; i++) {
         const obs = obsResults[i]
@@ -806,6 +809,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         r.score *= recencyFactor(r.observation.timestamp, now)
       }
       await capOlderNearTwins(kv, enriched)
+      await yieldToEventLoop()
       enriched.sort((a, b) => b.score - a.score)
       enriched.length = Math.min(enriched.length, effectiveLimit)
 
