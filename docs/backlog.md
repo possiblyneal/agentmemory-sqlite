@@ -51,7 +51,7 @@ reach Recall either.
   or none. If commit text pays, it should be indexed through the existing commit-link path
   rather than through a new connector.
 
-## Revisit the prompt-submit hook's 1.5 s Injection wait (due 2026-11-02)
+## Revisit the prompt-submit hook's 1.5 s Injection wait (due 2026-11-19)
 
 The Operator kept `INJECT_TIMEOUT_MS` at 1500 ms (`src/hooks/_missed-injection.ts`) on
 2026-10-19 and asked to revisit it two weeks later.
@@ -60,9 +60,17 @@ The Operator kept `INJECT_TIMEOUT_MS` at 1500 ms (`src/hooks/_missed-injection.t
   serves one at a time; its cap is 1000 ms. Under 30 parallel sdebench tasks Injections arrived
   1.7–5.2 s late and were lost. An internal 1300 ms budget (v13) scored worse than none
   (`docs/benchmarks/2026-10-18-sdebench.md`).
-- **Done when.** Two weeks of the live `missed-injections.jsonl` (`/diagnostics` `injections`)
-  show whether prompt-submit timeouts under normal use cost Injections, and the wait is either
-  raised with that evidence or kept and this item deleted.
+- **Evidence (2026-11-12).** Two weeks of the live `missed-injections.jsonl` (2026-10-29 to
+  2026-11-12) hold 858 prompt-submit timeouts. `mem:injections` starts at 2026-11-05T12:36Z, so
+  only 11-05 to 11-12 has a denominator: there timeouts are 6–16% of prompt-submit Injections
+  on ordinary days (16% on 11-05) and 41–46% on 2026-11-10 and 11-11. Those two days match the
+  event-loop stalls fixed by #371 (PR #386): in the 9.5 h after that fix was deployed, 55
+  prompt-submit Injections were served and none missed, a sample too short to confirm. The
+  10-29 and 10-30 spikes (136 timeouts on 10-30, with 503s and connection errors) predate the
+  Injection record and are unexplained. The wait stays at 1500 ms.
+- **Done when.** A week of `missed-injections.jsonl` after the #371 deploy
+  (2026-11-12T03:33Z) shows whether prompt-submit timeouts still cost Injections under normal
+  use, and the wait is either raised with that evidence or kept and this item deleted.
 
 ## Re-score Session Summary decisions as a Recall layer (#259)
 
