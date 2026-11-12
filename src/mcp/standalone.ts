@@ -21,6 +21,7 @@ import {
   type Handle,
   type ProxyHandle,
 } from "./rest-proxy.js";
+import { lessonQueueDir, queueLesson, replayLessonQueue } from "./lesson-queue.js";
 
 const IMPLEMENTED_TOOLS = new Set([
   "memory_save",
@@ -459,6 +460,60 @@ function serverAnswered(err: unknown): boolean {
   return typeof status === "number" && !GATEWAY_DOWN.has(status);
 }
 
+function logLine(line: string): void {
+  process.stderr.write(`[@agentmemory/mcp] ${line}\n`);
+}
+
+// #389: a Lesson save the daemon could not receive is queued, not lost.
+function queueUnreachableLesson(
+  args: Record<string, unknown>,
+): { content: Array<{ type: string; text: string }> } {
+  if (typeof args["content"] !== "string" || !args["content"].trim()) {
+    throw new Error("content is required");
+  }
+  if (!queueLesson(args)) {
+    throw new Error(
+      `agentmemory daemon unreachable and the Lesson queue at ${lessonQueueDir()} is full or unwritable; the Lesson was not saved.`,
+    );
+  }
+  logLine(`daemon unreachable; queued memory_lesson_save in ${lessonQueueDir()}`);
+  return textResponse(
+    {
+      queued: true,
+      message: `agentmemory daemon unreachable; the Lesson is queued in ${lessonQueueDir()} and will be saved when this MCP server next reaches the daemon.`,
+    },
+    true,
+  );
+}
+
+let replayInFlight: Promise<void> | null = null;
+
+function replayQueuedLessons(handle: ProxyHandle): Promise<void> {
+  replayInFlight ??= replayLessonQueue(async (entry) => {
+    try {
+      await handle.call("/agentmemory/mcp/call", {
+        method: "POST",
+        body: JSON.stringify({ name: "memory_lesson_save", arguments: entry.arguments }),
+      });
+      return "saved";
+    } catch (err) {
+      const status = (err as { status?: unknown } | null)?.status;
+      if (typeof status === "number" && status >= 400 && status < 500) {
+        logLine(
+          `dropped the Lesson queued at ${entry.queuedAt}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return "rejected";
+      }
+      return "retry";
+    }
+  }, logLine)
+    .catch((err) => logLine(`Lesson queue replay failed: ${err instanceof Error ? err.message : String(err)}`))
+    .finally(() => {
+      replayInFlight = null;
+    });
+  return replayInFlight;
+}
+
 let cwdProject: string | undefined;
 
 // #377: the daemon refuses a Lesson under a project nothing uses, but only this
@@ -491,8 +546,10 @@ export async function handleToolCall(
   const args = withDefaultProject(toolName, rawArgs, cwdProject);
   const handle = await resolveHandle();
   announceMode(handle);
+  if (handle.mode === "proxy") await replayQueuedLessons(handle);
 
   if (handle.mode === "local" && handle.unreachableUrl) {
+    if (toolName === "memory_lesson_save") return queueUnreachableLesson(args);
     throw new Error(daemonUnreachableMessage(handle.unreachableUrl));
   }
 
@@ -507,10 +564,14 @@ export async function handleToolCall(
         process.stderr.write(
           `[@agentmemory/mcp] proxy call failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`,
         );
-        if (!serverAnswered(err)) invalidateHandle();
+        if (!serverAnswered(err)) {
+          invalidateHandle();
+          if (toolName === "memory_lesson_save") return queueUnreachableLesson(args);
+        }
         throw withCurrentProject(err, toolName, args, cwdProject);
       }
     }
+    if (toolName === "memory_lesson_save") return queueUnreachableLesson(args);
     throw new Error(
       `Unknown tool: ${toolName} (local fallback supports only ${[...IMPLEMENTED_TOOLS].join(", ")}; start an agentmemory server and set AGENTMEMORY_URL to use the full tool set)`,
     );

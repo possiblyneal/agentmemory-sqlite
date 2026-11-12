@@ -425,8 +425,8 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     });
     const localKv = new InMemoryKV(undefined);
     await expect(
-      handleToolCall("memory_lesson_save", { title: "x" }, localKv),
-    ).rejects.toThrow(/Unknown tool: memory_lesson_save/);
+      handleToolCall("memory_lesson_recall", { query: "x" }, localKv),
+    ).rejects.toThrow(/Unknown tool: memory_lesson_recall/);
   });
 
   it("does not retry local after a validation error", async () => {
