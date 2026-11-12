@@ -30,7 +30,7 @@ slot pulling from a shared queue of the same 8 prompts, one warm-up call before 
 | | 2 | 277 s | 14.7 | 421 | 68 / 111 s | | |
 | `--parallel` 4 | 1 | 462 s | 17.5 | 252 | 178 / 462 s | 0 / 8 | 0 / 8 |
 | | 2 | 318 s | 14.2 | 367 | 154 / 285 s | | |
-| `--parallel` 1 + CPU route | | not measured | | | | | |
+| `--parallel` 1 + CPU route | | not measured here; see [2026-11-12 CPU route](./2026-11-12-eval-broker-cpu-route.md) | | | | | |
 
 - The workload is prefill-bound: about 14k prompt tokens in for about 500 out, so the batch
   step that extra slots share is mostly one prompt's prefill, which does not batch. That fits
@@ -51,8 +51,8 @@ slot pulling from a shared queue of the same 8 prompts, one warm-up call before 
 240 s capacity wait. The CPU backend allows one instance and the live daemon's `general` overflow
 held it, 4 of 4 slots in flight, from before the first run to the end of a 40 minute poll
 (20:35 to 21:15). Freeing it meant stopping the container and discarding the live daemon's
-in-flight calls, which this ticket does not authorize. The hypothesis that the CPU adds nothing
-on a unified-memory host stays untested. See the ledger's Retry if.
+in-flight calls, which this ticket does not authorize. Measured on 2026-11-12 with the CPU
+instance freed: [2026-11-12 CPU route](./2026-11-12-eval-broker-cpu-route.md).
 
 ## Conditions
 
