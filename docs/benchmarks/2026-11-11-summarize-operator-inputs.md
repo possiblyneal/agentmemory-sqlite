@@ -1,7 +1,9 @@
 # 2026-11-11 — Marking Operator inputs in the summarize prompt (#355)
 
-**Commit:** main `d101c715` (arm B) vs `8fd0faea` (arm A: `b6874c0d` merged onto main; the prompt
-change is reproduced below). Arm B of stage 1 was `56e52ed3` (mark + digest). Neither arm ships.
+**Commit:** main `d101c715` vs `8fd0faea` (arm A: `b6874c0d` merged onto main; the prompt change
+is reproduced below). Stage 1 ran each arm as its commit's patch applied onto main: arm A `b6874c0d`
+(mark), arm B `56e52ed3` (mark + digest). In stage 2's `eval:compare` output, A is arm A and B is
+main. Neither arm ships.
 **Bench:** stage 1 `eval:fold-drift --one-pass --decision-key --batch 20` on main's checkpoint 040
 of the [2026-11-07 decision loss](./2026-11-07-decision-loss.md) arm; stage 2 `eval:arm` (save pass
 `--llm-summary`, synthetic compression, then the `--decision-key` probe) and `eval:compare`, dev split
@@ -21,7 +23,7 @@ failed 8 in Session 5; the runner resumed from checkpoint 004 and reran it clean
 
 Inconclusive. Arm A cleared stage 1 (+16 key decisions captured vs main, threshold +10) but in the
 decision-key A/B it delivers 40 vs main's 38 of 262 paired reachable decisions (15 A-only, 13
-B-only, McNemar p = 0.851). On `typical` it does not lose on either-surface recall (18 vs 16 of 48)
+main-only, McNemar p = 0.851). On `typical` it does not lose on either-surface recall (18 vs 16 of 48)
 but loses one by turn (18 vs 19) and injects 29% more chars for fewer used items. The arms ran on
 different broker models, which confounds every stage-2 difference. Per #355, the prompt change
 does not ship.
@@ -47,10 +49,10 @@ not grow (9,613 vs 9,585 chars).
 | Metric | A `8fd0faea` | main `d101c715` |
 |---|---|---|
 | decisionRecall either (paired, 262) | **40** | 38 |
-| both / A-only / B-only / neither | 25 / 15 / 13 / 209 | |
+| both / A-only / main-only / neither | 25 / 15 / 13 / 209 | |
 | exact McNemar p | 0.851 | |
 | delivered by turn | 55 | 54 |
-| by turn both / A-only / B-only / neither | 35 / 20 / 19 / 188 | |
+| by turn both / A-only / main-only / neither | 35 / 20 / 19 / 188 | |
 | decisionRecall session start | 25 | 26 |
 | decisionRecall prompt submit | 15 | 13 |
 | prompt submit by turn | 30 | 29 |
@@ -139,7 +141,7 @@ and gets no Observations to mark.
 ## Reproduce
 
 ```sh
-# stage 1, per arm, from a build of that arm; main first, then each arm against main's output
+# stage 1, per arm, from main with that arm's patch applied; main first, then each arm against main's output
 npm run eval:fold-drift -- --store <main checkpoint 040> --sessions <the 17> --batch 20 \
   --decision-key tmp/eval-replay/decision-key.json --one-pass [--baseline <main screen.json> --threshold 10]
 # stage 2, one broker profile per arm (OPENAI_MODEL), AGENTMEMORY_AUTO_COMPRESS=false
