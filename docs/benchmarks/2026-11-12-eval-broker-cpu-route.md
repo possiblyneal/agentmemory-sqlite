@@ -80,4 +80,4 @@ route for the window and putting it back after.
 ## Notes
 
 - Do not mix backends in one replay. A summarize-bearing eval stays on the GPU `general-eval-b`
-  instance at chunk concurrency 1 (`eval/README.md`).
+  instance at chunk concurrency 1, as `eval/README.md` says.
