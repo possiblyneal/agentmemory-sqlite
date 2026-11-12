@@ -572,7 +572,7 @@ unchecked: the note is still upstream's claim, not a verified defect.
 ### Issue tracker
 
 Issues and specs live as GitHub issues on this fork (`possiblyneal/agentmemory-sqlite`), driven via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-Accepted-but-unscheduled work waits in `docs/backlog.md` until it becomes an issue.
+Accepted-but-unscheduled work is filed as a GitHub issue straight away; there is no backlog file.
 
 ### Triage labels
 
