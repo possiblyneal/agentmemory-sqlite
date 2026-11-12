@@ -134,12 +134,12 @@ describe("memory_lesson_save queue when the daemon is unreachable (#389)", () =>
     expect(queued()).toHaveLength(0);
   });
 
-  it("keeps a queued save the daemon cannot take yet", async () => {
+  it.each([503, 401])("keeps a queued save the daemon answers %i", async (status) => {
     daemonDown();
     await handleToolCall("memory_lesson_save", { content: "later" });
 
     resetHandleForTests();
-    daemonUp(() => new Response("not ready", { status: 503 }));
+    daemonUp(() => new Response("not now", { status }));
     await handleToolCall("memory_lesson_recall", { query: "x" });
     expect(queued()).toHaveLength(1);
 

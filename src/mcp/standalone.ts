@@ -486,6 +486,13 @@ function queueUnreachableLesson(
   );
 }
 
+// Auth, rate-limit and request-timeout answers say nothing about the save itself.
+const RETRYABLE_4XX = new Set([401, 403, 408, 429]);
+
+function savePermanentlyRefused(status: unknown): boolean {
+  return typeof status === "number" && status >= 400 && status < 500 && !RETRYABLE_4XX.has(status);
+}
+
 let replayInFlight: Promise<void> | null = null;
 
 function replayQueuedLessons(handle: ProxyHandle): Promise<void> {
@@ -498,7 +505,7 @@ function replayQueuedLessons(handle: ProxyHandle): Promise<void> {
       return "saved";
     } catch (err) {
       const status = (err as { status?: unknown } | null)?.status;
-      if (typeof status === "number" && status >= 400 && status < 500) {
+      if (savePermanentlyRefused(status)) {
         logLine(
           `dropped the Lesson queued at ${entry.queuedAt}: ${err instanceof Error ? err.message : String(err)}`,
         );

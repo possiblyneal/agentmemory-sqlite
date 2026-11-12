@@ -186,7 +186,8 @@ daemon (failed probe, connection error, timeout, gateway 502/504) is written to
 `~/.agentmemory/lesson-queue/`, one file per save, capped at 256 KiB in all
 (`src/mcp/lesson-queue.ts`), and the tool replies `queued: true`; a full queue is reported as a
 failure. Every tool call that reaches the daemon first replays the queue oldest first: a 4xx
-drops the entry with a stderr line, any other failure stops the replay and keeps the rest. The
+other than 401, 403, 408 or 429 drops the entry with a stderr line; any other failure stops the
+replay and keeps the rest. The
 concurrent shims of several Sessions share the directory: a replay claims each file by rename,
 and a claim older than 60 s is taken over. A save that timed out after the daemon stored it
 reinforces that Lesson on replay.
