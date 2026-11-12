@@ -65,6 +65,25 @@ item was lost to decision cutting (`cutDecision()`) or to a judge disagreement:
 
 The reranker gate was off in the sandbox (`AGENTMEMORY_PROMPT_RERANK=off`).
 
+### Summaries first at session start (2026-11-10)
+
+Session start re-rendered at budget 2000 on all 24 checkpoints with Session Summaries given budget
+before Insights and Semantic Facts (pinned slots, Rules and Lessons unchanged). The baseline
+render matched the probe's Injection text byte for byte for the 6 Sessions that carry the 27. An
+item counts as present when its Summary's whole `Decisions:` line appears; a Summary block renders
+whole or not at all. No LLM call.
+
+| | main | Summaries first |
+|---|---|---|
+| of the 24 cut by the budget, delivered | 0 | 3 |
+| Summaries rendered (24 probe points) | 43 | 65 |
+| Insights rendered | 73 | 3 |
+| Semantic Facts rendered | 75 | 5 |
+| delivered decisions that relied on a dropped Insight or Fact | — | 2 of 41 |
+
+A Summary block is about 600 tokens, so 2000 tokens hold 2 to 5 of them; the origin Sessions of
+the missed items rank 3 to 8 by recency and still fall off.
+
 ## Capture versus fold
 
 `eval:fold-drift` re-summarized the 18 origin Sessions of the not-in-Summary items, once in one
