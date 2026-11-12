@@ -20,7 +20,7 @@ type Row = { obsId: string; sessionId: string; score: number };
 function stubIndexes(perQuery: Record<string, Row[]>) {
   const seen: string[] = [];
   const bm25 = {
-    search(query: string, _depth: number): Row[] {
+    async searchCooperatively(query: string, _depth: number): Promise<Row[]> {
       seen.push(query);
       return perQuery[query] ?? [];
     },

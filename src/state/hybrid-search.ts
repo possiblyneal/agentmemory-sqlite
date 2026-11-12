@@ -250,7 +250,7 @@ export class HybridSearch {
     const depthFloor =
       Number.isFinite(parsedDepth) && parsedDepth >= 0 ? parsedDepth : 100;
     const depth = Math.max(limit * 2, depthFloor);
-    const bm25Results = this.bm25.search(query, depth);
+    const bm25Results = await this.bm25.searchCooperatively(query, depth);
 
     let vectorResults: Array<{
       obsId: string;

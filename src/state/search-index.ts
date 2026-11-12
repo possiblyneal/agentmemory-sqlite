@@ -27,13 +27,20 @@ const SUBTITLE_WEIGHT = 2;
 const MAX_QUERY_TERMS = 25;
 const MAX_QUERY_DATE_TERMS = 5;
 const EDGE_PUNCTUATION = /^[/.\\_-]+|[/.\\_-]+$/g;
+// Prefix expansion looks terms up by their first characters, so the
+// vocabulary is never sorted: re-sorting ~477k terms after every write held
+// the event loop for seconds on a live daemon (#371).
+const BUCKET_CHARS = 2;
+const SEARCH_SLICE_MS = 10;
+
+export type SearchHit = { obsId: string; sessionId: string; score: number };
 
 export class SearchIndex {
   private entries: Map<string, IndexEntry> = new Map();
   private invertedIndex: Map<string, Set<string>> = new Map();
   private docTermCounts: Map<string, Map<string, number>> = new Map();
   private totalDocLength = 0;
-  private sortedTerms: string[] | null = null;
+  private termsByLead: Map<string, Set<string>> = new Map();
 
   private readonly k1 = 1.2;
   private readonly b = 0.75;
@@ -71,11 +78,10 @@ export class SearchIndex {
     for (const term of termFreq.keys()) {
       if (!this.invertedIndex.has(term)) {
         this.invertedIndex.set(term, new Set());
+        this.addToLead(term);
       }
       this.invertedIndex.get(term)!.add(obs.id);
     }
-
-    this.sortedTerms = null;
   }
 
   has(id: string): boolean {
@@ -113,6 +119,7 @@ export class SearchIndex {
           postingList.delete(id);
           if (postingList.size === 0) {
             this.invertedIndex.delete(term);
+            this.removeFromLead(term);
           }
         }
       }
@@ -121,20 +128,57 @@ export class SearchIndex {
 
     this.totalDocLength = Math.max(0, this.totalDocLength - entry.termCount);
     this.entries.delete(id);
-    this.sortedTerms = null;
   }
 
-  search(
+  search(query: string, limit = 20, layer?: IndexLayer): SearchHit[] {
+    const steps = this.scoreTerms(query);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return this.ranked(step.value, limit, layer);
+  }
+
+  // Ranks as search() does, but hands the event loop back between query terms
+  // once `sliceMs` of scoring has run, so a search over a large store does not
+  // hold /livez and the hooks behind it (#371).
+  async searchCooperatively(
     query: string,
     limit = 20,
     layer?: IndexLayer,
-  ): Array<{ obsId: string; sessionId: string; score: number }> {
+    sliceMs = SEARCH_SLICE_MS,
+  ): Promise<SearchHit[]> {
+    const steps = this.scoreTerms(query);
+    let sliceStart = performance.now();
+    let step = steps.next();
+    while (!step.done) {
+      if (performance.now() - sliceStart >= sliceMs) {
+        await new Promise((resolve) => setImmediate(resolve));
+        sliceStart = performance.now();
+      }
+      step = steps.next();
+    }
+    return this.ranked(step.value, limit, layer);
+  }
+
+  // A document removed while a cooperative search yielded is left out.
+  private ranked(scores: Map<string, number>, limit: number, layer?: IndexLayer): SearchHit[] {
+    const hits: SearchHit[] = [];
+    for (const [obsId, score] of scores) {
+      const entry = this.entries.get(obsId);
+      if (!entry || (layer && (entry.layer ?? "observation") !== layer)) continue;
+      hits.push({ obsId, sessionId: entry.sessionId, score });
+    }
+    return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  // Yields after each query term's postings and prefix expansions are scored.
+  private *scoreTerms(query: string): Generator<void, Map<string, number>> {
+    const scores = new Map<string, number>();
     const rawTerms = this.tokenize(query.toLowerCase(), STOP_WORDS);
     const dateTerms = dateTermsForQuery(query).slice(0, MAX_QUERY_DATE_TERMS);
-    if (rawTerms.length === 0 && dateTerms.length === 0) return [];
+    if (rawTerms.length === 0 && dateTerms.length === 0) return scores;
 
     const N = this.entries.size;
-    if (N === 0) return [];
+    if (N === 0) return scores;
     const avgDocLen = this.totalDocLength / N;
 
     const queryTerms: Array<{ term: string; weight: number }> = [];
@@ -153,9 +197,6 @@ export class SearchIndex {
     }
 
     for (const term of dateTerms) queryTerms.push({ term, weight: 1.0 });
-
-    const scores = new Map<string, number>();
-    const sorted = this.getSortedTerms();
 
     for (const { term, weight } of queryTerms) {
       const matchingDocs = this.invertedIndex.get(term);
@@ -192,12 +233,7 @@ export class SearchIndex {
       // restores the old additive behaviour.
       const prefixSum = process.env.AGENTMEMORY_PREFIX_MATCH === "sum";
       const prefixBest = new Map<string, number>();
-      const startIdx = this.lowerBound(sorted, term);
-      for (let si = startIdx; si < sorted.length; si++) {
-        const indexTerm = sorted[si];
-        if (!indexTerm.startsWith(term)) break;
-        if (indexTerm === term) continue;
-
+      for (const indexTerm of this.termsExtending(term)) {
         const obsIds = this.invertedIndex.get(indexTerm)!;
         const prefixDf = obsIds.size;
         const prefixIdf =
@@ -224,16 +260,9 @@ export class SearchIndex {
       for (const [obsId, contribution] of prefixBest) {
         scores.set(obsId, (scores.get(obsId) || 0) + contribution);
       }
+      yield;
     }
-
-    return Array.from(scores.entries())
-      .filter(([obsId]) => !layer || (this.entries.get(obsId)!.layer ?? "observation") === layer)
-      .map(([obsId, score]) => {
-        const entry = this.entries.get(obsId)!;
-        return { obsId, sessionId: entry.sessionId, score };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+    return scores;
   }
 
   get size(): number {
@@ -245,7 +274,7 @@ export class SearchIndex {
     this.invertedIndex.clear();
     this.docTermCounts.clear();
     this.totalDocLength = 0;
-    this.sortedTerms = null;
+    this.termsByLead.clear();
   }
 
   restoreFrom(other: SearchIndex): void {
@@ -265,7 +294,9 @@ export class SearchIndex {
       ]),
     );
     this.totalDocLength = other.totalDocLength;
-    this.sortedTerms = null;
+    this.termsByLead = new Map(
+      Array.from(other.termsByLead.entries()).map(([k, v]) => [k, new Set(v)]),
+    );
   }
 
   serialize(): string {
@@ -296,6 +327,7 @@ export class SearchIndex {
       }
       for (const [term, ids] of data.inverted) {
         idx.invertedIndex.set(term, new Set(ids));
+        idx.addToLead(term);
       }
       for (const [id, counts] of data.docTerms) {
         idx.docTermCounts.set(id, new Map(counts));
@@ -382,21 +414,36 @@ export class SearchIndex {
     return out;
   }
 
-  private getSortedTerms(): string[] {
-    if (!this.sortedTerms) {
-      this.sortedTerms = Array.from(this.invertedIndex.keys()).sort();
+  private addToLead(term: string): void {
+    const lead = term.slice(0, BUCKET_CHARS);
+    let bucket = this.termsByLead.get(lead);
+    if (!bucket) {
+      bucket = new Set();
+      this.termsByLead.set(lead, bucket);
     }
-    return this.sortedTerms;
+    bucket.add(term);
   }
 
-  private lowerBound(arr: string[], target: string): number {
-    let lo = 0;
-    let hi = arr.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (arr[mid] < target) lo = mid + 1;
-      else hi = mid;
+  private removeFromLead(term: string): void {
+    const lead = term.slice(0, BUCKET_CHARS);
+    const bucket = this.termsByLead.get(lead);
+    if (!bucket) return;
+    bucket.delete(term);
+    if (bucket.size === 0) this.termsByLead.delete(lead);
+  }
+
+  // Indexed terms that start with `prefix` and are longer than it.
+  private *termsExtending(prefix: string): Generator<string> {
+    const buckets =
+      prefix.length >= BUCKET_CHARS
+        ? [this.termsByLead.get(prefix.slice(0, BUCKET_CHARS)) ?? []]
+        : Array.from(this.termsByLead.entries())
+            .filter(([lead]) => lead.startsWith(prefix))
+            .map(([, bucket]) => bucket);
+    for (const bucket of buckets) {
+      for (const term of bucket) {
+        if (term.length > prefix.length && term.startsWith(prefix)) yield term;
+      }
     }
-    return lo;
   }
 }

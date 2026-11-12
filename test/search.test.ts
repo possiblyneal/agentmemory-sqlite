@@ -216,6 +216,22 @@ describe("mem::search", () => {
     ).rejects.toThrow("format must be one of");
   });
 
+  // Each phase of a search over the Operator's store is tens of milliseconds
+  // of synchronous work; run back to back they held /livez for over 50 ms (#371).
+  it("lets queued I/O run between the phases of a search", async () => {
+    let turns = 0;
+    let ticking = true;
+    const tick = () => {
+      if (!ticking) return;
+      turns++;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+    await sdk.trigger("mem::search", { query: "auth middleware", project: "demo" });
+    ticking = false;
+    expect(turns).toBeGreaterThanOrEqual(3);
+  });
+
   it("surfaces saved memories from KV.memories (#265)", async () => {
     // mem::remember persists to KV.memories under a synthetic sessionId
     // ("memory") that has no corresponding KV.observations entry. mem::search

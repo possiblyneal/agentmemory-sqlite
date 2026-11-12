@@ -27,6 +27,12 @@ import {
 } from "../config.js";
 import { getCounters } from "../telemetry/setup.js";
 
+// Each phase of mem::search (BM25 scoring, loading candidates, the near-twin
+// cap) is tens of milliseconds over a large store; yielding between them keeps
+// /livez and hook requests served while a search runs (#371).
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve))
+
 let index: SearchIndex | null = null
 let vectorIndex: VectorIndex | null = null
 let currentEmbeddingProvider: EmbeddingProvider | null = null
@@ -721,7 +727,8 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(effectiveLimit * 10, 100)
         : Math.max(effectiveLimit * 3, 30)
-      const results = idx.search(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
+      const results = await idx.searchCooperatively(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
+      await yieldToEventLoop()
 
       const loadSession = createSessionLoader(kv)
       const inProject = projectFilter
@@ -785,6 +792,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           return memoryToObservation(mem)
         })
       )
+      await yieldToEventLoop()
       const enriched: SearchResult[] = []
       for (let i = 0; i < candidates.length; i++) {
         const obs = obsResults[i]
@@ -806,6 +814,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         r.score *= recencyFactor(r.observation.timestamp, now)
       }
       await capOlderNearTwins(kv, enriched)
+      await yieldToEventLoop()
       enriched.sort((a, b) => b.score - a.score)
       enriched.length = Math.min(enriched.length, effectiveLimit)
 
