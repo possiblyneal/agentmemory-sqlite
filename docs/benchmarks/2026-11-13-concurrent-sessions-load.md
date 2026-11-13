@@ -14,7 +14,7 @@ The daemon does not hang. `/livez` polled every 50 ms stayed under 500 ms at rea
 (tool call every ~3 s per Session) and peaked at 2.2 s only at 32 Sessions each posting an
 Observation every ~1 s. What reproduces is a **burst of Sessions opening together**: the first
 `prompt-context` of each Session takes 1.0 to 3.6 s at 32 Sessions (24 to 32 of 32 past the hook's
-1,500 ms `INJECT_TIMEOUT_MS`) and 0.1 to 0.3 s at 16. Later prompts of the same Sessions stay at
+1,500 ms `INJECT_TIMEOUT_MS` in three of four runs, none in the fourth, which ran under the profiler) and 0.1 to 0.3 s at 16. Later prompts of the same Sessions stay at
 p50 100 to 350 ms. A Missed Injection under concurrency is queueing, not a stall.
 
 ## Latency by load
