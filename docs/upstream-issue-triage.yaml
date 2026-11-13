@@ -338,7 +338,7 @@ issues:
     kind: bug
     note: "Server becomes unresponsive under three concurrent Claude Code sessions."
     disposition: candidate
-    status: "unresolved — upstream never found a cause on its iii engine and there is no repro here; the live daemon does log prompt-submit Missed Injections under concurrent sessions (missed-injections.jsonl), but no hang."
+    status: "partly-present-here — no hang (`/livez` stays under 500 ms at realistic load), but a burst of Sessions opening together queues their first prompt-submit Injections past the 1,500 ms hook timeout; cause and numbers in docs/benchmarks/2026-11-13-concurrent-sessions-load.md (#394)."
     url: https://github.com/rohitg00/agentmemory/issues/499
   - number: 505
     title: "Viewer Rebuild Graph button calls missing /agentmemory/graph/build endpoint"
