@@ -12,6 +12,10 @@ function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function waitUntil(check: () => boolean): Promise<void> {
+  return vi.waitFor(() => expect(check()).toBe(true), { timeout: 3000, interval: 20 });
+}
+
 describe("FilesystemWatcher", { retry: 2 }, () => {
   let root: string;
   const originalFetch = globalThis.fetch;
@@ -49,7 +53,7 @@ describe("FilesystemWatcher", { retry: 2 }, () => {
     w.start();
     try {
       writeFileSync(join(root, "notes.md"), "hello world\n");
-      await wait(1500);
+      await waitUntil(() => captured.length >= 1);
       expect(captured.length).toBeGreaterThanOrEqual(1);
       const obs = captured[captured.length - 1];
       expect(obs.url).toBe("http://localhost:3111/agentmemory/observe");
@@ -87,11 +91,12 @@ describe("FilesystemWatcher", { retry: 2 }, () => {
     w.start();
     try {
       unlinkSync(join(root, "old.md"));
-      await wait(1500);
-      const deletes = captured.filter(
-        (c) => (c.body as { data: { changeKind: string } }).data?.changeKind === "file_delete",
-      );
-      expect(deletes.length).toBeGreaterThanOrEqual(1);
+      const deletes = () =>
+        captured.filter(
+          (c) => (c.body as { data: { changeKind: string } }).data?.changeKind === "file_delete",
+        );
+      await waitUntil(() => deletes().length >= 1);
+      expect(deletes().length).toBeGreaterThanOrEqual(1);
     } finally {
       w.stop();
     }
@@ -131,7 +136,10 @@ describe("FilesystemWatcher", { retry: 2 }, () => {
     w.start();
     try {
       writeFileSync(join(root, "node_modules", "ignored.js"), "x");
-      await wait(1500);
+      writeFileSync(join(root, "seen.md"), "y");
+      await waitUntil(() =>
+        captured.some((c) => (c.body as { data: { files: string[] } }).data?.files?.includes("seen.md")),
+      );
       const matches = captured.filter((c) =>
         (c.body as { data: { files: string[] } }).data?.files?.some((f) => f.includes("ignored.js")),
       );
@@ -151,7 +159,7 @@ describe("FilesystemWatcher", { retry: 2 }, () => {
     w.start();
     try {
       writeFileSync(join(root, "secret.md"), "bearer test\n");
-      await wait(1500);
+      await waitUntil(() => captured.length >= 1);
       expect(captured.length).toBeGreaterThanOrEqual(1);
       const headers = captured[captured.length - 1].headers as Record<string, string>;
       expect(headers.authorization).toBe("Bearer shhh");
