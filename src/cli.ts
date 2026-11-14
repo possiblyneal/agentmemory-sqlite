@@ -62,6 +62,7 @@ import { CONNECT_ALIAS, CONNECT_FLAGS } from "./cli/connect/index.js";
 const ALL_TOOLS_COUNT = getAllTools().length;
 const CORE_TOOLS_COUNT = getAllTools().filter((t) => ESSENTIAL_TOOLS.has(t.name)).length;
 import { resolveDataDir } from "./cli-data-dir.js";
+import { resolveInstancePort } from "./cli/instance-port.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -140,7 +141,7 @@ Options:
                      relocates the whole trio.
   --instance <N>     Shortcut for --port (3111 + N*100) to run multiple
                      daemons side-by-side without env gymnastics.
-                     --instance 1 -> 3211/3212/3213, etc. (max N=50)
+                     --instance 1 -> 3211/3212/3213, etc. (N = 0..624)
   --data-dir <path>  Store the SQLite state outside the current repo
 
 Environment:
@@ -185,13 +186,14 @@ if (portIdx !== -1 && args[portIdx + 1]) {
 // anchor — streams/viewer derive from it via fixed offsets below unless
 // an env explicitly pins each one.
 const instanceIdx = args.indexOf("--instance");
-if (instanceIdx !== -1 && args[instanceIdx + 1]) {
-  const n = parseInt(args[instanceIdx + 1] || "", 10);
-  if (Number.isFinite(n) && n >= 0 && n <= 50) {
-    const base = 3111 + n * 100;
-    if (!process.env["III_REST_PORT"]) {
-      process.env["III_REST_PORT"] = String(base);
-    }
+if (instanceIdx !== -1) {
+  const resolved = resolveInstancePort(args[instanceIdx + 1]);
+  if (!resolved.ok) {
+    p.log.error(resolved.message);
+    process.exit(1);
+  }
+  if (!process.env["III_REST_PORT"]) {
+    process.env["III_REST_PORT"] = String(resolved.restPort);
   }
 }
 
