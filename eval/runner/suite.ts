@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { readNdjson, writeJsonAtomic } from "./durable.js";
 import type { PmbRow } from "./pmb-score.js";
 import type { SessionScore } from "./replay-score.js";
 import { selectionWarning, type Selection } from "./replay-selection.js";
@@ -23,6 +24,8 @@ interface Bench {
   args(tier: Tier, split: Split, input: string): string[];
   metrics(out: string): ItemMetrics;
   lowerIsBetter?: string[];
+  // The runner takes --resume and skips the units its scores.ndjson already holds.
+  resumable?: true;
 }
 
 interface RunMeta {
@@ -53,10 +56,6 @@ const CONFIG_KEYS = [
   "AGENTMEMORY_EVAL_REPLAY_PROJECTS",
 ];
 
-function readNdjson<T>(path: string): T[] {
-  return readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as T);
-}
-
 function addItem(metrics: ItemMetrics, metric: string, id: string, ratio: Ratio): void {
   (metrics[metric] ??= {})[id] = ratio;
 }
@@ -71,7 +70,7 @@ const BENCHES: Bench[] = [
     args: () => ["eval/runner/coding-life.ts", "--adapters", "agentmemory"],
     metrics(out) {
       const metrics: ItemMetrics = {};
-      for (const row of readNdjson<ScoreRow>(join(out, "scores.ndjson"))) {
+      for (const row of readNdjson<ScoreRow>(join(out, "scores.ndjson")).rows) {
         if (row.recall !== null) addItem(metrics, `${row.path}.recall`, row.questionId, one(row.recall));
         addItem(metrics, `${row.path}.precision`, row.questionId, one(row.precision));
         addItem(metrics, `${row.path}.hit`, row.questionId, one(row.hit));
@@ -86,7 +85,7 @@ const BENCHES: Bench[] = [
     args: () => ["eval/runner/pmb.ts"],
     metrics(out) {
       const metrics: ItemMetrics = {};
-      for (const row of readNdjson<PmbRow>(join(out, "scores.ndjson"))) {
+      for (const row of readNdjson<PmbRow>(join(out, "scores.ndjson")).rows) {
         addItem(metrics, "pass", row.caseId, one(row.pass));
         if (row.passType === "active") addItem(metrics, "activePass", row.caseId, one(row.activePass));
         if (row.precision !== null) addItem(metrics, "precision", row.caseId, one(row.precision));
@@ -97,6 +96,7 @@ const BENCHES: Bench[] = [
   },
   {
     name: "longmemeval",
+    resumable: true,
     tiers: ["fast", "full"],
     instance: 10,
     input: { env: "LONGMEMEVAL_PATH", hint: "longmemeval_s.json" },
@@ -110,7 +110,7 @@ const BENCHES: Bench[] = [
     ],
     metrics(out) {
       const metrics: ItemMetrics = {};
-      for (const row of readNdjson<ScoreRow>(join(out, "scores.ndjson"))) {
+      for (const row of readNdjson<ScoreRow>(join(out, "scores.ndjson")).rows) {
         if (row.recall !== null) addItem(metrics, "recall@5", row.questionId, one(row.recall));
         addItem(metrics, "hit", row.questionId, one(row.hit));
       }
@@ -125,7 +125,7 @@ const BENCHES: Bench[] = [
     args: (_tier, _split, projects) => ["eval/runner/replay.ts", "--projects", projects],
     metrics(out) {
       const metrics: ItemMetrics = {};
-      for (const s of readNdjson<SessionScore>(join(out, "scores.ndjson"))) {
+      for (const s of readNdjson<SessionScore>(join(out, "scores.ndjson")).rows) {
         const used = s.items.filter((i) => i.used).length;
         addItem(metrics, "usedShare", s.sessionId, { num: used, den: s.items.length });
         addItem(metrics, "injection", s.sessionId, { num: s.outcomes.filter((o) => o.injected).length, den: s.outcomes.length });
@@ -142,11 +142,29 @@ function git(...args: string[]): string {
   return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
 }
 
-function runBench(bench: Bench, tier: Tier, split: Split, dir: string, input: string): Promise<number | null> {
+const doneFile = (dir: string, bench: Bench) => join(dir, `${bench.name}.done.json`);
+
+function finishedBench(dir: string, bench: Bench): { exitCode: number | null; seconds: number } | undefined {
+  try {
+    const done = JSON.parse(readFileSync(doneFile(dir, bench), "utf8")) as { exitCode: number | null; seconds: number };
+    return done.exitCode === 0 ? done : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function runBench(bench: Bench, tier: Tier, split: Split, dir: string, input: string, resume: boolean): Promise<number | null> {
   const out = join(dir, bench.name);
   mkdirSync(out, { recursive: true });
-  const log = openSync(join(dir, `${bench.name}.log`), "w");
-  const args = [...bench.args(tier, split, input), "--instance", String(bench.instance), "--split", split, "--out", out];
+  const resuming = resume && bench.resumable === true;
+  const log = openSync(join(dir, `${bench.name}.log`), resuming ? "a" : "w");
+  const args = [
+    ...bench.args(tier, split, input),
+    "--instance", String(bench.instance),
+    "--split", split,
+    "--out", out,
+    ...(resuming ? ["--resume"] : []),
+  ];
   const child = spawn(join(REPO_ROOT, "node_modules/.bin/tsx"), args, { cwd: REPO_ROOT, stdio: ["ignore", log, log] });
   closeSync(log);
   return new Promise((done) => child.once("exit", (code) => done(code)));
@@ -194,7 +212,7 @@ function compare(dir: string, againstDir: string, benches: Bench[], meta: RunMet
       `  ${`${bench.name}.${metric}`.padEnd(32)} ${fmt(c.base)} → ${fmt(c.cand)}  Δ ${fmt(c.delta)} [${fmt(c.low)}, ${fmt(c.high)}] n=${c.n}  ${c.verdict}`,
     );
   }
-  writeFileSync(join(dir, `compare-${before.label}.json`), JSON.stringify(report, null, 2));
+  writeJsonAtomic(join(dir, `compare-${before.label}.json`), report);
   return !worse;
 }
 
@@ -206,6 +224,7 @@ async function main(): Promise<void> {
       label: { type: "string" },
       holdout: { type: "boolean", default: false },
       "no-build": { type: "boolean", default: false },
+      resume: { type: "boolean", default: false },
     },
   });
   const tier = values.tier as Tier;
@@ -244,18 +263,26 @@ async function main(): Promise<void> {
   if (values.holdout) process.env[HOLDOUT_ENV] = label;
   if (!values["no-build"]) execFileSync("npm", ["run", "build"], { cwd: REPO_ROOT, stdio: "ignore" });
 
-  rmSync(dir, { recursive: true, force: true });
+  const resume = values.resume === true && existsSync(dir);
+  if (!resume) rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   console.log(`${label}: ${benches.map((b) => b.name).join(", ")} → ${dir}`);
   await Promise.all(
     benches.map(async (bench) => {
+      const kept = resume ? finishedBench(dir, bench) : undefined;
+      if (kept) {
+        meta.benches[bench.name] = kept;
+        console.log(`  ${bench.name} kept from the earlier run`);
+        return;
+      }
       const t0 = Date.now();
-      const exitCode = await runBench(bench, tier, split, dir, inputs[bench.name] ?? "");
+      const exitCode = await runBench(bench, tier, split, dir, inputs[bench.name] ?? "", resume);
       meta.benches[bench.name] = { exitCode, seconds: Math.round((Date.now() - t0) / 1000) };
+      writeJsonAtomic(doneFile(dir, bench), meta.benches[bench.name]);
       console.log(`  ${bench.name} ${exitCode === 0 ? "done" : `FAILED (exit ${exitCode}, see ${bench.name}.log)`} in ${meta.benches[bench.name].seconds}s`);
     }),
   );
-  writeFileSync(join(dir, "meta.json"), JSON.stringify(meta, null, 2));
+  writeJsonAtomic(join(dir, "meta.json"), meta);
 
   const ok = benches.filter((b) => meta.benches[b.name].exitCode === 0);
   const summary: Record<string, Record<string, { n: number; value: number | null }>> = {};
@@ -267,7 +294,7 @@ async function main(): Promise<void> {
       console.log(`  ${`${bench.name}.${metric}`.padEnd(32)} ${fmt(value)}  n=${Object.keys(items).length}`);
     }
   }
-  writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  writeJsonAtomic(join(dir, "summary.json"), summary);
 
   const comparedOk = againstDir ? compare(dir, againstDir, ok, meta) : true;
   if (ok.length < benches.length || !comparedOk) process.exit(1);

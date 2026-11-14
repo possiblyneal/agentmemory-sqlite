@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { appendDurable, repairNdjson } from "./durable.js";
 import type { Complete, Decision, DecisionKey } from "./decision-key.js";
 import type { DecisionOutcome, Probe } from "./replay-score.js";
 import type { ReplaySession } from "./replay-transcript.js";
@@ -22,13 +23,7 @@ export interface VerdictCache {
 
 export function openVerdictCache(path: string): VerdictCache {
   const verdicts = new Map<string, boolean>();
-  if (existsSync(path)) {
-    for (const line of readFileSync(path, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const row = JSON.parse(line) as { k: string; v: boolean };
-      verdicts.set(row.k, row.v);
-    }
-  }
+  for (const row of repairNdjson<{ k: string; v: boolean }>(path)) verdicts.set(row.k, row.v);
   const keyOf = (id: string, text: string) => `${id}:${sha256(text)}`;
   return {
     get: (id, text) => verdicts.get(keyOf(id, text)),
@@ -36,7 +31,7 @@ export function openVerdictCache(path: string): VerdictCache {
       const k = keyOf(id, text);
       verdicts.set(k, delivers);
       mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, `${JSON.stringify({ k, v: delivers })}\n`);
+      appendDurable(path, { k, v: delivers });
     },
   };
 }

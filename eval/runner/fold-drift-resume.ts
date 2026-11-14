@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { appendDurable, repairNdjson, writeFileAtomic } from "./durable.js";
 import type { LlmProfile } from "./fold-drift-core.js";
 
 export type RunMode = "full" | "screen";
@@ -46,23 +47,6 @@ export function headerMismatch(prior: RunHeader, current: RunHeader): string[] {
   return diffs;
 }
 
-function readLines<R>(file: string): Array<Line<R>> {
-  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
-  const parsed: Array<Line<R>> = [];
-  lines.forEach((text, i) => {
-    try {
-      parsed.push(JSON.parse(text) as Line<R>);
-    } catch (err) {
-      if (i !== lines.length - 1) throw err;
-    }
-  });
-  return parsed;
-}
-
-function append(file: string, line: unknown): void {
-  appendFileSync(file, `${JSON.stringify(line)}\n`);
-}
-
 // Each finished Session is appended to `file` (NDJSON) before the next starts.
 // With `resume`, the Sessions already in it are not run again; a failed Session
 // is not finished and runs again. A half-written last line is a Session cut off.
@@ -81,17 +65,15 @@ export async function runCheckpointed<R extends { sessionId: string }, S = never
   const done = new Map<string, R>();
   if (opts.resume) {
     if (!existsSync(opts.file)) throw new Error(`cannot resume: ${opts.file} does not exist`);
-    const lines = readLines<R>(opts.file);
+    const lines = repairNdjson<Line<R>>(opts.file);
     const first = lines[0];
     if (!first || !("header" in first)) throw new Error(`cannot resume: ${opts.file} has no header line`);
     const diffs = headerMismatch(first.header, opts.header);
     if (diffs.length > 0) throw new Error(`cannot resume ${opts.file}, it differs from this run:\n  ${diffs.join("\n  ")}`);
     for (const line of lines) if ("result" in line) done.set(line.result.sessionId, line.result);
-    writeFileSync(opts.file, lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
   } else {
     mkdirSync(dirname(opts.file), { recursive: true });
-    writeFileSync(opts.file, "");
-    append(opts.file, { header: opts.header });
+    writeFileAtomic(opts.file, `${JSON.stringify({ header: opts.header })}\n`);
   }
 
   const failed: RunOutcome<R>["failed"] = [];
@@ -101,13 +83,13 @@ export async function runCheckpointed<R extends { sessionId: string }, S = never
     if (!done.has(sessionId)) {
       try {
         const r = await opts.run(sessionId);
-        append(opts.file, { result: r });
+        appendDurable(opts.file, { result: r });
         done.set(sessionId, r);
         opts.onResult?.(r);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         failed.push({ sessionId, error });
-        append(opts.file, { failed: { sessionId, error } });
+        appendDurable(opts.file, { failed: { sessionId, error } });
         opts.onFailure?.(sessionId, error);
         continue;
       }

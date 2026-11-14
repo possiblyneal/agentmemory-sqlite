@@ -921,8 +921,14 @@ describe("replay save pass checkpoints", () => {
       file: `${String(i).padStart(3, "0")}-${sessions[i]!.id}.sqlite`,
       ingested: sessions.slice(0, i).map((s) => s.id),
     }));
-  const writeManifest = (dir: string, entries: Checkpoint[]): void =>
+  const writeManifest = (dir: string, entries: Checkpoint[]): void => {
+    for (const entry of entries) {
+      const db = new DatabaseSync(join(dir, entry.file));
+      db.exec("CREATE TABLE kv (k TEXT)");
+      db.close();
+    }
     writeFileSync(join(dir, MANIFEST), JSON.stringify(entries));
+  };
   const resume = (dir: string, s = sessions, set = scored) => openSavePass(dir, true, s, set);
 
   it("resumes from the last checkpoint with the Sessions it already ingested", () => {

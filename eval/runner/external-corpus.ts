@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { writeFileAtomic } from "./durable.js";
 import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { ExternalCorpus, ExternalItem } from "./external-text.js";
@@ -90,7 +91,7 @@ function main(): void {
   }
   const corpus: ExternalCorpus = { builtAt: new Date().toISOString(), items };
   mkdirSync(dirname(resolve(values.out)), { recursive: true });
-  writeFileSync(values.out, JSON.stringify(corpus));
+  writeFileAtomic(values.out, JSON.stringify(corpus));
   console.log(`wrote ${items.length} items to ${values.out}`);
 }
 

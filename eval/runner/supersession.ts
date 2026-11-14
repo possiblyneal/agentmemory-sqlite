@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
+import { appendDurable, writeFileAtomic, writeJsonAtomic } from "./durable.js";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -130,7 +131,7 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  writeFileSync(ndjsonPath, "");
+  writeFileAtomic(ndjsonPath, "");
 
   const seedPath = resolve("tmp/eval-supersession", `seed-${instance}.sqlite`);
   mkdirSync(resolve("tmp/eval-supersession"), { recursive: true });
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
         outcome: classify(returned, c.stale, c.fresh),
       };
       rows.push(row);
-      appendFileSync(ndjsonPath, `${JSON.stringify(row)}\n`);
+      appendDurable(ndjsonPath, row);
       console.log(`  ${row.outcome.padEnd(12)} ${c.id}`);
     }
   } finally {
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
   }
 
   const summary = summarize(rows);
-  writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2));
+  writeJsonAtomic(`${outDir}/summary.json`, summary);
   console.log("\n=== Summary: stale-first rate per record kind and surface ===");
   printSummary(summary);
   console.log(`\nwrote ${ndjsonPath}`);

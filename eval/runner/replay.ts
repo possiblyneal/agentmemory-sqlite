@@ -1,11 +1,4 @@
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, join, relative, resolve } from "node:path";
@@ -34,7 +27,8 @@ import {
 import { daemonCall } from "./daemon-http.js";
 import { ingestCommitLinks, ingestExternal, type ExternalIngest } from "./replay-external.js";
 import { itemsBefore, parseExternalArm, type ExternalCorpus, type ExternalSource } from "./external-text.js";
-import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
+import { appendDurable, readNdjson, startNdjson, writeFileAtomic, writeJsonAtomic } from "./durable.js";
+import { MANIFEST, openSavePass, saveCheckpoint, writeManifest, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
 import { selectionOf } from "./replay-selection.js";
 import { loadSessions, type Loaded } from "./replay-load.js";
 import { DECISION_KEY_PATH, DECISION_VERDICTS_PATH, providerComplete } from "./decision-llm.js";
@@ -645,8 +639,8 @@ function writeRun(
     providers,
     ...extra,
   };
-  writeFileSync(join(opts.out, "summary.json"), JSON.stringify({ run, summary }, null, 2));
-  writeFileSync(join(opts.out, "worst-cases.md"), worstCasesMarkdown(scores));
+  writeJsonAtomic(join(opts.out, "summary.json"), { run, summary });
+  writeFileAtomic(join(opts.out, "worst-cases.md"), worstCasesMarkdown(scores));
   const { byProject, typical, ...pooled } = summary;
   console.log(JSON.stringify({ run: run.providers, minutes: run.minutes, summary: pooled }, null, 2));
   console.log(`\n${projectRows(byProject, typical)}`);
@@ -689,9 +683,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
     return session;
   };
   // --resume keeps the Sessions an earlier probe pass of this --out finished.
-  const scores: SessionScore[] = opts.resume
-    ? readFileSync(ndjson, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as SessionScore)
-    : [];
+  const scores: SessionScore[] = opts.resume ? readNdjson<SessionScore>(ndjson).rows : [];
   const probed = new Set(scores.map((s) => s.sessionId));
   const t0 = Date.now();
   // Live store bytes as seeded and after any maintenance pass: growth across
@@ -727,7 +719,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
       const decided = await withDecisions(base, session, ingested, probes, decisions);
       const score = opts.attribute && decisions ? await withAttribution(decided, decisions.key, decisions.judge, sandbox.sqlitePath) : decided;
       scores.push(score);
-      appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
+      appendDurable(ndjson, score);
       console.log(
         `[${i + 1}/${checkpoints.length}] ${session.id.slice(0, 8)} turns=${score.turns} key=${score.outcomes.length} ` +
           `injected=${score.items.length} used=${score.items.filter((x) => x.used).length} ` +
@@ -826,16 +818,15 @@ async function main(): Promise<void> {
   console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
-  if (!(opts.resume && opts.fromCheckpoints && existsSync(ndjson))) writeFileSync(ndjson, "");
+  startNdjson(ndjson, opts.resume && opts.fromCheckpoints !== undefined);
   if (decisions) {
     const warning = unreachableWarning(unreachableOrigins(decisions.key, new Set(sessions.map((x) => x.id))));
     if (warning) console.error(`warning: ${warning}`);
   }
-  writeFileSync(join(opts.out, "sessions.json"), JSON.stringify(sessions.map((x) => x.id), null, 2));
+  writeJsonAtomic(join(opts.out, "sessions.json"), sessions.map((x) => x.id));
   if (opts.fromCheckpoints) return probeCheckpoints(opts, loaded, scored, ndjson, decisions);
 
   const checkpointDir = join(opts.out, "checkpoints");
-  const manifestPath = join(checkpointDir, MANIFEST);
   const { checkpoints, ingested, resumeAt, seed }: SavePass =
     opts.resume || opts.saveCheckpoints
       ? openSavePass(checkpointDir, opts.resume, sessions, scored)
@@ -854,12 +845,12 @@ async function main(): Promise<void> {
       const alreadySaved = opts.resume && i === resumeAt;
       if (checkpointing && !alreadySaved) {
         checkpoints.push(await backend.checkpoint!(checkpointDir, i, session.id, ingested));
-        writeFileSync(manifestPath, JSON.stringify(checkpoints, null, 2));
+        writeManifest(checkpointDir, checkpoints);
       } else if (scored.has(session.id) && !opts.saveCheckpoints) {
         const probes = await backend.probe(session, opts.maxPrompts);
         score = await withDecisions(scoreSession(session, deriveAnswerKey(session, ingested), probes), session, ingested, probes, decisions);
         scores.push(score);
-        appendFileSync(ndjson, `${JSON.stringify(score)}\n`);
+        appendDurable(ndjson, score);
       }
 
       const importStart = Date.now();
@@ -886,7 +877,7 @@ async function main(): Promise<void> {
     const llm = metrics && { llm: metrics };
     if (opts.saveCheckpoints) {
       const run = { date: new Date().toISOString(), options: { ...opts, root: undefined, out: undefined }, selection: selectionOf(scored), ...llm, minutes };
-      writeFileSync(join(checkpointDir, "run.json"), JSON.stringify(run, null, 2));
+      writeJsonAtomic(join(checkpointDir, "run.json"), run);
       console.log(`wrote ${checkpoints.length} checkpoints to ${checkpointDir}`);
       return;
     }
