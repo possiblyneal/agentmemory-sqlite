@@ -28,6 +28,8 @@ import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { ObserveRetryQueue } from "../functions/observe-retry.js";
+import { ShedQueue } from "../functions/shed-queue.js";
+import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
 import {
   isGraphExtractionEnabled,
   isConsolidationEnabled,
@@ -1138,6 +1140,7 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/file-context", http_method: "POST" },
   });
 
+  const promptQueue = new ShedQueue(INJECT_TIMEOUT_MS);
   sdk.registerFunction("api::prompt-context",
     async (
       req: ApiRequest<{ sessionId: string; prompt: string; project?: string; reply?: string }>,
@@ -1167,17 +1170,19 @@ export function registerApiTriggers(
         };
       }
       const project = req.body.project?.trim();
-      const result = await sdk.trigger<unknown, InjectionResult>({
-        function_id: "mem::prompt-context",
-        payload: {
-          sessionId: req.body.sessionId,
-          prompt: req.body.prompt,
-          ...(project && { project }),
-          ...(req.body.reply && { reply: req.body.reply.slice(-MAX_REPLY_QUERY_CHARS) }),
-        },
-      });
-      noteInjection(kv, { source: "prompt-submit", sessionId: req.body.sessionId, project }, result);
-      return { status_code: 200, body: withoutInjected(result) };
+      const { sessionId, prompt } = req.body;
+      const reply = req.body.reply?.slice(-MAX_REPLY_QUERY_CHARS);
+      const turn = await promptQueue.run(() =>
+        sdk.trigger<unknown, InjectionResult>({
+          function_id: "mem::prompt-context",
+          payload: { sessionId, prompt, ...(project && { project }), ...(reply && { reply }) },
+        }),
+      );
+      if (turn.shed) {
+        return { status_code: 503, body: { error: "prompt-context queued past the hook timeout" } };
+      }
+      noteInjection(kv, { source: "prompt-submit", sessionId, project }, turn.value);
+      return { status_code: 200, body: withoutInjected(turn.value) };
     },
   );
   sdk.registerTrigger({

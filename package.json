@@ -37,6 +37,7 @@
     "eval:beam": "tsx eval/runner/beam.ts",
     "eval:pmb": "tsx eval/runner/pmb.ts",
     "eval:suite": "tsx eval/runner/suite.ts",
+    "eval:burst": "tsx eval/runner/burst.ts",
     "eval:supersession": "tsx eval/runner/supersession.ts",
     "eval:external-corpus": "tsx eval/runner/external-corpus.ts",
     "eval:external-compare": "tsx eval/runner/compare-external.ts",

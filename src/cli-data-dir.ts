@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir, platform } from "node:os";
+import { MAX_INSTANCE } from "./cli/instance-port.js";
 
 export type DataDirSource = "flag" | "env" | "default";
 
@@ -91,7 +92,7 @@ export function resolveDataDir(options: ResolveDataDirOptions = {}): ResolvedDat
   const nodePlatform = options.platform ?? platform();
   const parsedInstance = parseInt(argValue(args, "--instance") ?? "0", 10);
   const instance =
-    parsedInstance > 0 && parsedInstance <= 50 ? parsedInstance : 0;
+    parsedInstance > 0 && parsedInstance <= MAX_INSTANCE ?parsedInstance : 0;
   const forInstance = (dataDir: string) =>
     instance ? join(dataDir, `instance-${instance}`) : dataDir;
 

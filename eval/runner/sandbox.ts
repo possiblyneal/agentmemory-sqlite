@@ -164,8 +164,10 @@ export async function startSandbox(opts: {
   seed?: string;
   // Config rows written into the seeded store before the daemon boots.
   config?: Record<string, unknown>;
+  // A built CLI other than this tree's, so one run can compare two builds.
+  cli?: string;
 }): Promise<Sandbox> {
-  const cli = resolve(REPO_ROOT, "dist/cli.mjs");
+  const cli = opts.cli ? resolve(opts.cli) : resolve(REPO_ROOT, "dist/cli.mjs");
   if (!existsSync(cli)) throw new Error(`${cli} not found; run npm run build first`);
   const ports = instancePorts(opts.instance);
   const busy = await Promise.all(ports.map(isListening));
