@@ -32,6 +32,8 @@ import {
   type ReplaySession,
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
+import { ingestExternal } from "./replay-external.js";
+import { itemsBefore, parseExternalArm, type ExternalCorpus, type ExternalSource } from "./external-text.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
 import { selectionOf } from "./replay-selection.js";
 import { loadSessions, type Loaded } from "./replay-load.js";
@@ -78,6 +80,8 @@ interface Options {
   maintenance?: MaintenancePass;
   atypical: string[];
   queryArm: QueryArmOptions;
+  externalCorpus?: ExternalCorpus;
+  externalArm: string;
 }
 
 function parseOptions(): Options {
@@ -104,6 +108,8 @@ function parseOptions(): Options {
       "from-checkpoints": { type: "string" },
       maintenance: { type: "string" },
       "query-arm": { type: "string", default: "control" },
+      "external-corpus": { type: "string" },
+      "external-arm": { type: "string", default: "none" },
       "reply-chars": { type: "string", default: "1000" },
       "reply-scale": { type: "string", default: "0" },
       "terse-only": { type: "boolean", default: false },
@@ -156,8 +162,8 @@ function parseOptions(): Options {
     console.error("--save-checkpoints and --from-checkpoints are separate passes; pass one");
     process.exit(2);
   }
-  if (values.resume && !values["save-checkpoints"]) {
-    console.error("--resume continues a save pass; pass --save-checkpoints");
+  if (values.resume && !values["save-checkpoints"] && !values["from-checkpoints"]) {
+    console.error("--resume continues a save or probe pass; pass --save-checkpoints or --from-checkpoints");
     process.exit(2);
   }
   if ((values["save-checkpoints"] || values["from-checkpoints"]) && values.backend === "hindsight") {
@@ -194,6 +200,21 @@ function parseOptions(): Options {
     console.error("--attribute reads each origin Session's Summary from the restored checkpoint; pass --decision-key and --from-checkpoints");
     process.exit(2);
   }
+  const externalArm = values["external-arm"] as string;
+  try {
+    parseExternalArm(externalArm);
+  } catch (err) {
+    console.error(errorMessage(err));
+    process.exit(2);
+  }
+  if ((externalArm !== "none" || values["external-corpus"]) && !values["from-checkpoints"]) {
+    console.error("--external-arm and --external-corpus ingest into restored checkpoints; pass --from-checkpoints");
+    process.exit(2);
+  }
+  if (externalArm !== "none" && !values["external-corpus"]) {
+    console.error("--external-arm needs --external-corpus FILE (eval:external-corpus builds it)");
+    process.exit(2);
+  }
   const maintenance = values.maintenance ? parseMaintenance(values.maintenance) : undefined;
   if (maintenance && "error" in maintenance) {
     console.error(maintenance.error);
@@ -221,6 +242,10 @@ function parseOptions(): Options {
     fromCheckpoints: values["from-checkpoints"] ? resolve(values["from-checkpoints"]) : undefined,
     maintenance,
     atypical: (values.atypical as string).split(",").map((p) => p.trim()).filter(Boolean),
+    externalArm,
+    externalCorpus: values["external-corpus"]
+      ? (JSON.parse(readFileSync(resolve(values["external-corpus"]), "utf8")) as ExternalCorpus)
+      : undefined,
     queryArm: {
       arm: queryArm,
       chars: positive("reply-chars", values["reply-chars"] as string, 0),
@@ -295,7 +320,7 @@ interface InjectionRecordRow {
 type Extra = Map<string, { project?: string; text: string }>;
 
 interface Resolver {
-  observations: Map<string, { session: ReplaySession; row: ObsRow }>;
+  observations: Map<string, { session: ReplaySession; row: ObsRow; external?: ExternalSource }>;
   sessions: Map<string, ReplaySession>;
 }
 
@@ -308,7 +333,15 @@ function itemFor(ref: ItemRef, resolver: Resolver, extra: Extra): ProbeItem {
   const obs = resolver.observations.get(ref.id);
   if (obs) {
     const files = (obs.row.files ?? ref.files ?? []).flatMap((f) => relativeToCwd(f, obs.session.cwd) ?? []);
-    return { ref: key, kind: ref.kind, sessionId: obs.session.id, project: obs.session.project, files, text: obsText(obs.row) };
+    return {
+      ref: key,
+      kind: ref.kind,
+      sessionId: obs.session.id,
+      project: obs.session.project,
+      files,
+      text: obsText(obs.row),
+      ...(obs.external && { external: obs.external }),
+    };
   }
   const session = resolver.sessions.get(ref.id);
   if (ref.kind === "summary" && session) {
@@ -614,6 +647,18 @@ async function recordIngested(baseUrl: string, session: ReplaySession, resolver:
   resolver.sessions.set(session.id, session);
 }
 
+// The commits, pull requests and issues final before this Session started, in
+// the arm's sources, ingested into its restored store ahead of the probes.
+async function recordExternal(baseUrl: string, opts: Options, session: ReplaySession, resolver: Resolver): Promise<void> {
+  if (!opts.externalCorpus) return;
+  const items = itemsBefore(opts.externalCorpus, parseExternalArm(opts.externalArm), session.project, session.startedAt);
+  if (items.length === 0) return;
+  for (const row of await ingestExternal(baseUrl, items, session.cwd)) {
+    const pseudo = { id: row.sessionId, cwd: session.cwd, project: row.project } as ReplaySession;
+    resolver.observations.set(row.id, { session: pseudo, row: { ...row.row, files: row.files }, external: row.source });
+  }
+}
+
 async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string, decisions?: DecisionScoring): Promise<void> {
   process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
   const dir = opts.fromCheckpoints!;
@@ -630,7 +675,11 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
     if (!session) throw new Error(`checkpoint names Session ${id}, which --projects did not load`);
     return session;
   };
-  const scores: SessionScore[] = [];
+  // --resume keeps the Sessions an earlier probe pass of this --out finished.
+  const scores: SessionScore[] = opts.resume
+    ? readFileSync(ndjson, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as SessionScore)
+    : [];
+  const probed = new Set(scores.map((s) => s.sessionId));
   const t0 = Date.now();
   // Live store bytes as seeded and after any maintenance pass: growth across
   // the replay, as a normal run reports it, not what probing adds.
@@ -639,6 +688,7 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
   let bytesBeforePass = 0;
   const pass = opts.maintenance;
   for (const [i, checkpoint] of checkpoints.entries()) {
+    if (probed.has(checkpoint.sessionId)) continue;
     const session = find(checkpoint.sessionId);
     const ingested = checkpoint.ingested.map(find);
     const sandbox = await startSandbox({
@@ -655,9 +705,10 @@ async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<strin
         console.log(`  ${pass.name}: ${JSON.stringify(body).slice(0, 300)}`);
       }
       bytesEnd = liveStoreBytes(sandbox.sqlitePath);
-      if (i === 0) bytesStart = bytesEnd;
+      if (bytesStart === 0) bytesStart = bytesEnd;
       const resolver: Resolver = { observations: new Map(), sessions: new Map() };
       for (const s of ingested) await recordIngested(sandbox.baseUrl, s, resolver);
+      await recordExternal(sandbox.baseUrl, opts, session, resolver);
       const probes = await probeSession(sandbox.baseUrl, session, opts.maxPrompts, resolver, opts.queryArm);
       const base = { ...scoreSession(session, deriveAnswerKey(session, ingested), probes), ...(await injectionGate(sandbox.baseUrl)) };
       const decided = await withDecisions(base, session, ingested, probes, decisions);
@@ -762,7 +813,7 @@ async function main(): Promise<void> {
   console.log(`replaying ${sessions.length} Sessions from ${Object.keys(perProject).length} projects (${opts.projects.length} directories) into ${opts.backend}`);
   mkdirSync(opts.out, { recursive: true });
   const ndjson = join(opts.out, "scores.ndjson");
-  writeFileSync(ndjson, "");
+  if (!(opts.resume && opts.fromCheckpoints && existsSync(ndjson))) writeFileSync(ndjson, "");
   if (decisions) {
     const warning = unreachableWarning(unreachableOrigins(decisions.key, new Set(sessions.map((x) => x.id))));
     if (warning) console.error(`warning: ${warning}`);

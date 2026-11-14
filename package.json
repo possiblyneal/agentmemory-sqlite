@@ -38,6 +38,8 @@
     "eval:pmb": "tsx eval/runner/pmb.ts",
     "eval:suite": "tsx eval/runner/suite.ts",
     "eval:supersession": "tsx eval/runner/supersession.ts",
+    "eval:external-corpus": "tsx eval/runner/external-corpus.ts",
+    "eval:external-compare": "tsx eval/runner/compare-external.ts",
     "eval:fold-drift": "tsx eval/runner/fold-drift.ts",
     "eval:arm": "tsx eval/runner/arm.ts",
     "eval:compare": "tsx eval/runner/compare.ts",
