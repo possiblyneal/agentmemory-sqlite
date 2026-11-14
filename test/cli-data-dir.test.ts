@@ -22,6 +22,18 @@ describe("resolveDataDir", () => {
     });
   });
 
+  it("gives an instance above 50 its own data dir, never the live one (#405)", () => {
+    const resolved = resolveDataDir({
+      args: ["--data-dir", "/data", "--instance", "60"],
+      env: {},
+      cwd: "/repo",
+      home: "/home/alex",
+      platform: "linux",
+    });
+
+    expect(resolved.dataDir).toBe(join("/data", "instance-60"));
+  });
+
   it("uses AGENTMEMORY_DATA_DIR when --data-dir is absent", () => {
     const cwd = "/repo/project";
     const home = "/home/alex";
