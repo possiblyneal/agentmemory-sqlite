@@ -47,6 +47,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
+          # Caches ~/.npm keyed on package-lock.json; `npm ci` still installs
+          # exactly the locked tree, only without re-downloading it.
+          cache: npm
       # `npm ci` over the committed package-lock.json, so every leg installs
       # the tree the lockfile pins rather than whatever npm resolves that day.
       - run: npm ci --no-audit --no-fund

@@ -58,7 +58,16 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   The local embedder's worker is its own entry, `dist/local-worker.mjs`, which `local.ts` loads
   from beside its bundle (from source under tsx, `local-worker.ts`); keep the two in one output
   directory.
-- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
+- **Test**: vitest, in three projects (`vitest.config.ts`): `npm test` runs `shared` and `isolated`,
+  `npm run test:integration` runs `integration` against a live daemon. A file shares one module
+  graph per worker (`shared`, `isolate: false`) unless it calls `vi.mock`/`vi.doMock` or is in
+  `FRESH_MODULES`; add a file there when it asserts on state a module captures at import, such as
+  `config.ts`'s `DATA_DIR` from `$HOME` or `_env.ts`'s env-file cache. Under `CI` every file is
+  isolated, so a leak cannot turn another file's assertion green unnoticed. `tmp/**` and
+  `.claude/**`, where scratch and agent worktrees live, are excluded. Outside `CI`, vitest's
+  `experimental.fsModuleCache` keeps transformed modules in `node_modules/.experimental-vitest-cache`
+  between runs; it writes without fsync, so the config drops any entry whose metadata does not parse
+  before the run, and `npx vitest --clearCache` empties it
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu only: the daemon runs on the Operator's Linux machine, so do not add a macOS or Windows leg, nor re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
@@ -483,7 +492,9 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
   off and maps the SDK's timeout to `ProviderTimeoutError`. The in-process Engine has
   no invocation timeout, so never reintroduce a ceiling that clamps that bound
   ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)). Its requests go through
-  its own `undici` Agent with `headersTimeout` and `bodyTimeout` 0: Node's global dispatcher
+  its own `undici` Agent with `headersTimeout` and `bodyTimeout` 0, loaded on the first request
+  and before its deadline is armed, since loading it is the costliest import for the many
+  modules that never send one (`test/fetch-lazy-undici.test.ts`): Node's global dispatcher
   fails any request whose headers or body gaps pass 300 s (`fetch failed`), whatever the
   deadline. Keep `undici` on 7.x; 8.x needs Node >=22.19, above the 22.13 floor.
 
@@ -493,7 +504,7 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 - Mock pattern: hand-rolled fakes passed straight into the registrar, not module mocks. A `mockKV()` backed by a `Map<string, Map<string, unknown>>` implementing `get/set/delete/list`, and a `mockSdk()` holding a `Map` of registered handlers whose `trigger()` looks the handler up by `function_id` and calls it. `vi.mock` is reserved for `../src/logger.js` and `../src/state/keyed-mutex.js`.
 - Test files go in `test/` with `.test.ts` extension
 - Follow existing patterns in `test/lessons.test.ts` for function tests
-- An LLM-bound eval runner or measurement (one that runs for hours on the broker) saves each finished unit (a Session, a checkpoint, a measured setting) as it completes and resumes past them on restart, so the Operator can stop it and take the broker back without losing finished work; a unit cut off midway reruns from its start
+- Every test and eval run survives being killed at any instant, a power cut included. A rerun of `npm test` passes whatever an interrupted run left behind. A runner that takes minutes or more saves each finished unit (a Session, a checkpoint, a measured setting, a question) as it completes and resumes past them on restart, so the Operator can stop it, take the broker back or lose power without losing finished work; a unit cut off midway reruns from its start. Its state lives under the repo's `tmp/`, never `/tmp` (tmpfs, emptied on reboot); whole-file state is written to a temp file, fsynced and renamed into place; an ndjson reader drops a torn last line rather than failing; a cache or checkpoint is trusted only once it is complete on disk
 - `npm run eval:burst` (after `npm run build`) starts N Sessions together over a seeded 20,000-Observation store and reports first-Injection latency within the hooks' 1,500 ms, `/livez` and later prompts, 5 runs per `--label`; `--cli <cli.mjs>` runs a build copied aside, to compare two builds, and `--max-load` waits for an idle host (`eval/README.md`, Session burst). Latency depends on host load: compare arms at similar load, and record it
 - Recall quality is measured by `npm run eval:coding-life` (after `npm run build`), which scores search, session-start and prompt-submit Injections separately against a throwaway daemon under `tmp/eval-sandbox/`; see `eval/README.md`. A change to Recall or Injection content reruns it and, when the numbers move, publishes a new dated scorecard in `docs/benchmarks/`
 - `npm run eval:replay -- --projects=<dir>,...` replays the Operator's own `~/.claude/projects` transcripts into a throwaway daemon and scores each Goal line against an answer key derived from the transcripts, counting only turns the Operator typed (`eval/README.md`). `--llm` replays through the hook payloads into a daemon with LLM compression on, using the shell's OpenAI-compatible settings. `--llm-summary` does the same with compression left synthetic and summarizes at every Stop, so the daemon's fold logic runs as live; a run whose `summary.json` shows `failedSummarizeCalls` above 0 is not a measurement. It is not part of CI, and its output stays under `tmp/eval-replay/` because it quotes private transcripts; only aggregates reach `docs/benchmarks/`
