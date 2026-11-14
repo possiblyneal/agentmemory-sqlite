@@ -486,6 +486,19 @@ describe("mem::prompt-context", () => {
       ]);
     });
 
+    it("runs one amendment search however many Sessions are given, for the best-ranked one", async () => {
+      hits.push(
+        { id: "obs_d", score: 19, sessionId: "ses_decoy", timestamp: "2026-08-01T10:00:00.000Z" },
+        { id: "obs_a", score: 18, sessionId: "ses_amend", timestamp: "2026-07-17T03:13:00.000Z" },
+      );
+      amendmentSearch([]);
+      await run("contact sync leaves duplicates behind");
+      expect(searched.map((s) => s.query)).toEqual([
+        "contact sync leaves duplicates behind",
+        "Dedupe rule Keep the newest record on collision",
+      ]);
+    });
+
     it("still gives the chosen Sessions when the amendment search fails", async () => {
       sdk.registerFunction("mem::search", async (data: unknown) => {
         const { query } = data as { query: string };
