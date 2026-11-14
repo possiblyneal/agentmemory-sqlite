@@ -33,6 +33,10 @@ const EDGE_PUNCTUATION = /^[/.\\_-]+|[/.\\_-]+$/g;
 // the event loop for seconds on a live daemon (#371).
 const BUCKET_CHARS = 2;
 const SEARCH_SLICE_MS = 10;
+// A common term's posting list, or a short prefix's expansion, is tens of
+// thousands of documents scored in one loop; the search offers to yield after
+// this many, so one term cannot hold the event loop for hundreds of ms.
+const POSTINGS_PER_STEP = 2048;
 
 export type SearchHit = { obsId: string; sessionId: string; score: number };
 
@@ -160,18 +164,25 @@ export class SearchIndex {
     return this.ranked(step.value, limit, layer);
   }
 
-  // A document removed while a cooperative search yielded is left out.
+  // A document removed while a cooperative search yielded is left out. Only
+  // the head is kept: sorting every scored document held the event loop for
+  // up to 200 ms on a 99k-document index, to throw all but `limit` away. Ties
+  // rank in scoring order, as a stable sort of the full list would.
   private ranked(scores: Map<string, number>, limit: number, layer?: IndexLayer): SearchHit[] {
-    const hits: SearchHit[] = [];
+    const head: SearchHit[] = [];
     for (const [obsId, score] of scores) {
+      if (limit <= 0 || (head.length === limit && !(score > head[limit - 1].score))) continue;
       const entry = this.entries.get(obsId);
       if (!entry || (layer && (entry.layer ?? "observation") !== layer)) continue;
-      hits.push({ obsId, sessionId: entry.sessionId, score });
+      let at = head.length;
+      while (at > 0 && head[at - 1].score < score) at--;
+      head.splice(at, 0, { obsId, sessionId: entry.sessionId, score });
+      if (head.length > limit) head.pop();
     }
-    return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+    return head;
   }
 
-  // Yields after each query term's postings and prefix expansions are scored.
+  // Yields every POSTINGS_PER_STEP documents scored and after each query term.
   private *scoreTerms(query: string): Generator<void, Map<string, number>> {
     const scores = new Map<string, number>();
     const rawTerms = this.tokenize(query.toLowerCase(), STOP_WORDS);
@@ -205,7 +216,9 @@ export class SearchIndex {
         const df = matchingDocs.size;
         const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
 
+        let scored = 0;
         for (const obsId of matchingDocs) {
+          if (++scored % POSTINGS_PER_STEP === 0) yield;
           const entry = this.entries.get(obsId)!;
           const docTerms = this.docTermCounts.get(obsId);
           const tf = docTerms?.get(term) || 0;
@@ -234,12 +247,16 @@ export class SearchIndex {
       // restores the old additive behaviour.
       const prefixSum = process.env.AGENTMEMORY_PREFIX_MATCH === "sum";
       const prefixBest = new Map<string, number>();
+      let prefixScored = 0;
       for (const indexTerm of this.termsExtending(term)) {
-        const obsIds = this.invertedIndex.get(indexTerm)!;
+        // A term whose last document was removed while the search yielded.
+        const obsIds = this.invertedIndex.get(indexTerm);
+        if (!obsIds) continue;
         const prefixDf = obsIds.size;
         const prefixIdf =
           Math.log((N - prefixDf + 0.5) / (prefixDf + 0.5) + 1) * 0.5;
         for (const obsId of obsIds) {
+          if (++prefixScored % POSTINGS_PER_STEP === 0) yield;
           const entry = this.entries.get(obsId)!;
           const docTerms = this.docTermCounts.get(obsId);
           const tf = docTerms?.get(indexTerm) || 0;

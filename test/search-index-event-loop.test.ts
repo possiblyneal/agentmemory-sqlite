@@ -130,4 +130,54 @@ describe("SearchIndex.searchCooperatively", () => {
     expect(ids).not.toContain("obs_7");
     expect(ids).toContain("obs_57");
   });
+
+  // One term of a 20,000-document posting list, or one short prefix expanding
+  // to terms that hold as many, was a single uninterrupted loop of up to
+  // 400 ms on the live store.
+  it("lets queued I/O run inside one term's posting list", async () => {
+    const idx = new SearchIndex();
+    for (let d = 0; d < 20_000; d++) idx.add(doc(`obs_${d}`, `common${d % 3 === 0 ? "" : "x"} filler${d}`));
+    let turns = 0;
+    let ticking = true;
+    const tick = () => {
+      if (!ticking) return;
+      turns++;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+    await idx.searchCooperatively("common", 10, undefined, 0);
+    await idx.searchCooperatively("comm", 10, undefined, 0);
+    ticking = false;
+    // Two searches over ~20,000 postings each, 2,048 documents a step, plus
+    // one step per term: well above what one yield per term would give.
+    expect(turns).toBeGreaterThanOrEqual(15);
+  });
+
+  it("survives a prefix term whose last document is removed while it yielded", async () => {
+    const idx = new SearchIndex();
+    for (let d = 0; d < 5_000; d++) idx.add(doc(`obs_${d}`, `kubelet${d % 2 ? "" : "x"} notes`));
+    idx.add(doc("obs_rare", "kubezzz solo"));
+    const pending = idx.searchCooperatively("kube", 10_000, undefined, 0);
+    idx.remove("obs_rare");
+    const ids = (await pending).map((h) => h.obsId);
+    expect(ids).not.toContain("obs_rare");
+    expect(ids.length).toBeGreaterThan(0);
+  });
+});
+
+describe("SearchIndex ranking head", () => {
+  it("returns the head of the full ranking, ties in index order, for any limit and layer", () => {
+    const idx = new SearchIndex();
+    for (let d = 0; d < 400; d++) {
+      // Few distinct lengths and terms, so many documents tie on score.
+      idx.add(doc(`obs_${d}`, `alpha beta ${d % 4 === 0 ? "gamma" : "delta"} ${"pad ".repeat(d % 3)}`), d % 5 === 0 ? "memory" : "observation");
+    }
+    for (const layer of [undefined, "memory", "observation"] as const) {
+      const full = idx.search("alpha gamma", 10_000, layer);
+      expect(full.length).toBeGreaterThan(50);
+      for (const limit of [1, 2, 9, 50, 399, 10_000]) {
+        expect(idx.search("alpha gamma", limit, layer)).toEqual(full.slice(0, limit));
+      }
+    }
+  });
 });
