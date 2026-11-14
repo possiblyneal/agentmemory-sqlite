@@ -400,8 +400,9 @@ prefix expansion reads the vocabulary from buckets keyed by a term's first 2 cha
 current on every `add`/`remove` (`termsExtending()`, `src/state/search-index.ts`); never rebuild
 or sort the whole vocabulary per search, which over ~477k terms held the loop for seconds after
 each indexed Observation (#371). `mem::search` and `HybridSearch` score through
-`searchCooperatively()`, which yields with `setImmediate` between query terms once 10 ms of
-scoring has run and ranks exactly as `search()`; a document removed while it yielded is left
+`searchCooperatively()`, which yields with `setImmediate` between query terms, and every 2048
+postings inside one term's list or prefix expansion, once 10 ms of scoring has run, and ranks
+exactly as `search()` (`ranked()` keeps only the top `limit` hits, ties in scoring order); a document removed while it yielded is left
 out. `mem::search` also yields after BM25, after loading candidates and after the near-twin
 cap. `capBehindNewer` skips a pair whose smaller word set is under half the larger, which can
 never reach `RESTATEMENT_OVERLAP`. Lessons (`lessons.ts`), `mem::remember` and maintenance
