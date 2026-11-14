@@ -32,7 +32,7 @@ import {
   type ReplaySession,
 } from "./replay-transcript.js";
 import { daemonCall } from "./daemon-http.js";
-import { ingestExternal } from "./replay-external.js";
+import { ingestCommitLinks, ingestExternal, type ExternalIngest } from "./replay-external.js";
 import { itemsBefore, parseExternalArm, type ExternalCorpus, type ExternalSource } from "./external-text.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint, type SavePass } from "./replay-checkpoints.js";
 import { selectionOf } from "./replay-selection.js";
@@ -82,6 +82,7 @@ interface Options {
   queryArm: QueryArmOptions;
   externalCorpus?: ExternalCorpus;
   externalArm: string;
+  externalIngest: ExternalIngest;
 }
 
 function parseOptions(): Options {
@@ -110,6 +111,7 @@ function parseOptions(): Options {
       "query-arm": { type: "string", default: "control" },
       "external-corpus": { type: "string" },
       "external-arm": { type: "string", default: "none" },
+      "external-ingest": { type: "string", default: "observe" },
       "reply-chars": { type: "string", default: "1000" },
       "reply-scale": { type: "string", default: "0" },
       "terse-only": { type: "boolean", default: false },
@@ -211,6 +213,15 @@ function parseOptions(): Options {
     console.error("--external-arm and --external-corpus ingest into restored checkpoints; pass --from-checkpoints");
     process.exit(2);
   }
+  const externalIngest = values["external-ingest"] as string;
+  if (externalIngest !== "observe" && externalIngest !== "commit-link") {
+    console.error(`--external-ingest must be observe or commit-link, got "${externalIngest}"`);
+    process.exit(2);
+  }
+  if (externalIngest === "commit-link" && externalArm !== "none" && externalArm !== "commits") {
+    console.error("--external-ingest commit-link ingests commits only; use --external-arm commits");
+    process.exit(2);
+  }
   if (externalArm !== "none" && !values["external-corpus"]) {
     console.error("--external-arm needs --external-corpus FILE (eval:external-corpus builds it)");
     process.exit(2);
@@ -243,6 +254,7 @@ function parseOptions(): Options {
     maintenance,
     atypical: (values.atypical as string).split(",").map((p) => p.trim()).filter(Boolean),
     externalArm,
+    externalIngest: externalIngest as ExternalIngest,
     externalCorpus: values["external-corpus"]
       ? (JSON.parse(readFileSync(resolve(values["external-corpus"]), "utf8")) as ExternalCorpus)
       : undefined,
@@ -653,7 +665,8 @@ async function recordExternal(baseUrl: string, opts: Options, session: ReplaySes
   if (!opts.externalCorpus) return;
   const items = itemsBefore(opts.externalCorpus, parseExternalArm(opts.externalArm), session.project, session.startedAt);
   if (items.length === 0) return;
-  for (const row of await ingestExternal(baseUrl, items, session.cwd)) {
+  const ingest = opts.externalIngest === "commit-link" ? ingestCommitLinks : ingestExternal;
+  for (const row of await ingest(baseUrl, items, session.cwd)) {
     const pseudo = { id: row.sessionId, cwd: session.cwd, project: row.project } as ReplaySession;
     resolver.observations.set(row.id, { session: pseudo, row: { ...row.row, files: row.files }, external: row.source });
   }

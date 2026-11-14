@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { execFile } from "node:child_process";
+import { basename, dirname, join, resolve } from "node:path";
+import { execFile, execSync } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 //#region src/hooks/_env.ts
 function parseEnvFile(content) {
 	const vars = {};
@@ -89,6 +90,78 @@ function shouldSkipSession() {
 }
 //#endregion
 //#region src/hooks/_project.ts
+function projectNamesPath() {
+	return join(homedir(), ".agentmemory", "project-names.json");
+}
+function remoteUrl(dir) {
+	try {
+		return execSync("git config --get remote.origin.url", {
+			cwd: dir,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			],
+			timeout: 500
+		}).toString().trim().replace(/\.git$/, "");
+	} catch {
+		return "";
+	}
+}
+function disambiguate(name, commonDir, dir) {
+	const identity = remoteUrl(dir) || commonDir;
+	try {
+		const path = projectNamesPath();
+		let claims = {};
+		try {
+			claims = JSON.parse(readFileSync(path, "utf-8"));
+		} catch {}
+		if (!(name in claims)) {
+			mkdirSync(dirname(path), { recursive: true });
+			const staged = `${path}.${process.pid}`;
+			writeFileSync(staged, JSON.stringify({
+				...claims,
+				[name]: identity
+			}));
+			renameSync(staged, path);
+			return name;
+		}
+		if (claims[name] === identity) return name;
+		return `${name}-${createHash("sha1").update(identity).digest("hex").slice(0, 6)}`;
+	} catch {
+		return name;
+	}
+}
+function resolveProject(cwd) {
+	const explicit = process.env["AGENTMEMORY_PROJECT_NAME"];
+	if (explicit && explicit.trim()) return explicit.trim();
+	return resolveGitProject(cwd && cwd.trim() ? cwd : process.cwd());
+}
+function bareRepoName(commonDir) {
+	const name = basename(commonDir);
+	if (name === ".bare") return basename(dirname(commonDir));
+	return name.replace(/\.git$/, "");
+}
+function resolveGitProject(dir) {
+	try {
+		const [commonDir, top] = execSync("git rev-parse --git-common-dir --show-toplevel", {
+			cwd: dir,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			],
+			timeout: 500
+		}).toString().trim().split("\n");
+		if (commonDir && basename(commonDir) === ".git") return disambiguate(basename(dirname(resolve(dir, commonDir))), resolve(dir, commonDir), dir);
+		if (top && commonDir && resolve(dir, commonDir) !== resolve(top, ".git")) {
+			const bare = resolve(dir, commonDir);
+			if (!bare.split(/[\\/]/).includes("modules")) return disambiguate(bareRepoName(bare), bare, dir);
+		}
+		if (top) return disambiguate(basename(top), resolve(dir, commonDir || top), dir);
+	} catch {}
+	return basename(dir);
+}
 function hookCwd(data) {
 	if (!data || typeof data !== "object") return void 0;
 	if (typeof data.cwd === "string" && data.cwd.trim()) return data.cwd;
@@ -168,6 +241,8 @@ async function main() {
 	], cwd);
 	const files = filesRaw ? filesRaw.split("\n").filter(Boolean) : void 0;
 	const body = {
+		project: resolveProject(cwd),
+		cwd,
 		sessionId,
 		sha,
 		branch: branch || void 0,

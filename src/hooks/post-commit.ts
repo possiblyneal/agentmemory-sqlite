@@ -3,7 +3,7 @@ import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { hookCwd } from "./_project.js";
+import { hookCwd, resolveProject } from "./_project.js";
 
 hydrateHookEnv();
 
@@ -70,6 +70,8 @@ async function main() {
   const files = filesRaw ? filesRaw.split("\n").filter(Boolean) : undefined;
 
   const body = {
+    project: resolveProject(cwd),
+    cwd,
     sessionId,
     sha,
     branch: branch || undefined,
