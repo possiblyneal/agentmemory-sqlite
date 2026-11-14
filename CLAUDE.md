@@ -286,10 +286,11 @@ rendered Session takes its place among the Sessions by date, so it is not render
 decision it may supersede; the header sits before the first Session block. Older Memories, Lessons and
 Observations follow the Sessions. The top 3 are counted in rendered units from a 30-hit
 search: a covered Session is one unit however many of its Observations hit.
-Each covered Session given also triggers a search on its Summary's title and first 10 decisions:
+The best-ranked covered Session given also triggers a search on its Summary's title and first 10
+decisions (one search per prompt, since each is a full BM25 pass on the one search lane):
 when the best-scoring other Session there scores at least 0.35 of the given Session's own best
 hit, leads the runner-up by 1.25x and its Summary dates later, its decisions are given too, as
-the amendment (`laterAmendment`), so up to 3 given Sessions can bring 3 more. Memory hits, this
+the amendment (`laterAmendment`), so at most one amendment is added. Memory hits, this
 Session and any Summary already given are dropped before ranking. A failed amendment lookup
 drops only that amendment.
 At session start (`mem::context`) a Session Summary's block carries at most its first 10 decisions

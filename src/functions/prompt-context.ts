@@ -192,8 +192,10 @@ async function laterAmendment(
   return amendment.summary && decidedAt(amendment.summary) > decidedAt(given.summary) ? amendment : null;
 }
 
-// An amendment that cannot be looked up is left out; the Sessions already
-// chosen are still given.
+// Only the best-ranked Session is checked for an amendment: each check is a
+// full BM25 search, and the checks run one after another on the search
+// lane, so three of them took most of a prompt's time. An amendment that
+// cannot be looked up is left out; the Sessions already chosen are still given.
 async function withLaterAmendments(
   sdk: ISdk,
   kv: StateKV,
@@ -202,20 +204,10 @@ async function withLaterAmendments(
   project?: string,
 ): Promise<Resolved[]> {
   const given = new Set(chosen.filter((c) => c.summary).map((c) => c.hit.sessionId));
-  const amendments = await Promise.all(
-    chosen.map((c) =>
-      c.summary
-        ? laterAmendment(sdk, kv, { ...c, summary: c.summary }, (id) => given.has(id) || skip(id), project).catch(() => null)
-        : null,
-    ),
-  );
-  const added = new Set<string>();
-  const fresh = amendments.filter((a): a is Resolved => {
-    if (!a || added.has(a.hit.sessionId)) return false;
-    added.add(a.hit.sessionId);
-    return true;
-  });
-  return [...chosen, ...fresh];
+  const lead = chosen.find((c) => c.summary);
+  if (!lead?.summary) return chosen;
+  const amendment = await laterAmendment(sdk, kv, { ...lead, summary: lead.summary }, (id) => given.has(id) || skip(id), project).catch(() => null);
+  return amendment ? [...chosen, amendment] : chosen;
 }
 
 // Decisions lead, newest Session first, so a later Session that amends a
