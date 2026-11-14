@@ -58,7 +58,16 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
   The local embedder's worker is its own entry, `dist/local-worker.mjs`, which `local.ts` loads
   from beside its bundle (from source under tsx, `local-worker.ts`); keep the two in one output
   directory.
-- **Test**: vitest (`npm test` excludes integration tests; `vitest.config.ts` excludes `tmp/**` and `.claude/**`, where scratch and agent worktrees live)
+- **Test**: vitest, in three projects (`vitest.config.ts`): `npm test` runs `shared` and `isolated`,
+  `npm run test:integration` runs `integration` against a live daemon. A file shares one module
+  graph per worker (`shared`, `isolate: false`) unless it calls `vi.mock`/`vi.doMock` or is in
+  `FRESH_MODULES`; add a file there when it asserts on state a module captures at import, such as
+  `config.ts`'s `DATA_DIR` from `$HOME` or `_env.ts`'s env-file cache. Under `CI` every file is
+  isolated, so a leak cannot turn another file's assertion green unnoticed. `tmp/**` and
+  `.claude/**`, where scratch and agent worktrees live, are excluded. Outside `CI`, vitest's
+  `experimental.fsModuleCache` keeps transformed modules in `node_modules/.experimental-vitest-cache`
+  between runs; it writes without fsync, so the config drops any entry whose metadata does not parse
+  before the run, and `npx vitest --clearCache` empties it
 - **Runtime floor**: the Engine and its packages need Node >=22.13 — `node:sqlite` is unflagged from 22.13, so anything older fails at import. CI runs 22/24/26 on ubuntu only: the daemon runs on the Operator's Linux machine, so do not add a macOS or Windows leg, nor re-add a Node 20 leg. `integrations/filesystem-watcher` is a separate process that never imports `node:sqlite`, so its `>=20` stands.
 
 ## Consistency Rules
