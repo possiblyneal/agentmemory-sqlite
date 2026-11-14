@@ -10,6 +10,7 @@ import {
 import { contentTokens, isTersePrompt } from "../../src/utils/terse-prompt.js";
 import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
 import { MISS_LABELS, type MissLabel } from "./decision-attribution.js";
+import { EXTERNAL_SOURCES, type ExternalSource } from "./external-text.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
 
 export type ProbeKind = "session-start" | "prompt-context" | "search";
@@ -23,6 +24,8 @@ export interface ProbeItem {
   project?: string;
   files: string[];
   text: string;
+  // Set when the item is a commit, pull request or issue ingested by `--external-arm`.
+  external?: ExternalSource;
 }
 
 export interface Probe {
@@ -45,6 +48,7 @@ export interface ScoredItem {
   project?: string;
   chars: number;
   excerpt: string;
+  external?: ExternalSource;
 }
 
 export interface KeyOutcome {
@@ -168,6 +172,7 @@ export function scoreSession(session: ReplaySession, key: AnswerKey, probes: Pro
     project: item.project,
     chars: item.text.length,
     excerpt: item.text.slice(0, 160),
+    ...(item.external && { external: item.external }),
   }));
   const keys: KeyItem[] = [...key.files, ...key.corrections, ...key.decisions];
   return {
@@ -303,6 +308,12 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
       either: share(decisions.filter((d) => d.sessionStart || d.promptSubmit).length, decisions.length),
       attribution: attributionCounts(decisions),
     },
+    external: Object.fromEntries(
+      EXTERNAL_SOURCES.map((source) => {
+        const of = items.filter((i) => i.external === source);
+        return [source, { injectedItems: of.length, usedItems: of.filter((i) => i.used).length, chars: of.reduce((n, i) => n + i.chars, 0) }];
+      }),
+    ),
     rightScope: {
       injectedItems: items.length,
       leaks: items.filter((i) => i.leak).length,

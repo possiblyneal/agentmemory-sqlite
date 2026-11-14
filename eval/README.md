@@ -323,6 +323,10 @@ The key is a proxy and the numbers are not accuracy:
 - Files outside the Session's cwd (`~/.claude`, `/tmp`) are ignored on both sides.
 - Under `--backend hindsight`, retains carry no timestamp (the integration sends none), so every unit is dated at replay time, not at the Session's time. Latency is the HTTP round trip to the container, compared against agentmemory's 1.5 s budget; the integration's own recall timeout is 10 s.
 
+### External text (#396)
+
+Measures whether commit, PR and issue text adds Recall value. `npm run eval:external-corpus -- --out tmp/<dir>/corpus.json <repo checkout>...` reads each checkout's `git log` (with changed paths) and `gh pr|issue list`, dating a commit by its committer date and a PR or issue by `closedAt ?? updatedAt`. `eval:replay --from-checkpoints <dir> --external-corpus <corpus.json> --external-arm <arm>` then ingests, into each restored checkpoint, the arm's items dated before that Session's start (`prompt_submit` Observations, one Session per project and source, a commit's changed paths as `files`) and probes as usual. The arms are `none`, `commits`, `prs`, `issues`, their pairs joined by `+`, and `commits+prs+issues`; one save pass serves them all. `summary.json` gains `external` (injected and used items and chars per source), and `--resume` with `--from-checkpoints` continues a killed probe pass past the Sessions already in its `scores.ndjson`. `npm run eval:external-compare -- <dir>` (arms in `<dir>/arm-<arm>/`) prints the pooled and typical tables and each arm's paired McNemar against `none`. The store bytes it reports are read before the items are ingested. Result: [2026-11-13 external text](../docs/benchmarks/2026-11-13-external-text.md).
+
 ## Repo layout
 
 ```text
