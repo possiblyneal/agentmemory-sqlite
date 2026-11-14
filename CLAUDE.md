@@ -48,7 +48,7 @@ The Engine keeps the three primitives (Worker/Function/Trigger) as its internal 
 
 - **Engine**: `createInprocSdk()` in `src/engine/inproc/sdk.ts`, over `node:sqlite`. It binds the ports itself. Engine-facing types (`ISdk`, `ApiRequest`, `TriggerAction`) come from `src/engine/types.ts` — this repository owns them; there is no external SDK package.
 - **State**: `SqliteState` (`src/engine/inproc/state.ts`), one file at `AGENTMEMORY_SQLITE_PATH` (default `<data-dir>/agentmemory.sqlite`). Reach it as `StateKV` over the scopes in `src/state/schema.ts`. Every row written or deleted, by any path, bumps its scope's write generation (`StateKV.writeGeneration(scope)`, `state::write-generation`), so an in-memory view of a scope knows when it is stale; the counter starts at 0 when the store opens.
-- **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100.
+- **Ports**: REST 3111 is the anchor (`III_REST_PORT`); streams is REST+1 and the viewer REST+2. `--instance N` shifts the whole block by 100; N is an integer 0..624 (`MAX_INSTANCE`, `src/cli/instance-port.ts`), and any other value exits 1 rather than falling back to 3111.
 - **Build**: TypeScript → ESM via tsdown, output to `dist/` and, for the 12 hook entries, to
   `plugin/scripts/*.mjs` — those are committed build output, and tsdown gives them mode 755 for
   their shebang. Regenerate them with `npm run build`; never hand-edit one or reset its mode.
