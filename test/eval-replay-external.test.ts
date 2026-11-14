@@ -7,6 +7,7 @@ import {
   type ExternalCorpus,
   type ExternalItem,
 } from "../eval/runner/external-text.js";
+import { commitMessage } from "../eval/runner/replay-external.js";
 
 const item = (over: Partial<ExternalItem>): ExternalItem => ({
   source: "commits",
@@ -59,5 +60,15 @@ describe("itemsBefore", () => {
 describe("externalSessionId", () => {
   it("is one Session per project and source", () => {
     expect(externalSessionId("repo", "issues")).toBe("external-issues-repo");
+  });
+});
+
+describe("commitMessage", () => {
+  it("drops the changed-path list from a corpus commit's text", () => {
+    expect(commitMessage(item({ text: "Fix retry\n\nbody line\n\nFiles: a.ts, b.ts" }))).toBe("Fix retry\n\nbody line");
+  });
+
+  it("keeps a text that has no path list", () => {
+    expect(commitMessage(item({ text: "Fix retry" }))).toBe("Fix retry");
   });
 });

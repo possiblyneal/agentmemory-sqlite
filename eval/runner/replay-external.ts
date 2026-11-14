@@ -12,6 +12,8 @@ interface StoredRow {
   files?: string[];
 }
 
+export type ExternalIngest = "observe" | "commit-link";
+
 export interface IngestedExternal {
   id: string;
   source: ExternalSource;
@@ -54,6 +56,44 @@ export async function ingestExternal(baseUrl: string, items: ExternalItem[], cwd
     for (const row of body.observations ?? []) {
       const item = filesById.get(row.id);
       if (item) out.push({ id: row.id, source: item.source, project: item.project, sessionId, files: item.files, row });
+    }
+  }
+  return out;
+}
+
+const FILES_MARKER = "\n\nFiles: ";
+
+// The message of a corpus commit, whose text is `<message>\n\nFiles: <paths>`.
+export function commitMessage(item: ExternalItem): string {
+  const at = item.text.lastIndexOf(FILES_MARKER);
+  return at < 0 ? item.text : item.text.slice(0, at);
+}
+
+// Links each commit through the daemon's commit-link path
+// (POST /session/commit), the route the post-commit hook takes, so the stored
+// row carries the daemon's own `files`, not the item's. A commit is dated by
+// its committer date, as the corpus does, so the Session cutoff rule holds.
+// Non-commit items are not part of this path and are skipped.
+export async function ingestCommitLinks(baseUrl: string, items: ExternalItem[], cwd: string): Promise<IngestedExternal[]> {
+  const commits = items.filter((i) => i.source === "commits");
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < commits.length; i = next++) {
+      const item = commits[i];
+      await daemonCall(baseUrl, "session/commit", {
+        body: { sha: item.id, project: item.project, cwd, message: commitMessage(item), authoredAt: item.at, files: item.files },
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, commits.length) }, worker));
+
+  const byId = new Map(commits.map((i) => [`obs_commit_${i.id}`, i]));
+  const out: IngestedExternal[] = [];
+  for (const project of new Set(commits.map((i) => i.project))) {
+    const sessionId = `commits-${project}`;
+    const { body } = await daemonCall<{ observations?: StoredRow[] }>(baseUrl, `observations?sessionId=${encodeURIComponent(sessionId)}`);
+    for (const row of body.observations ?? []) {
+      if (byId.has(row.id)) out.push({ id: row.id, source: "commits", project, sessionId, files: row.files ?? [], row });
     }
   }
   return out;

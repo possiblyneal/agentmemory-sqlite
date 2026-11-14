@@ -2,6 +2,7 @@ import { TriggerAction, type ISdk, type ApiRequest } from "../engine/types.js";
 import { parsePage, takePage, listSessionsPage } from "../functions/sessions-page.js";
 import type { Session, CompressedObservation, HookPayload, CommitLink, InjectedRef, InjectionSource } from "../types.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
+import { indexCommitLink } from "../functions/commit-index.js";
 import { KV } from "../state/schema.js";
 import { isSearchLayer } from "../state/search-index.js";
 import { StateKV } from "../state/kv.js";
@@ -964,6 +965,17 @@ export function registerApiTriggers(
         await kv.set(KV.commits, sha, merged);
         return merged;
       });
+
+      const project = asNonEmptyString(body.project);
+      const cwd = asNonEmptyString(body.cwd);
+      if (project && cwd) {
+        await indexCommitLink(kv, link, project, cwd).catch((err) => {
+          logger.warn("Commit indexing failed", {
+            sha,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
 
       if (sessionId) {
         await withKeyedLock(`obs:${sessionId}`, async () => {
