@@ -483,7 +483,9 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
   off and maps the SDK's timeout to `ProviderTimeoutError`. The in-process Engine has
   no invocation timeout, so never reintroduce a ceiling that clamps that bound
   ([ADR 0001](./docs/adrs/0001-single-in-process-sqlite-engine.md)). Its requests go through
-  its own `undici` Agent with `headersTimeout` and `bodyTimeout` 0: Node's global dispatcher
+  its own `undici` Agent with `headersTimeout` and `bodyTimeout` 0, loaded on the first request
+  and before its deadline is armed, since loading it is the costliest import for the many
+  modules that never send one (`test/fetch-lazy-undici.test.ts`): Node's global dispatcher
   fails any request whose headers or body gaps pass 300 s (`fetch failed`), whatever the
   deadline. Keep `undici` on 7.x; 8.x needs Node >=22.19, above the 22.13 floor.
 
