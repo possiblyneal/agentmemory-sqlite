@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { appendDurable, writeFileAtomic, writeJsonAtomic } from "./durable.js";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { daemonCall } from "./daemon-http.js";
@@ -57,7 +58,7 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  writeFileSync(ndjsonPath, "");
+  writeFileAtomic(ndjsonPath, "");
 
   // Each user is its own project, so the cross-user cases test project scope.
   const sandbox = await startSandbox({ instance, embeddings: opts.embeddings as EmbeddingMode });
@@ -83,7 +84,7 @@ async function main(): Promise<void> {
       ];
       const row = scoreCase(c, beliefs, searched, ms);
       rows.push(row);
-      appendFileSync(ndjsonPath, `${JSON.stringify(row)}\n`);
+      appendDurable(ndjsonPath, row);
       console.log(
         `  ${row.pass ? "+" : "-"} ${c.caseId} [${row.passType}] P=${fmt(row.precision)} R=${fmt(row.recall)}` +
           (row.pass ? "" : ` ${row.failures.slice(0, 2).join("; ")}`),
@@ -94,7 +95,7 @@ async function main(): Promise<void> {
   }
 
   const summary = summarizePmb(rows);
-  writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2));
+  writeJsonAtomic(`${outDir}/summary.json`, summary);
   console.log(
     `\n=== Summary ===\n  active ${summary.activePass}/${summary.active}  total ${summary.pass}/${summary.n}  ` +
       `precision ${fmt(summary.precision)}  recall ${fmt(summary.recall)}\n\nwrote ${ndjsonPath}`,

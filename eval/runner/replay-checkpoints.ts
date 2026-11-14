@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { fsyncPath, writeJsonAtomic } from "./durable.js";
 import type { ReplaySession } from "./replay-transcript.js";
 
 // A copy of the store as it stands just before a scored Session would be
@@ -32,7 +33,27 @@ export async function saveCheckpoint(
   } finally {
     db.close();
   }
+  fsyncPath(join(dir, file));
+  fsyncPath(dir);
   return { sessionId, file, ingested: ingested.map((s) => s.id) };
+}
+
+export function writeManifest(dir: string, checkpoints: Checkpoint[]): void {
+  writeJsonAtomic(join(dir, MANIFEST), checkpoints);
+}
+
+export function checkpointIsSound(path: string): boolean {
+  if (!existsSync(path)) return false;
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(path, { readOnly: true });
+    const rows = db.prepare("PRAGMA quick_check").all() as Array<Record<string, unknown>>;
+    return rows.length === 1 && Object.values(rows[0])[0] === "ok";
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
 }
 
 export interface SavePass {
@@ -60,9 +81,17 @@ export function openSavePass(
   // holds every Session ingested before it, so only the rest are replayed.
   if (!existsSync(manifestPath)) throw new Error(`${checkpointDir} holds no save pass to resume`);
   if (existsSync(join(checkpointDir, "run.json"))) throw new Error(`${checkpointDir} holds a finished save pass; nothing to resume`);
-  const checkpoints = JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[];
+  const listed = JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[];
+  if (listed.length === 0) throw new Error(`${manifestPath} lists no checkpoint to resume from`);
+  let sound = listed.length;
+  while (sound > 0 && !checkpointIsSound(join(checkpointDir, listed[sound - 1].file))) sound--;
+  const checkpoints = listed.slice(0, sound);
   const last = checkpoints.at(-1);
-  if (!last) throw new Error(`${manifestPath} lists no checkpoint to resume from`);
+  if (!last) throw new Error(`${manifestPath} lists no sound checkpoint to resume from`);
+  if (sound < listed.length) {
+    console.warn(`--resume: ${listed.length - sound} checkpoints failed quick_check and are dropped; resuming from ${last.file}`);
+    writeManifest(checkpointDir, checkpoints);
+  }
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const resumeAt = sessions.findIndex((s) => s.id === last.sessionId);
   // The same options load the same Sessions in the same order and split, so

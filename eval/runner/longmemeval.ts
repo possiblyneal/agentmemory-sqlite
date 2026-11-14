@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { appendDurable, startNdjson, writeJsonAtomic } from "./durable.js";
 import { agentmemoryAdapter } from "./adapters/agentmemory.js";
 import { grepAdapter } from "./adapters/grep.js";
 import { vectorAdapter } from "./adapters/vector.js";
@@ -25,6 +26,7 @@ interface CliOptions {
   instance: string;
   concurrency: string;
   out: string;
+  resume?: boolean;
 }
 
 function parse(): CliOptions {
@@ -39,6 +41,7 @@ function parse(): CliOptions {
       instance: { type: "string", default: "3" },
       concurrency: { type: "string", default: "1" },
       out: { type: "string", default: "eval/reports/longmemeval" },
+      resume: { type: "boolean", default: false },
     },
   });
   return values as unknown as CliOptions;
@@ -104,10 +107,10 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  if (existsSync(ndjsonPath)) writeFileSync(ndjsonPath, "");
-  mkdirSync(dirname(ndjsonPath), { recursive: true });
-
-  const rows: ScoreRow[] = [];
+  const rows = startNdjson<ScoreRow>(ndjsonPath, opts.resume === true);
+  if (rows.some((r) => r.k !== k)) throw new Error(`${ndjsonPath} was scored at another --k; remove it or pass its own options`);
+  const finished = new Set(rows.map((r) => `${r.adapter}:${r.questionId}`));
+  if (finished.size > 0) console.log(`--resume: ${finished.size} questions already scored`);
   for (const adapterName of adapterNames) {
     const adapter = ADAPTERS[adapterName];
     console.log(`\n== ${adapter.name} ==`);
@@ -119,6 +122,7 @@ async function main(): Promise<void> {
     const worker = async (slot: number): Promise<void> => {
       while (!failed && next < questions.length) {
         const q = questions[next++];
+        if (finished.has(`${adapter.name}:${q.id}`)) continue;
         const t0 = performance.now();
         const state = await adapter.init(q.haystack, {
           instance: instance + slot,
@@ -129,7 +133,7 @@ async function main(): Promise<void> {
           const latencyMs = performance.now() - t0;
           const row = scoreQuestion(q, result, k, adapter.name, latencyMs);
           rows.push(row);
-          appendFileSync(ndjsonPath, JSON.stringify(row) + "\n");
+          appendDurable(ndjsonPath, row);
           const mark = row.hit ? "+" : "-";
           console.log(
             `  ${mark} ${q.id} [${q.type}] R@${k}=${(row.recall ?? 0).toFixed(2)} (${Math.round(latencyMs)}ms)`,
@@ -153,7 +157,7 @@ async function main(): Promise<void> {
 
   const agg = aggregate(rows);
   const summaryPath = `${outDir}/summary.json`;
-  writeFileSync(summaryPath, JSON.stringify(agg, null, 2));
+  writeJsonAtomic(summaryPath, agg);
 
   console.log("\n=== Summary ===");
   for (const [adapter, byPath] of Object.entries(agg.byPath)) {

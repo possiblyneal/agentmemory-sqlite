@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { appendDurable, startNdjson, writeJsonAtomic } from "./durable.js";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agentmemoryAdapter } from "./adapters/agentmemory.js";
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
       split: { type: "string" },
       instance: { type: "string", default: "3" },
       out: { type: "string", default: "eval/reports/dolphinbench" },
+      resume: { type: "boolean", default: false },
     },
   });
   if (!opts.data) fail("--data <path/to/dolphinbench> required (or DOLPHINBENCH_PATH env)");
@@ -61,8 +63,10 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  writeFileSync(ndjsonPath, "");
-  const rows: ScoreRow[] = [];
+  const rows = startNdjson<ScoreRow>(ndjsonPath, opts.resume === true);
+  if (rows.some((r) => r.k !== k)) fail(`${ndjsonPath} was scored at another --k; remove it or pass its own options`);
+  const finished = new Set(rows.map((r) => `${r.adapter}:${r.path}:${r.questionId}`));
+  if (finished.size > 0) console.log(`--resume: ${finished.size} questions already scored`);
 
   // A persona's history is ingested once and every test of it queries that store.
   for (const persona of personas) {
@@ -70,6 +74,9 @@ async function main(): Promise<void> {
     console.log(`\n=== ${persona}: ${questions.length} tests, ${questions[0].haystack.length} messages, k=${k} ===`);
     for (const adapterName of adapterNames) {
       const adapter = ADAPTERS[adapterName];
+      const adapterPaths = paths.filter((p) => adapter.paths.includes(p));
+      const remaining = (path: QuestionPath) => questions.filter((q) => !finished.has(`${adapter.name}:${path}:${q.id}`));
+      if (adapterPaths.every((p) => remaining(p).length === 0)) continue;
       const t0 = performance.now();
       const state = await adapter.init(questions[0].haystack, {
         instance,
@@ -77,16 +84,16 @@ async function main(): Promise<void> {
       });
       console.log(`${adapter.name}: ingested in ${Math.round((performance.now() - t0) / 1000)}s`);
       try {
-        for (const path of paths.filter((p) => adapter.paths.includes(p))) {
-          const personaRows: ScoreRow[] = [];
-          for (const q of questions) {
+        for (const path of adapterPaths) {
+          for (const q of remaining(path)) {
             const t1 = performance.now();
             const result = await adapter.query({ ...q, path }, state, k);
             const row = scoreQuestion({ ...q, path }, result, k, adapter.name, performance.now() - t1);
-            personaRows.push(row);
-            appendFileSync(ndjsonPath, JSON.stringify(row) + "\n");
+            rows.push(row);
+            appendDurable(ndjsonPath, row);
           }
-          rows.push(...personaRows);
+          const ids = new Set(questions.map((q) => q.id));
+          const personaRows = rows.filter((r) => r.adapter === adapter.name && r.path === path && ids.has(r.questionId));
           const s = aggregate(personaRows).byPath[adapter.name][path];
           console.log(
             `  ${adapter.name}/${path} P@${k}=${s.precision.toFixed(3)} R@${k}=${s.recall.toFixed(3)} hit=${s.hit}/${s.n} p50=${Math.round(s.latencyP50)}ms`,
@@ -99,7 +106,7 @@ async function main(): Promise<void> {
   }
 
   const summaryPath = `${outDir}/summary.json`;
-  writeFileSync(summaryPath, JSON.stringify(aggregate(rows), null, 2));
+  writeJsonAtomic(summaryPath, aggregate(rows));
   console.log(`\nwrote ${ndjsonPath}\nwrote ${summaryPath}`);
 }
 

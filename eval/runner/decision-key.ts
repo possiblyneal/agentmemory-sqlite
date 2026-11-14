@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
+import { appendDurable, repairNdjson, writeJsonAtomic } from "./durable.js";
 import { renderInput, type OperatorInput } from "./decision-inputs.js";
 import { isTersePrompt } from "../../src/utils/terse-prompt.js";
 import type { ReplaySession } from "./replay-transcript.js";
@@ -133,16 +134,51 @@ async function labelPrompts(
   return out;
 }
 
-export async function buildDecisionKey(entries: KeyedSession[], complete: Complete, now = new Date()): Promise<DecisionKey> {
-  const extracted = await mapPool(entries, CONCURRENCY, (entry) => extractDecisions(entry, complete));
+type KeyProgressRow =
+  | { phase: "extract"; sessionId: string; decisions: Decision[] }
+  | { phase: "label"; sessionId: string; expected: Expected[] };
+
+export const keyProgressPath = (keyPath: string): string => `${keyPath}.progress.ndjson`;
+
+// With a progress file, each Session's extraction and labelling is on disk when
+// it finishes, so a killed build resumes past them; a Session cut off midway
+// reruns from its start.
+export async function buildDecisionKey(
+  entries: KeyedSession[],
+  complete: Complete,
+  now = new Date(),
+  progressPath?: string,
+): Promise<DecisionKey> {
+  const rows = progressPath ? repairNdjson<KeyProgressRow>(progressPath) : [];
+  const extractedBefore = new Map<string, Decision[]>();
+  const labelledBefore = new Map<string, Expected[]>();
+  for (const row of rows) {
+    if (row.phase === "extract") extractedBefore.set(row.sessionId, row.decisions);
+    else labelledBefore.set(row.sessionId, row.expected);
+  }
+  const remember = (row: KeyProgressRow) => {
+    if (progressPath) appendDurable(progressPath, row);
+  };
+  const extracted = await mapPool(entries, CONCURRENCY, async (entry) => {
+    const id = entry.session.id;
+    const before = extractedBefore.get(id);
+    if (before) return before;
+    const decisions = await extractDecisions(entry, complete);
+    remember({ phase: "extract", sessionId: id, decisions });
+    return decisions;
+  });
   const decisions = extracted.flat();
   const bySession = new Map(entries.map((e, i) => [e.session.id, extracted[i]]));
-  const labelled = await mapPool(entries, CONCURRENCY, (entry) => {
+  const labelled = await mapPool(entries, CONCURRENCY, async (entry) => {
     const { session } = entry;
+    const before = labelledBefore.get(session.id);
+    if (before) return before;
     const earlier = entries
       .filter((e) => e.session.project === session.project && e.session.startedAt < session.startedAt)
       .flatMap((e) => bySession.get(e.session.id) ?? []);
-    return labelPrompts(session, earlier.slice(-MAX_CANDIDATES), complete);
+    const expected = await labelPrompts(session, earlier.slice(-MAX_CANDIDATES), complete);
+    remember({ phase: "label", sessionId: session.id, expected });
+    return expected;
   });
   return { version: 1, builtAt: now.toISOString(), decisions, expected: labelled.flat() };
 }
@@ -151,12 +187,21 @@ export async function buildDecisionKey(entries: KeyedSession[], complete: Comple
 export async function loadOrBuildKey(
   path: string,
   rebuild: boolean,
-  build: () => Promise<DecisionKey>,
+  build: (progressPath: string) => Promise<DecisionKey>,
 ): Promise<{ key: DecisionKey; reused: boolean }> {
-  if (!rebuild && existsSync(path)) return { key: JSON.parse(readFileSync(path, "utf8")) as DecisionKey, reused: true };
-  const key = await build();
+  const progress = keyProgressPath(path);
+  if (!rebuild && existsSync(path)) {
+    try {
+      return { key: JSON.parse(readFileSync(path, "utf8")) as DecisionKey, reused: true };
+    } catch {
+      console.warn(`${path} does not parse; rebuilding it`);
+    }
+  }
+  if (rebuild) rmSync(progress, { force: true });
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(key, null, 2));
+  const key = await build(progress);
+  writeJsonAtomic(path, key);
+  rmSync(progress, { force: true });
   return { key, reused: false };
 }
 

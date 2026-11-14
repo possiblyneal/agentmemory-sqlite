@@ -1,9 +1,10 @@
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { failedSessionIndex, parseArmArgs, probeArgs, resumePlan } from "./arm-core.js";
+import { writeFileAtomic, writeJsonAtomic } from "./durable.js";
 import { MANIFEST, type Checkpoint } from "./replay-checkpoints.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -22,8 +23,12 @@ function killGroup(pid: number, signal: NodeJS.Signals) {
 function savePassFinishedClean(checkpointDir: string): boolean {
   const runJson = join(checkpointDir, "run.json");
   if (!existsSync(runJson)) return false;
-  const run = JSON.parse(readFileSync(runJson, "utf8")) as { llm?: { failedSummarizeCalls?: number } };
-  return (run.llm?.failedSummarizeCalls ?? 0) === 0;
+  try {
+    const run = JSON.parse(readFileSync(runJson, "utf8")) as { llm?: { failedSummarizeCalls?: number } };
+    return (run.llm?.failedSummarizeCalls ?? 0) === 0;
+  } catch {
+    return false;
+  }
 }
 
 function run(cwd: string, cmd: string, args: string[]) {
@@ -67,7 +72,7 @@ function truncateSavePass(checkpointDir: string, failedIndex: number) {
   const { keep, remove } = resumePlan(JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[], failedIndex);
   for (const file of remove) rmSync(join(checkpointDir, file), { force: true });
   rmSync(join(checkpointDir, "run.json"), { force: true });
-  if (keep.length > 0) writeFileSync(manifestPath, JSON.stringify(keep, null, 2));
+  if (keep.length > 0) writeJsonAtomic(manifestPath, keep);
   else rmSync(manifestPath);
   console.log(`failed summarize in Session ${failedIndex + 1}: ${keep.length > 0 ? `resuming from ${keep.at(-1)!.file}` : "no clean checkpoint left, restarting"}`);
 }
@@ -98,7 +103,7 @@ async function main() {
       const from = join(REPO_ROOT, "tmp", "eval-replay", file);
       if (existsSync(from)) copyFileSync(from, join(tree, "tmp", "eval-replay", file));
     }
-    writeFileSync(ready, `${ref}\n`);
+    writeFileAtomic(ready, `${ref}\n`);
   }
   const treeOut = (name: string) => join(tree, "tmp", "arm-out", name);
 

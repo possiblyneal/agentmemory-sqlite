@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { fsyncPath, writeJsonAtomic } from "./durable.js";
 import { daemonCall } from "./daemon-http.js";
 import { latency, prng, summarizeRuns, type Call, type RunResult } from "./burst-core.js";
 import { startSandbox } from "./sandbox.js";
@@ -100,11 +101,16 @@ async function buildSeed(chunks: string[]): Promise<void> {
     }
     await sleep(5000);
     const db = new DatabaseSync(sandbox.sqlitePath, { readOnly: true });
+    const partial = `${SEED_FILE}.partial`;
+    rmSync(partial, { force: true });
     try {
-      db.prepare("VACUUM INTO ?").run(SEED_FILE);
+      db.prepare("VACUUM INTO ?").run(partial);
     } finally {
       db.close();
     }
+    fsyncPath(partial);
+    renameSync(partial, SEED_FILE);
+    fsyncPath(OUT);
   } finally {
     await sandbox.stop();
   }
@@ -204,14 +210,14 @@ async function main() {
       continue;
     }
     const result = await oneRun(chunks, run);
-    writeFileSync(file, JSON.stringify(result, null, 2));
+    writeJsonAtomic(file, result);
     results.push(result);
     console.log(
       `${values.label} run ${run}: load ${result.loadBefore.toFixed(1)}, first in time ${result.firstPrompt.inTime}/${result.firstPrompt.n} (p50 ${result.firstPrompt.p50} ms), session-start in time ${result.sessionStart.inTime}/${result.sessionStart.n}, later p95 ${result.laterPrompt.p95} ms, livez max ${result.livez.max} ms`,
     );
   }
   const summary = summarizeRuns(values.label!, results);
-  writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  writeJsonAtomic(join(dir, "summary.json"), summary);
   console.log(JSON.stringify(summary));
 }
 

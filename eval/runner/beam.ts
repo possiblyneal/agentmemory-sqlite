@@ -1,6 +1,7 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { appendDurable, rewriteNdjson, startNdjson, writeJsonAtomic } from "./durable.js";
 import { agentmemoryAdapter, agentmemoryBm25Adapter } from "./adapters/agentmemory.js";
 import { grepAdapter } from "./adapters/grep.js";
 import { loadBeam } from "./beam-load.js";
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
       split: { type: "string" },
       instance: { type: "string", default: "3" },
       out: { type: "string", default: "eval/reports/beam" },
+      resume: { type: "boolean", default: false },
     },
   });
   if (!values.data) {
@@ -81,30 +83,36 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = join(outDir, "scores.ndjson");
   const ingestPath = join(outDir, "ingest.ndjson");
-  writeFileSync(ndjsonPath, "");
-  writeFileSync(ingestPath, "");
-
-  const rows: ScoreRow[] = [];
+  startNdjson(ingestPath, values.resume === true);
+  const prior = startNdjson<ScoreRow>(ndjsonPath, values.resume === true);
+  const perQuestion = new Map<string, number>();
+  for (const r of prior) perQuestion.set(`${r.adapter}:${r.questionId}`, (perQuestion.get(`${r.adapter}:${r.questionId}`) ?? 0) + 1);
+  const finished = new Set([...perQuestion].filter(([, n]) => n === ks.length).map(([id]) => id));
+  const rows = prior.filter((r) => finished.has(`${r.adapter}:${r.questionId}`));
+  if (rows.length < prior.length) rewriteNdjson(ndjsonPath, rows);
+  if (finished.size > 0) console.log(`--resume: ${finished.size} questions already scored`);
   for (const name of adapterNames) {
     const adapter = ADAPTERS[name];
     console.log(`\n== ${adapter.name} ==`);
     for (const qs of conversations) {
+      const todo = qs.filter((q) => !finished.has(`${adapter.name}:${q.id}`));
+      if (todo.length === 0) continue;
       const t0 = performance.now();
       const state = await adapter.init(qs[0].haystack, { instance, baseUrl: process.env.AGENTMEMORY_BASE_URL });
       const ingestMs = performance.now() - t0;
       try {
-        for (const q of qs) {
+        for (const q of todo) {
           const t1 = performance.now();
           const result = await adapter.query(q, state, kMax);
           const latencyMs = performance.now() - t1;
           for (const n of ks) {
             const row = scoreQuestion(q, result, n, adapter.name, latencyMs);
             rows.push(row);
-            appendFileSync(ndjsonPath, JSON.stringify(row) + "\n");
+            appendDurable(ndjsonPath, row);
           }
         }
         const line = { adapter: adapter.name, conversation: qs[0].id.split("/")[1], turns: qs[0].haystack.length, questions: qs.length, ingestMs: Math.round(ingestMs) };
-        appendFileSync(ingestPath, JSON.stringify(line) + "\n");
+        appendDurable(ingestPath, line);
         console.log(`  ${line.conversation}: ${line.turns} turns ingested in ${(ingestMs / 1000).toFixed(1)}s, ${qs.length} questions`);
       } finally {
         if (adapter.teardown) await adapter.teardown(state);
@@ -114,7 +122,7 @@ async function main(): Promise<void> {
 
   const summary: Record<string, ReturnType<typeof aggregate>> = {};
   for (const n of ks) summary[`k=${n}`] = aggregate(rows.filter((r) => r.k === n));
-  writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
+  writeJsonAtomic(join(outDir, "summary.json"), summary);
 
   for (const n of ks) {
     console.log(`\n=== k=${n} ===`);
