@@ -57,7 +57,7 @@ export interface Ndjson<T> {
   tornOffset: number;
 }
 
-function parseNdjson<T>(path: string, text: string): Ndjson<T> {
+function parseNdjson<T>(path: string, text: string, skipAnyUnparseable = false): Ndjson<T> {
   const lines = text.split("\n");
   const last = lines.length - 1;
   const rows: T[] = [];
@@ -67,7 +67,7 @@ function parseNdjson<T>(path: string, text: string): Ndjson<T> {
     try {
       rows.push(JSON.parse(line) as T);
     } catch (err) {
-      if (i !== last) throw new Error(`${path}: line ${i + 1} is not JSON: ${err instanceof Error ? err.message : String(err)}`);
+      if (i !== last && !skipAnyUnparseable) throw new Error(`${path}: line ${i + 1} is not JSON: ${err instanceof Error ? err.message : String(err)}`);
       torn = true;
     }
   });
@@ -79,6 +79,14 @@ function parseNdjson<T>(path: string, text: string): Ndjson<T> {
 export function readNdjson<T>(path: string): Ndjson<T> {
   if (!existsSync(path)) return { rows: [], torn: false, endsInNewline: true, tornOffset: 0 };
   return parseNdjson<T>(path, readFileSync(path, "utf8"));
+}
+
+// A file that `appendDurable(…, true)` writers share: a torn fragment becomes a
+// middle line once another writer appends after it, so every unparseable line is
+// dropped. Never modifies the file, since another writer may be mid-append.
+export function readSharedNdjson<T>(path: string): T[] {
+  if (!existsSync(path)) return [];
+  return parseNdjson<T>(path, readFileSync(path, "utf8"), true).rows;
 }
 
 // Reads the rows and leaves a single-writer file ready to append to: a torn

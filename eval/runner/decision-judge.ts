@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { appendDurable } from "./durable.js";
+import { appendDurable, readSharedNdjson } from "./durable.js";
 import type { Complete, Decision, DecisionKey } from "./decision-key.js";
 import type { DecisionOutcome, Probe } from "./replay-score.js";
 import type { ReplaySession } from "./replay-transcript.js";
@@ -16,8 +16,7 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 
 // Verdicts persist as ndjson rows keyed by (decision id, hash of the injected
 // text), so an unchanged rerun asks the judge nothing. Other processes append
-// to the same file, so opening never truncates: an unparseable line is skipped
-// in memory and the next append starts on a fresh line.
+// to the same file, so opening never truncates (`readSharedNdjson`).
 export interface VerdictCache {
   get(decisionId: string, text: string): boolean | undefined;
   set(decisionId: string, text: string, delivers: boolean): void;
@@ -25,16 +24,7 @@ export interface VerdictCache {
 
 export function openVerdictCache(path: string): VerdictCache {
   const verdicts = new Map<string, boolean>();
-  if (existsSync(path)) {
-    for (const line of readFileSync(path, "utf8").split("\n")) {
-      try {
-        const row = JSON.parse(line) as { k: string; v: boolean };
-        verdicts.set(row.k, row.v);
-      } catch {
-        continue;
-      }
-    }
-  }
+  for (const row of readSharedNdjson<{ k: string; v: boolean }>(path)) verdicts.set(row.k, row.v);
   const keyOf = (id: string, text: string) => `${id}:${sha256(text)}`;
   return {
     get: (id, text) => verdicts.get(keyOf(id, text)),
