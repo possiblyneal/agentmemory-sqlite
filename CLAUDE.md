@@ -196,18 +196,6 @@ handled, the full-disk queue's included; a stored, deduplicated, skipped or drop
 An `oldestPendingAt` that keeps aging is a wedge, even while other Sessions store; `null` with no
 arrivals is an idle Operator.
 
-### Commit text in Recall
-`POST /agentmemory/session/commit` (the commit-link path; `GET /agentmemory/commits` lists) also
-indexes a commit when its body carries `project` and `cwd`, which the `post-commit` hook sends:
-`indexCommitLink()` (`src/functions/commit-index.ts`) writes the message and changed paths
-(`files`) as one Observation, id `obs_commit_<sha>`, of the project's `commits-<project>` Session
-(created `completed`, never active, and not counted as Project Time), dated `authoredAt`. A repeat
-link of a sha replaces its row. Search and Injection then find the commit by a path it touched
-(#403, measured in `docs/benchmarks/`). A body without `project` and `cwd`, or a commit with no
-message and no paths, links as before and indexes nothing. Nothing backfills history: only a commit
-the hook sees, or one posted to the endpoint, is indexed. `eval:replay --external-ingest commit-link`
-(with `--external-arm commits`) posts the corpus's commits through this path instead of `/observe`.
-
 ### Lesson saves with the daemon down
 A `memory_lesson_save` through `agentmemory mcp` (`src/mcp/standalone.ts`) that cannot reach the
 daemon (failed probe, connection error, timeout, gateway 502/504) is written to
