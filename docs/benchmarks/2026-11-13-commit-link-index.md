@@ -35,7 +35,7 @@ Before this change the commit-link path stored a commit's message and changed pa
 
 ## Limits
 
-- Synthetic compression and no reranker gate, as #396. The LLM-compression and gate rerun the issue asks for is a long run (about an hour per Session on the broker, 33 Sessions) and is reported separately when it finishes; this scorecard does not claim the size under the gate.
+- Synthetic compression and no reranker gate, as #396. Under LLM compression and the gate the gain does not hold: [2026-11-14](./2026-11-14-commit-link-llm-gate.md).
 - 27 of 30 key items are file keys, which is what a changed-path list answers; no decision or correction is gained.
 - No history backfill: only commits linked after this change are indexed, so a repo's earlier history is unsearchable until a backfill exists. That is a new public command and is left to its own issue.
 - One Operator, 12 projects, one replay per arm.
