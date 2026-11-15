@@ -20,6 +20,7 @@ import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { isSqliteFull, unstoredOnFullDisk } from "./observe-retry.js";
+import { markCaptureStored } from "../telemetry/capture.js";
 
 export function extractImage(d: unknown): string | undefined {
   if (!d) return undefined;
@@ -533,6 +534,7 @@ export function registerObserveFunction(
             heldImageRef = raw.imageData;
           }
           await kv.set(KV.observations(payload.sessionId), obsId, raw);
+          markCaptureStored();
         } catch (error) {
           if (heldImageRef) {
             // decrementImageRef deletes the file only when no other observation

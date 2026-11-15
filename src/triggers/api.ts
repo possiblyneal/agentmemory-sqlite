@@ -21,6 +21,7 @@ import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
 import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
+import { captureTimes, markCaptureArrival } from "../telemetry/capture.js";
 import { getFollowupStats } from "../functions/smart-search.js";
 import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
 import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
@@ -356,6 +357,7 @@ export function registerApiTriggers(
           circuitBreakers,
           llm,
           recall: recallCounts(),
+          capture: captureTimes(),
           ...instanceInfo(),
         },
       };
@@ -391,6 +393,7 @@ export function registerApiTriggers(
           },
         };
       }
+      markCaptureArrival();
       const payload: HookPayload = {
         hookType: hookType as HookPayload["hookType"],
         sessionId,
