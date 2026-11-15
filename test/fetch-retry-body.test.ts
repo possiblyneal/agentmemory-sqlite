@@ -1,9 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fetchWithTimeout } from "../src/providers/_fetch.js";
 
 type Reply = { status: number; body?: string; headers?: Record<string, string> };
+
+// The waits under test are up to 1.5 s each. Time is faked so they cost
+// nothing, and stepped 10 ms at a time with a real turn of the event loop
+// between steps so the real sockets keep moving.
+async function settle<T>(pending: Promise<T>): Promise<T> {
+  let done = false;
+  pending.then(() => (done = true), () => (done = true));
+  while (!done) {
+    await new Promise((r) => setImmediate(r));
+    await vi.advanceTimersByTimeAsync(10);
+  }
+  return pending;
+}
 
 describe("fetchWithTimeout body retry_after_seconds", () => {
   let server: Server;
@@ -12,6 +25,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
   let hits: number[];
 
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     replies = [];
     hits = [];
     server = createServer((_req, res) => {
@@ -25,6 +39,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await new Promise<void>((r) => server.close(() => r()));
   });
 
@@ -33,7 +48,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
       { status: 429, body: JSON.stringify({ retry_after_seconds: 0.8 }) },
       { status: 200, body: "ok" },
     ];
-    const res = await fetchWithTimeout(url, {}, 10_000);
+    const res = await settle(fetchWithTimeout(url, {}, 10_000));
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok");
     expect(hits[1] - hits[0]).toBeGreaterThanOrEqual(790);
@@ -44,7 +59,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
       { status: 503, body: JSON.stringify({ error: { retry_after_seconds: 0.8 } }) },
       { status: 200 },
     ];
-    const res = await fetchWithTimeout(url, {}, 10_000);
+    const res = await settle(fetchWithTimeout(url, {}, 10_000));
     expect(res.status).toBe(200);
     expect(hits[1] - hits[0]).toBeGreaterThanOrEqual(790);
   });
@@ -52,7 +67,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
   it("returns the 429 with a readable body when the wait exceeds the budget", async () => {
     const body = JSON.stringify({ retry_after_seconds: 100000 });
     replies = [{ status: 429, body }, { status: 200 }];
-    const res = await fetchWithTimeout(url, {}, 1000);
+    const res = await settle(fetchWithTimeout(url, {}, 1000));
     expect(res.status).toBe(429);
     expect(hits).toHaveLength(1);
     expect(await res.text()).toBe(body);
@@ -67,7 +82,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
       },
       { status: 200 },
     ];
-    const res = await fetchWithTimeout(url, {}, 2000);
+    const res = await settle(fetchWithTimeout(url, {}, 2000));
     expect(res.status).toBe(200);
     expect(hits).toHaveLength(2);
   });
@@ -78,7 +93,7 @@ describe("fetchWithTimeout body retry_after_seconds", () => {
       { status: 429, body: JSON.stringify({ retry_after_seconds: -5 }) },
       { status: 200 },
     ];
-    const res = await fetchWithTimeout(url, {}, 10_000);
+    const res = await settle(fetchWithTimeout(url, {}, 10_000));
     expect(res.status).toBe(200);
     expect(hits[1] - hits[0]).toBeGreaterThanOrEqual(490);
     expect(hits[2] - hits[1]).toBeGreaterThanOrEqual(990);

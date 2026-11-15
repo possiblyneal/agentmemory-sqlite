@@ -1,11 +1,21 @@
-import { Agent } from "undici";
+import { createRequire } from "node:module";
+import type { Dispatcher } from "undici";
 import { getEnvVar } from "../config.js";
 
 // Node's global fetch gives up when response headers, or the gap between body
 // chunks, pass undici's 300 s default, whatever the signal allows. A provider
 // that queues a request answers only when it is done, so the caller's deadline
-// must be the only bound (#302).
-const deadlineOnlyDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+// must be the only bound (#302). undici loads on the first request, not at
+// import: most importers never send one, and it is the costliest module to load.
+const undiciRequire = createRequire(import.meta.url);
+let deadlineOnlyDispatcher: Dispatcher | undefined;
+function getDeadlineOnlyDispatcher(): Dispatcher {
+  if (!deadlineOnlyDispatcher) {
+    const { Agent } = undiciRequire("undici") as typeof import("undici");
+    deadlineOnlyDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+  }
+  return deadlineOnlyDispatcher;
+}
 
 // Bounded retry for transient rate-limit / unavailable responses. Attempts is
 // total tries (initial + retries). Retries are bounded by a TOTAL elapsed
@@ -120,6 +130,7 @@ export async function fetchWithTimeout(
     timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
       ? timeoutMs
       : resolveLlmTimeoutMs();
+  const dispatcher = getDeadlineOnlyDispatcher();
 
   // The caller's timeout is the TOTAL budget for all attempts, sleeps and the
   // caller's read of the returned body, honored exactly: nothing above this
@@ -138,7 +149,7 @@ export async function fetchWithTimeout(
     ? AbortSignal.any([init.signal, deadline.signal])
     : deadline.signal;
   const send = () =>
-    fetch(url, { ...init, signal, dispatcher: deadlineOnlyDispatcher });
+    fetch(url, { ...init, signal, dispatcher });
 
   const response = await sendWithRetry(send, ms, start);
   if (!options?.idle || !response.body) return response;

@@ -36,17 +36,16 @@ describe("audit eviction on the real SqliteState", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  // Rows go straight into the table: the pass under test reads rows only, and
+  // set() per row made seeding 57k cost 10x the eviction it sets up.
   function seed(total: number, stamp: (i: number) => string): void {
-    for (let i = 0; i < total; i += 1000) {
-      const entries = [];
-      for (let j = i; j < Math.min(total, i + 1000); j++) {
-        entries.push({
-          key: `aud_${j}`,
-          value: { id: `aud_${j}`, timestamp: stamp(j), operation: "observe", functionId: "mem::observe", targetIds: [`obs_${j}`], details: { note: "x".repeat(200) } },
-        });
+    const insert = store.db.prepare("INSERT INTO kv (scope, key, value, updated_at) VALUES (?, ?, ?, ?)");
+    store.transaction(() => {
+      for (let j = 0; j < total; j++) {
+        const value = { id: `aud_${j}`, timestamp: stamp(j), operation: "observe", functionId: "mem::observe", targetIds: [`obs_${j}`], details: { note: "x".repeat(200) } };
+        insert.run(KV.audit, `aud_${j}`, JSON.stringify(value), Date.now());
       }
-      store.setMany(KV.audit, entries);
-    }
+    });
   }
 
   it("keeps the newest rows by timestamp, ties by insertion order, and leaves other scopes", async () => {
