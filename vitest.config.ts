@@ -27,12 +27,15 @@ const testFiles = readdirSync("test")
   .filter((name) => name.endsWith(".test.ts"))
   .map((name) => `test/${name}`)
   .filter((file) => file !== INTEGRATION);
+const sharedFiles = testFiles.filter(sharesModules);
+const isolatedFiles = testFiles.filter((file) => !sharedFiles.includes(file));
 
 // Vitest's fs module cache keeps transformed modules between runs, which
 // takes the transform off the main process every worker waits on. It writes
 // each entry by rename without fsync, so a power cut can leave one torn, and
 // a torn entry fails every run that loads it. Drop any entry whose trailing
-// metadata does not parse before the run reads them (~30 ms for 500 entries).
+// metadata does not parse, or whose code holds a NUL from a zero-filled block,
+// before the run reads them (~30 ms for 500 entries).
 const MODULE_CACHE = "node_modules/.experimental-vitest-cache";
 const CACHE_MARKER = "\n//# vitestCache=";
 function dropTornCacheEntries() {
@@ -40,10 +43,16 @@ function dropTornCacheEntries() {
   for (const name of readdirSync(MODULE_CACHE)) {
     if (!/^[0-9a-f]{40}$/.test(name)) continue;
     const entry = join(MODULE_CACHE, name);
-    const code = readFileSync(entry, "utf8");
+    let code: string;
+    try {
+      code = readFileSync(entry, "utf8");
+    } catch {
+      continue;
+    }
     const marker = code.lastIndexOf(CACHE_MARKER);
     if (marker === -1) continue;
     try {
+      if (code.includes("\0")) throw new Error("zero-filled block");
       JSON.parse(Buffer.from(code.slice(marker + CACHE_MARKER.length), "base64").toString("utf8"));
     } catch {
       rmSync(entry, { force: true });
@@ -66,8 +75,8 @@ export default defineConfig({
     projects: [
       // CI isolates every file, so state one file leaks can never turn
       // another's assertion green unnoticed.
-      { extends: true, test: { name: "shared", include: testFiles.filter(sharesModules), isolate: !!process.env.CI } },
-      { extends: true, test: { name: "isolated", include: testFiles.filter((file) => !sharesModules(file)) } },
+      { extends: true, test: { name: "shared", include: sharedFiles, isolate: !!process.env.CI } },
+      { extends: true, test: { name: "isolated", include: isolatedFiles } },
       { extends: true, test: { name: "integration", include: [INTEGRATION] } },
     ],
   },
