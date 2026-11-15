@@ -188,10 +188,13 @@ behind it so each Session stores them in arrival order; past the cap one is drop
 written ahead of the queue. A failure after the row is stored is never queued, since replaying
 it would duplicate the row. Session-cap eviction runs only after the row is stored, and its
 errors are logged, not returned. A daemon restart before the disk frees loses the queue.
-`GET /agentmemory/health` carries `capture: { lastArrivalAt, lastStoredAt }` (ISO or `null` since
-boot; `src/telemetry/capture.ts`): arrival is stamped by `api::observe` once the body validates,
-before any work, and stored by `mem::observe` right after the row write, so the queue's replay
-counts too. Arrivals with no later stored time are a wedge; neither moving is an idle Operator.
+`GET /agentmemory/health` carries `capture: { lastArrivalAt, lastStoredAt, oldestPendingAt }` (ISO
+or `null` since boot; `src/telemetry/capture.ts`): arrival is stamped by `api::observe` once the
+body validates, before any work, and stored by `mem::observe` right after the row write, so the
+queue's replay counts too. `oldestPendingAt` is the arrival of the oldest Observation still being
+handled, the full-disk queue's included; a stored, deduplicated, skipped or dropped one settles.
+An `oldestPendingAt` that keeps aging is a wedge, even while other Sessions store; `null` with no
+arrivals is an idle Operator.
 
 ### Commit text in Recall
 `POST /agentmemory/session/commit` (the commit-link path; `GET /agentmemory/commits` lists) also
