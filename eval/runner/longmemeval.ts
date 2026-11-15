@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { appendDurable, startNdjson, writeJsonAtomic } from "./durable.js";
+import { appendDurable, resumeScores, writeJsonAtomic } from "./durable.js";
 import { agentmemoryAdapter } from "./adapters/agentmemory.js";
 import { grepAdapter } from "./adapters/grep.js";
 import { vectorAdapter } from "./adapters/vector.js";
@@ -107,10 +107,7 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  const rows = startNdjson<ScoreRow>(ndjsonPath, opts.resume === true);
-  if (rows.some((r) => r.k !== k)) throw new Error(`${ndjsonPath} was scored at another --k; remove it or pass its own options`);
-  const finished = new Set(rows.map((r) => `${r.adapter}:${r.questionId}`));
-  if (finished.size > 0) console.log(`--resume: ${finished.size} questions already scored`);
+  const { rows, finished } = resumeScores<ScoreRow>(ndjsonPath, opts.resume === true, [k], (r) => `${r.adapter}:${r.questionId}`);
   for (const adapterName of adapterNames) {
     const adapter = ADAPTERS[adapterName];
     console.log(`\n== ${adapter.name} ==`);

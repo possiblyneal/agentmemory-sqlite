@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { appendDurable, repairNdjson } from "./durable.js";
+import { appendDurable } from "./durable.js";
 import type { Complete, Decision, DecisionKey } from "./decision-key.js";
 import type { DecisionOutcome, Probe } from "./replay-score.js";
 import type { ReplaySession } from "./replay-transcript.js";
@@ -15,7 +15,9 @@ Reply with JSON only: {"delivers":true} or {"delivers":false}.`;
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
 // Verdicts persist as ndjson rows keyed by (decision id, hash of the injected
-// text), so an unchanged rerun asks the judge nothing.
+// text), so an unchanged rerun asks the judge nothing. Other processes append
+// to the same file, so opening never truncates: an unparseable line is skipped
+// in memory and the next append starts on a fresh line.
 export interface VerdictCache {
   get(decisionId: string, text: string): boolean | undefined;
   set(decisionId: string, text: string, delivers: boolean): void;
@@ -23,7 +25,16 @@ export interface VerdictCache {
 
 export function openVerdictCache(path: string): VerdictCache {
   const verdicts = new Map<string, boolean>();
-  for (const row of repairNdjson<{ k: string; v: boolean }>(path)) verdicts.set(row.k, row.v);
+  if (existsSync(path)) {
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      try {
+        const row = JSON.parse(line) as { k: string; v: boolean };
+        verdicts.set(row.k, row.v);
+      } catch {
+        continue;
+      }
+    }
+  }
   const keyOf = (id: string, text: string) => `${id}:${sha256(text)}`;
   return {
     get: (id, text) => verdicts.get(keyOf(id, text)),
@@ -31,7 +42,7 @@ export function openVerdictCache(path: string): VerdictCache {
       const k = keyOf(id, text);
       verdicts.set(k, delivers);
       mkdirSync(dirname(path), { recursive: true });
-      appendDurable(path, { k, v: delivers });
+      appendDurable(path, { k, v: delivers }, true);
     },
   };
 }

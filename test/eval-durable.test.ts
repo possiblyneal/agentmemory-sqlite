@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendDurable, readNdjson, repairNdjson, startNdjson, writeFileAtomic, writeJsonAtomic } from "../eval/runner/durable.js";
+import { appendDurable, readNdjson, repairNdjson, resumeScores, startNdjson, writeFileAtomic, writeJsonAtomic } from "../eval/runner/durable.js";
 import { buildDecisionKey, keyProgressPath, loadOrBuildKey, type Complete, type KeyedSession } from "../eval/runner/decision-key.js";
+import { resumeMismatch } from "../eval/runner/suite-resume.js";
+import { truncateSavePass } from "../eval/runner/arm-core.js";
 import { createJudge, openVerdictCache } from "../eval/runner/decision-judge.js";
 import { runCheckpointed, type RunHeader } from "../eval/runner/fold-drift-resume.js";
 import { MANIFEST, openSavePass, saveCheckpoint, type Checkpoint } from "../eval/runner/replay-checkpoints.js";
@@ -42,9 +44,18 @@ describe("durable files", () => {
     appendDurable(path, { id: 2 });
     appendDurable(path, { id: 3 });
     cutLastLine(path, 6);
-    expect(readNdjson<{ id: number }>(path)).toEqual({ rows: [{ id: 1 }, { id: 2 }], torn: true });
+    expect(readNdjson<{ id: number }>(path)).toMatchObject({ rows: [{ id: 1 }, { id: 2 }], torn: true });
     writeFileSync(path, '{"id":1}\n{"id":\n{"id":3}\n');
     expect(() => readNdjson(path)).toThrow("line 2 is not JSON");
+  });
+
+  it("writes the whole payload, including one past a pipe-sized chunk", () => {
+    const dir = scratch();
+    const big = "x".repeat(5_000_000);
+    writeFileAtomic(join(dir, "big.json"), big);
+    expect(readFileSync(join(dir, "big.json"), "utf8")).toBe(big);
+    appendDurable(join(dir, "rows.ndjson"), { big });
+    expect(readNdjson<{ big: string }>(join(dir, "rows.ndjson")).rows[0].big).toBe(big);
   });
 
   it("repairs a torn tail so the next append starts a clean line", () => {
@@ -93,8 +104,25 @@ describe("verdict cache", () => {
     expect(await judge.delivers({ id: "d2", text: "x" }, "text two")).toBe(true);
     expect(await judge.delivers({ id: "d1", text: "x" }, "text one")).toBe(true);
     expect(calls).toBe(1);
-    expect(readNdjson(path).torn).toBe(false);
-    expect(readNdjson(path).rows).toHaveLength(2);
+    expect(openVerdictCache(path).get("d2", "text two")).toBe(true);
+    expect(openVerdictCache(path).get("d1", "text one")).toBe(true);
+  });
+
+  it("never truncates the shared file and starts its next row on a fresh line", () => {
+    const dir = scratch();
+    const path = join(dir, "verdicts.ndjson");
+    const first = openVerdictCache(path);
+    first.set("d1", "text one", true);
+    appendFileSync(path, '{"k":"another-process-in-flight');
+    const before = readFileSync(path, "utf8");
+
+    const cache = openVerdictCache(path);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    cache.set("d2", "text two", false);
+    expect(readFileSync(path, "utf8").startsWith(before)).toBe(true);
+    const reopened = openVerdictCache(path);
+    expect(reopened.get("d1", "text one")).toBe(true);
+    expect(reopened.get("d2", "text two")).toBe(false);
   });
 });
 
@@ -127,13 +155,40 @@ describe("decision key build", () => {
       return '{"prompts":[]}';
     };
     await expect(buildDecisionKey(entries, crashing, new Date(), progress)).rejects.toThrow("killed");
-    expect(readNdjson(progress).rows).toHaveLength(1);
+    expect(readNdjson(progress).rows).toHaveLength(2);
     appendDurable(progress, { phase: "extract", sessionId: "s-b", decisions: [] });
     cutLastLine(progress, 12);
 
     const { complete, calls } = llm();
     const key = await buildDecisionKey(entries, complete, new Date(), progress);
     expect(calls.filter((c) => c === "extract")).toHaveLength(1);
+    expect(key.decisions).toHaveLength(2);
+  });
+
+  it("starts the progress file with a header and discards a file built from other Sessions", async () => {
+    const dir = scratch();
+    const progress = join(dir, "key.json.progress.ndjson");
+    const { complete, calls } = llm();
+    await buildDecisionKey(entries, complete, new Date(), progress);
+    const [header] = readNdjson<{ header?: string }>(progress).rows;
+    expect(typeof header.header).toBe("string");
+
+    const other = llm();
+    await buildDecisionKey(entries.slice(0, 1), other.complete, new Date(), progress);
+    expect(other.calls.filter((c) => c === "extract")).toHaveLength(1);
+    const again = llm();
+    await buildDecisionKey(entries.slice(0, 1), again.complete, new Date(), progress);
+    expect(again.calls).toEqual([]);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it("discards a progress file that has no header", async () => {
+    const dir = scratch();
+    const progress = join(dir, "key.json.progress.ndjson");
+    writeFileSync(progress, `${JSON.stringify({ phase: "extract", sessionId: "s-a", decisions: [] })}\n`);
+    const { complete, calls } = llm();
+    const key = await buildDecisionKey(entries, complete, new Date(), progress);
+    expect(calls.filter((c) => c === "extract")).toHaveLength(2);
     expect(key.decisions).toHaveLength(2);
   });
 
@@ -226,5 +281,78 @@ describe("save-pass checkpoints", () => {
     const checkpoints = await savedPass(dir);
     for (const c of checkpoints) writeFileSync(join(dir, c.file), "garbage");
     expect(() => openSavePass(dir, true, sessions, scored)).toThrow("lists no sound checkpoint");
+  });
+});
+
+describe("save-pass truncation", () => {
+  it("has the kept manifest on disk before any checkpoint file is removed", () => {
+    const dir = scratch();
+    const cp = (i: number) => ({ sessionId: `id${i}`, file: `${String(i).padStart(3, "0")}-id${i}.sqlite`, ingested: [] as string[] });
+    const manifest = [cp(1), cp(2), cp(3)];
+    for (const c of manifest) writeFileSync(join(dir, c.file), "db");
+    writeFileSync(join(dir, MANIFEST), JSON.stringify(manifest));
+    writeFileSync(join(dir, "run.json"), "{}");
+
+    expect(() =>
+      truncateSavePass(dir, 1, () => {
+        throw new Error("killed");
+      }),
+    ).toThrow("killed");
+    expect(JSON.parse(readFileSync(join(dir, MANIFEST), "utf8"))).toEqual([cp(1)]);
+    expect(existsSync(join(dir, cp(3).file))).toBe(true);
+
+    truncateSavePass(dir, 1);
+    expect(existsSync(join(dir, "run.json"))).toBe(false);
+    expect(existsSync(join(dir, cp(1).file))).toBe(true);
+  });
+});
+
+describe("resumeScores", () => {
+  type Row = { adapter: string; questionId: string; k: number };
+  const key = (r: Row) => `${r.adapter}:${r.questionId}`;
+  const row = (questionId: string, k: number): Row => ({ adapter: "a", questionId, k });
+
+  it("counts a question finished only when its rows cover every k, and rewrites the file without the rest", () => {
+    const dir = scratch();
+    const path = join(dir, "scores.ndjson");
+    for (const r of [row("q1", 5), row("q1", 10), row("q2", 5), row("q3", 5), row("q3", 5)]) appendDurable(path, r);
+    const { rows, finished } = resumeScores<Row>(path, true, [5, 10], key);
+    expect([...finished]).toEqual(["a:q1"]);
+    expect(rows).toEqual([row("q1", 5), row("q1", 10)]);
+    expect(readNdjson<Row>(path).rows).toEqual(rows);
+  });
+
+  it("refuses a file with a row at a k this run does not score", () => {
+    const dir = scratch();
+    const path = join(dir, "scores.ndjson");
+    appendDurable(path, row("q1", 7));
+    expect(() => resumeScores<Row>(path, true, [5, 10], key)).toThrow("another --k");
+  });
+
+  it("starts empty without --resume", () => {
+    const dir = scratch();
+    const path = join(dir, "scores.ndjson");
+    appendDurable(path, row("q1", 5));
+    expect(resumeScores<Row>(path, false, [5], key).finished.size).toBe(0);
+  });
+});
+
+describe("suite --resume identity", () => {
+  const current = { commit: "abc1234", dirty: false, config: { EMBEDDING_PROVIDER: "local" } };
+
+  it("accepts the same run and a dir with no meta.json", () => {
+    const dir = scratch();
+    expect(resumeMismatch(dir, current)).toEqual([]);
+    writeJsonAtomic(join(dir, "meta.json"), current);
+    expect(resumeMismatch(dir, current)).toEqual([]);
+  });
+
+  it("names a changed commit, tree state and config key", () => {
+    const dir = scratch();
+    writeJsonAtomic(join(dir, "meta.json"), current);
+    const diffs = resumeMismatch(dir, { commit: "def5678", dirty: true, config: { AGENTMEMORY_PROMPT_RERANK: "off" } });
+    expect(diffs).toHaveLength(4);
+    expect(diffs.join("\n")).toContain("commit: earlier run abc1234, this run def5678");
+    expect(diffs.join("\n")).toContain("EMBEDDING_PROVIDER: earlier run local, this run unset");
   });
 });

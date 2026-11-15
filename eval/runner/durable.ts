@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, truncateSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, renameSync, truncateSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 export function fsyncPath(path: string): void {
@@ -17,7 +17,7 @@ export function writeFileAtomic(path: string, data: string): void {
   const partial = join(dir, `.${basename(path)}.partial`);
   const fd = openSync(partial, "w");
   try {
-    writeSync(fd, data);
+    writeFileSync(fd, data);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -30,11 +30,20 @@ export function writeJsonAtomic(path: string, value: unknown): void {
   writeFileAtomic(path, JSON.stringify(value, null, 2));
 }
 
-// A finished unit's row is on disk before the next unit starts.
-export function appendDurable(path: string, line: unknown): void {
-  const fd = openSync(path, "a");
+// A finished unit's row is on disk before the next unit starts. A file shared
+// with other writers passes `sharedFile`, so a row never joins another
+// writer's unfinished line.
+export function appendDurable(path: string, line: unknown, sharedFile = false): void {
+  const fd = openSync(path, "a+");
   try {
-    writeSync(fd, `${JSON.stringify(line)}\n`);
+    const { size } = fstatSync(fd);
+    let lead = "";
+    if (sharedFile && size > 0) {
+      const last = Buffer.alloc(1);
+      readSync(fd, last, 0, 1, size - 1);
+      if (last[0] !== 0x0a) lead = "\n";
+    }
+    writeFileSync(fd, `${lead}${JSON.stringify(line)}\n`);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -44,13 +53,12 @@ export function appendDurable(path: string, line: unknown): void {
 export interface Ndjson<T> {
   rows: T[];
   torn: boolean;
+  endsInNewline: boolean;
+  tornOffset: number;
 }
 
-// An unparseable last line is a write the kill cut off and is dropped; one
-// anywhere else is corruption and throws.
-export function readNdjson<T>(path: string): Ndjson<T> {
-  if (!existsSync(path)) return { rows: [], torn: false };
-  const lines = readFileSync(path, "utf8").split("\n");
+function parseNdjson<T>(path: string, text: string): Ndjson<T> {
+  const lines = text.split("\n");
   const last = lines.length - 1;
   const rows: T[] = [];
   let torn = false;
@@ -63,17 +71,23 @@ export function readNdjson<T>(path: string): Ndjson<T> {
       torn = true;
     }
   });
-  return { rows, torn };
+  return { rows, torn, endsInNewline: text === "" || text.endsWith("\n"), tornOffset: Buffer.byteLength(text.slice(0, text.lastIndexOf("\n") + 1)) };
 }
 
-// Reads the rows and leaves the file ready to append to: a torn tail is cut
-// off and a complete last line gets its newline.
+// An unparseable last line is a write the kill cut off and is dropped; one
+// anywhere else is corruption and throws. Never modifies the file.
+export function readNdjson<T>(path: string): Ndjson<T> {
+  if (!existsSync(path)) return { rows: [], torn: false, endsInNewline: true, tornOffset: 0 };
+  return parseNdjson<T>(path, readFileSync(path, "utf8"));
+}
+
+// Reads the rows and leaves a single-writer file ready to append to: a torn
+// tail is cut off and a complete last line gets its newline.
 export function repairNdjson<T>(path: string): T[] {
   if (!existsSync(path)) return [];
-  const { rows, torn } = readNdjson<T>(path);
-  const text = readFileSync(path, "utf8");
-  if (torn) truncateSync(path, Buffer.byteLength(text.slice(0, text.lastIndexOf("\n") + 1)));
-  else if (text !== "" && !text.endsWith("\n")) appendFileSync(path, "\n");
+  const { rows, torn, endsInNewline, tornOffset } = readNdjson<T>(path);
+  if (torn) truncateSync(path, tornOffset);
+  else if (!endsInNewline) appendFileSync(path, "\n");
   return rows;
 }
 
@@ -87,4 +101,24 @@ export function startNdjson<T>(path: string, resume: boolean): T[] {
   if (resume && existsSync(path)) return repairNdjson<T>(path);
   writeFileAtomic(path, "");
   return [];
+}
+
+// The preamble of a runner that scores each question at one or more k. A
+// question is finished when its rows cover every k in `ks`; a prior row at any
+// other k means the file came from other options.
+export function resumeScores<R extends { k: number }>(
+  path: string,
+  resume: boolean,
+  ks: number[],
+  keyOf: (row: R) => string,
+): { rows: R[]; finished: Set<string> } {
+  const prior = startNdjson<R>(path, resume);
+  if (prior.some((r) => !ks.includes(r.k))) throw new Error(`${path} was scored at another --k; remove it or pass its own options`);
+  const ksSeen = new Map<string, Set<number>>();
+  for (const r of prior) ksSeen.set(keyOf(r), (ksSeen.get(keyOf(r)) ?? new Set<number>()).add(r.k));
+  const finished = new Set([...ksSeen].filter(([, seen]) => seen.size === new Set(ks).size).map(([key]) => key));
+  const rows = prior.filter((r) => finished.has(keyOf(r)));
+  if (rows.length < prior.length) rewriteNdjson(path, rows);
+  if (finished.size > 0) console.log(`--resume: ${finished.size} questions already scored`);
+  return { rows, finished };
 }

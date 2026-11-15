@@ -3,9 +3,9 @@ import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, r
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { failedSessionIndex, parseArmArgs, probeArgs, resumePlan } from "./arm-core.js";
-import { writeFileAtomic, writeJsonAtomic } from "./durable.js";
-import { MANIFEST, type Checkpoint } from "./replay-checkpoints.js";
+import { failedSessionIndex, parseArmArgs, probeArgs, truncateSavePass } from "./arm-core.js";
+import { writeFileAtomic } from "./durable.js";
+import { MANIFEST } from "./replay-checkpoints.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MAX_SAVE_ATTEMPTS = 40;
@@ -67,13 +67,8 @@ function replayPass(tree: string, args: string[], log: string, watch: boolean): 
   });
 }
 
-function truncateSavePass(checkpointDir: string, failedIndex: number) {
-  const manifestPath = join(checkpointDir, MANIFEST);
-  const { keep, remove } = resumePlan(JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[], failedIndex);
-  for (const file of remove) rmSync(join(checkpointDir, file), { force: true });
-  rmSync(join(checkpointDir, "run.json"), { force: true });
-  if (keep.length > 0) writeJsonAtomic(manifestPath, keep);
-  else rmSync(manifestPath);
+function dropFailedCheckpoints(checkpointDir: string, failedIndex: number) {
+  const { keep } = truncateSavePass(checkpointDir, failedIndex);
   console.log(`failed summarize in Session ${failedIndex + 1}: ${keep.length > 0 ? `resuming from ${keep.at(-1)!.file}` : "no clean checkpoint left, restarting"}`);
 }
 
@@ -114,7 +109,7 @@ async function main() {
     const resume = existsSync(join(checkpointDir, MANIFEST)) ? ["--resume"] : [];
     console.log(`save pass attempt ${attempt} ${resume.join(" ")}`);
     const { code, failedIndex } = await replayPass(tree, [...replayArgs, "--decision-key", "--save-checkpoints", ...resume, "--out", treeOut("save")], join(armDir, "save.log"), true);
-    if (failedIndex !== undefined) truncateSavePass(checkpointDir, failedIndex);
+    if (failedIndex !== undefined) dropFailedCheckpoints(checkpointDir, failedIndex);
     saved = code === 0 && savePassFinishedClean(checkpointDir);
   }
   if (!saved) throw new Error(`save pass did not finish in ${MAX_SAVE_ATTEMPTS} attempts; see ${join(armDir, "save.log")}`);

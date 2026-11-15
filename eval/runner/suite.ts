@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { readNdjson, writeJsonAtomic } from "./durable.js";
+import { resumeMismatch } from "./suite-resume.js";
 import type { PmbRow } from "./pmb-score.js";
 import type { SessionScore } from "./replay-score.js";
 import { selectionWarning, type Selection } from "./replay-selection.js";
@@ -264,8 +265,13 @@ async function main(): Promise<void> {
   if (!values["no-build"]) execFileSync("npm", ["run", "build"], { cwd: REPO_ROOT, stdio: "ignore" });
 
   const resume = values.resume === true && existsSync(dir);
+  if (resume) {
+    const mismatch = resumeMismatch(dir, meta);
+    if (mismatch.length > 0) throw new Error(`cannot --resume ${label}: ${mismatch.join("; ")}; remove ${dir} or drop --resume`);
+  }
   if (!resume) rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
+  writeJsonAtomic(join(dir, "meta.json"), meta);
   console.log(`${label}: ${benches.map((b) => b.name).join(", ")} → ${dir}`);
   await Promise.all(
     benches.map(async (bench) => {

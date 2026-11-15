@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, truncateSync } from "node:fs";
 import { dirname } from "node:path";
-import { appendDurable, repairNdjson, writeJsonAtomic } from "./durable.js";
+import { appendDurable, readNdjson, writeFileAtomic, writeJsonAtomic } from "./durable.js";
 import { renderInput, type OperatorInput } from "./decision-inputs.js";
 import { isTersePrompt } from "../../src/utils/terse-prompt.js";
 import type { ReplaySession } from "./replay-transcript.js";
@@ -135,10 +136,29 @@ async function labelPrompts(
 }
 
 type KeyProgressRow =
+  | { header: string }
   | { phase: "extract"; sessionId: string; decisions: Decision[] }
   | { phase: "label"; sessionId: string; expected: Expected[] };
 
 export const keyProgressPath = (keyPath: string): string => `${keyPath}.progress.ndjson`;
+
+const inputsHeader = (entries: KeyedSession[]): string =>
+  createHash("sha256").update(JSON.stringify(entries.map((e) => e.session.id))).digest("hex");
+
+// Progress belongs to the ordered Session ids it was built from; a file from
+// other inputs is discarded, and a torn tail is cut off.
+function openProgress(path: string, entries: KeyedSession[]): Array<Exclude<KeyProgressRow, { header: string }>> {
+  const header = inputsHeader(entries);
+  const { rows, torn, endsInNewline, tornOffset } = readNdjson<KeyProgressRow>(path);
+  const [first, ...rest] = rows;
+  if (!first || !("header" in first) || first.header !== header) {
+    writeFileAtomic(path, `${JSON.stringify({ header })}\n`);
+    return [];
+  }
+  if (torn) truncateSync(path, tornOffset);
+  else if (!endsInNewline) appendFileSync(path, "\n");
+  return rest as Array<Exclude<KeyProgressRow, { header: string }>>;
+}
 
 // With a progress file, each Session's extraction and labelling is on disk when
 // it finishes, so a killed build resumes past them; a Session cut off midway
@@ -149,7 +169,7 @@ export async function buildDecisionKey(
   now = new Date(),
   progressPath?: string,
 ): Promise<DecisionKey> {
-  const rows = progressPath ? repairNdjson<KeyProgressRow>(progressPath) : [];
+  const rows = progressPath ? openProgress(progressPath, entries) : [];
   const extractedBefore = new Map<string, Decision[]>();
   const labelledBefore = new Map<string, Expected[]>();
   for (const row of rows) {

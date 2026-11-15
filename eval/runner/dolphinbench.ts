@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { appendDurable, startNdjson, writeJsonAtomic } from "./durable.js";
+import { appendDurable, resumeScores, writeJsonAtomic } from "./durable.js";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agentmemoryAdapter } from "./adapters/agentmemory.js";
@@ -63,10 +63,13 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  const rows = startNdjson<ScoreRow>(ndjsonPath, opts.resume === true);
-  if (rows.some((r) => r.k !== k)) fail(`${ndjsonPath} was scored at another --k; remove it or pass its own options`);
-  const finished = new Set(rows.map((r) => `${r.adapter}:${r.path}:${r.questionId}`));
-  if (finished.size > 0) console.log(`--resume: ${finished.size} questions already scored`);
+  let scored;
+  try {
+    scored = resumeScores<ScoreRow>(ndjsonPath, opts.resume === true, [k], (r) => `${r.adapter}:${r.path}:${r.questionId}`);
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+  const { rows, finished } = scored;
 
   // A persona's history is ingested once and every test of it queries that store.
   for (const persona of personas) {
