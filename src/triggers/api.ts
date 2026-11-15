@@ -21,13 +21,14 @@ import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
 import { stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
+import { captureTimes, markCaptureArrival, markCaptureSettled } from "../telemetry/capture.js";
 import { getFollowupStats } from "../functions/smart-search.js";
 import { parsePatternsLimit, PATTERNS_LIMIT_ERROR } from "../functions/patterns.js";
 import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/parse-number.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
-import { ObserveRetryQueue } from "../functions/observe-retry.js";
+import { isUnstoredOnFullDisk, ObserveRetryQueue } from "../functions/observe-retry.js";
 import { ShedQueue } from "../functions/shed-queue.js";
 import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
 import {
@@ -356,6 +357,7 @@ export function registerApiTriggers(
           circuitBreakers,
           llm,
           recall: recallCounts(),
+          capture: captureTimes(),
           ...instanceInfo(),
         },
       };
@@ -371,9 +373,17 @@ export function registerApiTriggers(
     },
   });
 
-  const observeRetry = new ObserveRetryQueue((payload) =>
-    sdk.trigger({ function_id: "mem::observe", payload }),
-  );
+  const observeRetry = new ObserveRetryQueue(async (payload) => {
+    let unstored = false;
+    try {
+      return await sdk.trigger({ function_id: "mem::observe", payload });
+    } catch (err) {
+      unstored = isUnstoredOnFullDisk(err);
+      throw err;
+    } finally {
+      if (!unstored) markCaptureSettled(payload);
+    }
+  });
   sdk.registerFunction("api::observe",
     async (req: ApiRequest): Promise<Response> => {
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -399,7 +409,11 @@ export function registerApiTriggers(
         timestamp,
         data: body.data,
       };
-      const outcome = await observeRetry.submit(payload);
+      markCaptureArrival(payload);
+      const outcome = await observeRetry.submit(payload).catch((err: unknown) => {
+        markCaptureSettled(payload);
+        throw err;
+      });
       return outcome.queued
         ? { status_code: 202, body: { queued: true } }
         : { status_code: 201, body: outcome.result };
