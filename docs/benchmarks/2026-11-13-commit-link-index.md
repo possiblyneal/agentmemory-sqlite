@@ -12,6 +12,8 @@
 
 The built path reproduces the #396 result. Linking each commit through `POST /agentmemory/session/commit`, the route the post-commit hook takes, delivers 10 of 30 key items against 4 for `none` (7 gained, 0 lost, exact McNemar p = 0.0156), the target of 10. The used share of injected items is 7.2% against 5.6%.
 
+Superseded: [2026-11-14](./2026-11-14-commit-link-llm-gate.md) reran this with LLM compression and the Injection Gate on, and the gain did not hold. The indexing was removed in #416, so the commands below no longer run on `main`.
+
 ## Per arm
 
 Pooled over the 141 Sessions. Both arms restore the same #396 checkpoints; only the ingest differs.
@@ -36,7 +38,7 @@ Before this change the commit-link path stored a commit's message and changed pa
 ## Limits
 
 - Synthetic compression and no reranker gate, as #396. Under LLM compression and the gate the gain does not hold: [2026-11-14](./2026-11-14-commit-link-llm-gate.md).
-- 27 of 30 key items are file keys, which is what a changed-path list answers; no decision or correction is gained.
+- 22 of the 30 key items are file keys (6 corrections, 2 decisions), which is what a changed-path list answers; no decision or correction is gained.
 - No history backfill: only commits linked after this change are indexed, so a repo's earlier history is unsearchable until a backfill exists. That is a new public command and is left to its own issue.
 - One Operator, 12 projects, one replay per arm.
 
