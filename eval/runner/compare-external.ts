@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readNdjson } from "./durable.js";
 import { join, resolve } from "node:path";
 import { mcnemarExact } from "./compare-core.js";
 import { EXTERNAL_ARMS } from "./external-text.js";
@@ -22,8 +23,7 @@ function load(root: string, arm: string): Run {
   const dir = join(root, `arm-${arm}`);
   const file = JSON.parse(readFileSync(join(dir, "summary.json"), "utf8")) as { summary: Summary & { typical: { summary: Summary } } };
   const delivered = new Map<string, boolean>();
-  for (const line of readFileSync(join(dir, "scores.ndjson"), "utf8").split("\n").filter(Boolean)) {
-    const s = JSON.parse(line) as { sessionId: string; outcomes: Array<{ injected: boolean; searched: boolean }> };
+  for (const s of readNdjson<{ sessionId: string; outcomes: Array<{ injected: boolean; searched: boolean }> }>(join(dir, "scores.ndjson")).rows) {
     s.outcomes.forEach((o, i) => delivered.set(`${s.sessionId}#${i}`, o.injected || o.searched));
   }
   return { summary: file.summary, typical: file.summary.typical.summary, delivered };

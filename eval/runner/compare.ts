@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readNdjson } from "./durable.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cumulativeLine, mcnemarExact, pairDecisions, refuseFailedSummaries, type DecisionRow } from "./compare-core.js";
@@ -28,10 +29,7 @@ function resolveRunDir(arg: string): string {
 function loadRun(arg: string): LoadedRun {
   const dir = resolveRunDir(arg);
   const summary = JSON.parse(readFileSync(join(dir, "summary.json"), "utf8")) as Summary;
-  const rows = readFileSync(join(dir, "scores.ndjson"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as DecisionRow);
+  const rows = readNdjson<DecisionRow>(join(dir, "scores.ndjson")).rows;
   // A probe pass summarizes nothing; the failures belong to the save pass it probed.
   // An arm's recorded path is inside its worktree, so its out/save copy is tried too.
   let saved: Summary["run"] | undefined;

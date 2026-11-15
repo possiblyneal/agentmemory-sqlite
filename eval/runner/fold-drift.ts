@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { writeJsonAtomic } from "./durable.js";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
       onFailure: (id, error) => console.log(`${SCREEN_MODE_TAG} ${id} failed: ${error}`),
     });
     console.log(screenTotal(results));
-    writeFileSync(`${stem}.json`, JSON.stringify({ mode: "screen", store: values.store, batch, llm: header.llm, ...stopFields(earlyStop(results, stopped, failed)), sessions: results, failed }, null, 2));
+    writeJsonAtomic(`${stem}.json`, { mode: "screen", store: values.store, batch, llm: header.llm, ...stopFields(earlyStop(results, stopped, failed)), sessions: results, failed });
     console.log(`wrote ${stem}.json`);
     return;
   }
@@ -156,7 +157,7 @@ async function main(): Promise<void> {
   const labelTotal = labelCounts(results.flatMap((r) => r.labels ?? []));
   console.log(`total sessions=${results.length} full=${total.full} folded=${total.folded} missing(exact)=${total.missingExact} missing(jaccard>=0.5)=${total.missingLoose} missing(judged)=${total.missingJudged}${labelText(labelTotal)} dropped-by-folds(exact)=${total.droppedExact} dropped-by-folds(jaccard>=0.5)=${total.droppedLoose} dropped-by-fallbacks(exact)=${total.fallbackDroppedExact} dropped-by-fallbacks(jaccard>=0.5)=${total.fallbackDroppedLoose}`);
 
-  writeFileSync(`${stem}.json`, JSON.stringify({ store: values.store, batch, llm: header.llm, total, labelTotal, ...stopFields(earlyStop(results, stopped, failed)), sessions: results, failed }, null, 2));
+  writeJsonAtomic(`${stem}.json`, { store: values.store, batch, llm: header.llm, total, labelTotal, ...stopFields(earlyStop(results, stopped, failed)), sessions: results, failed });
   console.log(`wrote ${stem}.json`);
 }
 
@@ -209,7 +210,7 @@ async function rescore(file: string, ids: string[], batch: number, store: string
   mkdirSync(OUT_DIR, { recursive: true });
   const out = join(OUT_DIR, `rescore-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
   const output: StoredRescore = { mode: "rescore", from: file, store: stored.store, batch, llm: stored.llm, decisionKey: keyPath, ...result };
-  writeFileSync(out, JSON.stringify(output, null, 2));
+  writeJsonAtomic(out, output);
   console.log(`wrote ${out}`);
 }
 

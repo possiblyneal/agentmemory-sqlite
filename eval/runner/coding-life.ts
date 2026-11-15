@@ -1,4 +1,5 @@
-import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
+import { appendDurable, writeFileAtomic, writeJsonAtomic } from "./durable.js";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { agentmemoryAdapter, agentmemoryBm25Adapter } from "./adapters/agentmemory.js";
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
   const outDir = resolve(opts.out);
   mkdirSync(outDir, { recursive: true });
   const ndjsonPath = `${outDir}/scores.ndjson`;
-  writeFileSync(ndjsonPath, "");
+  writeFileAtomic(ndjsonPath, "");
 
   const rows: ScoreRow[] = [];
   for (const adapterName of adapterNames) {
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
         const latencyMs = performance.now() - t0;
         const row = scoreQuestion(q, result, k, adapter.name, latencyMs);
         rows.push(row);
-        appendFileSync(ndjsonPath, JSON.stringify(row) + "\n");
+        appendDurable(ndjsonPath, row);
         const mark = row.hit ? "+" : "-";
         console.log(
           `  ${mark} ${q.id} [${row.path}/${q.type}] returned=${row.returned} recall=${fmt(row.recall, 2)} precision=${row.precision.toFixed(2)} (${Math.round(latencyMs)}ms)`,
@@ -123,7 +124,7 @@ async function main(): Promise<void> {
   }
 
   const summary = aggregate(rows);
-  writeFileSync(`${outDir}/summary.json`, JSON.stringify(summary, null, 2));
+  writeJsonAtomic(`${outDir}/summary.json`, summary);
   console.log("\n=== Summary ===");
   console.log(
     `  ${"adapter".padEnd(18)} ${"path".padEnd(14)} ${"n".padStart(3)} ${"recall".padStart(7)} ${"precision".padStart(9)} ${"no-answer".padStart(9)} ${"hit".padStart(7)} ${"chars".padStart(7)} ${"p50".padStart(6)} ${"p95".padStart(6)}`,

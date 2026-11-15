@@ -26,11 +26,11 @@ async function main(): Promise<void> {
   }
   const loadOpts = { projects, root: resolve(values.root as string), cap, minTurns };
   const { sessions } = loadSessions(loadOpts);
-  const { key, reused } = await loadOrBuildKey(DECISION_KEY_PATH, values.rebuild === true, () => {
+  const { key, reused } = await loadOrBuildKey(DECISION_KEY_PATH, values.rebuild === true, (progressPath) => {
     const complete = providerComplete();
     console.log(`building the decision key from ${sessions.length} Sessions`);
     const entries = sessions.map((session) => ({ session, inputs: operatorInputs(readFileSync(session.sourcePath!, "utf8"), session) }));
-    return buildDecisionKey(entries, complete);
+    return buildDecisionKey(entries, complete, new Date(), progressPath);
   });
   const replayable = loadSessions({ ...loadOpts, include: keyedSessionIds(key) }).sessions;
   const warning = unreachableWarning(unreachableOrigins(key, new Set(replayable.map((s) => s.id))));

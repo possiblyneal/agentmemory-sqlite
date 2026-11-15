@@ -1,4 +1,7 @@
-import type { Checkpoint } from "./replay-checkpoints.js";
+import { readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { writeJsonAtomic } from "./durable.js";
+import { MANIFEST, type Checkpoint } from "./replay-checkpoints.js";
 
 export interface ArmArgs {
   ref: string;
@@ -49,4 +52,20 @@ export function failedSessionIndex(line: string): number | undefined {
 export function resumePlan(manifest: Checkpoint[], failedIndex: number): { keep: Checkpoint[]; remove: string[] } {
   const clean = (c: Checkpoint) => Number.parseInt(c.file, 10) <= failedIndex;
   return { keep: manifest.filter(clean), remove: manifest.filter((c) => !clean(c)).map((c) => c.file) };
+}
+
+// The kept manifest is on disk before any file goes, so a kill between the two
+// never leaves a manifest listing a checkpoint taken after the failed summarize.
+export function truncateSavePass(
+  checkpointDir: string,
+  failedIndex: number,
+  removeFile: (path: string) => void = (path) => rmSync(path, { force: true }),
+): { keep: Checkpoint[]; remove: string[] } {
+  const manifestPath = join(checkpointDir, MANIFEST);
+  const plan = resumePlan(JSON.parse(readFileSync(manifestPath, "utf8")) as Checkpoint[], failedIndex);
+  if (plan.keep.length > 0) writeJsonAtomic(manifestPath, plan.keep);
+  else rmSync(manifestPath);
+  for (const file of plan.remove) removeFile(join(checkpointDir, file));
+  removeFile(join(checkpointDir, "run.json"));
+  return plan;
 }
