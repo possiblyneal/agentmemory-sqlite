@@ -6,6 +6,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerObserveFunction } from "../src/functions/observe.js";
 import { registerPromptContextFunction } from "../src/functions/prompt-context.js";
+import { registerApiTriggers } from "../src/triggers/api.js";
 import { parseJsonlText } from "../src/replay/jsonl-parser.js";
 import { KV } from "../src/state/schema.js";
 import { isHarnessMessage } from "../src/utils/harness-message.js";
@@ -70,12 +71,17 @@ describe("harness messages delivered as user turns", () => {
       searched.push(data);
       return { results: [] };
     });
-    registerPromptContextFunction(sdk as never, mockKV() as never);
+    const kv = mockKV();
+    registerPromptContextFunction(sdk as never, kv as never);
+    registerApiTriggers(sdk as never, kv as never);
 
-    const result = await sdk.trigger("mem::prompt-context", { sessionId: "ses_1", project: "shipctl", prompt: text });
+    const result = await sdk.trigger("api::prompt-context", {
+      headers: {},
+      body: { sessionId: "ses_1", project: "shipctl", prompt: text },
+    });
 
     expect(searched).toEqual([]);
-    expect(result).toEqual({ context: "", tokens: 0, injected: [] });
+    expect(result).toEqual({ status_code: 200, body: { context: "" } });
   });
 
   it("are left out of an imported transcript", () => {

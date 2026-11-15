@@ -5,7 +5,6 @@ import type { StateKV } from "../state/kv.js";
 import { logger } from "../logger.js";
 import { estimateTokens } from "../utils/tokens.js";
 import { escapeXml } from "../utils/xml.js";
-import { isHarnessMessage } from "../utils/harness-message.js";
 import { isTersePrompt, MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { getPromptRerankConfig } from "../config.js";
 import { lessonToObservation } from "../state/memory-utils.js";
@@ -263,7 +262,6 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::prompt-context",
     async (data: { sessionId: string; prompt: string; project?: string; reply?: string }): Promise<PromptContextResult> => {
-      if (isHarnessMessage(data.prompt.trim())) return EMPTY;
       const prompt = queryFor(data.prompt, data.reply);
       if (wordCount(prompt) < MIN_PROMPT_WORDS) return EMPTY;
 

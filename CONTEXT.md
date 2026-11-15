@@ -39,7 +39,8 @@ _Avoid_: event, log entry
 A user turn that Claude Code writes and the Operator does not: a background-task result or
 a message from another Session, delivered as one or more `<task-notification>`,
 `<teammate-message>`, `<cross-session-message>` or `<agent-message>` elements. It is never
-stored as an Observation, never searched on for an Injection, and dropped on import.
+stored as an Observation, never searched on, never counted or recorded as an Injection, and
+dropped on import.
 _Avoid_: notification (alone)
 
 **Memory**:

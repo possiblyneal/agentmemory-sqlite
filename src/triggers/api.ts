@@ -27,6 +27,7 @@ import { parseOptionalFiniteNumber, parseOptionalPositiveInt } from "../utils/pa
 import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
+import { isHarnessMessage } from "../utils/harness-message.js";
 import { isUnstoredOnFullDisk, ObserveRetryQueue } from "../functions/observe-retry.js";
 import { ShedQueue } from "../functions/shed-queue.js";
 import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
@@ -1173,6 +1174,9 @@ export function registerApiTriggers(
       }
       const project = req.body.project?.trim();
       const { sessionId, prompt } = req.body;
+      // A harness turn (a <task-notification>, say) is not the Operator's
+      // and gives Recall nothing to search on: it is not an Injection.
+      if (isHarnessMessage(prompt.trim())) return { status_code: 200, body: { context: "" } };
       const reply = req.body.reply?.slice(-MAX_REPLY_QUERY_CHARS);
       const turn = await promptQueue.run(() =>
         sdk.trigger<unknown, InjectionResult>({
