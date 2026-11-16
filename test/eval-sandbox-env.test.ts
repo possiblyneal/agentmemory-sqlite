@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { sandboxEnv } from "../eval/runner/sandbox.js";
 
-const KEYS = ["AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS"];
+const GRAPH_KEYS = [
+  "GRAPH_EXTRACTION_ENABLED",
+  "GRAPH_EXTRACTION_BATCH_SIZE",
+  "AGENTMEMORY_GRAPH_WEIGHT",
+  "AGENTMEMORY_GRAPH_LEG",
+];
+const KEYS = ["AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", ...GRAPH_KEYS];
 
 describe("sandboxEnv", () => {
   const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
@@ -30,5 +36,21 @@ describe("sandboxEnv", () => {
     process.env.AGENTMEMORY_LOCAL_EMBEDDING_MODEL = "Xenova/bge-small-en-v1.5";
     const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
     expect(env.AGENTMEMORY_LOCAL_EMBEDDING_MODEL).toBeUndefined();
+  });
+
+  it("forwards each graph setting the shell sets and leaves the unset ones absent", () => {
+    for (const k of GRAPH_KEYS) delete process.env[k];
+    process.env.GRAPH_EXTRACTION_ENABLED = "true";
+    process.env.AGENTMEMORY_GRAPH_WEIGHT = "0.4";
+    const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
+    expect(env.GRAPH_EXTRACTION_ENABLED).toBe("true");
+    expect(env.AGENTMEMORY_GRAPH_WEIGHT).toBe("0.4");
+    expect("GRAPH_EXTRACTION_BATCH_SIZE" in env).toBe(false);
+    expect("AGENTMEMORY_GRAPH_LEG" in env).toBe(false);
+    process.env.GRAPH_EXTRACTION_BATCH_SIZE = "8";
+    process.env.AGENTMEMORY_GRAPH_LEG = "on";
+    const all = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
+    expect(all.GRAPH_EXTRACTION_BATCH_SIZE).toBe("8");
+    expect(all.AGENTMEMORY_GRAPH_LEG).toBe("on");
   });
 });

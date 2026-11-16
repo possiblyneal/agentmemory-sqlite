@@ -124,6 +124,15 @@ export function sandboxEnv(
   if (process.env.AGENTMEMORY_MEMORY_CHUNKING) {
     env.AGENTMEMORY_MEMORY_CHUNKING = process.env.AGENTMEMORY_MEMORY_CHUNKING;
   }
+  for (const key of [
+    "GRAPH_EXTRACTION_ENABLED",
+    "GRAPH_EXTRACTION_BATCH_SIZE",
+    "AGENTMEMORY_GRAPH_WEIGHT",
+    "AGENTMEMORY_GRAPH_LEG",
+  ]) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
   if (process.env.AGENTMEMORY_INJECT_CONTEXT) {
     env.AGENTMEMORY_INJECT_CONTEXT = process.env.AGENTMEMORY_INJECT_CONTEXT;
   }
