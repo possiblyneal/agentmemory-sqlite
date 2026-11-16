@@ -222,6 +222,13 @@ and is audited as `delete` with `resource: "graph"`. Candidates come only from t
 sources' obs-node rows: there is no sweep, so records orphaned before this existed stay on
 disk. Import `replace` and snapshot restore rewrite the graph from their own file and do not
 call it.
+Graph extraction is off by default and bought no Recall (#420). With it off, startup
+maintenance deletes every `mem:graph:*` row once (`deleteGraphRows`,
+`src/state/startup-maintenance.ts`, marker `graph-rows-deleted:done` in `KV.config`, audited
+`delete` with `resource: "graph"`, under `GRAPH_WRITE_LOCK`); with it on, the graph is kept.
+The boot graph-index backfill runs only with extraction on, so it never arms rows being deleted.
+The delete leaves each Session's `graphExtractedThrough`: turning extraction back on builds the
+graph from new Observations only, and the history stays unextracted.
 
 ### Reflect
 `mem::reflect` (`src/functions/reflect.ts`) records a hash of each cluster's inputs in

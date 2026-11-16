@@ -48,6 +48,9 @@ export interface QueryResult {
 export interface AdapterConfig {
   instance?: number;
   baseUrl?: string;
+  // The sandbox's daemon gets the shell's OpenAI-compatible provider, with
+  // Compression left synthetic.
+  llm?: boolean;
 }
 
 export interface Adapter<State = unknown, Config extends AdapterConfig = AdapterConfig> {

@@ -35,9 +35,9 @@ export function parseArmArgs(argv: string[]): ArmArgs {
   return { ref, label, replayArgs };
 }
 
-// The probe reads stores the save pass already compressed and summarized.
+// The probe reads stores the save pass already compressed, summarized and derived.
 export function probeArgs(replayArgs: string[]): string[] {
-  return replayArgs.filter((a) => a !== "--llm" && a !== "--llm-summary");
+  return replayArgs.filter((a) => a !== "--llm" && a !== "--llm-summary" && a !== "--derived");
 }
 
 // The save pass logs `[k/N] … failed=F` per Session; F > 0 taints the stores

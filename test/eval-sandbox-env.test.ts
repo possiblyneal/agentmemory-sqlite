@@ -1,7 +1,16 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { sandboxEnv } from "../eval/runner/sandbox.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { __resetEnvFileCache, hydratedKeys, hydrateEnvFromFile } from "../src/hooks/_env.js";
+import { defaultUnlessShellSet, sandboxEnv } from "../eval/runner/sandbox.js";
 
-const KEYS = ["AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS"];
+const GRAPH_KEYS = [
+  "GRAPH_EXTRACTION_ENABLED",
+  "GRAPH_EXTRACTION_BATCH_SIZE",
+  "AGENTMEMORY_GRAPH_WEIGHT",
+  "AGENTMEMORY_GRAPH_LEG",
+];
+const KEYS = ["AGENTMEMORY_INJECT_CONTEXT", "AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", ...GRAPH_KEYS];
 
 describe("sandboxEnv", () => {
   const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
@@ -30,5 +39,70 @@ describe("sandboxEnv", () => {
     process.env.AGENTMEMORY_LOCAL_EMBEDDING_MODEL = "Xenova/bge-small-en-v1.5";
     const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
     expect(env.AGENTMEMORY_LOCAL_EMBEDDING_MODEL).toBeUndefined();
+  });
+
+  it("forwards each graph setting the shell sets and leaves the unset ones absent", () => {
+    for (const k of GRAPH_KEYS) delete process.env[k];
+    process.env.GRAPH_EXTRACTION_ENABLED = "true";
+    process.env.AGENTMEMORY_GRAPH_WEIGHT = "0.4";
+    const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
+    expect(env.GRAPH_EXTRACTION_ENABLED).toBe("true");
+    expect(env.AGENTMEMORY_GRAPH_WEIGHT).toBe("0.4");
+    expect("GRAPH_EXTRACTION_BATCH_SIZE" in env).toBe(false);
+    expect("AGENTMEMORY_GRAPH_LEG" in env).toBe(false);
+    process.env.GRAPH_EXTRACTION_BATCH_SIZE = "8";
+    process.env.AGENTMEMORY_GRAPH_LEG = "on";
+    const all = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
+    expect(all.GRAPH_EXTRACTION_BATCH_SIZE).toBe("8");
+    expect(all.AGENTMEMORY_GRAPH_LEG).toBe("on");
+  });
+
+  describe("with a ~/.agentmemory/.env hydrated into process.env", () => {
+    const home = process.env.HOME;
+    let fakeHome = "";
+    afterEach(() => {
+      if (home === undefined) delete process.env.HOME;
+      else process.env.HOME = home;
+      __resetEnvFileCache();
+      hydratedKeys.clear();
+      rmSync(fakeHome, { recursive: true, force: true });
+    });
+
+    it("leaves out a setting only the .env gave and forwards the one the shell set", () => {
+      fakeHome = mkdtempSync(join(process.cwd(), "tmp", "sandbox-env-"));
+      mkdirSync(join(fakeHome, ".agentmemory"));
+      writeFileSync(
+        join(fakeHome, ".agentmemory", ".env"),
+        "GRAPH_EXTRACTION_ENABLED=true\nAGENTMEMORY_GRAPH_WEIGHT=0.9\nAGENTMEMORY_LOCAL_EMBEDDING_MODEL=live/model\n",
+      );
+      process.env.HOME = fakeHome;
+      __resetEnvFileCache();
+      for (const k of KEYS) delete process.env[k];
+      process.env.AGENTMEMORY_GRAPH_WEIGHT = "0.4";
+      hydrateEnvFromFile((current) => current === undefined);
+      expect(process.env.GRAPH_EXTRACTION_ENABLED).toBe("true");
+
+      const env = sandboxEnv("/h", "/s.sqlite", "/m", "local", false);
+      expect("GRAPH_EXTRACTION_ENABLED" in env).toBe(false);
+      expect("AGENTMEMORY_LOCAL_EMBEDDING_MODEL" in env).toBe(false);
+      expect(env.AGENTMEMORY_GRAPH_WEIGHT).toBe("0.4");
+    });
+
+    it("forwards a runner default over a value only the .env gave", () => {
+      fakeHome = mkdtempSync(join(process.cwd(), "tmp", "sandbox-env-"));
+      mkdirSync(join(fakeHome, ".agentmemory"));
+      writeFileSync(join(fakeHome, ".agentmemory", ".env"), "AGENTMEMORY_INJECT_CONTEXT=false\n");
+      process.env.HOME = fakeHome;
+      __resetEnvFileCache();
+      for (const k of KEYS) delete process.env[k];
+      hydrateEnvFromFile((current) => current === undefined);
+
+      defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
+      expect(sandboxEnv("/h", "/s.sqlite", "/m", "none", false).AGENTMEMORY_INJECT_CONTEXT).toBe("true");
+
+      process.env.AGENTMEMORY_INJECT_CONTEXT = "false";
+      defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
+      expect(process.env.AGENTMEMORY_INJECT_CONTEXT).toBe("false");
+    });
   });
 });

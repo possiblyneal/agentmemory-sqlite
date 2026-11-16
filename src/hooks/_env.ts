@@ -63,12 +63,18 @@ export function __resetEnvFileCache(): void {
 // a copy from the env file would point agentmemory at a config it never reads.
 const NOT_HYDRATED = new Set(["CLAUDE_CONFIG_DIR"]);
 
+// Keys whose process.env value came from the env file, not from the shell
+// that launched this process. The eval sandbox forwards shell settings only.
+export const hydratedKeys = new Set<string>();
+
 // Copies the env file into process.env for every key the caller's isUnset
 // says has no value yet, so a value already in process.env wins.
 export function hydrateEnvFromFile(isUnset: (current: string | undefined) => boolean): void {
   for (const [key, value] of Object.entries(loadEnvFile())) {
     if (NOT_HYDRATED.has(key)) continue;
-    if (isUnset(process.env[key])) process.env[key] = value;
+    if (!isUnset(process.env[key])) continue;
+    process.env[key] = value;
+    hydratedKeys.add(key);
   }
 }
 
