@@ -8,7 +8,8 @@ import { daemonCall } from "./daemon-http.js";
 // graph the live daemon builds from it, so the checkpoint taken after holds
 // them. The stop fires graph extraction and consolidation fire-and-forget.
 //
-// Graph: the stop's own extraction is awaited through its watermark
+// Graph, only when the shell sets GRAPH_EXTRACTION_ENABLED=true (the sandbox
+// forwards it): the stop's own extraction is awaited through its watermark
 // (`graphExtractedThrough`) rather than repeated by an explicit call, so no
 // Observation is extracted twice and the daemon's batching, retry and skip
 // rules run as live.
@@ -73,8 +74,9 @@ export async function deriveFactsAndGraph(
   baseUrl: string,
   sqlitePath: string,
   sessionId: string,
-): Promise<{ graph: "settled" | "stalled"; consolidated: boolean }> {
-  const graph = await waitUntilSettled(
+  graphEnabled: boolean,
+): Promise<{ graph: "off" | "settled" | "stalled"; consolidated: boolean }> {
+  const graph = !graphEnabled ? "off" : await waitUntilSettled(
     async () => {
       const { body } = await daemonCall<{ observations?: CompressedObservation[] }>(
         baseUrl,

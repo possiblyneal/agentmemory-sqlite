@@ -55,9 +55,12 @@ describe("consolidationFailed", () => {
 });
 
 describe("derived sandbox env", () => {
-  it("turns graph extraction on and keeps the stop's own consolidation from ever being due", () => {
+  it("keeps the stop's own consolidation from ever being due and leaves graph extraction to the shell", () => {
+    const before = process.env.GRAPH_EXTRACTION_ENABLED;
+    delete process.env.GRAPH_EXTRACTION_ENABLED;
     const env = sandboxEnv("/h", "/s.sqlite", "/m", "none", true, false, true);
-    expect(env.GRAPH_EXTRACTION_ENABLED).toBe("true");
+    if (before !== undefined) process.env.GRAPH_EXTRACTION_ENABLED = before;
+    expect("GRAPH_EXTRACTION_ENABLED" in env).toBe(false);
     expect(Number(env.AGENTMEMORY_CONSOLIDATION_COOLDOWN_MS)).toBeGreaterThan(Date.now() * 100);
   });
 

@@ -163,7 +163,6 @@ export function sandboxEnv(
     if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
   }
   if (derived) {
-    env.GRAPH_EXTRACTION_ENABLED = "true";
     env.AGENTMEMORY_CONSOLIDATION_COOLDOWN_MS = NEVER_DUE_COOLDOWN_MS;
   }
   return env;
@@ -175,7 +174,7 @@ export async function startSandbox(opts: {
   llm?: boolean;
   // false keeps Compression synthetic while the LLM provider stays configured.
   compress?: boolean;
-  // The replay's --derived mode: graph extraction on, the stop's own consolidation never due.
+  // The replay's --derived mode: the stop's own consolidation never due.
   derived?: boolean;
   // A store file the daemon starts from instead of an empty one.
   seed?: string;

@@ -771,7 +771,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
         if (counts.summarized > 0) summarizedSessions++;
         drain = ` stops=${counts.summarizeCalls} summarized=${counts.summarized} failed=${counts.failed}`;
         if (opts.derived) {
-          const derived = await deriveFactsAndGraph(sandbox.baseUrl, sandbox.sqlitePath, session.id);
+          const derived = await deriveFactsAndGraph(sandbox.baseUrl, sandbox.sqlitePath, session.id, process.env.GRAPH_EXTRACTION_ENABLED === "true");
           if (derived.graph === "stalled" || !derived.consolidated) derivedIncomplete++;
           drain += ` graph=${derived.graph} consolidated=${derived.consolidated}`;
         }
