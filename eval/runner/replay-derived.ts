@@ -20,7 +20,9 @@ import { daemonCall } from "./daemon-http.js";
 export const NEVER_DUE_COOLDOWN_MS = "9007199254740991";
 
 const CONSOLIDATE_TIMEOUT_MS = 60 * 60_000;
-const GRAPH_STALL_MS = 15 * 60_000;
+// The watermark moves only when a Session's whole extraction lands, so this bounds
+// the extraction itself: one Session's batches ran past 15 minutes on the broker.
+const GRAPH_STALL_MS = 2 * 60 * 60_000;
 const GRAPH_POLL_MS = 500;
 
 type Stamped = Pick<CompressedObservation, "timestamp" | "title"> & Partial<Pick<CompressedObservation, "awaitingCompression">>;
