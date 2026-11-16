@@ -1,3 +1,4 @@
+import { NEVER_DUE_COOLDOWN_MS } from "./replay-derived.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { connect } from "node:net";
@@ -98,6 +99,7 @@ export function sandboxEnv(
   embeddings: EmbeddingMode,
   llm: boolean,
   compress = true,
+  derived = false,
 ) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
@@ -160,6 +162,10 @@ export function sandboxEnv(
     env.OPENAI_EXTRA_BODY = EVAL_LLM_SAMPLING;
     if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
   }
+  if (derived) {
+    env.GRAPH_EXTRACTION_ENABLED = "true";
+    env.AGENTMEMORY_CONSOLIDATION_COOLDOWN_MS = NEVER_DUE_COOLDOWN_MS;
+  }
   return env;
 }
 
@@ -169,6 +175,8 @@ export async function startSandbox(opts: {
   llm?: boolean;
   // false keeps Compression synthetic while the LLM provider stays configured.
   compress?: boolean;
+  // The replay's --derived mode: graph extraction on, the stop's own consolidation never due.
+  derived?: boolean;
   // A store file the daemon starts from instead of an empty one.
   seed?: string;
   // Config rows written into the seeded store before the daemon boots.
@@ -218,6 +226,7 @@ export async function startSandbox(opts: {
         opts.embeddings,
         opts.llm === true,
         opts.compress !== false,
+        opts.derived === true,
       ),
       stdio: ["ignore", log, log],
     },
