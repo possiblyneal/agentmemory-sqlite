@@ -70,13 +70,8 @@ function sessionWatermark(sqlitePath: string, sessionId: string): string | undef
   }
 }
 
-export async function deriveFactsAndGraph(
-  baseUrl: string,
-  sqlitePath: string,
-  sessionId: string,
-  graphEnabled: boolean,
-): Promise<{ graph: "off" | "settled" | "stalled"; consolidated: boolean }> {
-  const graph = !graphEnabled ? "off" : await waitUntilSettled(
+export function waitForGraphExtraction(baseUrl: string, sqlitePath: string, sessionId: string): Promise<"settled" | "stalled"> {
+  return waitUntilSettled(
     async () => {
       const { body } = await daemonCall<{ observations?: CompressedObservation[] }>(
         baseUrl,
@@ -87,6 +82,15 @@ export async function deriveFactsAndGraph(
     },
     { stallMs: GRAPH_STALL_MS, pollMs: GRAPH_POLL_MS },
   );
+}
+
+export async function deriveFactsAndGraph(
+  baseUrl: string,
+  sqlitePath: string,
+  sessionId: string,
+  graphEnabled: boolean,
+): Promise<{ graph: "off" | "settled" | "stalled"; consolidated: boolean }> {
+  const graph = !graphEnabled ? "off" : await waitForGraphExtraction(baseUrl, sqlitePath, sessionId);
   let consolidated = false;
   try {
     const { body } = await daemonCall<{ success?: boolean }>(baseUrl, "consolidate-pipeline", {

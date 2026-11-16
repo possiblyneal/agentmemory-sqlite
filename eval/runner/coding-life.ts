@@ -27,6 +27,7 @@ interface CliOptions {
   "base-url"?: string;
   gate?: string;
   split?: string;
+  llm?: boolean;
 }
 
 function parse(): CliOptions {
@@ -40,6 +41,7 @@ function parse(): CliOptions {
       "base-url": { type: "string" },
       gate: { type: "string" },
       split: { type: "string" },
+      llm: { type: "boolean", default: false },
     },
   });
   return values as unknown as CliOptions;
@@ -59,6 +61,10 @@ async function main(): Promise<void> {
   const instance = Number(opts.instance);
   if (!Number.isInteger(instance) || instance < 1) {
     console.error(`--instance must be a positive integer, got: ${opts.instance}`);
+    process.exit(2);
+  }
+  if (opts.llm && !process.env.OPENAI_API_KEY) {
+    console.error("--llm needs the OpenAI-compatible provider in the shell: OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL");
     process.exit(2);
   }
   const sessions = JSON.parse(
@@ -103,7 +109,7 @@ async function main(): Promise<void> {
   for (const adapterName of adapterNames) {
     const adapter = ADAPTERS[adapterName];
     console.log(`\n== ${adapter.name} ==`);
-    const state = await adapter.init(sessions, { instance, baseUrl });
+    const state = await adapter.init(sessions, { instance, baseUrl, llm: opts.llm });
     try {
       for (const q of questions) {
         if (!adapter.paths.includes(questionPath(q))) continue;

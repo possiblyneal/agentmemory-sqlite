@@ -1,4 +1,6 @@
 import { daemonCall } from "../daemon-http.js";
+import { waitForGraphExtraction, waitUntilSettled } from "../replay-derived.js";
+import { graphCounts, graphWaitWanted, hasSummary, waitForGraphQuiet } from "../graph-wait.js";
 import { startSandbox, type EmbeddingMode, type Sandbox } from "../sandbox.js";
 import { randomUUID } from "node:crypto";
 import type {
@@ -297,6 +299,43 @@ async function queryPromptSubmit(q: Question, state: AgentMemoryState): Promise<
   return { ranked: attribute(context, state.needles), chars: context.length };
 }
 
+// Every Session's stop summarizes it with the LLM; searched before then, an
+// arm would hold fewer Summaries than one that waits on its graph.
+async function settleSummaries(sandbox: Sandbox, sessions: Session[]): Promise<void> {
+  const captured = sessions.filter((s) => s.observations?.length);
+  const settled = await waitUntilSettled(
+    async () => {
+      const done = captured.filter((s) => hasSummary(sandbox.sqlitePath, s.id)).length;
+      return { settled: done === captured.length, progress: String(done) };
+    },
+    { stallMs: 30 * 60_000, pollMs: 1000 },
+  );
+  if (settled === "stalled") throw new Error("a Session's Summary never arrived; see " + sandbox.logPath);
+}
+
+// Extraction runs after a Session's stop (watermarked) or after a /remember
+// (not), and the arms differ only by whether the graph exists when a question
+// is asked, so it is awaited, armed and its size reported.
+async function settleGraph(sandbox: Sandbox, sessions: Session[]): Promise<void> {
+  for (const s of sessions) {
+    if (!s.observations?.length) continue;
+    const settled = await waitForGraphExtraction(sandbox.baseUrl, sandbox.sqlitePath, s.id);
+    if (settled === "stalled") throw new Error(`${s.id}: graph extraction stalled`);
+  }
+  await waitForGraphQuiet(sandbox.sqlitePath);
+  // A daemon arms the graph's read indexes only at a boot that finds a snapshot
+  // under 25,000 nodes, or at a rebuild; one that grew its graph live reads
+  // none of it. The rebuild makes the graph readable, which is what the arm
+  // measures.
+  const rebuilt = await post<{ success?: boolean; error?: string }>(
+    { baseUrl: sandbox.baseUrl, secret: process.env.AGENTMEMORY_SECRET },
+    "graph/snapshot-rebuild",
+    {},
+  );
+  if (!rebuilt.success) throw new Error(`graph snapshot rebuild failed: ${rebuilt.error}`);
+  console.log(`  graph: ${JSON.stringify(graphCounts(sandbox.sqlitePath))}`);
+}
+
 // The daemon to score is the caller's choice: with no `baseUrl` the adapter
 // starts its own sandbox, so a runner that must never touch a live store
 // (the CI gate) simply passes none.
@@ -309,6 +348,8 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
       : await startSandbox({
           instance: config.instance ?? 3,
           embeddings: config.embeddings ?? "local",
+          llm: config.llm === true,
+          compress: false,
         });
     const state: AgentMemoryState = {
       baseUrl: config.baseUrl ?? sandbox!.baseUrl,
@@ -327,6 +368,8 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
         else await ingestRemembered(state, s);
       }
       await assertStoredImportanceVaried(state, sessions);
+      if (sandbox && config.llm) await settleSummaries(sandbox, ordered);
+      if (sandbox && graphWaitWanted(process.env)) await settleGraph(sandbox, ordered);
     } catch (err) {
       await sandbox?.stop();
       throw err;
