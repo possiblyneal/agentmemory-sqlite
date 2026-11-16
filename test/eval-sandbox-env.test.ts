@@ -1,4 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { __resetEnvFileCache, hydratedKeys, hydrateEnvFromFile } from "../src/hooks/_env.js";
 import { sandboxEnv } from "../eval/runner/sandbox.js";
 
 const GRAPH_KEYS = [
@@ -52,5 +56,37 @@ describe("sandboxEnv", () => {
     const all = sandboxEnv("/h", "/s.sqlite", "/m", "none", false);
     expect(all.GRAPH_EXTRACTION_BATCH_SIZE).toBe("8");
     expect(all.AGENTMEMORY_GRAPH_LEG).toBe("on");
+  });
+
+  describe("with a ~/.agentmemory/.env hydrated into process.env", () => {
+    const home = process.env.HOME;
+    let fakeHome = "";
+    afterEach(() => {
+      if (home === undefined) delete process.env.HOME;
+      else process.env.HOME = home;
+      __resetEnvFileCache();
+      hydratedKeys.clear();
+      rmSync(fakeHome, { recursive: true, force: true });
+    });
+
+    it("leaves out a setting only the .env gave and forwards the one the shell set", () => {
+      fakeHome = mkdtempSync(join(tmpdir(), "sandbox-env-"));
+      mkdirSync(join(fakeHome, ".agentmemory"));
+      writeFileSync(
+        join(fakeHome, ".agentmemory", ".env"),
+        "GRAPH_EXTRACTION_ENABLED=true\nAGENTMEMORY_GRAPH_WEIGHT=0.9\nAGENTMEMORY_LOCAL_EMBEDDING_MODEL=live/model\n",
+      );
+      process.env.HOME = fakeHome;
+      __resetEnvFileCache();
+      for (const k of KEYS) delete process.env[k];
+      process.env.AGENTMEMORY_GRAPH_WEIGHT = "0.4";
+      hydrateEnvFromFile((current) => current === undefined);
+      expect(process.env.GRAPH_EXTRACTION_ENABLED).toBe("true");
+
+      const env = sandboxEnv("/h", "/s.sqlite", "/m", "local", false);
+      expect("GRAPH_EXTRACTION_ENABLED" in env).toBe(false);
+      expect("AGENTMEMORY_LOCAL_EMBEDDING_MODEL" in env).toBe(false);
+      expect(env.AGENTMEMORY_GRAPH_WEIGHT).toBe("0.4");
+    });
   });
 });

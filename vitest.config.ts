@@ -16,7 +16,7 @@ const testHome = mkdtempSync(join(tmpdir(), "agentmemory-test-home-"));
 // when it mocks a module, or when it asserts on state a module captures at
 // import (config.ts's DATA_DIR from $HOME, _env.ts's env-file cache, ...).
 const FRESH_MODULES = new Set([
-  "cli-connect", "consolidation-default", "fetch-lazy-undici", "hook-env", "hook-project",
+  "cli-connect", "consolidation-default", "eval-sandbox-env", "fetch-lazy-undici", "hook-env", "hook-project",
   "live-stream", "local-embedding-provider", "mcp-lesson-queue", "mcp-standalone-proxy",
   "openai-reply", "preferences", "slots-flag-gate", "viewer-proxy-prefix", "viewer-security",
 ].map((name) => `test/${name}.test.ts`));
