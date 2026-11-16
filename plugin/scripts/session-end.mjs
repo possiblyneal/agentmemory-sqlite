@@ -47,10 +47,13 @@ function loadEnvFile() {
 	return vars;
 }
 const NOT_HYDRATED = new Set(["CLAUDE_CONFIG_DIR"]);
+const hydratedKeys = /* @__PURE__ */ new Set();
 function hydrateEnvFromFile(isUnset) {
 	for (const [key, value] of Object.entries(loadEnvFile())) {
 		if (NOT_HYDRATED.has(key)) continue;
-		if (isUnset(process.env[key])) process.env[key] = value;
+		if (!isUnset(process.env[key])) continue;
+		process.env[key] = value;
+		hydratedKeys.add(key);
 	}
 }
 function hydrateHookEnv() {
