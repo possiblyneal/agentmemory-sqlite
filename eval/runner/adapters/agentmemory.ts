@@ -1,7 +1,7 @@
 import { daemonCall } from "../daemon-http.js";
 import { waitForGraphExtraction, waitUntilSettled } from "../replay-derived.js";
 import { graphCounts, graphWaitWanted, hasSummary, waitForGraphQuiet } from "../graph-wait.js";
-import { startSandbox, type EmbeddingMode, type Sandbox } from "../sandbox.js";
+import { shellEnv, startSandbox, type EmbeddingMode, type Sandbox } from "../sandbox.js";
 import { randomUUID } from "node:crypto";
 import type {
   Adapter,
@@ -369,7 +369,7 @@ export const agentmemoryAdapter: Adapter<AgentMemoryState, AgentMemoryConfig> = 
       }
       await assertStoredImportanceVaried(state, sessions);
       if (sandbox && config.llm) await settleSummaries(sandbox, ordered);
-      if (sandbox && graphWaitWanted(process.env)) await settleGraph(sandbox, ordered);
+      if (sandbox && graphWaitWanted(shellEnv())) await settleGraph(sandbox, ordered);
     } catch (err) {
       await sandbox?.stop();
       throw err;

@@ -9,6 +9,8 @@ import {
   isGraphExtractionEnabled,
 } from "../config.js";
 import { noteGraphWrite } from "./kv.js";
+import { withKeyedLock } from "./keyed-mutex.js";
+import { GRAPH_WRITE_LOCK } from "../functions/graph.js";
 import { decayedStrength } from "../functions/consolidation-pipeline.js";
 import { logger } from "../logger.js";
 import {
@@ -155,18 +157,19 @@ async function deleteRowsWhere(
   where: string,
   params: string[],
 ): Promise<number> {
-  const pick = state.db.prepare(`SELECT seq FROM kv WHERE ${where} LIMIT ?`);
+  const pick = state.db.prepare(`SELECT seq, scope FROM kv WHERE ${where} LIMIT ?`);
   let deleted = 0;
 
   await inChunks(
     // The rows this read are gone by the next call, so the cursor is moot.
-    (_afterSeq) => pick.all(...params, CHUNK_ROWS) as Array<{ seq: number }>,
+    (_afterSeq) => pick.all(...params, CHUNK_ROWS) as Array<{ seq: number; scope: string }>,
     (rows) => {
       const seqs = rows.map((row) => row.seq);
       const result = state.db
         .prepare(`DELETE FROM kv WHERE seq IN (${seqs.map(() => "?").join(",")})`)
         .run(...seqs);
       deleted += Number(result.changes ?? 0);
+      for (const row of rows) state.noteWrite(row.scope);
     },
   );
 
@@ -188,11 +191,14 @@ async function deleteGraphRows(state: SqliteState): Promise<number> {
   if (isGraphExtractionEnabled()) return 0;
   if (state.get(KV.config, GRAPH_DELETE_MARKER) !== null) return 0;
 
-  // A range, not LIKE, so the lookup uses the (scope, seq) index.
-  const deleted = await deleteRowsWhere(state, "scope >= ? AND scope < ?", [
-    GRAPH_SCOPE_PREFIX,
-    GRAPH_SCOPE_PREFIX.slice(0, -1) + ";",
-  ]);
+  // A range, not LIKE, so the lookup uses the (scope, seq) index. Held under
+  // the graph write lock so no writer interleaves with the chunks.
+  const deleted = await withKeyedLock(GRAPH_WRITE_LOCK, () =>
+    deleteRowsWhere(state, "scope >= ? AND scope < ?", [
+      GRAPH_SCOPE_PREFIX,
+      GRAPH_SCOPE_PREFIX.slice(0, -1) + ";",
+    ]),
+  );
   const at = new Date().toISOString();
   state.transaction(() => {
     if (deleted > 0) {

@@ -1,6 +1,6 @@
 # 2026-11-16 — graph extraction on vs off (#420)
 
-**Commit:** `ef548d85` plus the uncommitted `eval --llm` and graph-wait change that this scorecard's commit carries
+**Commit:** `7ee235de` (`ef548d85` plus the `eval:coding-life --llm` graph wait the runs used)
 **Bench:** coding-agent-life-v2 (search, session-start, prompt-submit) and LongMemEval `_s` dev sample (`--stratify 10`, 60 questions)
 **N:** coding-life search 10 answerable (2 no-answer), session-start 1, prompt-submit 6; LongMemEval search 60
 **K:** 5 (search only; an Injection is scored whole)
@@ -88,7 +88,7 @@ the two orders is better by `topGoldRank` is not resolved at n = 10.
 ## Reproduce
 
 ```sh
-git checkout <sha>
+git checkout 7ee235de
 npm ci && npm run build
 export OPENAI_API_KEY=... OPENAI_BASE_URL=... OPENAI_MODEL=general-eval-b AGENTMEMORY_LLM_MAX_CONCURRENCY=2
 GRAPH_EXTRACTION_ENABLED=true  npx tsx eval/runner/coding-life.ts --llm --adapters agentmemory --instance 44 --out tmp/graph-420/on

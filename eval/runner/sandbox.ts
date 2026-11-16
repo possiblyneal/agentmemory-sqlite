@@ -1,4 +1,3 @@
-import { NEVER_DUE_COOLDOWN_MS } from "./replay-derived.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { connect } from "node:net";
@@ -7,6 +6,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hydratedKeys } from "../../src/hooks/_env.js";
 import { KV } from "../../src/state/schema.js";
+
+// Above any epoch millisecond count, so the stop never finds a consolidation due.
+const NEVER_DUE_COOLDOWN_MS = "9007199254740991";
 
 export type EmbeddingMode = "local" | "none";
 
@@ -94,8 +96,16 @@ const LLM_ENV = [
 // What the launching shell set. A key that hydrateEnvFromFile copied in from
 // the Operator's ~/.agentmemory/.env is not the shell's, and forwarding it
 // would make a run depend on the live config.
-function shellEnv(): Record<string, string | undefined> {
+export function shellEnv(): Record<string, string | undefined> {
   return Object.fromEntries(Object.entries(process.env).filter(([key]) => !hydratedKeys.has(key)));
+}
+
+// A runner's default for a setting the shell left unset. A copy hydrated from
+// the .env does not count as set: the runner's value replaces it and is forwarded.
+export function defaultUnlessShellSet(key: string, value: string): void {
+  if (shellEnv()[key] !== undefined) return;
+  process.env[key] = value;
+  hydratedKeys.delete(key);
 }
 
 // The model cache sits beside the instance dirs, not in the per-run HOME

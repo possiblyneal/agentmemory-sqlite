@@ -225,7 +225,10 @@ call it.
 Graph extraction is off by default and bought no Recall (#420). With it off, startup
 maintenance deletes every `mem:graph:*` row once (`deleteGraphRows`,
 `src/state/startup-maintenance.ts`, marker `graph-rows-deleted:done` in `KV.config`, audited
-`delete` with `resource: "graph"`); with it on, the graph is kept.
+`delete` with `resource: "graph"`, under `GRAPH_WRITE_LOCK`); with it on, the graph is kept.
+The boot graph-index backfill runs only with extraction on, so it never arms rows being deleted.
+The delete leaves each Session's `graphExtractedThrough`: turning extraction back on builds the
+graph from new Observations only, and the history stays unextracted.
 
 ### Reflect
 `mem::reflect` (`src/functions/reflect.ts`) records a hash of each cluster's inputs in

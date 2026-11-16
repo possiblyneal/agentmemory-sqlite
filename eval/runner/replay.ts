@@ -37,7 +37,7 @@ import { keyedSessionIds, readDecisionKey, unreachableOrigins, unreachableWarnin
 import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
 import { hookPayloads, hookSteps, runHookSteps, summarizeCounts, summarizeOutcome } from "./replay-hooks.js";
 import { deriveFactsAndGraph } from "./replay-derived.js";
-import { startSandbox, type EmbeddingMode } from "./sandbox.js";
+import { defaultUnlessShellSet, shellEnv, startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
 import { composeQuery, isQueryArm, QUERY_ARMS, type QueryArmOptions } from "./replay-query-arm.js";
@@ -662,7 +662,7 @@ async function recordExternal(baseUrl: string, opts: Options, session: ReplaySes
 }
 
 async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string, decisions?: DecisionScoring): Promise<void> {
-  process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
+  defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
   const dir = opts.fromCheckpoints!;
   const checkpoints = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as Checkpoint[];
   // The save pass drew its own split; probing outside this pass's split would
@@ -748,8 +748,8 @@ async function injectionGate(baseUrl: string): Promise<Pick<SessionScore, "injec
 async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> {
   // The Operator's live daemon injects; without this the sandbox's session
   // start writes no Injection record and delivers nothing to score.
-  process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
-  if (opts.llm) process.env.AGENTMEMORY_AUTO_COMPRESS ??= "true";
+  defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
+  if (opts.llm) defaultUnlessShellSet("AGENTMEMORY_AUTO_COMPRESS", "true");
   if (opts.llmSummary) process.env.AGENTMEMORY_AUTO_COMPRESS = "false";
   const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm, compress: !opts.llmSummary, derived: opts.derived, seed });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
@@ -771,7 +771,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
         if (counts.summarized > 0) summarizedSessions++;
         drain = ` stops=${counts.summarizeCalls} summarized=${counts.summarized} failed=${counts.failed}`;
         if (opts.derived) {
-          const derived = await deriveFactsAndGraph(sandbox.baseUrl, sandbox.sqlitePath, session.id, process.env.GRAPH_EXTRACTION_ENABLED === "true");
+          const derived = await deriveFactsAndGraph(sandbox.baseUrl, sandbox.sqlitePath, session.id, shellEnv().GRAPH_EXTRACTION_ENABLED === "true");
           if (derived.graph === "stalled" || !derived.consolidated) derivedIncomplete++;
           drain += ` graph=${derived.graph} consolidated=${derived.consolidated}`;
         }

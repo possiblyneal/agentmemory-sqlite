@@ -1,9 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { __resetEnvFileCache, hydratedKeys, hydrateEnvFromFile } from "../src/hooks/_env.js";
-import { sandboxEnv } from "../eval/runner/sandbox.js";
+import { defaultUnlessShellSet, sandboxEnv } from "../eval/runner/sandbox.js";
 
 const GRAPH_KEYS = [
   "GRAPH_EXTRACTION_ENABLED",
@@ -11,7 +10,7 @@ const GRAPH_KEYS = [
   "AGENTMEMORY_GRAPH_WEIGHT",
   "AGENTMEMORY_GRAPH_LEG",
 ];
-const KEYS = ["AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", ...GRAPH_KEYS];
+const KEYS = ["AGENTMEMORY_INJECT_CONTEXT", "AGENTMEMORY_LOCAL_EMBEDDING_MODEL", "AGENTMEMORY_LOCAL_EMBEDDING_DIMENSIONS", ...GRAPH_KEYS];
 
 describe("sandboxEnv", () => {
   const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
@@ -70,7 +69,7 @@ describe("sandboxEnv", () => {
     });
 
     it("leaves out a setting only the .env gave and forwards the one the shell set", () => {
-      fakeHome = mkdtempSync(join(tmpdir(), "sandbox-env-"));
+      fakeHome = mkdtempSync(join(process.cwd(), "tmp", "sandbox-env-"));
       mkdirSync(join(fakeHome, ".agentmemory"));
       writeFileSync(
         join(fakeHome, ".agentmemory", ".env"),
@@ -87,6 +86,23 @@ describe("sandboxEnv", () => {
       expect("GRAPH_EXTRACTION_ENABLED" in env).toBe(false);
       expect("AGENTMEMORY_LOCAL_EMBEDDING_MODEL" in env).toBe(false);
       expect(env.AGENTMEMORY_GRAPH_WEIGHT).toBe("0.4");
+    });
+
+    it("forwards a runner default over a value only the .env gave", () => {
+      fakeHome = mkdtempSync(join(process.cwd(), "tmp", "sandbox-env-"));
+      mkdirSync(join(fakeHome, ".agentmemory"));
+      writeFileSync(join(fakeHome, ".agentmemory", ".env"), "AGENTMEMORY_INJECT_CONTEXT=false\n");
+      process.env.HOME = fakeHome;
+      __resetEnvFileCache();
+      for (const k of KEYS) delete process.env[k];
+      hydrateEnvFromFile((current) => current === undefined);
+
+      defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
+      expect(sandboxEnv("/h", "/s.sqlite", "/m", "none", false).AGENTMEMORY_INJECT_CONTEXT).toBe("true");
+
+      process.env.AGENTMEMORY_INJECT_CONTEXT = "false";
+      defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
+      expect(process.env.AGENTMEMORY_INJECT_CONTEXT).toBe("false");
     });
   });
 });

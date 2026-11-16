@@ -13,12 +13,9 @@ import { daemonCall } from "./daemon-http.js";
 // (`graphExtractedThrough`) rather than repeated by an explicit call, so no
 // Observation is extracted twice and the daemon's batching, retry and skip
 // rules run as live.
-// Consolidation: the stop's own is made never due (a cooldown no clock
-// reaches) and the runner drives exactly one pass per Session, which it can
-// await.
-
-// Above any epoch millisecond count, so the stop never finds a pass due.
-export const NEVER_DUE_COOLDOWN_MS = "9007199254740991";
+// Consolidation: the stop's own is made never due (sandbox.ts sets a cooldown
+// no clock reaches) and the runner drives exactly one pass per Session, which
+// it can await.
 
 const CONSOLIDATE_TIMEOUT_MS = 60 * 60_000;
 // The watermark moves only when a Session's whole extraction lands, so this bounds
