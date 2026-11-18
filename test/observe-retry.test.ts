@@ -41,7 +41,7 @@ function observeRequest(n: number, data: Record<string, unknown> = { n }) {
   };
 }
 
-describe("api::observe on a full disk", () => {
+describe("api::observe when a row write fails", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let diskFull: boolean;
   let stored: number[];

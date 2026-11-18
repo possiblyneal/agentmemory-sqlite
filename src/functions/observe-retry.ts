@@ -47,9 +47,10 @@ export class ObserveRetryQueue {
 
   constructor(private readonly observe: (payload: HookPayload) => Promise<unknown>) {}
 
-  // Once anything is queued, later Observations queue behind it so the Session
-  // stores them in arrival order; each one also prompts a drain. Past the cap
-  // an Observation is dropped rather than written ahead of the queue.
+  // Once anything is queued, Observations arriving later queue behind it so the
+  // Session stores them in arrival order; each one also prompts a drain. One
+  // already writing when the first write fails may still store ahead of it.
+  // Past the cap an Observation is dropped rather than written ahead of the queue.
   async submit(payload: HookPayload): Promise<{ queued: true } | { queued: false; result: unknown }> {
     if (this.pending.length > 0) {
       if (!this.enqueue(payload)) {

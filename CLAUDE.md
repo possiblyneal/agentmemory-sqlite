@@ -185,8 +185,9 @@ hits a full disk or `database is locked` (another connection holds the write loc
 sets no busy timeout, since a synchronous wait would stall the whole daemon), or its image file
 hits a full disk, `api::observe` answers 202 `{queued: true}` and holds it
 in `ObserveRetryQueue` (`src/functions/observe-retry.ts`): in memory, capped at 64 MiB, and
-replayed every 30 s until a write succeeds. While anything is queued, new Observations queue
-behind it so each Session stores them in arrival order; past the cap one is dropped (500), never
+replayed every 30 s until a write succeeds. While anything is queued, Observations arriving later
+queue behind it so each Session stores them in arrival order (one already writing when the first
+write fails may still store ahead of it); past the cap one is dropped (500), never
 written ahead of the queue. A failure after the row is stored is never queued, since replaying
 it would duplicate the row. Session-cap eviction runs only after the row is stored, and its
 errors are logged, not returned. A daemon restart before a write succeeds loses the queue.

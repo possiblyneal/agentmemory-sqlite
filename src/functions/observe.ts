@@ -563,8 +563,8 @@ export function registerObserveFunction(
           throw error;
         }
 
-        // Evicting only after the row is stored means a write that fails on a
-        // full disk, and each retry of it, costs the Session nothing.
+        // Evicting only after the row is stored means a write that fails and
+        // is retried, and each retry of it, costs the Session nothing.
         // The row is stored, so an eviction error must not fail the observe:
         // the hook would see a 500 and the Session's count would miss this row.
         const capEvicted =
