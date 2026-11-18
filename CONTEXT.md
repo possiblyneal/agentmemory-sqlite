@@ -147,7 +147,9 @@ _Avoid_: hook failure, dropped context
 
 **Empty Injection**:
 An Injection the daemon answered with nothing to inject. The daemon was reachable; Recall
-found nothing that bore on the work.
+found nothing that bore on the work. A turn under the word floor (a bare slash command, a
+Terse prompt with no reply to search on) is not one: Recall never searched it, so it is counted
+apart as `/health` `recall.belowFloorTurns`.
 _Avoid_: miss, no-op
 
 **Injection Gate**:
@@ -169,7 +171,7 @@ _Avoid_: short prompt, acknowledgement
 The daemon's note of one answered Injection: the path that served it (session start, context,
 or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,
 Insights and Session Summaries it carried. An Empty Injection
-leaves a record with no identifiers; a Missed Injection leaves none, because the daemon never
+leaves a record with no identifiers; a below-floor turn and a Harness Message turn leave none; a Missed Injection leaves none, because the daemon never
 answered. Session start leaves none while context injection is off, because the hook discards
 that reply. Kept for seven days.
 _Avoid_: injection log, context log

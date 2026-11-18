@@ -28,6 +28,7 @@ import { recordProjectActivity } from "../state/project-time.js";
 import { recordInjection } from "../functions/injections.js";
 import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
+import { isBelowWordFloor } from "../functions/prompt-context.js";
 import { isUnstoredOnFullDisk, ObserveRetryQueue } from "../functions/observe-retry.js";
 import { ShedQueue } from "../functions/shed-queue.js";
 import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
@@ -195,6 +196,7 @@ function recallCounts() {
   return {
     injections: totals.injections,
     emptyInjections: totals.emptyInjections,
+    belowFloorTurns: totals.belowFloorTurns,
     smartSearches: followups.agentInitiatedSearches,
     smartSearchFollowups: followups.followupWithinWindow,
     nonlatestLeaked: totals.nonlatestLeaked,
@@ -1178,6 +1180,12 @@ export function registerApiTriggers(
       // and gives Recall nothing to search on: it is not an Injection.
       if (isHarnessMessage(prompt.trim())) return { status_code: 200, body: { context: "" } };
       const reply = req.body.reply?.slice(-MAX_REPLY_QUERY_CHARS);
+      // Under the word floor Recall has nothing to search: counted apart so
+      // emptyInjections / injections measures only turns Recall searched.
+      if (isBelowWordFloor(prompt, reply)) {
+        getCounters().belowFloorTurns.add(1);
+        return { status_code: 200, body: { context: "" } };
+      }
       const turn = await promptQueue.run(() =>
         sdk.trigger<unknown, InjectionResult>({
           function_id: "mem::prompt-context",
