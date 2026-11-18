@@ -91,10 +91,12 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.AGENTMEMORY_GRAPH_LEG;
+  delete process.env.GRAPH_EXTRACTION_ENABLED;
 });
 
 describe("/health recall counts", () => {
   it("starts at zero", async () => {
+    process.env.GRAPH_EXTRACTION_ENABLED = "true";
     expect(await recall()).toEqual({
       injections: 0,
       emptyInjections: 0,
@@ -190,6 +192,7 @@ describe("/health recall counts", () => {
   });
 
   it("counts smart-searches, zero-overlap follow-ups and graph-leg omissions", async () => {
+    process.env.GRAPH_EXTRACTION_ENABLED = "true";
     searchHits = [hit("obs_a")];
     await sdk.trigger({ function_id: "mem::smart-search", payload: { query: "auth flow", sessionId: "s1" } });
     await flushPendingFollowups();
@@ -212,7 +215,19 @@ describe("/health recall counts", () => {
   });
 
   it("does not expect the graph leg when it is switched off", async () => {
+    process.env.GRAPH_EXTRACTION_ENABLED = "true";
     process.env.AGENTMEMORY_GRAPH_LEG = "off";
     expect((await recall()).graphLegExpected).toBe(false);
+  });
+
+  it("does not expect the graph leg, nor count its omission, with extraction off", async () => {
+    searchHits = [hit("obs_a")];
+    await sdk.trigger({ function_id: "mem::smart-search", payload: { query: "auth flow", sessionId: "s1" } });
+    await flushPendingFollowups();
+
+    const r = await recall();
+    expect(r.smartSearches).toBe(1);
+    expect(r.graphLegExpected).toBe(false);
+    expect(r.graphLegOmitted).toBe(0);
   });
 });
