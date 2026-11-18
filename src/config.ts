@@ -609,7 +609,7 @@ const PROMPT_RERANK_DEFAULT_MIN_SCORE = 0.03;
 // About half the Lessons scoring 0.5 or more bore on the prompt, a third at
 // 0.03 (#317, docs/benchmarks/2026-11-11-prompt-submit-lessons.md).
 const PROMPT_LESSON_DEFAULT_MIN_SCORE = 0.5;
-// The hook aborts Injection at 1500 ms and mem::search shares that budget,
+// The prompt-submit hook aborts Injection at 2500 ms and mem::search shares that budget,
 // so the gate may only shorten its wait, never lengthen it.
 const PROMPT_RERANK_MAX_TIMEOUT_MS = 1000;
 

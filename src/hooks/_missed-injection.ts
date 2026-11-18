@@ -18,6 +18,10 @@ export interface MissedInjection {
 // records a Missed Injection and lets the prompt through.
 export const INJECT_TIMEOUT_MS = 1500;
 
+// prompt-submit waits longer: of a week's 143 prompt-submit timeouts at
+// 1500 ms, 85 finished within the next second (#397).
+export const PROMPT_INJECT_TIMEOUT_MS = 2500;
+
 const MAX_BYTES = 256 * 1024;
 const KEEP_ENTRIES = 1000;
 

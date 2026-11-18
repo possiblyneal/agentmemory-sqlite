@@ -2,7 +2,7 @@
 import { hydrateHookEnv } from "./_env.js";
 import { shouldSkipSession } from "./sdk-guard.js";
 import { resolveProject, hookCwd } from "./_project.js";
-import { INJECT_TIMEOUT_MS, recordMissedInjection, missReason } from "./_missed-injection.js";
+import { PROMPT_INJECT_TIMEOUT_MS, recordMissedInjection, missReason } from "./_missed-injection.js";
 import { lastAgentReply, withinDeadline } from "./_last-reply.js";
 import { isTersePrompt } from "../utils/terse-prompt.js";
 
@@ -80,7 +80,7 @@ async function injectContext(sessionId: string, project: string, prompt: string,
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ sessionId, project, prompt, ...(reply && { reply }) }),
-      signal: AbortSignal.timeout(INJECT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(PROMPT_INJECT_TIMEOUT_MS),
     });
     if (!res.ok) {
       recordMissedInjection("prompt-submit", `http_${res.status}`);
