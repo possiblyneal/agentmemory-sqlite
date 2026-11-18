@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +8,7 @@ import { SqliteVectorStore } from "../src/engine/inproc/vectors.js";
 import { VectorIndex } from "../src/state/vector-index.js";
 import { KV } from "../src/state/schema.js";
 import { embedInputHash, memoryEmbedJobs } from "../src/state/index-corpus.js";
+import { snapshotDatabase } from "../src/functions/maintenance.js";
 import { claimedNow, createIndexFill, dropMismatchedVectors } from "../src/functions/index-fill.js";
 import {
   indexRecords,
@@ -364,5 +365,21 @@ describe("mem::index-fill-missing", () => {
     state.set(KV.memories, short.id, short);
     await indexRecords([], [short]);
     expect(rows().map((x) => x.id)).toEqual(["mem_flip"]);
+  });
+
+  it("a backup snapshot taken while the fill yields to the event loop does not hit an open cursor", async () => {
+    // The fill awaits every 2000 corpus rows; the daily backup shares this
+    // connection, and VACUUM refuses to run while any statement is active.
+    state.transaction(() => {
+      for (let i = 0; i < 2001; i++) state.set(KV.memories, `mem_${i}`, memory(`mem_${i}`, `memory number ${i}`));
+    });
+    const fill = createIndexFill(state, vectors, vi);
+    const running = fill.run();
+    // run() is paused at its first setImmediate here, with the walk half done.
+    const snap = snapshotDatabase(state.db, dir);
+    expect(existsSync(snap.path)).toBe(true);
+    expect(snap.integrity).toBe("ok");
+    const r = await running;
+    expect(r).toMatchObject({ expected: 2001, missing: 2001, embedded: 2001, aborted: false });
   });
 });
