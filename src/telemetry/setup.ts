@@ -75,6 +75,9 @@ interface Counters {
   // is the subset that returned no context (CONTEXT.md, Empty Injection).
   injections: Counter;
   emptyInjections: Counter;
+  // The subset of emptyInjections where the Injection Gate judged every
+  // candidate irrelevant: Recall worked and found nothing that bore on the turn.
+  gateRejectedInjections: Counter;
   // A prompt-submit turn under the word floor: Recall never searched it, so
   // it is neither an Injection nor an Empty Injection.
   belowFloorTurns: Counter;
@@ -128,6 +131,7 @@ const COUNTER_NAMES: Array<[keyof Counters, string]> = [
   ["nonlatestLeaked", "nonlatest_leaked_total"],
   ["injections", "injections_total"],
   ["emptyInjections", "empty_injections_total"],
+  ["gateRejectedInjections", "gate_rejected_injections_total"],
   ["belowFloorTurns", "below_floor_turns_total"],
 ];
 

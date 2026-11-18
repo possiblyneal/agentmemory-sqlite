@@ -98,6 +98,7 @@ describe("/health recall counts", () => {
     expect(await recall()).toEqual({
       injections: 0,
       emptyInjections: 0,
+      gateRejectedInjections: 0,
       belowFloorTurns: 0,
       smartSearches: 0,
       smartSearchFollowups: 0,
@@ -126,6 +127,17 @@ describe("/health recall counts", () => {
     const r = await recall();
     expect(r.injections).toBe(3);
     expect(r.emptyInjections).toBe(2);
+  });
+
+  it("counts a gate-rejected Injection as an Empty Injection and apart, without sending the flag to the hook", async () => {
+    sdk._fns.set("mem::prompt-context", () => ({ context: "", tokens: 0, injected: [], gateRejected: true }));
+    const res = await sdk._fns.get("api::prompt-context")!({
+      headers: auth,
+      body: { sessionId: "s1", prompt: "fix the auth flow", project: "p" },
+    });
+
+    expect(res.body).toEqual({ context: "", tokens: 0 });
+    expect(await recall()).toMatchObject({ injections: 1, emptyInjections: 1, gateRejectedInjections: 1 });
   });
 
   it("answers a harness turn with nothing and neither counts nor records it as an Injection", async () => {

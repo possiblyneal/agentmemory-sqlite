@@ -48,6 +48,7 @@ export interface PromptContextResult {
   context: string;
   tokens: number;
   injected: InjectedRef[];
+  gateRejected?: true;
 }
 
 const EMPTY: PromptContextResult = { context: "", tokens: 0, injected: [] };
@@ -311,7 +312,9 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
       );
       const gated = await withShadowingMemories(kv, passed, leftOut, seen);
       const chosen = distinctUnits(await withCoveringSummaries(kv, gated)).slice(0, MAX_RESULTS);
-      if (chosen.length === 0) return EMPTY;
+      if (chosen.length === 0) {
+        return gate && pool.length > 0 && passed.length === 0 ? { ...EMPTY, gateRejected: true } : EMPTY;
+      }
 
       const withAmendments = await withLaterAmendments(
         sdk,

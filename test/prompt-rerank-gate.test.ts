@@ -120,6 +120,21 @@ describe("mem::prompt-context reranker gate", () => {
     hits = bm25Hits();
     reply = scoring({ obs_a: 0.001, obs_b: 0.002, obs_c: 0.0 });
     const result = await run();
+    expect(result).toEqual({ context: "", tokens: 0, injected: [], gateRejected: true });
+  });
+
+  it("does not mark an empty answer gate-rejected when the gate had nothing to score", async () => {
+    await kv.set<InjectionRecord>(KV.injections, "inj_1", {
+      id: "inj_1",
+      source: "prompt-submit",
+      sessionId: "ses_1",
+      injected: [{ kind: "observation", id: "obs_a" }],
+      tokens: 10,
+      at: "2026-10-03T00:00:00.000Z",
+    });
+    hits = [{ id: "obs_a", score: 16 }];
+    const result = await run();
+    expect(requests).toEqual([]);
     expect(result).toEqual({ context: "", tokens: 0, injected: [] });
   });
 
