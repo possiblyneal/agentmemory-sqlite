@@ -6,12 +6,12 @@ import { fsyncPath, writeJsonAtomic } from "./durable.js";
 import { daemonCall } from "./daemon-http.js";
 import { latency, prng, summarizeRuns, type Call, type RunResult } from "./burst-core.js";
 import { startSandbox } from "./sandbox.js";
-import { INJECT_TIMEOUT_MS, PROMPT_INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
+import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
 
 // N Sessions opening together over a seeded store, as a Session burst reaches
 // the daemon: each posts session/start, types a first prompt a second or three
 // later, then works at a tool call every --think ms. Latencies are the hooks':
-// a call still unanswered at its hook's deadline counts as late and is dropped
+// a call still unanswered at INJECT_TIMEOUT_MS counts as late and is dropped
 // by the client, and the daemon is left to finish it, as for a real hook.
 const PROJECT = "burst-bench";
 const CWD = "/work/burst-bench";
@@ -116,14 +116,10 @@ async function buildSeed(chunks: string[]): Promise<void> {
   }
 }
 
-function deadlineFor(path: string): number {
-  return path.endsWith("/prompt-context") ? PROMPT_INJECT_TIMEOUT_MS : INJECT_TIMEOUT_MS;
-}
-
 async function timed(baseUrl: string, path: string, body: unknown): Promise<Call> {
   const t0 = performance.now();
   try {
-    await daemonCall(baseUrl, path, { body, timeoutMs: deadlineFor(path) });
+    await daemonCall(baseUrl, path, { body, timeoutMs: INJECT_TIMEOUT_MS });
     return { ms: performance.now() - t0, timedOut: false };
   } catch {
     return { ms: performance.now() - t0, timedOut: true };
@@ -187,9 +183,9 @@ async function oneRun(chunks: string[], run: number): Promise<RunResult> {
       run,
       loadBefore,
       sessions: N,
-      firstPrompt: latency(first, PROMPT_INJECT_TIMEOUT_MS),
+      firstPrompt: latency(first, INJECT_TIMEOUT_MS),
       sessionStart: latency(starts, INJECT_TIMEOUT_MS),
-      laterPrompt: latency(later, PROMPT_INJECT_TIMEOUT_MS),
+      laterPrompt: latency(later, INJECT_TIMEOUT_MS),
       livez: {
         n: sorted.length,
         p95: Math.round(sorted[Math.floor(sorted.length * 0.95)] ?? 0),

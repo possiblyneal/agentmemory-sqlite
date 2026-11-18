@@ -81,7 +81,7 @@ Runs the adapters named in `baselines/coding-agent-life-v2.json` (today `agentme
 FAIL agentmemory-bm25/search          recall        baseline 0.969  got 0.156  -0.813
 ```
 
-The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start` (and `pre-compact` in `baselines/pinned-rules.json`), none for `search`. 500 ms is session start's `INJECT_TIMEOUT_MS` (1500 ms) minus the Injection Gate's 1000 ms reranker cap, so a slower p95 would risk Missed Injections once the reranker is on; prompt-submit keeps the same ceiling though its hook waits 2500 ms (`PROMPT_INJECT_TIMEOUT_MS`). Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
+The baseline also carries `latencyCeilingMs`, a per-adapter, per-path maximum for the p95 Injection latency: 500 ms for `prompt-submit` and `session-start` (and `pre-compact` in `baselines/pinned-rules.json`), none for `search`. 500 ms was set as the hooks' then 1500 ms `INJECT_TIMEOUT_MS` minus the Injection Gate's 1000 ms reranker cap; the hooks now wait 2500 ms, so it leaves 1000 ms of margin. Tolerance does not apply. The gate prints each gated path's p95, ceiling and margin, and fails when the p95 is over the ceiling or the path is missing from the run; p95 is nearest-rank, so on the 15 and 3 questions of those paths it is the slowest question.
 
 ```text
 FAIL agentmemory-bm25/prompt-submit   p95 620ms  ceiling 500ms  margin -120ms
@@ -192,7 +192,7 @@ It runs BM25-only by default (`--embeddings local` adds vectors), is not part of
 npm run build && npm run eval:burst -- --label main --runs 5
 ```
 
-`runner/burst.ts` measures what a burst of Sessions opening together does to the Injections the hooks wait for. It seeds a throwaway daemon with `--observations` (default 20,000) post-tool-use Observations of this repository's own text across 12 Sessions of one project, saves the store as `tmp/eval-burst/seed-<N>.sqlite` (built once, reused), then per run restarts a daemon from a copy and starts `--sessions` (default 32) virtual Sessions inside `--spread` ms (2,000): each posts `session/start`, types its first prompt 1 to 3 s later, then does a tool call every `--think` ms (3,000, jittered) and a prompt every 8th call for `--duration` ms (30,000). `/livez` is polled every 50 ms beside it. Calls carry their hook's deadline (2,500 ms for a prompt, 1,500 ms for `session/start`): one unanswered by then counts as late and is abandoned by the client, as a hook abandons it. Per run it reports first-prompt Injections in time, their p50/p95/max (a late call reads as the deadline), session-start in time, later-prompt p95, `/livez` max, and the host's 1-minute load average before the run; each run is saved as `tmp/eval-burst/<label>/run-<n>.json` and a rerun skips finished ones.
+`runner/burst.ts` measures what a burst of Sessions opening together does to the Injections the hooks wait for. It seeds a throwaway daemon with `--observations` (default 20,000) post-tool-use Observations of this repository's own text across 12 Sessions of one project, saves the store as `tmp/eval-burst/seed-<N>.sqlite` (built once, reused), then per run restarts a daemon from a copy and starts `--sessions` (default 32) virtual Sessions inside `--spread` ms (2,000): each posts `session/start`, types its first prompt 1 to 3 s later, then does a tool call every `--think` ms (3,000, jittered) and a prompt every 8th call for `--duration` ms (30,000). `/livez` is polled every 50 ms beside it. Calls carry the hooks' 2,500 ms deadline: one unanswered by then counts as late and is abandoned by the client, as a hook abandons it. Per run it reports first-prompt Injections in time, their p50/p95/max (a late call reads as the deadline), session-start in time, later-prompt p95, `/livez` max, and the host's 1-minute load average before the run; each run is saved as `tmp/eval-burst/<label>/run-<n>.json` and a rerun skips finished ones.
 
 `--cli <path>` runs another build's `cli.mjs` (copy `dist/` aside before building the change, to compare two builds in one session); `--instance` (default 47, at most 50) picks the port block; `--max-load` (default 3) makes a run wait up to 10 minutes for the host's load to fall, and the load is recorded when it does not. Latency is host-sensitive: compare builds only with runs interleaved or back to back at similar load. Not part of `eval:suite` or CI.
 
@@ -314,7 +314,7 @@ Session start is turn 0; a prompt's Injection arrives before the work on that pr
 | Right scope | Injected items whose project is not Session k's project (target 0) |
 | Durable beats recent | share of repeated corrections whose earlier correction was injected before the repeat |
 | Least record | store bytes at the end (database + WAL; live bytes, pages in use, in a checkpoint pass) per distinct item ever used |
-| Never on the critical path | p50/p99 of each probe, and how many exceeded the hook timeout (2.5 s prompt-context, 1.5 s otherwise) |
+| Never on the critical path | p50/p99 of each probe, and how many exceeded the 2.5 s hook timeout |
 | Operator attention | store growth in bytes per replayed week (span of start times, at least one day; live bytes in a checkpoint pass) |
 
 `summary.json` and the printed output also carry `byProject` (every metric above, per resolved project; store size and growth are run-wide, so only the pooled row carries `leastRecord` and `operatorAttention`) and `typical` (`{excluded, summary}`: the same metrics over the Sessions of projects not in `--atypical`). The pooled numbers are unchanged. Reading rule: a change ships on the pooled number only when it does not lose on the `typical` row.
@@ -332,10 +332,10 @@ The key is a proxy and the numbers are not accuracy:
 - Without an LLM provider the sandbox holds no Memories beyond lessons the importer extracts by phrase, so the "titles and concepts of earlier Memories" form of a revisited decision is not measured; decisions come from earlier human turns.
 - Which repositories to replay is the caller's pick; the runner does not choose the busiest N.
 - Only prompts up to `--max-prompts` are probed (default 40, so the tail of a long Session is never scored), and only Sessions with `--min-turns` human turns are replayed. History before the oldest transcript on disk is absent.
-- Every probe is compared against the Injection timeout of the context-injecting hooks: 2.5 s for `prompt-context` (`PROMPT_INJECT_TIMEOUT_MS`), 1.5 s for the rest (`INJECT_TIMEOUT_MS`), including `smart-search`, which has no hook.
+- Every probe is compared against the 2.5 s Injection timeout of the context-injecting hooks (`INJECT_TIMEOUT_MS`), including `smart-search`, which has no hook.
 - "Least record" divides the final store size (database plus WAL) by distinct used items; the WAL is not checkpointed first, and the store includes Sessions replayed after the last use.
 - Files outside the Session's cwd (`~/.claude`, `/tmp`) are ignored on both sides.
-- Under `--backend hindsight`, retains carry no timestamp (the integration sends none), so every unit is dated at replay time, not at the Session's time. Latency is the HTTP round trip to the container, compared against agentmemory's 1.5 s budget; the integration's own recall timeout is 10 s.
+- Under `--backend hindsight`, retains carry no timestamp (the integration sends none), so every unit is dated at replay time, not at the Session's time. Latency is the HTTP round trip to the container, compared against agentmemory's 2.5 s budget; the integration's own recall timeout is 10 s.
 
 ### External text (#396)
 

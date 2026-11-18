@@ -172,7 +172,7 @@ function hookCwd(data) {
 }
 //#endregion
 //#region src/hooks/_missed-injection.ts
-const INJECT_TIMEOUT_MS = 1500;
+const INJECT_TIMEOUT_MS = 2500;
 const MAX_BYTES = 256 * 1024;
 const KEEP_ENTRIES = 1e3;
 function missedInjectionsPath() {
