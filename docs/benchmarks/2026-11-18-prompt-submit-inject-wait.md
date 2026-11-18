@@ -61,6 +61,8 @@ one connection error. Session start is slower to finish late than prompt-submit:
 | 2 s | 32 of 48 | 0.69 s | 1.10 s | 1.60 s | 1.88 s | 8 | 15 |
 | 5 s | 44 of 48 | 0.83 s | 1.52 s | 2.04 s | 2.71 s | 8 | 15 |
 
+Served counts include those late rows, as for prompt-submit, so 663 counts up to 44 Injections twice and 7.4% is a lower bound (about 7.9% without them). The week-after check uses the same base.
+
 The 2500 ms wait would have served at most 15 of the 48 (31%), against 85 of 143 (59%) for
 prompt-submit. Session start (`mem::context`) is not queued, so the only cost is up to 1 s more
 before a slow session start lets the Session begin. One constant, `INJECT_TIMEOUT_MS`, now

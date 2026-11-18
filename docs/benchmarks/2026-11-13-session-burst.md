@@ -1,7 +1,7 @@
 # 2026-11-13 — Session burst first Injections (#400)
 
 **Commit:** `860f27f3` (main) plus the change under test, as built per arm
-**Bench:** `npm run eval:burst` (`eval/runner/burst.ts`): 32 virtual Sessions opening within 2 s over a restarted daemon, hook-shaped traffic, calls abandoned at the hooks' 1,500 ms deadline
+**Bench:** `npm run eval:burst` (`eval/runner/burst.ts`): 32 virtual Sessions opening within 2 s over a restarted daemon, hook-shaped traffic, calls abandoned at the hooks' 1,500 ms deadline (2,500 ms from #397 and #432, so later runs do not compare with these, and a `--label` resumed across that change mixes both)
 **N:** 32 Sessions per run, 5 runs per arm; 20,000 seeded Observations (12 Sessions of one project, chunks of this repo's own text)
 **K:** none (latency only)
 **Hardware:** Linux 6.12, 12 cores, Node 22, BM25 only, no LLM; shared with other agents' daemons and evals, so the load average before each run is listed
