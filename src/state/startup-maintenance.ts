@@ -3,7 +3,14 @@ import { DEAD_INDEX_SCOPE, DEAD_INDEX_SCOPE_PREFIX, KV, generateId } from "./sch
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "../functions/graph-provenance.js";
 import { checkoutRootsOf } from "../functions/project-files.js";
 import { mergeDuplicateFileNodes } from "./merge-file-nodes.js";
-import { getConsolidationDecayDays, getMaxSourceObservationIds } from "../config.js";
+import {
+  getConsolidationDecayDays,
+  getMaxSourceObservationIds,
+  isGraphExtractionEnabled,
+} from "../config.js";
+import { noteGraphWrite } from "./kv.js";
+import { withKeyedLock } from "./keyed-mutex.js";
+import { GRAPH_WRITE_LOCK } from "../functions/graph.js";
 import { decayedStrength } from "../functions/consolidation-pipeline.js";
 import { logger } from "../logger.js";
 import {
@@ -43,6 +50,8 @@ export type StartupMaintenanceResult = {
   edgesChanged: number;
   /** Rows deleted from the dead index scopes. */
   deadIndexRowsDeleted: number;
+  /** Graph rows deleted because graph extraction is off (#420). */
+  graphRowsDeleted: number;
   /** Semantic Facts whose strength was recomputed from their idle periods. */
   decayRepaired: number;
   /** Near-duplicate Insights merged into a survivor and deleted. */
@@ -54,6 +63,8 @@ export type StartupMaintenanceResult = {
 const DECAY_REPAIR_MARKER = "decay-repair:done";
 const INSIGHT_COLLAPSE_MARKER = "insight-collapse:done";
 const INSIGHT_SCOPE_MARKER = "insight-project-scope:done";
+const GRAPH_DELETE_MARKER = "graph-rows-deleted:done";
+const GRAPH_SCOPE_PREFIX = "mem:graph:";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function alreadyRan(state: SqliteState): boolean {
@@ -137,28 +148,76 @@ async function trimIdLists(
   return { rowsTrimmed, idsDropped };
 }
 
-// Raw SQL rather than delete() per key: these scopes have no reader left, so
-// there is nobody to fire a state:deleted event at, and the row count is only
-// known by scanning anyway.
-async function deleteDeadIndexRows(state: SqliteState): Promise<number> {
-  const pick = state.db.prepare(
-    "SELECT seq FROM kv WHERE (scope = ? OR scope LIKE ?) LIMIT ?",
-  );
-  const like = `${DEAD_INDEX_SCOPE_PREFIX}%`;
+// Deletes every row the WHERE clause matches, a chunk at a time. Raw SQL
+// rather than delete() per key: the rows have no reader left, so there is
+// nobody to fire a state:deleted event at, and the row count is only known by
+// scanning anyway.
+async function deleteRowsWhere(
+  state: SqliteState,
+  where: string,
+  params: string[],
+): Promise<number> {
+  const pick = state.db.prepare(`SELECT seq, scope FROM kv WHERE ${where} LIMIT ?`);
   let deleted = 0;
 
   await inChunks(
     // The rows this read are gone by the next call, so the cursor is moot.
-    (_afterSeq) => pick.all(DEAD_INDEX_SCOPE, like, CHUNK_ROWS) as Array<{ seq: number }>,
+    (_afterSeq) => pick.all(...params, CHUNK_ROWS) as Array<{ seq: number; scope: string }>,
     (rows) => {
       const seqs = rows.map((row) => row.seq);
       const result = state.db
         .prepare(`DELETE FROM kv WHERE seq IN (${seqs.map(() => "?").join(",")})`)
         .run(...seqs);
       deleted += Number(result.changes ?? 0);
+      for (const row of rows) state.noteWrite(row.scope);
     },
   );
 
+  return deleted;
+}
+
+function deleteDeadIndexRows(state: SqliteState): Promise<number> {
+  return deleteRowsWhere(state, "(scope = ? OR scope LIKE ?)", [
+    DEAD_INDEX_SCOPE,
+    `${DEAD_INDEX_SCOPE_PREFIX}%`,
+  ]);
+}
+
+// Graph extraction bought no Recall (#420, docs/benchmarks/2026-11-16-graph-extraction.md)
+// and is off by default, so a store built while it ran holds the graph as dead
+// weight. Deletes every graph scope's rows once, under its own marker, and only
+// while extraction is off: an install that keeps it on keeps its graph.
+async function deleteGraphRows(state: SqliteState): Promise<number> {
+  if (isGraphExtractionEnabled()) return 0;
+  if (state.get(KV.config, GRAPH_DELETE_MARKER) !== null) return 0;
+
+  // A range, not LIKE, so the lookup uses the (scope, seq) index. Held under
+  // the graph write lock so no writer interleaves with the chunks.
+  const deleted = await withKeyedLock(GRAPH_WRITE_LOCK, () =>
+    deleteRowsWhere(state, "scope >= ? AND scope < ?", [
+      GRAPH_SCOPE_PREFIX,
+      GRAPH_SCOPE_PREFIX.slice(0, -1) + ";",
+    ]),
+  );
+  const at = new Date().toISOString();
+  state.transaction(() => {
+    if (deleted > 0) {
+      const id = generateId("aud");
+      state.set(KV.audit, id, {
+        id,
+        timestamp: at,
+        operation: "delete",
+        functionId: "startup-maintenance",
+        targetIds: [],
+        details: { resource: "graph", reason: "graph-extraction-off", deleted },
+      });
+    }
+    state.set(KV.config, GRAPH_DELETE_MARKER, { at, count: deleted });
+  });
+  if (deleted > 0) {
+    noteGraphWrite(KV.graphNodes);
+    logger.info("Graph rows deleted, graph extraction is off", { deleted });
+  }
   return deleted;
 }
 
@@ -385,6 +444,7 @@ export async function runStartupMaintenance(
   const decayRepaired = await repairDecay(state);
   const insightsMisscopedDeleted = deleteMisscopedInsights(state);
   const insightsCollapsed = await collapseInsights(state);
+  const graphRowsDeleted = await deleteGraphRows(state);
 
   if (alreadyRan(state)) {
     return {
@@ -394,6 +454,7 @@ export async function runStartupMaintenance(
       fileNodesMerged: 0,
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
+      graphRowsDeleted,
       decayRepaired,
       insightsCollapsed,
       insightsMisscopedDeleted,
@@ -421,6 +482,7 @@ export async function runStartupMaintenance(
     fileNodesMerged: merged.nodesMerged,
     edgesChanged: merged.edgesChanged,
     deadIndexRowsDeleted,
+    graphRowsDeleted,
     decayRepaired,
     insightsCollapsed,
     insightsMisscopedDeleted,

@@ -36,7 +36,8 @@ import { attributeDecision, readSummaryDecisions } from "./decision-attribution.
 import { keyedSessionIds, readDecisionKey, unreachableOrigins, unreachableWarning, type DecisionKey } from "./decision-key.js";
 import { createJudge, decisionOutcomes, openVerdictCache, type Judge } from "./decision-judge.js";
 import { hookPayloads, hookSteps, runHookSteps, summarizeCounts, summarizeOutcome } from "./replay-hooks.js";
-import { startSandbox, type EmbeddingMode } from "./sandbox.js";
+import { deriveFactsAndGraph } from "./replay-derived.js";
+import { defaultUnlessShellSet, shellEnv, startSandbox, type EmbeddingMode } from "./sandbox.js";
 import { startHindsight } from "./hindsight.js";
 import { openSplit, selectSplit, type Split } from "./split.js";
 import { composeQuery, isQueryArm, QUERY_ARMS, type QueryArmOptions } from "./replay-query-arm.js";
@@ -62,6 +63,7 @@ interface Options {
   embeddings: EmbeddingMode;
   llm: boolean;
   llmSummary: boolean;
+  derived: boolean;
   root: string;
   out: string;
   split: Split;
@@ -91,6 +93,7 @@ function parseOptions(): Options {
       embeddings: { type: "string", default: "local" },
       llm: { type: "boolean", default: false },
       "llm-summary": { type: "boolean", default: false },
+      derived: { type: "boolean", default: false },
       root: { type: "string", default: join(homedir(), ".claude/projects") },
       out: { type: "string", default: join(REPO_TMP, "eval-replay") },
       split: { type: "string" },
@@ -141,6 +144,10 @@ function parseOptions(): Options {
   const llmSummary = values["llm-summary"] === true;
   if (llmSummary && (values.llm || values.backend === "hindsight")) {
     console.error("--llm-summary is the Summary-only alternative to --llm and does not apply to --backend hindsight; pass one");
+    process.exit(2);
+  }
+  if (values.derived && !llmSummary) {
+    console.error("--derived builds Semantic Facts and the graph on a --llm-summary save pass; pass --llm-summary");
     process.exit(2);
   }
   const llm = values.llm === true || llmSummary || values.backend === "hindsight";
@@ -225,6 +232,7 @@ function parseOptions(): Options {
     embeddings: values.embeddings,
     llm,
     llmSummary,
+    derived: values.derived === true,
     root: resolve(values.root as string),
     out,
     split: openSplit(values.split, "replay"),
@@ -654,7 +662,7 @@ async function recordExternal(baseUrl: string, opts: Options, session: ReplaySes
 }
 
 async function probeCheckpoints(opts: Options, loaded: Loaded, scored: Set<string>, ndjson: string, decisions?: DecisionScoring): Promise<void> {
-  process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
+  defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
   const dir = opts.fromCheckpoints!;
   const checkpoints = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as Checkpoint[];
   // The save pass drew its own split; probing outside this pass's split would
@@ -740,16 +748,17 @@ async function injectionGate(baseUrl: string): Promise<Pick<SessionScore, "injec
 async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> {
   // The Operator's live daemon injects; without this the sandbox's session
   // start writes no Injection record and delivers nothing to score.
-  process.env.AGENTMEMORY_INJECT_CONTEXT ??= "true";
-  if (opts.llm) process.env.AGENTMEMORY_AUTO_COMPRESS ??= "true";
+  defaultUnlessShellSet("AGENTMEMORY_INJECT_CONTEXT", "true");
+  if (opts.llm) defaultUnlessShellSet("AGENTMEMORY_AUTO_COMPRESS", "true");
   if (opts.llmSummary) process.env.AGENTMEMORY_AUTO_COMPRESS = "false";
-  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm, compress: !opts.llmSummary, seed });
+  const sandbox = await startSandbox({ instance: opts.instance, embeddings: opts.embeddings, llm: opts.llm, compress: !opts.llmSummary, derived: opts.derived, seed });
   const resolver: Resolver = { observations: new Map(), sessions: new Map() };
   let drainMsTotal = 0;
   let summarizedSessions = 0;
   let ingestedSessions = 0;
   let summarizeCalls = 0;
   let failedSummarizeCalls = 0;
+  let derivedIncomplete = 0;
   return {
     probe: (session, maxPrompts) => probeSession(sandbox.baseUrl, session, maxPrompts, resolver, opts.queryArm),
     async ingest(session) {
@@ -761,6 +770,11 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
         failedSummarizeCalls += counts.failed;
         if (counts.summarized > 0) summarizedSessions++;
         drain = ` stops=${counts.summarizeCalls} summarized=${counts.summarized} failed=${counts.failed}`;
+        if (opts.derived) {
+          const derived = await deriveFactsAndGraph(sandbox.baseUrl, sandbox.sqlitePath, session.id, shellEnv().GRAPH_EXTRACTION_ENABLED === "true");
+          if (derived.graph === "stalled" || !derived.consolidated) derivedIncomplete++;
+          drain += ` graph=${derived.graph} consolidated=${derived.consolidated}`;
+        }
       } else if (opts.llm) {
         const { drainMs, summarized } = await ingestThroughHooks(sandbox.baseUrl, session);
         drainMsTotal += drainMs;
@@ -780,7 +794,7 @@ async function startAgentmemory(opts: Options, seed?: string): Promise<Backend> 
       if (!opts.llm) return undefined;
       const llm = { ...(await llmMetrics(sandbox.baseUrl)), drainMinutes: drainMsTotal / 60_000, summarizedSessions };
       if (!opts.llmSummary) return llm;
-      return { ...llm, ingestedSessions, summarizeCalls, failedSummarizeCalls, folds: summarizeCounts(readFileSync(sandbox.logPath, "utf8")) };
+      return { ...llm, ingestedSessions, summarizeCalls, failedSummarizeCalls, ...(opts.derived && { derivedIncomplete }), folds: summarizeCounts(readFileSync(sandbox.logPath, "utf8")) };
     },
     providers: () => agentmemoryProviders(opts),
     stop: () => sandbox.stop(),

@@ -39,7 +39,6 @@ import {
   GRAPH_INDEX_NODE_CEILING,
   backfillGraphIndexes,
   graphIndexesReady,
-  graphLegDisabled,
 } from "./state/graph-indexes.js";
 import { VectorIndex } from "./state/vector-index.js";
 import { HybridSearch } from "./state/hybrid-search.js";
@@ -518,8 +517,9 @@ async function main() {
   // this block is skipped ENTIRELY — it makes the only graph-scope reads
   // at boot (the kv.list arming enumeration), and B-mode must issue zero.
   // Skipping is safe: with the marker absent the readers fail-closed
-  // (graphReadable === false) rather than enumerating.
-  if (!graphLegDisabled()) {
+  // (graphReadable === false) rather than enumerating. With extraction off
+  // startup maintenance deletes the graph, so arming it would race that delete.
+  if (graphWritesOffReason() === null) {
     try {
       if (!(await graphIndexesReady(kv))) {
         const graphSnap = await kv.get<import("./types.js").GraphSnapshot>(

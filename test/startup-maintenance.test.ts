@@ -24,11 +24,13 @@ describe("startup maintenance", () => {
 
   beforeEach(() => {
     process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = String(MAX);
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
     store = new SqliteState(":memory:");
   });
 
   afterEach(() => {
     delete process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+    delete process.env["GRAPH_EXTRACTION_ENABLED"];
     store.close();
   });
 
@@ -135,6 +137,7 @@ describe("startup maintenance", () => {
       fileNodesMerged: 0,
       edgesChanged: 0,
       deadIndexRowsDeleted: 0,
+      graphRowsDeleted: 0,
       decayRepaired: 0,
       insightsCollapsed: 0,
       insightsMisscopedDeleted: 0,
@@ -248,6 +251,7 @@ describe("startup maintenance: duplicate file nodes", () => {
 
   beforeEach(() => {
     process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"] = "4";
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
     mkdirSync(join(process.cwd(), "tmp"), { recursive: true });
     dir = realpathSync(mkdtempSync(join(process.cwd(), "tmp", "merge-files-")));
     main = join(dir, "main");
@@ -283,6 +287,7 @@ describe("startup maintenance: duplicate file nodes", () => {
 
   afterEach(() => {
     delete process.env["AGENTMEMORY_GRAPH_MAX_SOURCE_IDS"];
+    delete process.env["GRAPH_EXTRACTION_ENABLED"];
     store.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -630,5 +635,53 @@ describe("startup maintenance: misscoped Insights (#323)", () => {
     store.set(KV.insights, "ins_late", insight("ins_late", "template", ["sem_glydr"]));
     expect((await runStartupMaintenance(store)).insightsMisscopedDeleted).toBe(0);
     expect(store.get(KV.insights, "ins_late")).toBeTruthy();
+  });
+});
+
+// #420: graph extraction bought no Recall, so with it off the stored graph is
+// dead weight. One pass deletes every graph scope's rows, once.
+describe("startup maintenance: graph rows with extraction off (#420)", () => {
+  let store: SqliteState;
+
+  beforeEach(() => {
+    store = new SqliteState(":memory:");
+    store.set(KV.graphNodes, "node-1", { id: "node-1", sourceObservationIds: ["a"] });
+    store.set(KV.graphEdges, "edge-1", { id: "edge-1" });
+    store.set(KV.graphObsNodes, "obs-1", ["node-1"]);
+    store.set(KV.graphSnapshot, "current", { nodes: 1 });
+    store.set(KV.observations("sess-1"), "obs-1", { id: "obs-1" });
+  });
+
+  afterEach(() => {
+    delete process.env["GRAPH_EXTRACTION_ENABLED"];
+    store.close();
+  });
+
+  it("deletes every graph row and nothing else, audits it, and runs once", async () => {
+    const result = await runStartupMaintenance(store);
+
+    expect(result.graphRowsDeleted).toBe(4);
+    for (const scope of [KV.graphNodes, KV.graphEdges, KV.graphObsNodes, KV.graphSnapshot]) {
+      expect(store.list(scope)).toEqual([]);
+    }
+    expect(store.get(KV.observations("sess-1"), "obs-1")).toEqual({ id: "obs-1" });
+    expect(store.get(KV.config, "graph-rows-deleted:done")).toMatchObject({ count: 4 });
+    expect(store.list(KV.audit)).toEqual([
+      expect.objectContaining({ operation: "delete", details: expect.objectContaining({ resource: "graph", deleted: 4 }) }),
+    ]);
+
+    store.set(KV.graphNodes, "node-2", { id: "node-2" });
+    expect((await runStartupMaintenance(store)).graphRowsDeleted).toBe(0);
+    expect(store.get(KV.graphNodes, "node-2")).toBeTruthy();
+  });
+
+  it("keeps the graph while extraction is on", async () => {
+    process.env["GRAPH_EXTRACTION_ENABLED"] = "true";
+
+    const result = await runStartupMaintenance(store);
+
+    expect(result.graphRowsDeleted).toBe(0);
+    expect(store.get(KV.graphNodes, "node-1")).toBeTruthy();
+    expect(store.get(KV.config, "graph-rows-deleted:done")).toBeNull();
   });
 });

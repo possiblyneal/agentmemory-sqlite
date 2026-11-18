@@ -4,7 +4,11 @@ import { connect } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hydratedKeys } from "../../src/hooks/_env.js";
 import { KV } from "../../src/state/schema.js";
+
+// Above any epoch millisecond count, so the stop never finds a consolidation due.
+const NEVER_DUE_COOLDOWN_MS = "9007199254740991";
 
 export type EmbeddingMode = "local" | "none";
 
@@ -89,6 +93,21 @@ const LLM_ENV = [
   "AGENTMEMORY_AUTO_COMPRESS",
 ];
 
+// What the launching shell set. A key that hydrateEnvFromFile copied in from
+// the Operator's ~/.agentmemory/.env is not the shell's, and forwarding it
+// would make a run depend on the live config.
+export function shellEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !hydratedKeys.has(key)));
+}
+
+// A runner's default for a setting the shell left unset. A copy hydrated from
+// the .env does not count as set: the runner's value replaces it and is forwarded.
+export function defaultUnlessShellSet(key: string, value: string): void {
+  if (shellEnv()[key] !== undefined) return;
+  process.env[key] = value;
+  hydratedKeys.delete(key);
+}
+
 // The model cache sits beside the instance dirs, not in the per-run HOME
 // that startSandbox wipes, so a restart does not download the model again.
 export function sandboxEnv(
@@ -98,21 +117,23 @@ export function sandboxEnv(
   embeddings: EmbeddingMode,
   llm: boolean,
   compress = true,
+  derived = false,
 ) {
+  const shell = shellEnv();
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "",
+    PATH: shell.PATH ?? "",
     HOME: home,
     USERPROFILE: home,
     AGENTMEMORY_SQLITE_PATH: sqlitePath,
     EVICTION_ENABLED: "false",
     AGENTMEMORY_MODEL_CACHE_DIR: modelCacheDir,
   };
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(shell)) {
     if (key.startsWith("HF_") && value !== undefined) env[key] = value;
   }
   if (embeddings === "local") env.EMBEDDING_PROVIDER = "local";
   if (embeddings !== "none") {
-    for (const [key, value] of Object.entries(process.env)) {
+    for (const [key, value] of Object.entries(shell)) {
       const forwarded =
         key === "EMBEDDING_PROVIDER" ||
         key.startsWith("OPENAI_EMBEDDING_") ||
@@ -120,14 +141,23 @@ export function sandboxEnv(
       if (forwarded && value !== undefined) env[key] = value;
     }
   }
-  if (process.env.RERANK_ENABLED) env.RERANK_ENABLED = process.env.RERANK_ENABLED;
-  if (process.env.AGENTMEMORY_MEMORY_CHUNKING) {
-    env.AGENTMEMORY_MEMORY_CHUNKING = process.env.AGENTMEMORY_MEMORY_CHUNKING;
+  if (shell.RERANK_ENABLED) env.RERANK_ENABLED = shell.RERANK_ENABLED;
+  if (shell.AGENTMEMORY_MEMORY_CHUNKING) {
+    env.AGENTMEMORY_MEMORY_CHUNKING = shell.AGENTMEMORY_MEMORY_CHUNKING;
   }
-  if (process.env.AGENTMEMORY_INJECT_CONTEXT) {
-    env.AGENTMEMORY_INJECT_CONTEXT = process.env.AGENTMEMORY_INJECT_CONTEXT;
+  for (const key of [
+    "GRAPH_EXTRACTION_ENABLED",
+    "GRAPH_EXTRACTION_BATCH_SIZE",
+    "AGENTMEMORY_GRAPH_WEIGHT",
+    "AGENTMEMORY_GRAPH_LEG",
+  ]) {
+    const value = shell[key];
+    if (value) env[key] = value;
   }
-  if (process.env.AGENTMEMORY_PROMPT_RERANK_URL) {
+  if (shell.AGENTMEMORY_INJECT_CONTEXT) {
+    env.AGENTMEMORY_INJECT_CONTEXT = shell.AGENTMEMORY_INJECT_CONTEXT;
+  }
+  if (shell.AGENTMEMORY_PROMPT_RERANK_URL) {
     for (const key of [
       "AGENTMEMORY_PROMPT_RERANK",
       "AGENTMEMORY_PROMPT_RERANK_URL",
@@ -135,13 +165,15 @@ export function sandboxEnv(
       "AGENTMEMORY_PROMPT_LESSON_MIN",
       "AGENTMEMORY_PROMPT_RERANK_TIMEOUT_MS",
     ]) {
-      const value = process.env[key];
+      const value = shell[key];
       if (value) env[key] = value;
     }
   } else {
     env.AGENTMEMORY_PROMPT_RERANK = "off";
   }
   if (llm) {
+    // process.env, not the shell's alone: a runner that loads the daemon's
+    // provider from ~/.agentmemory/.env (the decision judge) shares it.
     for (const key of LLM_ENV) {
       const value = process.env[key];
       if (value !== undefined) env[key] = value;
@@ -150,6 +182,9 @@ export function sandboxEnv(
     env.AGENTMEMORY_LLM_TIMEOUT_MS = String(EVAL_LLM_TIMEOUT_MS);
     env.OPENAI_EXTRA_BODY = EVAL_LLM_SAMPLING;
     if (!compress) env.AGENTMEMORY_AUTO_COMPRESS = "false";
+  }
+  if (derived) {
+    env.AGENTMEMORY_CONSOLIDATION_COOLDOWN_MS = NEVER_DUE_COOLDOWN_MS;
   }
   return env;
 }
@@ -160,6 +195,8 @@ export async function startSandbox(opts: {
   llm?: boolean;
   // false keeps Compression synthetic while the LLM provider stays configured.
   compress?: boolean;
+  // The replay's --derived mode: the stop's own consolidation never due.
+  derived?: boolean;
   // A store file the daemon starts from instead of an empty one.
   seed?: string;
   // Config rows written into the seeded store before the daemon boots.
@@ -209,6 +246,7 @@ export async function startSandbox(opts: {
         opts.embeddings,
         opts.llm === true,
         opts.compress !== false,
+        opts.derived === true,
       ),
       stdio: ["ignore", log, log],
     },

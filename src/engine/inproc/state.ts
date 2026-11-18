@@ -193,7 +193,7 @@ export class SqliteState {
     return this.writeCounts.get(scope) ?? 0;
   }
 
-  private noteWrite(scope: string): void {
+  noteWrite(scope: string): void {
     this.writeCounts.set(scope, this.writeGeneration(scope) + 1);
   }
 
