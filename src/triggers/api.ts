@@ -145,16 +145,19 @@ function asNonEmptyString(value: unknown): string | null {
 
 export const SESSION_IDLE_END_MS = 30 * 60_000;
 
-function countInjection(context: string | undefined): void {
+function countInjection(result: InjectionResult | undefined): void {
   const counters = getCounters();
   counters.injections.add(1);
-  if (!context?.trim()) counters.emptyInjections.add(1);
+  if (result?.context?.trim()) return;
+  counters.emptyInjections.add(1);
+  if (result?.gateRejected) counters.gateRejectedInjections.add(1);
 }
 
 interface InjectionResult {
   context?: string;
   tokens?: number;
   injected?: InjectedRef[];
+  gateRejected?: boolean;
 }
 
 interface InjectionDelivery {
@@ -168,7 +171,7 @@ function noteInjection(
   delivery: InjectionDelivery,
   result: InjectionResult | undefined,
 ): void {
-  countInjection(result?.context);
+  countInjection(result);
   const context = result?.context ?? "";
   recordInjection(kv, {
     source: delivery.source,
@@ -186,7 +189,7 @@ function noteInjection(
 }
 
 function withoutInjected(result: InjectionResult | undefined) {
-  const { injected: _injected, ...rest } = result ?? {};
+  const { injected: _injected, gateRejected: _gateRejected, ...rest } = result ?? {};
   return rest;
 }
 
@@ -196,6 +199,7 @@ function recallCounts() {
   return {
     injections: totals.injections,
     emptyInjections: totals.emptyInjections,
+    gateRejectedInjections: totals.gateRejectedInjections,
     belowFloorTurns: totals.belowFloorTurns,
     smartSearches: followups.agentInitiatedSearches,
     smartSearchFollowups: followups.followupWithinWindow,
@@ -803,7 +807,7 @@ export function registerApiTriggers(
       if (isContextInjectionEnabled()) {
         noteInjection(kv, { source: "session-start", sessionId, project }, contextResult);
       } else {
-        countInjection(contextResult.context);
+        countInjection(contextResult);
       }
       return {
         status_code: 200,
