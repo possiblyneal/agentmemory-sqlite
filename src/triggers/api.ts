@@ -29,7 +29,7 @@ import { recordInjection } from "../functions/injections.js";
 import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { isBelowWordFloor } from "../functions/prompt-context.js";
-import { isUnstoredOnFullDisk, ObserveRetryQueue } from "../functions/observe-retry.js";
+import { isUnstored, ObserveRetryQueue } from "../functions/observe-retry.js";
 import { ShedQueue } from "../functions/shed-queue.js";
 import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
 import {
@@ -384,7 +384,7 @@ export function registerApiTriggers(
     try {
       return await sdk.trigger({ function_id: "mem::observe", payload });
     } catch (err) {
-      unstored = isUnstoredOnFullDisk(err);
+      unstored = isUnstored(err);
       throw err;
     } finally {
       if (!unstored) markCaptureSettled(payload);

@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -10,9 +13,12 @@ import { registerObserveFunction } from "../src/functions/observe.js";
 import {
   OBSERVE_RETRY_CAPACITY_BYTES,
   OBSERVE_RETRY_INTERVAL_MS,
-  isUnstoredOnFullDisk,
+  isUnstored,
+  retryableWriteCause,
+  unstored,
   unstoredOnFullDisk,
 } from "../src/functions/observe-retry.js";
+import { SqliteState } from "../src/engine/inproc/state.js";
 import { getImageRefCount } from "../src/functions/image-refs.js";
 import { KV } from "../src/state/schema.js";
 import { deleteImage } from "../src/utils/image-store.js";
@@ -20,6 +26,7 @@ import { mockKV, mockSdk } from "./helpers/mocks.js";
 import { logger } from "../src/logger.js";
 
 const DISK_FULL = "database or disk is full";
+const LOCKED = "database is locked";
 
 function observeRequest(n: number, data: Record<string, unknown> = { n }) {
   return {
@@ -99,7 +106,7 @@ describe("api::observe on a full disk", () => {
     diskFull = false;
     await vi.advanceTimersByTimeAsync(OBSERVE_RETRY_INTERVAL_MS);
     expect(vi.mocked(logger.info)).toHaveBeenCalledWith(
-      "Observation queue drained after a full disk",
+      "Observation queue drained after a failed write",
       { queued: 2 },
     );
   });
@@ -120,7 +127,20 @@ describe("api::observe on a full disk", () => {
     expect(stored).toHaveLength(fits);
   });
 
-  it("still fails an Observation for any error other than a full disk", async () => {
+  it("queues an Observation whose row write hit a lock and stores it once the lock clears", async () => {
+    let locked = true;
+    sdk.registerFunction("mem::observe", async (payload) => {
+      if (locked) throw unstored(LOCKED);
+      stored.push((payload as { data: { n: number } }).data.n);
+      return { observationId: "obs" };
+    });
+    expect((await observe(1)).status_code).toBe(202);
+    locked = false;
+    await vi.advanceTimersByTimeAsync(OBSERVE_RETRY_INTERVAL_MS);
+    expect(stored).toEqual([1]);
+  });
+
+  it("still fails an Observation for an error that does not clear on its own", async () => {
     sdk.registerFunction("mem::observe", async () => {
       throw new Error("boom");
     });
@@ -178,7 +198,7 @@ describe("mem::observe on a full disk", () => {
       .trigger({ function_id: "mem::observe", payload: imageRequest(1, uniqueImage()) })
       .catch((e: unknown) => e);
 
-    expect(isUnstoredOnFullDisk(err)).toBe(true);
+    expect(isUnstored(err)).toBe(true);
     expect(deltas).toHaveLength(2);
     expect(deltas[0]! + deltas[1]!).toBe(0);
   });
@@ -212,13 +232,67 @@ describe("mem::observe on a full disk", () => {
   it("marks the Observation unstored when its row write fails", async () => {
     const kv = failingKV((scope) => scope.startsWith("mem:obs:"));
     const err = await observeWith(kv).catch((e: unknown) => e);
-    expect(isUnstoredOnFullDisk(err)).toBe(true);
+    expect(isUnstored(err)).toBe(true);
   });
 
   it("does not mark it unstored when a later write fails", async () => {
     const kv = failingKV((scope) => scope === "mem:sessions");
     const err = await observeWith(kv).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect(isUnstoredOnFullDisk(err)).toBe(false);
+    expect(isUnstored(err)).toBe(false);
+  });
+});
+
+describe("mem::observe on a locked database", () => {
+  function lockedKV(failScope: (scope: string) => boolean) {
+    const kv = mockKV();
+    const set = kv.set;
+    kv.set = async <T>(scope: string, key: string, data: T): Promise<T> => {
+      if (failScope(scope)) throw new Error(LOCKED);
+      return set(scope, key, data);
+    };
+    return kv;
+  }
+
+  async function observeWith(kv: ReturnType<typeof mockKV>) {
+    const sdk = mockSdk({ looseTrigger: true });
+    registerObserveFunction(sdk as never, kv as never);
+    return sdk.trigger({ function_id: "mem::observe", payload: observeRequest(1).body });
+  }
+
+  it("marks the Observation unstored when its row write hits a lock", async () => {
+    const err = await observeWith(lockedKV((scope) => scope.startsWith("mem:obs:"))).catch((e: unknown) => e);
+    expect(isUnstored(err)).toBe(true);
+  });
+
+  it("does not mark it unstored when a later write hits a lock", async () => {
+    const err = await observeWith(lockedKV((scope) => scope === "mem:sessions")).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(isUnstored(err)).toBe(false);
+  });
+
+  // Pins the matched text to what node:sqlite actually throws when another
+  // connection holds the write lock.
+  it("recognises node:sqlite's own error while another connection holds the write lock", () => {
+    const dir = mkdtempSync(join(tmpdir(), "observe-locked-"));
+    const path = join(dir, "state.db");
+    const state = new SqliteState(path);
+    const other = new DatabaseSync(path);
+    try {
+      other.exec("BEGIN IMMEDIATE");
+      let err: unknown;
+      try {
+        state.set("mem:obs:ses-1", "obs-1", { n: 1 });
+      } catch (e) {
+        err = e;
+      }
+      expect(retryableWriteCause(err)).toBe(LOCKED);
+      other.exec("COMMIT");
+      expect(() => state.set("mem:obs:ses-1", "obs-1", { n: 1 })).not.toThrow();
+    } finally {
+      other.close();
+      state.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

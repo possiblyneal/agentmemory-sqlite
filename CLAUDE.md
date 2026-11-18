@@ -179,20 +179,22 @@ the inbound bearer on a non-loopback bind (a browser carries it as the second su
 upstream. Observe and compress publish to the `viewer` group alone; there are no per-Session
 stream groups.
 
-### Observations on a full disk
+### Observations on a full disk or a locked database
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
-(or its image file) hits a full disk, `api::observe` answers 202 `{queued: true}` and holds it
+hits a full disk or `database is locked` (another connection holds the write lock; the store
+sets no busy timeout, since a synchronous wait would stall the whole daemon), or its image file
+hits a full disk, `api::observe` answers 202 `{queued: true}` and holds it
 in `ObserveRetryQueue` (`src/functions/observe-retry.ts`): in memory, capped at 64 MiB, and
 replayed every 30 s until a write succeeds. While anything is queued, new Observations queue
 behind it so each Session stores them in arrival order; past the cap one is dropped (500), never
 written ahead of the queue. A failure after the row is stored is never queued, since replaying
 it would duplicate the row. Session-cap eviction runs only after the row is stored, and its
-errors are logged, not returned. A daemon restart before the disk frees loses the queue.
+errors are logged, not returned. A daemon restart before a write succeeds loses the queue.
 `GET /agentmemory/health` carries `capture: { lastArrivalAt, lastStoredAt, oldestPendingAt }` (ISO
 or `null` since boot; `src/telemetry/capture.ts`): arrival is stamped by `api::observe` once the
 body validates, before any work, and stored by `mem::observe` right after the row write, so the
 queue's replay counts too. `oldestPendingAt` is the arrival of the oldest Observation still being
-handled, the full-disk queue's included; a stored, deduplicated, skipped or dropped one settles.
+handled, the retry queue's included; a stored, deduplicated, skipped or dropped one settles.
 An `oldestPendingAt` that keeps aging is a wedge, even while other Sessions store; `null` with no
 arrivals is an idle Operator.
 
