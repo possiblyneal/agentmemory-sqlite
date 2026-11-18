@@ -5,7 +5,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
 import { isSearchLayer } from "../state/search-index.js";
 import { StateKV } from "../state/kv.js";
-import { graphLegDisabled } from "../state/graph-indexes.js";
+import { graphLegDisabled, graphLegExpected } from "../state/graph-indexes.js";
 import { checkPayloadSize, isOversizedPayload } from "../state/payload-bound.js";
 import { pageMeshDelta } from "../functions/mesh.js";
 import { getLatestHealth } from "../health/monitor.js";
@@ -205,7 +205,7 @@ function recallCounts() {
     smartSearchFollowups: followups.followupWithinWindow,
     nonlatestLeaked: totals.nonlatestLeaked,
     graphLegOmitted: totals.graphLegOmitted,
-    graphLegExpected: !graphLegDisabled(),
+    graphLegExpected: graphLegExpected(),
   };
 }
 

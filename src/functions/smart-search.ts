@@ -23,7 +23,7 @@ import {
 } from "../config.js";
 import { logger } from "../logger.js";
 import { getCounters } from "../telemetry/setup.js";
-import { graphReadable } from "../state/graph-indexes.js";
+import { graphLegExpected, graphReadable } from "../state/graph-indexes.js";
 import { createProjectMatcher, getEmbeddingProvider } from "./search.js";
 import { recallSemanticFacts } from "./semantic-recall.js";
 
@@ -358,7 +358,7 @@ export function registerSmartSearchFunction(
       // side-indexes are unarmed — the results above are BM25+vector only.
       // Phase-D alerts treat graphOmitted as a signal ONLY in A-mode.
       const graphOmitted = !(await graphReadable(kv));
-      if (graphOmitted) getCounters().graphLegOmitted.add(1);
+      if (graphOmitted && graphLegExpected()) getCounters().graphLegOmitted.add(1);
       const response: {
         mode: "compact";
         results: CompactSearchResult[];

@@ -2,6 +2,7 @@ import type { GraphNode, GraphEdge } from "../types.js";
 import { KV } from "./schema.js";
 import { graphWriteGeneration, type StateKV } from "./kv.js";
 import { withKeyedLock } from "./keyed-mutex.js";
+import { isGraphExtractionEnabled } from "../config.js";
 import { capSourceIds } from "../functions/graph-provenance.js";
 
 export const NAME_SHARD_COUNT = 64;
@@ -42,6 +43,13 @@ export const GRAPH_INDEX_NOT_READY = "GRAPH_INDEX_NOT_READY";
 // call — not memoized at module load — so boot ordering and tests can flip it.
 export function graphLegDisabled(): boolean {
   return process.env.AGENTMEMORY_GRAPH_LEG === "off";
+}
+
+// Whether the graph leg should be contributing: extraction must be on (with
+// it off, startup maintenance deletes every graph row, readiness marker
+// included) and the kill-switch not thrown.
+export function graphLegExpected(): boolean {
+  return isGraphExtractionEnabled() && !graphLegDisabled();
 }
 
 // A graph READ is serviceable only when the leg is on AND the bounded
