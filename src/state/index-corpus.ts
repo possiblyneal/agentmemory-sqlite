@@ -181,22 +181,38 @@ export type CorpusItem = {
   error?: string;
 };
 
+const CORPUS_PAGE = 500;
+type KvRow = { seq: number; scope: string; key: string; value: string };
+
 // Walks every memory and every observation on disk - including observation
 // scopes whose session record is gone (evict.ts removes sessions but keeps
 // their observations, which are content and stay indexed) - in `seq` order,
 // and applies the eligibility rules above once for both legs. The boot BM25
 // rebuild and the vector fill pass consume this same iterator, so the two can
 // never disagree about what belongs in the index.
+//
+// It reads in pages of `CORPUS_PAGE` rows keyed on `seq` and finishes each
+// `.all()` before yielding, so no statement is active while a consumer awaits:
+// the daily backup's VACUUM shares this connection and refuses to run while
+// any cursor is open. The unary `+` keeps the planner off kv_scope_seq: through
+// that index the observation-range leg cannot use `seq > ?`, so every page would
+// re-read and re-sort the whole corpus (quadratic). Walking the rowid from the
+// cursor reads each kv row once.
 export function* enumerateIndexCorpus(db: DatabaseSync): IterableIterator<CorpusItem> {
   const stmt = db.prepare(
-    "SELECT seq, scope, key, value FROM kv WHERE scope = ? OR (scope >= ? AND scope < ?) ORDER BY seq",
+    "SELECT seq, scope, key, value FROM kv WHERE (+scope = ? OR (+scope >= ? AND +scope < ?)) AND seq > ? ORDER BY seq LIMIT ?",
   );
-  for (const r of stmt.iterate(KV.memories, OBS_SCOPE_LO, OBS_SCOPE_HI) as Iterable<{
-    seq: number;
-    scope: string;
-    key: string;
-    value: string;
-  }>) {
+  let after = 0;
+  for (;;) {
+    const page = stmt.all(KV.memories, OBS_SCOPE_LO, OBS_SCOPE_HI, after, CORPUS_PAGE) as KvRow[];
+    if (page.length === 0) return;
+    after = page[page.length - 1].seq;
+    yield* pageItems(page);
+  }
+}
+
+function* pageItems(page: KvRow[]): IterableIterator<CorpusItem> {
+  for (const r of page) {
     let row: unknown;
     try {
       row = JSON.parse(r.value);
