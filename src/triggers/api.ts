@@ -31,7 +31,7 @@ import { isHarnessMessage } from "../utils/harness-message.js";
 import { isBelowWordFloor } from "../functions/prompt-context.js";
 import { isUnstoredOnFullDisk, ObserveRetryQueue } from "../functions/observe-retry.js";
 import { ShedQueue } from "../functions/shed-queue.js";
-import { PROMPT_INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
+import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
 import {
   isGraphExtractionEnabled,
   isConsolidationEnabled,
@@ -1149,7 +1149,7 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/file-context", http_method: "POST" },
   });
 
-  const promptQueue = new ShedQueue(PROMPT_INJECT_TIMEOUT_MS);
+  const promptQueue = new ShedQueue(INJECT_TIMEOUT_MS);
   sdk.registerFunction("api::prompt-context",
     async (
       req: ApiRequest<{ sessionId: string; prompt: string; project?: string; reply?: string }>,

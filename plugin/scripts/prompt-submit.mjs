@@ -173,7 +173,7 @@ function hookCwd(data) {
 }
 //#endregion
 //#region src/hooks/_missed-injection.ts
-const PROMPT_INJECT_TIMEOUT_MS = 2500;
+const INJECT_TIMEOUT_MS = 2500;
 const MAX_BYTES = 256 * 1024;
 const KEEP_ENTRIES = 1e3;
 function missedInjectionsPath() {
@@ -340,7 +340,7 @@ async function injectContext(sessionId, project, prompt, transcriptPath) {
 				prompt,
 				...reply && { reply }
 			}),
-			signal: AbortSignal.timeout(PROMPT_INJECT_TIMEOUT_MS)
+			signal: AbortSignal.timeout(INJECT_TIMEOUT_MS)
 		});
 		if (!res.ok) {
 			recordMissedInjection("prompt-submit", `http_${res.status}`);

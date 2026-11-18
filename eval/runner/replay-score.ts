@@ -8,7 +8,7 @@ import {
   type TurnNeed,
 } from "./replay-answer-key.js";
 import { contentTokens, isTersePrompt } from "../../src/utils/terse-prompt.js";
-import { INJECT_TIMEOUT_MS, PROMPT_INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
+import { INJECT_TIMEOUT_MS } from "../../src/hooks/_missed-injection.js";
 import { MISS_LABELS, type MissLabel } from "./decision-attribution.js";
 import { EXTERNAL_SOURCES, type ExternalSource } from "./external-text.js";
 import { touchedFiles, type ReplaySession } from "./replay-transcript.js";
@@ -341,7 +341,7 @@ function summarizeSessions(scores: SessionScore[], meta: RunMeta) {
             n: ms.length,
             p50: percentile(ms, 0.5),
             p99: percentile(ms, 0.99),
-            overHookTimeout: ms.filter((m) => m > (kind === "prompt-context" ? PROMPT_INJECT_TIMEOUT_MS : INJECT_TIMEOUT_MS)).length,
+            overHookTimeout: ms.filter((m) => m > INJECT_TIMEOUT_MS).length,
           },
         ];
       }),

@@ -460,7 +460,7 @@ describe("summarizeReplay", () => {
       probe("session-start", 0, [
         item({ ref: "observation:a", files: ["src/cart.ts"], text: "x".repeat(100) }),
         item({ ref: "observation:n", text: "noise", project: "other" }),
-      ], { latencyMs: 2000 }),
+      ], { latencyMs: 3000 }),
       probe("prompt-context", 1, [], { latencyMs: 40 }),
     ]),
     scoreSession(miss, deriveAnswerKey(miss, [earlier, hit]), [probe("search", 1, [item({ ref: "observation:a", files: ["src/cart.ts"] })])]),
@@ -480,7 +480,7 @@ describe("summarizeReplay", () => {
   });
 
   it("reports latency percentiles against the hook timeout", () => {
-    expect(summary.criticalPath["session-start"]).toEqual({ n: 1, p50: 2000, p99: 2000, overHookTimeout: 1 });
+    expect(summary.criticalPath["session-start"]).toEqual({ n: 1, p50: 3000, p99: 3000, overHookTimeout: 1 });
     expect(summary.criticalPath["prompt-context"]).toMatchObject({ n: 1, p50: 40, overHookTimeout: 0 });
   });
 

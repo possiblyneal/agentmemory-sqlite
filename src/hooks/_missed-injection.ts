@@ -16,11 +16,9 @@ export interface MissedInjection {
 
 // How long a context-injecting hook waits for its Injection before it
 // records a Missed Injection and lets the prompt through.
-export const INJECT_TIMEOUT_MS = 1500;
-
-// prompt-submit waits longer: of a week's 143 prompt-submit timeouts at
-// 1500 ms, 85 finished within the next second (#397).
-export const PROMPT_INJECT_TIMEOUT_MS = 2500;
+// Raised from 1500 ms: in a week of timeouts at 1500 ms, 85 of 143 prompt-submit
+// and 15 of 48 session-start Injections finished within the next second (#397, #432).
+export const INJECT_TIMEOUT_MS = 2500;
 
 const MAX_BYTES = 256 * 1024;
 const KEEP_ENTRIES = 1000;
