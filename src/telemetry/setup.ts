@@ -75,6 +75,9 @@ interface Counters {
   // is the subset that returned no context (CONTEXT.md, Empty Injection).
   injections: Counter;
   emptyInjections: Counter;
+  // A prompt-submit turn under the word floor: Recall never searched it, so
+  // it is neither an Injection nor an Empty Injection.
+  belowFloorTurns: Counter;
 }
 
 interface Histograms {
@@ -125,6 +128,7 @@ const COUNTER_NAMES: Array<[keyof Counters, string]> = [
   ["nonlatestLeaked", "nonlatest_leaked_total"],
   ["injections", "injections_total"],
   ["emptyInjections", "empty_injections_total"],
+  ["belowFloorTurns", "below_floor_turns_total"],
 ];
 
 const HISTOGRAM_NAMES: Array<[keyof Histograms, string]> = [

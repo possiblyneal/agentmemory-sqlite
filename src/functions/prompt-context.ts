@@ -69,9 +69,13 @@ function wordCount(prompt: string): number {
   return prompt.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
+export function isBelowWordFloor(prompt: string, reply: string | undefined): boolean {
+  return wordCount(queryFor(prompt, reply)) < MIN_PROMPT_WORDS;
+}
+
 // A terse prompt ("go ahead", "2") answers the Agent's last reply, so the
 // reply's end is what it is about (#310, docs/benchmarks/2026-11-08-terse-prompt-query.md).
-function queryFor(prompt: string, reply: string | undefined): string {
+export function queryFor(prompt: string, reply: string | undefined): string {
   const trimmed = prompt.trim();
   const tail = reply?.trim().slice(-MAX_REPLY_QUERY_CHARS).trim();
   return tail && isTersePrompt(trimmed) ? `${trimmed}\n${tail}` : trimmed;
@@ -262,8 +266,8 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::prompt-context",
     async (data: { sessionId: string; prompt: string; project?: string; reply?: string }): Promise<PromptContextResult> => {
+      if (isBelowWordFloor(data.prompt, data.reply)) return EMPTY;
       const prompt = queryFor(data.prompt, data.reply);
-      if (wordCount(prompt) < MIN_PROMPT_WORDS) return EMPTY;
 
       const [search, seen, lessons] = await Promise.all([
         sdk
