@@ -19,7 +19,7 @@ import { logger } from "../logger.js";
 import { recordProjectActivity } from "../state/project-time.js";
 import { saveImageToDisk } from "../utils/image-store.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
-import { isSqliteFull, unstoredOnFullDisk } from "./observe-retry.js";
+import { retryableWriteCause, unstored, unstoredOnFullDisk } from "./observe-retry.js";
 import { markCaptureStored } from "../telemetry/capture.js";
 
 export function extractImage(d: unknown): string | undefined {
@@ -356,7 +356,7 @@ export function registerObserveFunction(
 ): void {
   // An image ref whose rollback or eviction release failed on a full disk;
   // retried on each later Observation until the disk has room. A restart
-  // forgets it, as it does the disk-full queue.
+  // forgets it, as it does the retry queue.
   const pendingRefReleases: string[] = [];
 
   sdk.registerFunction("mem::observe", 
@@ -558,12 +558,13 @@ export function registerObserveFunction(
               });
             });
           }
-          if (isSqliteFull(error)) throw unstoredOnFullDisk();
+          const cause = retryableWriteCause(error);
+          if (cause) throw unstored(cause);
           throw error;
         }
 
-        // Evicting only after the row is stored means a write that fails on a
-        // full disk, and each retry of it, costs the Session nothing.
+        // Evicting only after the row is stored means a write that fails and
+        // is retried, and each retry of it, costs the Session nothing.
         // The row is stored, so an eviction error must not fail the observe:
         // the hook would see a 500 and the Session's count would miss this row.
         const capEvicted =
