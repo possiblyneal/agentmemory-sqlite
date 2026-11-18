@@ -53,7 +53,7 @@ benchmarks. None was reproduced here.
 ## Ranked techniques
 
 Ordered by the expected cut in interventions per unit of work. Hot path means inside the
-prompt-submit hook's 1,500 ms budget.
+prompt-submit hook's 2,500 ms budget.
 
 1. **One result slot per Session, from a wider pool** (memanto k ablation, ai-memory one vote
    per Session). Fixes F1. Size S, no hot-path LLM. Shipped in #242 (`3974ad8`).

@@ -1,6 +1,6 @@
 # 2026-11-18 — prompt-submit Injection wait raised to 2500 ms (#397)
 
-**Commit:** live daemon on `bcfc8fa3` from 2026-11-15T21:57Z, `7a838812` from 2026-11-18T03:04Z; earlier days on the #371 deploy
+**Commit:** live daemon on `bcfc8fa3` from 2026-11-15T21:57Z, `7a838812` from 2026-11-18T03:04Z; earlier days on the #371 deploy; the 2500 ms wait ships in PR #431
 **Bench:** the Operator's live store, read-only: served is `mem:injections` rows with `source: "prompt-submit"`, missed is `~/.agentmemory/missed-injections.jsonl` lines with `hook: "prompt-submit"`
 **N:** 2,036 prompt-submit Injections, 2026-11-12T03:33Z to 2026-11-18T04:00Z
 **K:** an Injection is served or missed whole
@@ -15,7 +15,7 @@ At the 1500 ms wait, 145 of 2,036 prompt-submit Injections were missed over the 
 day. 116 of the 143 timeouts match a served `mem:injections` row within 2 s, the daemon
 finishing after the hook gave up; 85 of those 116 finished within 1 s of the deadline. The
 prompt-submit wait is raised to 2500 ms (`PROMPT_INJECT_TIMEOUT_MS`,
-`src/hooks/_missed-injection.ts`), which would have served about 85 of the 143. Session start
+`src/hooks/_missed-injection.ts`), which would have served at most about 85 of the 143: projected from the late rows, and an upper bound, since the `ShedQueue` now computes turns it used to shed and those delay the turns behind them. The check is the prompt-submit miss rate over the week after deploy against 7.1%. Session start
 keeps 1500 ms.
 
 ## Per day
@@ -49,3 +49,4 @@ Served counts include those late rows, so 7.1% is a lower bound on the miss rate
 The prompt-context `ShedQueue` (`src/triggers/api.ts`) sheds at the same deadline, so a burst
 queues up to 2500 ms before it sheds, and a slow turn delays the prompt up to 1 s longer before
 the Agent sees it. The daemon was finishing that work anyway; the extra wait is what it costs.
+Neither cost is measured: `eval:burst` was not rerun at 2500 ms.
