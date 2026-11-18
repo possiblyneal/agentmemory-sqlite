@@ -194,10 +194,13 @@ type KvRow = { seq: number; scope: string; key: string; value: string };
 // It reads in pages of `CORPUS_PAGE` rows keyed on `seq` and finishes each
 // `.all()` before yielding, so no statement is active while a consumer awaits:
 // the daily backup's VACUUM shares this connection and refuses to run while
-// any cursor is open.
+// any cursor is open. The unary `+` keeps the planner off kv_scope_seq: through
+// that index the observation-range leg cannot use `seq > ?`, so every page would
+// re-read and re-sort the whole corpus (quadratic). Walking the rowid from the
+// cursor reads each kv row once.
 export function* enumerateIndexCorpus(db: DatabaseSync): IterableIterator<CorpusItem> {
   const stmt = db.prepare(
-    "SELECT seq, scope, key, value FROM kv WHERE (scope = ? OR (scope >= ? AND scope < ?)) AND seq > ? ORDER BY seq LIMIT ?",
+    "SELECT seq, scope, key, value FROM kv WHERE (+scope = ? OR (+scope >= ? AND +scope < ?)) AND seq > ? ORDER BY seq LIMIT ?",
   );
   let after = 0;
   for (;;) {
