@@ -48,7 +48,7 @@ export interface PromptContextResult {
   context: string;
   tokens: number;
   injected: InjectedRef[];
-  gateRejected?: true;
+  gateRejected?: boolean;
 }
 
 const EMPTY: PromptContextResult = { context: "", tokens: 0, injected: [] };
