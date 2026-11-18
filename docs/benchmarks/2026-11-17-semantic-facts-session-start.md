@@ -54,7 +54,7 @@ npm run eval:compare -- <facts probe> <off probe>
 
 ## Notes
 
-- The 4 facts-only items (Sessions `5b2e2552` ×2 counting turns 1 and 5, `f3e72519`, `95e176be`) were
+- The 4 facts-only items (Session `5b2e2552` at turns 1 and 5, `f3e72519`, `95e176be`) were
   all delivered at session start, in Injections that carried 5 Semantic Facts; Summary,
   Insight and Lesson items were the same in both arms.
 - Two items in Session `d7c034c8` moved between surfaces: prompt submit delivered them with
