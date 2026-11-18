@@ -12,6 +12,7 @@ import {
   flushPendingFollowups,
 } from "../src/functions/smart-search.js";
 import type { HybridSearchResult } from "../src/types.js";
+import { KV } from "../src/state/schema.js";
 
 const SECRET = "recall-test-secret";
 const auth = { authorization: `Bearer ${SECRET}` };
@@ -67,6 +68,7 @@ function mockSdk() {
 }
 
 let sdk: ReturnType<typeof mockSdk>;
+let kv: ReturnType<typeof mockKV>;
 let nextContext = "";
 let searchHits: HybridSearchResult[] = [];
 
@@ -79,7 +81,7 @@ beforeEach(() => {
   initMetrics();
   resetFollowupStatsForTests();
   sdk = mockSdk();
-  const kv = mockKV();
+  kv = mockKV();
   registerApiTriggers(sdk as never, kv as never, SECRET);
   registerSmartSearchFunction(sdk as never, kv as never, async () => searchHits);
   sdk._fns.set("mem::lesson-recall", () => ({ success: true, lessons: [] }));
@@ -96,6 +98,7 @@ describe("/health recall counts", () => {
     expect(await recall()).toEqual({
       injections: 0,
       emptyInjections: 0,
+      belowFloorTurns: 0,
       smartSearches: 0,
       smartSearchFollowups: 0,
       nonlatestLeaked: 0,
@@ -123,6 +126,55 @@ describe("/health recall counts", () => {
     const r = await recall();
     expect(r.injections).toBe(3);
     expect(r.emptyInjections).toBe(2);
+  });
+
+  it("answers a harness turn with nothing and neither counts nor records it as an Injection", async () => {
+    let searched = 0;
+    sdk._fns.set("mem::prompt-context", () => {
+      searched++;
+      return { context: "" };
+    });
+    const res = await sdk._fns.get("api::prompt-context")!({
+      headers: auth,
+      body: { sessionId: "s1", prompt: "<task-notification>\n<task-id>a1</task-id>\n</task-notification>", project: "p" },
+    });
+
+    expect(res).toEqual({ status_code: 200, body: { context: "" } });
+    expect(searched).toBe(0);
+    expect(await recall()).toMatchObject({ injections: 0, emptyInjections: 0 });
+    expect(await kv.list(KV.injections)).toEqual([]);
+  });
+
+  it("counts a bare slash command and a terse prompt with no reply as below-floor turns, not Injections", async () => {
+    let searched = 0;
+    sdk._fns.set("mem::prompt-context", () => {
+      searched++;
+      return { context: "" };
+    });
+    const bare = await sdk._fns.get("api::prompt-context")!({
+      headers: auth,
+      body: { sessionId: "s1", prompt: "<command-message>ship</command-message>\n<command-name>/ship</command-name>", project: "p" },
+    });
+    const terse = await sdk._fns.get("api::prompt-context")!({
+      headers: auth,
+      body: { sessionId: "s1", prompt: "y", project: "p" },
+    });
+
+    expect(bare).toEqual({ status_code: 200, body: { context: "" } });
+    expect(terse).toEqual({ status_code: 200, body: { context: "" } });
+    expect(searched).toBe(0);
+    expect(await recall()).toMatchObject({ injections: 0, emptyInjections: 0, belowFloorTurns: 2 });
+    expect(await kv.list(KV.injections)).toEqual([]);
+  });
+
+  it("still counts a terse prompt whose reply clears the floor as an Injection", async () => {
+    nextContext = "";
+    await sdk._fns.get("api::prompt-context")!({
+      headers: auth,
+      body: { sessionId: "s1", prompt: "y", reply: "Should I rebase the branch onto main now?", project: "p" },
+    });
+
+    expect(await recall()).toMatchObject({ injections: 1, emptyInjections: 1, belowFloorTurns: 0 });
   });
 
   it("counts smart-searches, zero-overlap follow-ups and graph-leg omissions", async () => {

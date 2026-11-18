@@ -152,7 +152,7 @@ describe("REST Injection paths write a record", () => {
   it("records an Empty Injection with no identifiers", async () => {
     sdk.registerFunction("mem::prompt-context", async () => ({ context: "", tokens: 0, injected: [] }));
 
-    await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "fix it", project: "/p" } });
+    await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "fix the build", project: "/p" } });
     await flush();
 
     const [record] = await kv.list<InjectionRecord>(KV.injections);
@@ -165,7 +165,7 @@ describe("REST Injection paths write a record", () => {
       payloads.push(data);
       return { context: "", tokens: 0, injected: [] };
     });
-    const reply = `${"x".repeat(1500)}end`;
+    const reply = `${"word ".repeat(300)}end`;
 
     await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "yes", reply, extra: 1 } });
     const bad = await sdk.trigger("api::prompt-context", { body: { sessionId: "s1", prompt: "yes", reply: 7 } });

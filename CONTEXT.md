@@ -39,7 +39,8 @@ _Avoid_: event, log entry
 A user turn that Claude Code writes and the Operator does not: a background-task result or
 a message from another Session, delivered as one or more `<task-notification>`,
 `<teammate-message>`, `<cross-session-message>` or `<agent-message>` elements. It is never
-stored as an Observation, never searched on for an Injection, and dropped on import.
+stored as an Observation, never searched on, never counted or recorded as an Injection, and
+dropped on import.
 _Avoid_: notification (alone)
 
 **Memory**:
@@ -146,7 +147,9 @@ _Avoid_: hook failure, dropped context
 
 **Empty Injection**:
 An Injection the daemon answered with nothing to inject. The daemon was reachable; Recall
-found nothing that bore on the work.
+found nothing that bore on the work. A turn under the word floor (a bare slash command, a
+Terse prompt with no reply to search on) is not one: Recall never searched it, so it is counted
+apart as `/health` `recall.belowFloorTurns`.
 _Avoid_: miss, no-op
 
 **Injection Gate**:
@@ -167,9 +170,10 @@ _Avoid_: short prompt, acknowledgement
 **Injection Record**:
 The daemon's note of one answered Injection: the path that served it (session start, context,
 or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,
-Insights and Session Summaries it carried. An Empty Injection
-leaves a record with no identifiers; a Missed Injection leaves none, because the daemon never
-answered. Session start leaves none while context injection is off, because the hook discards
+Insights and Session Summaries it carried. An Empty Injection leaves a record with no
+identifiers. A below-floor turn and a Harness Message turn leave none, because the daemon
+answers them before Recall. A Missed Injection leaves none, because the daemon never answered.
+Session start leaves none while context injection is off, because the hook discards
 that reply. Kept for seven days.
 _Avoid_: injection log, context log
 

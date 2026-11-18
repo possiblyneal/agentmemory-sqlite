@@ -8,6 +8,8 @@ import { isAwaitingCompression } from "../../src/functions/compress-synthetic.js
 import type { CompressedObservation } from "../../src/types.js";
 import { deriveAnswerKey, keyedSubset } from "./replay-answer-key.js";
 import { isTersePrompt } from "../../src/utils/terse-prompt.js";
+import { isBelowWordFloor } from "../../src/functions/prompt-context.js";
+import { pairProbesWithRecords } from "./replay-pairing.js";
 import {
   scoreSession,
   summarizeReplay,
@@ -399,6 +401,7 @@ async function probeSession(
   queryArm: QueryArmOptions,
 ): Promise<Probe[]> {
   const probes: Probe[] = [];
+  const belowFloor = new Set<Probe>();
   const attempt = async (kind: ProbeKind, turn: number, run: () => Promise<Omit<Probe, "kind" | "turn">>) => {
     try {
       probes.push({ kind, turn, ...(await run()) });
@@ -429,6 +432,7 @@ async function probeSession(
       turn.turn,
       injection("prompt-context", { sessionId: session.id, prompt, project: session.project, ...reply }),
     );
+    if (isBelowWordFloor(prompt, reply.reply)) belowFloor.add(probes[probes.length - 1]);
     await attempt("search", turn.turn, async () => {
       const { body, ms } = await post<{ results?: SearchRow[] }>(baseUrl, "smart-search", {
         query: turn.text,
@@ -449,18 +453,8 @@ async function probeSession(
   const { body } = await get<{ injections?: InjectionRecordRow[] }>(baseUrl, `injections?sessionId=${encodeURIComponent(session.id)}`);
   const records = [...(body.injections ?? [])].sort((a, b) => a.at.localeCompare(b.at));
   const extra = await lessonsAndMemories(baseUrl);
-  // Records are paired with probes per source: a session-start record exists
-  // only when the daemon runs with injection on, so position across sources
-  // would shift every later probe onto the wrong record.
-  for (const [kind, source] of [["session-start", "session-start"], ["prompt-context", "prompt-submit"]] as const) {
-    const ofKind = probes.filter((p) => p.kind === kind && !p.failed);
-    const ofSource = records.filter((r) => r.source === source);
-    if (ofKind.length !== ofSource.length) {
-      console.warn(`  ${source} injection records (${ofSource.length}) do not match probes (${ofKind.length})`);
-    }
-    ofKind.forEach((probe, i) => {
-      probe.items = (ofSource[i]?.injected ?? []).map((ref) => itemFor(ref, resolver, extra));
-    });
+  for (const [probe, record] of pairProbesWithRecords(probes, records, belowFloor)) {
+    probe.items = (record?.injected ?? []).map((ref) => itemFor(ref, resolver, extra));
   }
   return probes;
 }
