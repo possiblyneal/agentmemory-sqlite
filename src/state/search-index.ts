@@ -399,7 +399,7 @@ export class SearchIndex {
   // prompt's common words ("the", "in", and every index term they prefix)
   // dominate it while adding almost no score. Keep the rarest terms, as
   // Lucene's MoreLikeThis does: a 4,000-char prompt took 1.7 s on a 54k-doc
-  // index against the prompt hook's 1.5 s budget. A term the index has never
+  // index against the prompt hook's then 1.5 s budget. A term the index has never
   // seen sorts last: it scores nothing exact, and ranking it rarest let a
   // prompt's hashes and typos crowd out every term that matches.
   private rarestIndexedTerms(terms: string[]): string[] {

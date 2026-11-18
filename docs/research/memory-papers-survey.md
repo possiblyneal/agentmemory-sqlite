@@ -35,7 +35,7 @@ evidence below comes from its abstract and method/results on arXiv unless the ro
 
 Status values: **in place** (shipped here), **tried** (scorecard or findings-log row),
 **in flight** (open issue), **untried**, **not pursued** (Goal or scope conflict, reason given).
-"Hot path" means inside prompt-submit's 500 ms `eval:gate` ceiling (1.5 s hook wait).
+"Hot path" means inside prompt-submit's 500 ms `eval:gate` ceiling (2.5 s hook wait).
 
 ### Supersession and update of stale facts
 
