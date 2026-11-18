@@ -170,9 +170,10 @@ _Avoid_: short prompt, acknowledgement
 **Injection Record**:
 The daemon's note of one answered Injection: the path that served it (session start, context,
 or prompt-submit), the Session, and the identifiers of the Observations, Memories, Lessons,
-Insights and Session Summaries it carried. An Empty Injection
-leaves a record with no identifiers; a below-floor turn and a Harness Message turn leave none; a Missed Injection leaves none, because the daemon never
-answered. Session start leaves none while context injection is off, because the hook discards
+Insights and Session Summaries it carried. An Empty Injection leaves a record with no
+identifiers. A below-floor turn and a Harness Message turn leave none, because the daemon
+answers them before Recall. A Missed Injection leaves none, because the daemon never answered.
+Session start leaves none while context injection is off, because the hook discards
 that reply. Kept for seven days.
 _Avoid_: injection log, context log
 

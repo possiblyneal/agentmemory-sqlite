@@ -403,6 +403,7 @@ eval/
 │   ├── compare-core.ts            decision pairing, exact McNemar, failedSummarizeCalls refusal
 │   ├── replay-checkpoints.ts      save-pass manifest, --resume checks, checkpoint write
 │   ├── replay-selection.ts        scored-Session fingerprint and the cross-corpus comparison warning
+│   ├── replay-pairing.ts          probes → their Injection Records, per source, skipping below-floor turns
 │   ├── replay-hooks.ts            transcript → the /observe payloads the hooks would have sent and Stop boundaries (--llm, --llm-summary)
 │   ├── replay-derived.ts          --derived: wait for the stop graph extraction, then one consolidation pass, per Session
 │   ├── graph-wait.ts              GRAPH_EXTRACTION_ENABLED=true adapters: wait for Summaries and graph extraction, then rebuild the snapshot

@@ -266,8 +266,8 @@ export function registerPromptContextFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction(
     "mem::prompt-context",
     async (data: { sessionId: string; prompt: string; project?: string; reply?: string }): Promise<PromptContextResult> => {
-      if (isBelowWordFloor(data.prompt, data.reply)) return EMPTY;
       const prompt = queryFor(data.prompt, data.reply);
+      if (wordCount(prompt) < MIN_PROMPT_WORDS) return EMPTY;
 
       const [search, seen, lessons] = await Promise.all([
         sdk
