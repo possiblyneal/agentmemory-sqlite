@@ -386,10 +386,13 @@ Memories, not Lessons.
 LLM detection and doctor share `isPlaceholderKey()` (`src/utils/placeholder-key.ts`); a
 placeholder cannot select a provider. `OPENAI_API_KEY_FOR_LLM=false` excludes the OpenAI
 key from LLM detection, and doctor accepts `AGENTMEMORY_ALLOW_AGENT_SDK=true` as a fallback.
-Doctor reports without prompting when either terminal is not a TTY or `CI` is set, unless
-`--all` explicitly applies fixes. A fallback chain exposes `describeImage` only when a
-provider supports it, trying capable providers in order. Embedding dimension lookup ignores
-an OpenRouter `:variant` suffix; an explicit dimension override still wins.
+Doctor checks provider readiness against the file overlaid by the process environment; its
+missing-file and placeholder-file diagnostics remain separate. Doctor reports without prompting
+when either terminal is not a TTY or `CI` is set; `--all` applies safe fixes but skips editor
+fixes. A noop primary stays noop; other fallback chains skip placeholder credentials and expose
+`describeImage` only when a provider supports it, trying capable providers in order. Scheduled
+consolidation ignores placeholder keys but retains its explicit and legacy enablement rules.
+OpenRouter embedding dimension lookup ignores a `:variant` suffix; an explicit override still wins.
 
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default

@@ -32,6 +32,7 @@ function stubEffects(overrides: Partial<DoctorEffects> = {}): DoctorEffects {
   return {
     envFileExists: () => true,
     readEnvFile: () => ({ ANTHROPIC_API_KEY: "sk-ant-real-key-value" }),
+    readProcessEnv: () => ({}),
     pidfileExists: () => false,
     pidfilePidIsAlive: () => null,
     viewerReachable: async () => true,
@@ -201,6 +202,44 @@ describe("realProviderKeys / placeholderProviderKeys", () => {
 });
 
 describe("doctor agrees with the daemon on the LLM provider", () => {
+  async function providerStatus(file: Record<string, string>, processEnv: Record<string, string>, exists = true) {
+    const check = buildDiagnostics(stubEffects({
+      envFileExists: () => exists,
+      readEnvFile: () => file,
+      readProcessEnv: () => processEnv,
+    })).find((d) => d.id === "no-llm-provider-key")!;
+    return check.check(stubCtx());
+  }
+
+  it("recognizes process-only providers and agent-sdk when the file is missing", async () => {
+    expect((await providerStatus({}, { ANTHROPIC_API_KEY: "sk-ant-test-value" }, false)).ok).toBe(true);
+    expect((await providerStatus({}, { AGENTMEMORY_ALLOW_AGENT_SDK: "true" }, false)).ok).toBe(true);
+    expect((await providerStatus({}, {}, false)).ok).toBe(false);
+  });
+
+  it("uses process values over file values for keys and provider controls", async () => {
+    expect((await providerStatus({ ANTHROPIC_API_KEY: "your-key-here" }, { ANTHROPIC_API_KEY: "sk-ant-test-value" })).ok).toBe(true);
+    expect((await providerStatus({ ANTHROPIC_API_KEY: "sk-ant-test-value" }, { ANTHROPIC_API_KEY: "" })).ok).toBe(false);
+    expect((await providerStatus({ OPENAI_API_KEY: "sk-test-value", OPENAI_API_KEY_FOR_LLM: "true" }, { OPENAI_API_KEY_FOR_LLM: "false" })).ok).toBe(false);
+    expect((await providerStatus({ AGENTMEMORY_ALLOW_AGENT_SDK: "true" }, { AGENTMEMORY_ALLOW_AGENT_SDK: "false" })).ok).toBe(false);
+  });
+
+  it("marks only editor fixes manual while keeping other fixes automatic", () => {
+    const diagnostics = buildDiagnostics(stubEffects());
+    expect(diagnostics.filter((d) => d.manualOnly).map((d) => d.id)).toEqual([
+      "no-llm-provider-key", "env-placeholder-keys",
+    ]);
+  });
+
+  it("opens the context's env path when fixing provider readiness", async () => {
+    let opened = "";
+    const check = buildDiagnostics(stubEffects({
+      openEditor: async (path) => { opened = path; return { ok: true }; },
+    })).find((d) => d.id === "no-llm-provider-key")!;
+    await check.fix(stubCtx({ envPath: "/custom/home/.agentmemory/.env" }));
+    expect(opened).toBe("/custom/home/.agentmemory/.env");
+  });
+
   it("ignores an OpenAI key the daemon keeps off the LLM", () => {
     expect(realProviderKeys({ OPENAI_API_KEY: "sk-real-key-value", OPENAI_API_KEY_FOR_LLM: "false" })).toEqual([]);
   });

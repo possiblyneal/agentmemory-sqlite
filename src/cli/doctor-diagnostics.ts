@@ -81,7 +81,7 @@ const PROVIDER_KEY_NAMES = [
 ] as const;
 
 /** Returns the list of provider keys the daemon would use (non-placeholder). */
-export function realProviderKeys(env: Record<string, string>): string[] {
+export function realProviderKeys(env: Record<string, string | undefined>): string[] {
   return PROVIDER_KEY_NAMES.filter((k) => {
     const v = (env[k] ?? "").trim();
     if (!v || isPlaceholderKey(v)) return false;
@@ -109,6 +109,8 @@ export type DoctorEffects = {
   envFileExists: () => boolean;
   /** Read ~/.agentmemory/.env and return parsed key=value pairs. */
   readEnvFile: () => Record<string, string>;
+  /** Read the process environment, which overrides file values. */
+  readProcessEnv: () => Record<string, string | undefined>;
   /** Is the daemon PID in the pidfile still alive? */
   pidfilePidIsAlive: () => boolean | null;
   /** Does the pidfile exist on disk? */
@@ -134,8 +136,8 @@ export function buildDiagnostics(effects: DoctorEffects): Diagnostic[] {
       message: "~/.agentmemory/.env is missing.",
       fixPreview: "Copy .env.example into ~/.agentmemory/.env (your keys file).",
       moreInfo:
-        "agentmemory reads provider API keys (Anthropic, OpenAI, Gemini, …) from ~/.agentmemory/.env. " +
-        "Without this file the daemon falls back to BM25-only search and no LLM-backed enrichment runs.",
+        "agentmemory reads provider API keys from ~/.agentmemory/.env and the process environment. " +
+        "Process values take precedence, so a provider can still be configured without the file.",
       check: async () => ({
         ok: effects.envFileExists(),
         detail: effects.envFileExists() ? undefined : "no env file",
@@ -144,17 +146,15 @@ export function buildDiagnostics(effects: DoctorEffects): Diagnostic[] {
     },
     {
       id: "no-llm-provider-key",
-      message: "No LLM provider API key found in ~/.agentmemory/.env.",
+      manualOnly: true,
+      message: "No LLM provider API key or agent-sdk fallback configured.",
       fixPreview: "Open ~/.agentmemory/.env in $EDITOR and paste your key, then re-check.",
       moreInfo:
         "Set at least one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, " +
         "OPENROUTER_API_KEY, MINIMAX_API_KEY. The daemon picks the first that resolves " +
         "to a real (non-placeholder) value at startup.",
       check: async () => {
-        if (!effects.envFileExists()) {
-          return { ok: false, detail: "env file missing (run env-missing fix first)" };
-        }
-        const env = effects.readEnvFile();
+        const env = { ...effects.readEnvFile(), ...effects.readProcessEnv() };
         const real = realProviderKeys(env);
         if (real.length === 0 && env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true") {
           return { ok: true, detail: "agent-sdk fallback (AGENTMEMORY_ALLOW_AGENT_SDK)" };
@@ -209,11 +209,12 @@ export function buildDiagnostics(effects: DoctorEffects): Diagnostic[] {
     },
     {
       id: "env-placeholder-keys",
+      manualOnly: true,
       message: "~/.agentmemory/.env contains placeholder/empty API keys.",
       fixPreview: "Open ~/.agentmemory/.env in $EDITOR to paste real values.",
       moreInfo:
         "Lines like ANTHROPIC_API_KEY=sk-ant-... or =your-key-here are treated as " +
-        "absent. The daemon will fall back to BM25-only search. Replace placeholders " +
+        "absent unless overridden by the process environment. Replace placeholders " +
         "with real keys or comment the line out.",
       check: async () => {
         if (!effects.envFileExists()) {

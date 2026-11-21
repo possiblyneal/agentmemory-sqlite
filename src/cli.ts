@@ -673,6 +673,7 @@ function buildDoctorEffects(): DoctorEffects {
         return {};
       }
     },
+    readProcessEnv: () => process.env,
     pidfileExists: () => existsSync(workerPidfilePath()),
     pidfilePidIsAlive: () => {
       const pid = readWorkerPidfile();
@@ -982,6 +983,11 @@ async function runDoctor() {
 
     if (d.manualOnly) {
       p.log.info(`(manual fix only — see "${d.id}" docs)`);
+    }
+
+    if (applyAll && d.manualOnly) {
+      skipped++;
+      continue;
     }
 
     if (applyAll) {

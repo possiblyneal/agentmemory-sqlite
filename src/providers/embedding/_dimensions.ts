@@ -23,7 +23,7 @@ const MODEL_DIMENSIONS: Record<string, number> = {
 };
 
 function lookupModelDimensions(model: string): number | undefined {
-  const id = model.toLowerCase().replace(/:[^/:]+$/, "");
+  const id = model.toLowerCase();
   if (id in MODEL_DIMENSIONS) return MODEL_DIMENSIONS[id];
   const slash = id.indexOf("/");
   if (slash === -1) return undefined;

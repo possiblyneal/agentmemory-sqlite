@@ -3,6 +3,8 @@ const PLACEHOLDER_VALUES = new Set([
   "your-key-here",
   "sk-ant-...",
   "sk-...",
+  "sk-or-...",
+  "...",
   "changeme",
   "todo",
   "xxx",
