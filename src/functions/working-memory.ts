@@ -2,6 +2,7 @@ import type { ISdk } from "../engine/types.js";
 import type { Memory } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
+import { indexNewMemoryVersion } from "./search.js";
 import { recordAudit } from "./audit.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { logger } from "../logger.js";
@@ -231,6 +232,7 @@ export function registerWorkingMemoryFunctions(
           isLatest: true,
         };
         await kv.set(KV.memories, archivalMemory.id, archivalMemory);
+        await indexNewMemoryVersion(archivalMemory);
         await kv.delete(CORE_SCOPE, entry.id);
 
         totalTokens -= tokens;

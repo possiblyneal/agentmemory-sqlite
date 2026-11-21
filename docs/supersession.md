@@ -93,7 +93,10 @@ when the newest claim was already given, an older one is not admitted in its pla
 removes the row from BM25 and the vector index. `mem::evolve` and the evolve branch of
 `mem::consolidate` add the new version through `indexNewMemoryVersion()`, so a replaced Memory is
 neither returned nor the only hit (T5, T6). A Memory `mem::consolidate` creates fresh (no
-predecessor) is still not added to the live index until the next boot. A daemon restart rebuilds
+predecessor), one `mem::auto-page` archives and a latest one mesh receive or sync accepts enter the
+live index the same way; `mem::heal` and a non-latest mesh row leave it through
+`deindexSupersededMemory()` (`test/memory-write-indexing.test.ts`, unscoped smart-search).
+Fresh consolidation and auto-page do not supersede a Memory. A daemon restart rebuilds
 BM25 from content and skips non-latest Memories. `mem::evict` deletes a non-latest Memory after
 `nonLatestMemoryMaxDays`; `AGENTMEMORY_NONLATEST_FILTER` stays off by default.
 

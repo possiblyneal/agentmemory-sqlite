@@ -237,6 +237,7 @@ export function registerConsolidateFunction(
                 ...(scopedProject !== undefined && { project: scopedProject }),
               };
               await kv.set(KV.memories, memory.id, memory);
+              await indexNewMemoryVersion(memory);
               existingMemories.push(memory);
               writtenTitles.add(memory.title.toLowerCase());
               await recordAudit(kv, "remember", "mem::consolidate", [memory.id], {
