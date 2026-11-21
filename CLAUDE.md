@@ -239,13 +239,21 @@ Concurrent deletion locking is outside this contract.
 
 ### Memory writes and provider recovery
 `MEMORY_WRITE_LOCK` (`src/state/memory-utils.ts`) serializes Memory saves, deletes,
-relations, evolution, and auto-forget demotion. Consolidation checks the predecessor again
-under the lock after the provider call. Release the lock before graph eviction. Import and
-snapshot restore keep their own replacement semantics. Eviction decrements image references
-after deleting the row and logs a failed release without skipping bookkeeping.
+relations, evolution, and auto-forget demotion. Before demoting, auto-forget rechecks both
+live rows under the lock and reports only completed demotions; dry runs report snapshot matches.
+Consolidation checks the predecessor again under the lock after the provider call. Release the
+lock before graph eviction. Import and snapshot restore keep their own replacement semantics.
+Eviction decrements image references after deleting the row and logs a failed release without
+skipping bookkeeping.
 `ResilientProvider` admits one half-open probe per operation after acquiring a provider slot.
 The reservation lasts until the call settles; busy and content-filter responses release it,
 and probe generations discard stale completions. An open circuit rejects before waiting for a slot.
+
+### Replace import
+`mem::import` validates section shapes, size limits and keyed fields used by import indexing
+before any store mutation. Rows without string keys are dropped and counted in `invalid`, so
+legacy keyless Session stubs do not prevent restoring the rest. Access logs and legacy Memory
+session IDs retain their normal normalization. This preflight does not make replacement transactional.
 
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap

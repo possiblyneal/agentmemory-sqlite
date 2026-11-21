@@ -103,6 +103,113 @@ function nonEmpty<T>(rows: T[] | undefined): T[] | undefined {
   return rows && rows.length > 0 ? rows : undefined;
 }
 
+const MAX_ACCESS_LOGS = 50_000;
+
+const KEYED_SECTIONS = [
+  ["sessions", "id"],
+  ["memories", "id"],
+  ["summaries", "sessionId"],
+  ["graphNodes", "id"],
+  ["graphEdges", "id"],
+  ["semanticMemories", "id"],
+  ["proceduralMemories", "id"],
+  ["profiles", "project"],
+  ["signals", "id"],
+  ["facets", "id"],
+  ["lessons", "id"],
+  ["insights", "id"],
+] as const;
+
+function isKeyedRow(row: unknown, key: string): boolean {
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    typeof (row as Record<string, unknown>)[key] === "string"
+  );
+}
+
+// A replace import deletes every store before it writes, so a malformed
+// section must fail first, leaving the store untouched.
+function invalidImportSection(importData: ExportData): string | null {
+  for (const [section] of KEYED_SECTIONS) {
+    const rows: unknown = importData[section];
+    if (rows != null && !Array.isArray(rows)) return `${section} must be an array`;
+  }
+  const accessLogs: unknown = importData.accessLogs;
+  if (accessLogs != null && !Array.isArray(accessLogs)) return "accessLogs must be an array";
+  if (Array.isArray(accessLogs) && accessLogs.length > MAX_ACCESS_LOGS) {
+    return `Too many access logs (max ${MAX_ACCESS_LOGS})`;
+  }
+  return null;
+}
+
+// A row without its key cannot be written (SQLite refuses an undefined key),
+// so it is dropped rather than failing the import part way through.
+function dropUnkeyedRows(importData: ExportData): number {
+  let dropped = 0;
+  const keep = <T>(rows: T[], key: string): T[] => {
+    const kept = rows.filter((row) => isKeyedRow(row, key));
+    dropped += rows.length - kept.length;
+    return kept;
+  };
+  const sections = importData as unknown as Record<string, unknown[] | undefined>;
+  for (const [section, key] of KEYED_SECTIONS) {
+    const rows = sections[section];
+    if (rows) sections[section] = keep(rows, key);
+  }
+  for (const [sessionId, rows] of Object.entries(importData.observations)) {
+    importData.observations[sessionId] = keep(rows, "id");
+  }
+  if (importData.accessLogs) {
+    const kept = importData.accessLogs.filter((row) => typeof row === "object" && row !== null);
+    dropped += importData.accessLogs.length - kept.length;
+    importData.accessLogs = kept;
+  }
+  return dropped;
+}
+
+function invalidImportRow(data: ExportData): string | null {
+  const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
+  const optionalString = (value: unknown) => value == null || typeof value === "string";
+  const checkIndexFields = (row: Record<string, unknown>, fields: string[]): boolean =>
+    fields.every((field) => strings(row[field]));
+
+  for (const memory of data.memories) {
+    if (!isKeyedRow(memory, "id")) continue;
+    if (Array.isArray(memory.sessionIds) && !strings(memory.sessionIds)) return "memories.sessionIds must contain strings";
+    if (memory.isLatest === false || !memory.title || !memory.content) continue;
+    if (typeof memory.title !== "string" || typeof memory.content !== "string" ||
+        !optionalString(memory.createdAt) || !checkIndexFields(memory as unknown as Record<string, unknown>, ["concepts", "files"])) {
+      return "memories contain invalid indexing fields";
+    }
+  }
+  for (const rows of Object.values(data.observations)) {
+    for (const obs of rows) {
+      if (!isKeyedRow(obs, "id") || !obs.title || !obs.narrative) continue;
+      if (typeof obs.title !== "string" || typeof obs.narrative !== "string" ||
+          !optionalString(obs.sessionId) || !optionalString(obs.timestamp) ||
+          !optionalString(obs.subtitle) || !optionalString(obs.userPrompt) ||
+          !checkIndexFields(obs as unknown as Record<string, unknown>, ["facts", "concepts", "files"])) {
+        return "observations contain invalid indexing fields";
+      }
+    }
+  }
+  for (const node of data.graphNodes ?? []) {
+    if (!isKeyedRow(node, "id")) continue;
+    if (!optionalString(node.name) || (node.sourceObservationIds != null && !strings(node.sourceObservationIds))) {
+      return "graphNodes contain invalid indexing fields";
+    }
+  }
+  for (const edge of data.graphEdges ?? []) {
+    if (!isKeyedRow(edge, "id")) continue;
+    if (!optionalString(edge.sourceNodeId) || !optionalString(edge.targetNodeId) ||
+        (edge.sourceObservationIds != null && !strings(edge.sourceObservationIds))) {
+      return "graphEdges contain invalid indexing fields";
+    }
+  }
+  return null;
+}
+
 function oversizedExport(bytes: number): OversizedPayload {
   return {
     success: false,
@@ -235,7 +342,6 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
       const MAX_SUMMARIES = 10_000;
       const MAX_OBS_PER_SESSION = 5_000;
       const MAX_TOTAL_OBSERVATIONS = 500_000;
-      const MAX_ACCESS_LOGS = 50_000;
 
       if (!Array.isArray(importData.sessions)) {
         return { success: false, error: "sessions must be an array" };
@@ -300,6 +406,11 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           error: `Too many total observations (max ${MAX_TOTAL_OBSERVATIONS})`,
         };
       }
+      const invalidSection = invalidImportSection(importData);
+      if (invalidSection) return { success: false, error: invalidSection };
+      const invalidRow = invalidImportRow(importData);
+      if (invalidRow) return { success: false, error: invalidRow };
+      const invalid = dropUnkeyedRows(importData);
 
       const stats = {
         sessions: 0,
@@ -307,6 +418,7 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         memories: 0,
         summaries: 0,
         skipped: 0,
+        invalid,
       };
 
       if (strategy === "replace") {
@@ -553,15 +665,6 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         });
       }
       if (importData.accessLogs) {
-        if (!Array.isArray(importData.accessLogs)) {
-          return { success: false, error: "accessLogs must be an array" };
-        }
-        if (importData.accessLogs.length > MAX_ACCESS_LOGS) {
-          return {
-            success: false,
-            error: `Too many access logs (max ${MAX_ACCESS_LOGS})`,
-          };
-        }
         const memoryIds = new Set<string>(
           importData.memories.map((m) => m.id),
         );

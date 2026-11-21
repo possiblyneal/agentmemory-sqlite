@@ -133,6 +133,31 @@ describe("Auto-Forget Function", () => {
     expect(older!.isLatest).toBe(false);
   });
 
+  it.each(["deleted", "demoted", "edited", "retagged"])("keeps the older Memory when the newer one was %s after listing", async (change) => {
+    const older = makeMemory({ id: "mem_older", createdAt: "2026-01-01T00:00:00Z" });
+    const newer = makeMemory({ id: "mem_newer", createdAt: "2026-02-01T00:00:00Z" });
+    await kv.set("mem:memories", older.id, older);
+    await kv.set("mem:memories", newer.id, newer);
+    const list = kv.list;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      const snapshot = await list<T>(scope);
+      if (scope === "mem:memories") {
+        if (change === "deleted") await kv.delete(scope, newer.id);
+        else await kv.set(scope, newer.id, {
+          ...newer,
+          ...(change === "demoted" ? { isLatest: false }
+            : change === "edited" ? { content: "Deploy the unrelated service on Friday" }
+            : { concepts: ["unrelated"] }),
+        });
+      }
+      return snapshot;
+    };
+
+    expect(await sdk.trigger("mem::auto-forget", {})).toMatchObject({ contradictions: [] });
+    expect(await kv.get("mem:memories", older.id)).toMatchObject({ isLatest: true });
+    expect(await kv.list("mem:audit")).toEqual([]);
+  });
+
   it("removes the older contradicted memory from the live index", async () => {
     getSearchIndex().clear();
     const content = "Use React hooks for state management in all components";

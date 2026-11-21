@@ -19,6 +19,22 @@ function sameSupersessionScope(a: Memory, b: Memory): boolean {
     a.agentId === b.agentId;
 }
 
+function contradictionTokens(content: string): Set<string> {
+  return new Set(content.toLowerCase().split(/\s+/).filter((word) => word.length > 2));
+}
+
+function contradictionSimilarity(a: Memory, b: Memory, setA: Set<string>, setB: Set<string>): number {
+  if (!setA.size || !setB.size) return 0;
+  let intersection = 0;
+  for (const word of setA) {
+    if (setB.has(word)) intersection++;
+  }
+  const similarity = intersection / (setA.size + setB.size - intersection);
+  // Daily reports for different dates are not contradictions, even if their text nearly matches.
+  return similarity > CONTRADICTION_THRESHOLD && sameSupersessionScope(a, b) &&
+    !refersToDifferentDates(a.content, b.content) ? similarity : 0;
+}
+
 interface AutoForgetResult {
   ttlExpired: string[];
   contradictions: Array<{
@@ -83,19 +99,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
         )
         .slice(0, 1000);
 
-      const tokenCache = new Map<string, Set<string>>();
-      for (const mem of latestMemories) {
-        tokenCache.set(
-          mem.id,
-          new Set(
-            mem.content
-              .toLowerCase()
-              .split(/\s+/)
-              .filter((t) => t.length > 2),
-          ),
-        );
-      }
-
+      const tokenCache = new Map(latestMemories.map((mem) => [mem.id, contradictionTokens(mem.content)]));
       const memById = new Map(latestMemories.map((m) => [m.id, m]));
       const conceptIndex = new Map<string, string[]>();
       for (const mem of latestMemories) {
@@ -118,57 +122,38 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             if (compared.has(key)) continue;
             compared.add(key);
 
-            const setA = tokenCache.get(memIds[i])!;
-            const setB = tokenCache.get(memIds[j])!;
-            let intersection = 0;
-            if (setA.size === 0 && setB.size === 0) continue;
-            if (setA.size === 0 || setB.size === 0) continue;
-            for (const word of setA) {
-              if (setB.has(word)) intersection++;
+            const memA = memById.get(memIds[i])!;
+            const memB = memById.get(memIds[j])!;
+            if (memA.id === memB.id) continue;
+            const similarity = contradictionSimilarity(memA, memB, tokenCache.get(memA.id)!, tokenCache.get(memB.id)!);
+            if (!similarity) continue;
+            if (dryRun) {
+              result.contradictions.push({ memoryA: memA.id, memoryB: memB.id, similarity });
+              continue;
             }
-            const sim =
-              intersection / (setA.size + setB.size - intersection);
 
-            if (sim > CONTRADICTION_THRESHOLD) {
-              const memA = memById.get(memIds[i])!;
-              const memB = memById.get(memIds[j])!;
-              if (!sameSupersessionScope(memA, memB)) continue;
-              // Two daily reports of two different days are not a
-              // contradiction. Without this, auto-forget silently re-demotes
-              // exactly the rows a lineage repair just restored - measured
-              // 2026-08-10, one hour after the step 5 repair - and unlike
-              // remember it records NO supersedes edge, so a lineage census
-              // cannot even see what it did.
-              if (refersToDifferentDates(memA.content, memB.content)) {
-                continue;
-              }
-              result.contradictions.push({
-                memoryA: memA.id,
-                memoryB: memB.id,
-                similarity: sim,
-              });
-
-              if (!dryRun) {
-                const older =
-                  new Date(memA.createdAt).getTime() <
-                    new Date(memB.createdAt).getTime()
-                    ? memA
-                    : memB;
-                await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
-                  const current = await kv.get<Memory>(KV.memories, older.id);
-                  if (!current) return;
-                  current.isLatest = false;
-                  await kv.set(KV.memories, current.id, current);
-                  deindexSupersededMemory(current.id);
-                });
-                await recordAudit(kv, "forget", "mem::auto-forget", [older.id], {
-                  resource: "memory",
-                  reason: "auto-forget contradiction",
-                  olderId: older.id,
-                  similarity: sim,
-                });
-              }
-            }
+            const demotion = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+              const [a, b] = await Promise.all([
+                kv.get<Memory>(KV.memories, memA.id),
+                kv.get<Memory>(KV.memories, memB.id),
+              ]);
+              if (!a || !b || a.isLatest === false || b.isLatest === false) return;
+              const conceptsB = new Set(b.concepts?.map((concept) => concept.toLowerCase()));
+              if (!a.concepts?.some((concept) => conceptsB.has(concept.toLowerCase()))) return;
+              const similarity = contradictionSimilarity(a, b, contradictionTokens(a.content), contradictionTokens(b.content));
+              if (!similarity) return;
+              const older = new Date(a.createdAt).getTime() < new Date(b.createdAt).getTime() ? a : b;
+              await kv.set(KV.memories, older.id, { ...older, isLatest: false });
+              deindexSupersededMemory(older.id);
+              return { olderId: older.id, similarity };
+            });
+            if (!demotion) continue;
+            result.contradictions.push({ memoryA: memA.id, memoryB: memB.id, similarity: demotion.similarity });
+            await recordAudit(kv, "forget", "mem::auto-forget", [demotion.olderId], {
+              resource: "memory",
+              reason: "auto-forget contradiction",
+              ...demotion,
+            });
           }
         }
       }

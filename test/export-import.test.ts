@@ -412,4 +412,85 @@ describe("Export/Import Functions", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("Unsupported export version");
   });
+
+  describe("replace leaves the store untouched when the file is invalid (#436)", () => {
+    const base = (): ExportData => ({
+      version: VERSION,
+      exportedAt: "2026-03-01T00:00:00Z",
+      sessions: [],
+      observations: {},
+      memories: [],
+      summaries: [],
+    });
+
+    it.each([
+      ["accessLogs is not an array", { accessLogs: {} }],
+      ["lessons is not an array", { lessons: {} }],
+      ["insights is not an array", { insights: "x" }],
+      ["accessLogs exceeds its limit", { accessLogs: Array(50_001).fill({}) }],
+      ["memory content is not text", { memories: [{ ...testMemory, content: 42 }] }],
+      ["memory concepts contain a non-string", { memories: [{ ...testMemory, concepts: [null] }] }],
+      ["memory sessionIds contain a non-string", { memories: [{ ...testMemory, sessionIds: [3] }] }],
+      ["observation facts are not an array", { observations: { ses_2: [{ ...testObs, facts: {} }] } }],
+      ["observation narrative is not text", { observations: { ses_2: [{ ...testObs, narrative: 42 }] } }],
+      ["graph node provenance is malformed", { graphNodes: [{ id: "node", name: "Node", sourceObservationIds: [3] }] }],
+      ["graph edge endpoint is malformed", { graphEdges: [{ id: "edge", sourceNodeId: {}, targetNodeId: "node" }] }],
+    ])("%s", async (_label, patch) => {
+      const result = (await sdk.trigger("mem::import", {
+        exportData: { ...base(), ...patch },
+        strategy: "replace",
+      })) as { success: boolean; error?: string };
+
+      expect(result.success).toBe(false);
+      expect(await kv.get("mem:sessions", "ses_1")).toEqual(testSession);
+      expect(await kv.get("mem:obs:ses_1", "obs_1")).not.toBeNull();
+      expect(await kv.get("mem:memories", "mem_1")).not.toBeNull();
+      expect(await kv.get("mem:summaries", "ses_1")).toEqual(testSummary);
+    });
+
+    it.each(["merge", "skip"] as const)("validates before writes with %s", async (strategy) => {
+      const result = await sdk.trigger("mem::import", {
+        exportData: { ...base(), sessions: [{ ...testSession, id: "new" }], memories: [{ ...testMemory, files: 5 }] },
+        strategy,
+      });
+      expect(result).toMatchObject({ success: false });
+      expect(await kv.get("mem:sessions", "new")).toBeNull();
+      expect(await kv.get("mem:memories", "mem_1")).toEqual(testMemory);
+    });
+
+    it.each(["merge", "skip", "replace"] as const)("keeps legacy normalization with %s", async (strategy) => {
+      const result = await sdk.trigger("mem::import", {
+        exportData: {
+          ...base(),
+          sessions: [{ status: "completed" }],
+          memories: [{ ...testMemory, id: "legacy", sessionIds: "old" }],
+          accessLogs: [{ memoryId: "legacy", count: "old", recent: [1, "old"] }],
+        },
+        strategy,
+      });
+      expect(result).toMatchObject({ success: true, invalid: 1 });
+      expect(await kv.get("mem:memories", "legacy")).toMatchObject({ sessionIds: [] });
+      expect(await kv.get("mem:access", "legacy")).toMatchObject({ count: 1, recent: [1] });
+    });
+
+    it("drops rows without their key and restores the rest", async () => {
+      const keyless = { endedAt: "2026-09-22T01:02:26.889Z", status: "completed" };
+      const result = (await sdk.trigger("mem::import", {
+        exportData: {
+          ...base(),
+          sessions: [keyless, { ...testSession, id: "ses_2" }],
+          observations: { ses_2: ["oops", { ...testObs, id: "obs_2", sessionId: "ses_2" }] },
+          memories: [null, { ...testMemory, id: "mem_2" }],
+          lessons: [{ content: "no id" }],
+        },
+        strategy: "replace",
+      })) as { success: boolean; invalid: number; sessions: number };
+
+      expect(result).toMatchObject({ success: true, invalid: 4, sessions: 1 });
+      expect(await kv.get("mem:sessions", "ses_1")).toBeNull();
+      expect(await kv.get("mem:sessions", "ses_2")).not.toBeNull();
+      expect(await kv.get("mem:obs:ses_2", "obs_2")).not.toBeNull();
+      expect(await kv.get("mem:memories", "mem_2")).not.toBeNull();
+    });
+  });
 });
