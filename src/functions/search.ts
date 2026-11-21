@@ -559,18 +559,8 @@ export function createSessionLoader(
   }
 }
 
-// A Global Memory matches every project, ahead of its session's project.
-// Otherwise a result's project is its session's. Results with no session entry fall
-// back to KV.memories, then to the Session Summary, and pass through when
-// neither has a project. Two cases arrive without a session:
-//   1. Synthetic sessionId: memories indexed via mem::remember use
-//      sessionIds[0] ?? 'memory'. The string 'memory' has no session entry;
-//      neither does a real sessionId from a different lifecycle.
-//   2. Evicted session: eviction deletes the session record and keeps its
-//      observations indexed, but its Session Summary still names the
-//      project. Only an observation with neither passes through unscoped:
-//      we lose the ability to filter but never block a result we can no
-//      longer verify.
+// An unscoped Observation can outlive its Session and Summary through eviction;
+// retain it even when its project can no longer be verified.
 export function createProjectMatcher(
   kv: StateKV,
   project: string,
@@ -585,17 +575,24 @@ export function createProjectMatcher(
     return memories.get(obsId)!
   }
   return async (sessionId, obsId) => {
-    if (obsId.startsWith('mem_') && (await loadMemory(obsId))?.global === true) return true
+    const isMemory = obsId.startsWith('mem_')
+    if (isMemory) {
+      const memory = await loadMemory(obsId)
+      if (memory?.global === true) return true
+      if (memory?.project) return memory.project === project
+    }
     const session = await loadSession(sessionId)
     if (session) return session.project === project
-    const memProject = (await loadMemory(obsId))?.project ?? null
-    if (memProject !== null) return memProject === project
+    if (!isMemory) {
+      const memProject = (await loadMemory(obsId))?.project ?? null
+      if (memProject !== null) return memProject === project
+    }
     if (!summaryProjects.has(sessionId)) {
       const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null)
       summaryProjects.set(sessionId, summary?.project || null)
     }
     const summaryProject = summaryProjects.get(sessionId)!
-    return summaryProject === null || summaryProject === project
+    return summaryProject === project || (summaryProject === null && !isMemory)
   }
 }
 
