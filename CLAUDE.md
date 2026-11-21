@@ -317,6 +317,11 @@ prompt's query is unchanged. The Injection Gate scores only the first `RERANK_QU
 of that combined query, so for a terse prompt it sees the prompt and the start of the reply tail.
 Measured in `docs/benchmarks/2026-11-08-terse-prompt-query.md`.
 
+### Model reply lists
+`getXmlChildren()` (`src/prompts/xml.ts`) keeps list items separate when a model closes one
+with the wrong tag. It drops the trailing mismatched close from that item and preserves inline
+markup in correctly closed items. This applies to new replies; it does not rewrite stored records.
+
 ### Session Summaries in Injection
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`

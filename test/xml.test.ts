@@ -79,6 +79,23 @@ describe('getXmlChildren', () => {
   it('returns empty for invalid parent tag name', () => {
     expect(getXmlChildren('<facts><fact>A</fact></facts>', '.*', 'fact')).toEqual([])
   })
+
+  // #472: models sometimes close an item with the wrong tag; the lazy match
+  // then fused it with the next item and stored the stray tag in the field.
+  it('splits an item closed with the wrong tag from the next one', () => {
+    const xml = '<concepts><concept>VAAPI renderD128</color>\n    <concept>Jellyfin acceleration</concept></concepts>'
+    expect(getXmlChildren(xml, 'concepts', 'concept')).toEqual(['VAAPI renderD128', 'Jellyfin acceleration'])
+  })
+
+  it('keeps a last item closed with the wrong tag', () => {
+    const xml = '<concepts><concept>CPAL</concept><concept>alsa.headroom</cpu>\n</concepts>'
+    expect(getXmlChildren(xml, 'concepts', 'concept')).toEqual(['CPAL', 'alsa.headroom'])
+  })
+
+  it('keeps inline markup inside a properly closed item', () => {
+    const xml = '<decisions><decision>Wrap it in <code>x</code></decision></decisions>'
+    expect(getXmlChildren(xml, 'decisions', 'decision')).toEqual(['Wrap it in <code>x</code>'])
+  })
 })
 
 describe('getXmlPayload', () => {

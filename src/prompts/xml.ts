@@ -45,6 +45,11 @@ export function getXmlTag(xml: string, tag: string): string {
   return firstElementContent(xml, tag)?.trim() ?? "";
 }
 
+// Models sometimes close an item with the wrong tag (`<concept>x</color>`).
+// Each child runs from its open tag to its own close tag, else to the next
+// open tag, dropping a wrong close tag left at its end.
+const STRAY_TRAILING_CLOSE = /<\/[a-zA-Z_][a-zA-Z0-9_-]*\s*>\s*$/;
+
 export function getXmlChildren(
   xml: string,
   parentTag: string,
@@ -53,16 +58,17 @@ export function getXmlChildren(
   if (!VALID_TAG.test(parentTag) || !VALID_TAG.test(childTag)) return [];
   const parent = firstElementContent(xml, parentTag);
   if (parent === null) return [];
-  const items: string[] = [];
-  const re = new RegExp(
-    `${openTag(childTag)}([\\s\\S]*?)${closeTag(childTag)}`,
-    "g",
-  );
-  let m;
-  while ((m = re.exec(parent)) !== null) {
-    items.push(m[1].trim());
-  }
-  return items;
+  const close = new RegExp(closeTag(childTag));
+  return parent
+    .split(new RegExp(openTag(childTag)))
+    .slice(1)
+    .map((piece) => {
+      const closed = piece.search(close);
+      return closed >= 0
+        ? piece.slice(0, closed)
+        : piece.replace(STRAY_TRAILING_CLOSE, "");
+    })
+    .map((item) => item.trim());
 }
 
 // Every `<tag id="...">` element, inner text keyed by id. A repeated id is
