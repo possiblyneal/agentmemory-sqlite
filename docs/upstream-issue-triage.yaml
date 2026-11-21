@@ -32,11 +32,11 @@
 #                    (closing keyword). Read the PR before writing the fix here; several
 #                    issues have competing PRs, and none of them are merged.
 # mentioned_by_prs — open PRs that reference the issue without claiming to close it.
-# Absent fields mean no PR references the issue. 209 of the 386 PRs reference no issue
-# in this file and are NOT represented here.
-# Snapshot: 354 issues (308 open on 2026-09-21 plus 46 opened since, some since closed),
-# cross-linked against 386 PRs (291 open on 2026-09-21 plus 95 opened since, some since merged or
-# closed), as of 2026-10-11 (gh issue list / gh pr list --repo rohitg00/agentmemory).
+# Absent fields mean no PR link is recorded. The companion PR file contains 305
+# other PRs; neither file accounts for three PRs in the reported input count.
+# Snapshot: 455 issues (354 on 2026-10-11 plus 101 opened since, some since closed),
+# with 265 distinct PR cross-links. The reported input was 573 PRs (386 on 2026-10-11
+# plus 187 opened since, some since merged or closed), as of 2026-11-18.
 
 issues:
   - number: 195
@@ -56,6 +56,7 @@ issues:
     kind: feature
     note: "Free-form session metadata plus a filterable surface in search_sessions."
     disposition: candidate
+    status: "present-here — Session carries tags only, no free-form metadata (src/types.ts:1-19)."
     url: https://github.com/rohitg00/agentmemory/issues/259
     mentioned_by_prs: [306, 318]
   - number: 262
@@ -154,6 +155,7 @@ issues:
     kind: feature
     note: "concept_edges table plus a BFS-depth-2 recall mode."
     disposition: candidate
+    status: "partly-present-here — graph traversal already reaches depth 2 but graph extraction is off by default and there is no concept_edges table."
     url: https://github.com/rohitg00/agentmemory/issues/345
     fix_prs: [349]
   - number: 392
@@ -163,6 +165,7 @@ issues:
     kind: feature
     note: "Time-range filters for memory_recall and memory_sessions."
     disposition: candidate
+    status: "present-here — memory_sessions and search take no time-range filter."
     url: https://github.com/rohitg00/agentmemory/issues/392
     fix_prs: [414]
   - number: 395
@@ -200,6 +203,7 @@ issues:
     kind: feature
     note: "Read-only memory_signal_peek that does not set readAt."
     disposition: candidate
+    status: "present-here — mem::signal-read sets readAt (src/functions/signals.ts:88-113); there is no read-only peek."
     url: https://github.com/rohitg00/agentmemory/issues/420
   - number: 422
     title: "Viewer tab bar collapses/clips on Windows/Chromium layout"
@@ -244,6 +248,7 @@ issues:
     kind: feature
     note: "Expose agent_id/session_id in /agentmemory/audit for per-agent rate limiting."
     disposition: candidate
+    status: "present-here — api::audit takes only operation and limit (src/triggers/api.ts:2148-2164)."
     url: https://github.com/rohitg00/agentmemory/issues/433
   - number: 436
     title: "[Question] Desktop Apps Auto-detect?"
@@ -329,7 +334,8 @@ issues:
     difficulty: med
     kind: feature
     note: "DELETE endpoints for Actions and Crystals."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — Actions and Crystals were removed (5d4a86c0), so there is nothing to delete"
     url: https://github.com/rohitg00/agentmemory/issues/496
   - number: 499
     title: "AgentMemory server becomes unresponsive with multiple concurrent Claude Code sessions"
@@ -338,7 +344,7 @@ issues:
     kind: bug
     note: "Server becomes unresponsive under three concurrent Claude Code sessions."
     disposition: candidate
-    status: "partly-present-here — no hang (`/livez` stays under 500 ms at realistic load), but a burst of Sessions opening together queues their first prompt-submit Injections past the 1,500 ms hook timeout; cause and numbers in docs/benchmarks/2026-11-13-concurrent-sessions-load.md (#394)."
+    status: "partly-present-here — no hang (`/livez` stays under 500 ms at realistic load), but a burst of Sessions opening together queues their first prompt-submit Injections past the 1,500 ms hook wait it had then; the wait is now 2,500 ms (#433) and #400 is closed; cause and numbers in docs/benchmarks/2026-11-13-concurrent-sessions-load.md (#394)."
     url: https://github.com/rohitg00/agentmemory/issues/499
   - number: 505
     title: "Viewer Rebuild Graph button calls missing /agentmemory/graph/build endpoint"
@@ -407,6 +413,7 @@ issues:
     kind: feature
     note: "LAN multi-machine client/server mode plus scheduled database backup."
     disposition: candidate
+    status: "partly-present-here — scheduled backup exists (src/index.ts:613-621, keeps 7); LAN mode is out of scope with the loopback bind."
     url: https://github.com/rohitg00/agentmemory/issues/523
   - number: 524
     title: "Feature request: built-in service install for daemon-mode autostart (macOS / Linux / Windows)"
@@ -415,6 +422,7 @@ issues:
     kind: feature
     note: "Ship LaunchAgent/systemd/Windows service units for daemon autostart."
     disposition: candidate
+    status: "present-here — nothing generates a service unit for the daemon."
     url: https://github.com/rohitg00/agentmemory/issues/524
   - number: 527
     title: "Support OpenAI/Codex subscription-auth fallback without requiring OPENAI_API_KEY"
@@ -459,6 +467,7 @@ issues:
     kind: feature
     note: "Regex signal detector on on_turn_start for zero-LLM entity extraction."
     disposition: candidate
+    status: "present-here — no signal detector hook."
     url: https://github.com/rohitg00/agentmemory/issues/586
   - number: 589
     title: "How to use it with github copilot"
@@ -488,6 +497,7 @@ issues:
     kind: feature
     note: "Privacy-safe governance/delete receipts as an observability boundary."
     disposition: candidate
+    status: "present-here — no privacy-safe governance or delete receipt."
     url: https://github.com/rohitg00/agentmemory/issues/595
   - number: 596
     title: "OpenClaw plugin should scope recall/capture by session/user to avoid cross-user memory leakage"
@@ -524,6 +534,7 @@ issues:
     kind: feature
     note: "Raw-anchor citation provenance schema for the verify/audit lane."
     disposition: candidate
+    status: "partly-present-here — mem::verify returns the citation chain (src/functions/verify.ts); no hybrid-result provenance beyond it."
     url: https://github.com/rohitg00/agentmemory/issues/605
   - number: 608
     title: "Doc - Link to an auto-generated architecture overview for agentmemory"
@@ -544,7 +555,7 @@ issues:
     wont_fix_reason: "the iii engine's stream sync — the in-process stream server only broadcasts live events after join (src/engine/inproc/sdk.ts:259-276, 576-584) and never sends a sync backlog."
     url: https://github.com/rohitg00/agentmemory/issues/609
     fix_prs: [623, 1302]
-    mentioned_by_prs: [1407]
+    mentioned_by_prs: [1407, 1717]
   - number: 620
     title: "Reduce MCP tool surface area"
     severity: med
@@ -552,7 +563,9 @@ issues:
     kind: feature
     note: "Cut the MCP tool surface so models stop picking wrong entry points."
     disposition: candidate
+    status: "partly-present-here — AGENTMEMORY_TOOLS=core exposes the 8 essentials; the default exposes all 43."
     url: https://github.com/rohitg00/agentmemory/issues/620
+    mentioned_by_prs: [1717]
   - number: 621
     title: "Standardize MCP tool dispatch test mocks"
     severity: low
@@ -562,6 +575,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "asks to move test/mcp-tools-call.test.ts onto vi.mock(\"iii-sdk\"); this tree has neither, and its rule is hand-rolled mockKV/mockSdk fakes (test/helpers/mocks.ts) with vi.mock reserved for the logger and keyed mutex"
     url: https://github.com/rohitg00/agentmemory/issues/621
+    mentioned_by_prs: [1717]
   - number: 637
     title: "Windows: mem::summarize fails with Unicode characters (em dash) — ByteString conversion error"
     severity: high
@@ -626,6 +640,7 @@ issues:
     kind: feature
     note: "Signal local-fallback writes in the tool response and add a strict no-fallback mode."
     disposition: candidate
+    status: "partly-present-here — strictDaemonUrl() fails loudly only when AGENTMEMORY_URL is set explicitly (src/mcp/standalone.ts); the default fallback to local is silent."
     url: https://github.com/rohitg00/agentmemory/issues/695
   - number: 700
     title: "iii-engine state_store.db pollutes user's data/ directory — should use hidden path"
@@ -697,7 +712,9 @@ issues:
     difficulty: med
     kind: feature
     note: "Resolve project identity from the canonical repo URL rather than the directory basename."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "hooks/_project.ts disambiguates same-named repos with a -<6 hex> suffix (f0ab3dd6, 71d873e5); the bare name is still the main checkout's basename."
+    status: "fixed-here — hooks/_project.ts disambiguates same-named repos with a -<6 hex> suffix (f0ab3dd6, 71d873e5); the bare name is still the main checkout's basename."
     url: https://github.com/rohitg00/agentmemory/issues/716
     fix_prs: [717]
   - number: 720
@@ -729,6 +746,7 @@ issues:
     disposition: already-fixed
     fixed_by: "src/state/reranker.ts scores each query/passage pair with AutoTokenizer + AutoModelForSequenceClassification and takes the sigmoid of the single logit; a live run scored a relevant pair 0.874 and an irrelevant one 0.000."
     url: https://github.com/rohitg00/agentmemory/issues/724
+    fix_prs: [1543]
   - number: 725
     title: "local embedding provider hardcodes English-only model — make it configurable (multilingual default)"
     severity: med
@@ -738,7 +756,7 @@ issues:
     disposition: already-fixed
     fixed_by: "1902f33 — AGENTMEMORY_LOCAL_EMBEDDING_MODEL overrides the local model (src/providers/embedding/local.ts:21)."
     url: https://github.com/rohitg00/agentmemory/issues/725
-    mentioned_by_prs: [943, 1473]
+    mentioned_by_prs: [943, 1473, 1707]
   - number: 728
     title: "Hook resolveProject() is not worktree-aware: each git worktree becomes a separate memory silo"
     severity: med
@@ -756,6 +774,7 @@ issues:
     kind: feature
     note: "Nix flake for one-command installation."
     disposition: candidate
+    status: "present-here — no flake.nix; the install path is clone, npm ci, build, npm link."
     url: https://github.com/rohitg00/agentmemory/issues/730
     fix_prs: [740]
   - number: 732
@@ -804,7 +823,9 @@ issues:
     difficulty: low
     kind: feature
     note: "DELETE endpoint for individual memories by id."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "DELETE /agentmemory/memories/:id (src/triggers/api.ts:2370-2388), 66a9c713."
+    status: "fixed-here — DELETE /agentmemory/memories/:id (src/triggers/api.ts:2370-2388), 66a9c713."
     url: https://github.com/rohitg00/agentmemory/issues/739
   - number: 745
     title: "`stop` hook prematurely calls `/agentmemory/session/end`, causing sessions to be marked as ended before user actually exits"
@@ -843,7 +864,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Surface per-tier consolidation gate reasons instead of empty viewer tabs."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — the viewer has no consolidation tabs; Crystals and Actions were removed (5d4a86c0)"
     url: https://github.com/rohitg00/agentmemory/issues/754
     mentioned_by_prs: [1407, 1473]
   - number: 765
@@ -861,7 +883,9 @@ issues:
     kind: feature
     note: "Consolidation/extract failures as first-class audit events with backoff retry."
     disposition: candidate
+    status: "partly-present-here — consolidation retries projects and logs failures (src/functions/consolidation-pipeline.ts:93,148-158,317-340) but writes no failure audit event."
     url: https://github.com/rohitg00/agentmemory/issues/766
+    mentioned_by_prs: [1640]
   - number: 767
     title: "feat(budget): per-session token cap with soft warn + hard block"
     severity: med
@@ -880,13 +904,16 @@ issues:
     disposition: candidate
     status: "partly-present-here — a supersedes relation marks the old Memory isLatest=false (src/functions/relations.ts:153-156) and search drops non-latest Memories (src/functions/search.ts:420, src/state/hybrid-search.ts:582); temporal-graph edges supersede too. A contradicts relation only lowers the score by 0.05 (relations.ts:35) and stales nothing."
     url: https://github.com/rohitg00/agentmemory/issues/768
+    mentioned_by_prs: [1640]
   - number: 769
     title: "feat(bench): LongMemEval-S harness with statistical rigor + CI gate"
     severity: med
     difficulty: high
     kind: feature
     note: "LongMemEval-S retrieval benchmark harness with a CI gate."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "eval/runner/longmemeval.ts and the eval:gate CI step cover and exceed the request."
+    status: "fixed-here — eval/runner/longmemeval.ts and the eval:gate CI step cover and exceed the request."
     url: https://github.com/rohitg00/agentmemory/issues/769
   - number: 770
     title: "feat(smart-search): index semantic facts, procedural skills, crystals, insights, facets"
@@ -956,8 +983,9 @@ issues:
     difficulty: med
     kind: feature
     note: "No way to search only memory_save entries; observation noise buries L2."
-    disposition: candidate
-    status: "partly-present-here — smart-search ranks Memories above Observations only when AGENTMEMORY_MEMORY_LAYER_BOOST > 1 (src/state/hybrid-search.ts:351, default 1.0); there is no Memories-only filter. The eval corpus holds no saved Memories, so a default boost cannot be measured yet."
+    disposition: already-fixed
+    fixed_by: "memory_recall defaults targetLayer=memory (8d24eca3, src/mcp/server.ts:154, src/functions/search.ts:668)."
+    status: "fixed-here — memory_recall defaults targetLayer=memory (8d24eca3, src/mcp/server.ts:154, src/functions/search.ts:668)."
     url: https://github.com/rohitg00/agentmemory/issues/819
     fix_prs: [1519]
   - number: 820
@@ -979,7 +1007,7 @@ issues:
     disposition: already-fixed
     fixed_by: "mem::graph-snapshot-rebuild pages nodes and edges through StateKV.listPage and rebuilds the side indexes page by page, with no 25,000-node refusal (src/functions/graph.ts rebuildIndexesAndSnapshot); mem::graph-reset deletes adjacency and obs-nodes rows in pages (clearGraphSideIndexes, src/state/graph-indexes.ts). Covered by test/graph.test.ts (#825)."
     url: https://github.com/rohitg00/agentmemory/issues/825
-    mentioned_by_prs: [1454]
+    mentioned_by_prs: [1454, 1636]
   - number: 826
     title: "feat: Expose post-tool-use and TaskCompleted hooks to Python plugin (Hermes integration)"
     severity: med
@@ -999,6 +1027,7 @@ issues:
     fixed_by: "A query or startNodeId walk goes through the bounded side indexes (queryViaIndexes/traverseViaIndexes, src/functions/graph.ts:247-300, 1279-1290, capped at TRAVERSAL_VISIT_CAP); with the indexes unarmed it returns the snapshot and never enumerates (graph.ts:1293-1300)."
     url: https://github.com/rohitg00/agentmemory/issues/828
     fix_prs: [893]
+    mentioned_by_prs: [1636]
   - number: 833
     title: "/agentmemory:forget deletes nothing — memory_governance_delete only targets the memories store, not observations (reports success: true)"
     severity: high
@@ -1015,7 +1044,8 @@ issues:
     difficulty: low
     kind: feature
     note: "Smarter on_memory_write sync: skip add/update, archive on remove."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — no Hermes integration and no on_memory_write hook"
     url: https://github.com/rohitg00/agentmemory/issues/834
     fix_prs: [864]
   - number: 843
@@ -1055,7 +1085,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/866
-    fix_prs: [867]
+    fix_prs: [867, 1691]
   - number: 871
     title: "Use ~/.local/bin per XDG Base Directory Specification instead of ~/.agentmemory/bin"
     severity: low
@@ -1121,6 +1151,7 @@ issues:
     fixed_by: "1902f33 — AGENTMEMORY_LOCAL_EMBEDDING_MODEL overrides the local model (src/providers/embedding/local.ts:21)."
     url: https://github.com/rohitg00/agentmemory/issues/881
     fix_prs: [943]
+    mentioned_by_prs: [1707]
   - number: 884
     title: "MCP tool descriptions lack 'when to use' guidance — LLM struggles to choose the right tool among 53"
     severity: med
@@ -1128,6 +1159,7 @@ issues:
     kind: feature
     note: "Tool descriptions say what, not when, so the model picks wrong among 53."
     disposition: candidate
+    status: "present-here — one 'Use when' among 43 tool descriptions (src/mcp/tools-registry.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/884
     fix_prs: [904]
   - number: 888
@@ -1159,6 +1191,7 @@ issues:
     disposition: already-fixed
     fixed_by: "api::mesh-export returns the delta in cursor pages of at most 8 MiB (nextCursor) and mem::mesh-sync follows the cursor until it is null (src/functions/mesh.ts pageMeshDelta; test/mesh-export-project-scope.test.ts, test/mesh.test.ts)"
     url: https://github.com/rohitg00/agentmemory/issues/890
+    fix_prs: [1636]
     mentioned_by_prs: [1143]
   - number: 899
     title: "feat: allow a cheaper model for compression than for summarization"
@@ -1167,6 +1200,7 @@ issues:
     kind: feature
     note: "Allow a cheaper model for compression than for summarization."
     disposition: candidate
+    status: "present-here — compressionModel is the provider's model (src/config.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/899
     fix_prs: [900]
   - number: 902
@@ -1279,6 +1313,7 @@ issues:
     kind: feature
     note: "LLM_PROVIDER env var to bypass hardcoded provider detection order."
     disposition: candidate
+    status: "present-here — provider detection order is hardcoded in src/config.ts; only OPENAI_API_KEY_FOR_LLM=false opts out."
     url: https://github.com/rohitg00/agentmemory/issues/919
   - number: 921
     title: "Viewer dashboard flickers under active sessions - per-event full reload blanks the panel"
@@ -1339,6 +1374,7 @@ issues:
     disposition: already-fixed
     fixed_by: "Replace-import deletes through deleteIndexed and merge/replace index what they write via indexRecords (src/functions/export-import.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/938
+    mentioned_by_prs: [1640]
   - number: 944
     title: "[viewer] Agentmemory Token Savings always 0% — estInjected counts all sessions, not just active"
     severity: low
@@ -1365,6 +1401,7 @@ issues:
     kind: feature
     note: "Option to include low-score semantic results rather than returning nothing."
     disposition: candidate
+    status: "present-here — intentional: the relevance floor serves the Goal of right content."
     url: https://github.com/rohitg00/agentmemory/issues/948
   - number: 950
     title: "[BUG] Docker: iii-engine uses in_memory despite file_based config in /app/config.yaml"
@@ -1452,14 +1489,17 @@ issues:
     disposition: already-fixed
     fixed_by: "A Stop-hook turn end waits out SESSION_IDLE_END_MS before ending the Session (src/triggers/api.ts:138, 854), extraction takes only Observations past the graphExtractedThrough watermark (src/triggers/events.ts:141-162), and GRAPH_EXTRACTION_BATCH_SIZE is honored (src/functions/graph.ts:1197)."
     url: https://github.com/rohitg00/agentmemory/issues/978
-    fix_prs: [1280]
+    fix_prs: [1280, 1639]
+    mentioned_by_prs: [1802]
   - number: 979
     title: "Feature Request: Separate API configuration for LLM and embedding providers"
     severity: med
     difficulty: low
     kind: feature
     note: "Separate API key and base URL for LLM versus embedding providers."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "OPENAI_EMBEDDING_API_KEY and OPENAI_EMBEDDING_BASE_URL configure embeddings apart from the LLM (051d5ac2)."
+    status: "fixed-here — OPENAI_EMBEDDING_API_KEY and OPENAI_EMBEDDING_BASE_URL configure embeddings apart from the LLM (051d5ac2)."
     url: https://github.com/rohitg00/agentmemory/issues/979
   - number: 981
     title: "Add first-class workspace namespace isolation"
@@ -1517,6 +1557,7 @@ issues:
     disposition: already-fixed
     fixed_by: "Telemetry hooks use the documented fetch-and-unref'd-setTimeout exit pattern."
     url: https://github.com/rohitg00/agentmemory/issues/991
+    fix_prs: [1692]
   - number: 993
     title: "post-tool-use captures agentmemory MCP calls as observations, polluting recall results"
     severity: med
@@ -1562,6 +1603,7 @@ issues:
     kind: feature
     note: "Auto-restore from the latest snapshot on daemon startup."
     disposition: candidate
+    status: "present-here — backups and snapshots exist but nothing restores the latest automatically."
     url: https://github.com/rohitg00/agentmemory/issues/1007
   - number: 1008
     title: "POST /agentmemory/consolidate returns 500 with unhandled \"[object Object]\" error"
@@ -1581,6 +1623,7 @@ issues:
     kind: feature
     note: "Asymmetric query/document embedding parameters for OpenAI-compatible endpoints."
     disposition: candidate
+    status: "partly-present-here — prefix-only profiles (src/providers/embedding/_retrieval.ts); no task or input_type request parameter."
     url: https://github.com/rohitg00/agentmemory/issues/1009
   - number: 1013
     title: "All HTTP REST endpoints return 404 after iii-engine WebSocket reconnection (iii-engine #1796) — v0.19.2 only a partial fix, holds in v0.22.x"
@@ -1608,6 +1651,7 @@ issues:
     kind: feature
     note: "memory_update tool for versioning instead of duplicate v1 memories."
     disposition: candidate
+    status: "partly-present-here — mem::remember supersedes near-duplicates (src/functions/remember.ts:170-222) and REST /evolve exists; there is no memory_update tool."
     url: https://github.com/rohitg00/agentmemory/issues/1018
     fix_prs: [1038]
   - number: 1020
@@ -1630,7 +1674,7 @@ issues:
     fixed_by: "PR #48 (possiblyneal/agentmemory-sqlite): api::sessions pages through parsePage: default first page, limit/offset, and total in the body."
     status: "fixed-here — PR #48 (possiblyneal/agentmemory-sqlite): api::sessions pages through parsePage: default first page, limit/offset, and total in the body."
     url: https://github.com/rohitg00/agentmemory/issues/1022
-    mentioned_by_prs: [1034, 1352, 1403, 1430]
+    mentioned_by_prs: [1034, 1352, 1403, 1430, 1649]
   - number: 1024
     title: "Backfill corpus quality: 6c727be fix landed but LLM drain stalled, 33% LLM-compressed after 11h"
     severity: med
@@ -1640,6 +1684,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "upstream housekeeping, marketing or repo diary"
     url: https://github.com/rohitg00/agentmemory/issues/1024
+    mentioned_by_prs: [1639]
   - number: 1025
     title: "[Cat B] Follow-up: 1867 obs stuck synthetic, drain throughput dropped 16x"
     severity: med
@@ -1649,6 +1694,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "upstream housekeeping, marketing or repo diary"
     url: https://github.com/rohitg00/agentmemory/issues/1025
+    mentioned_by_prs: [1639]
   - number: 1026
     title: "[Cat A] Defer: b61469b dead code + stale inline eval scripts"
     severity: low
@@ -1677,6 +1723,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "upstream housekeeping, marketing or repo diary"
     url: https://github.com/rohitg00/agentmemory/issues/1029
+    mentioned_by_prs: [1639]
   - number: 1030
     title: "upgrade-backfill-compression.py progress.json drift: 207 obs marked done but missing compressionKind"
     severity: low
@@ -1794,7 +1841,7 @@ issues:
     kind: bug
     note: "Claude Code summarizer and Warmup transcripts ingested as real phantom sessions."
     disposition: already-fixed
-    status: "fixed-here — 2f99c65: import-jsonl skips a transcript whose first prompt is Warmup or the conversation-list summary instruction. Live store had 0 such sessions; hooks already drop SDK child runs via isSdkChildContext."
+    status: "fixed-here — 2f99c65: import-jsonl skips a transcript whose first prompt is Warmup or the conversation-list summary instruction. Hooks also drop SDK child runs via isSdkChildContext."
     fixed_by: "2f99c65"
     url: https://github.com/rohitg00/agentmemory/issues/1064
   - number: 1065
@@ -1825,6 +1872,7 @@ issues:
     disposition: already-fixed
     fixed_by: "#130"
     url: https://github.com/rohitg00/agentmemory/issues/1067
+    fix_prs: [1703]
   - number: 1069
     title: "bug: session-end hook causes 'Hook cancelled' due to .unref() making setTimeout passive while fetch keeps event loop alive"
     severity: low
@@ -1901,6 +1949,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1093
+    mentioned_by_prs: [1611, 1799]
   - number: 1094
     title: "`infer-memory-projects` permanently unfixable after a project directory move — path-keyed project identity marks every memory ambiguous"
     severity: med
@@ -1947,7 +1996,7 @@ issues:
     disposition: already-fixed
     fixed_by: "memory_action_create forwards createdBy (alias agentId) to mem::action-create (src/mcp/server.ts, src/mcp/tools-registry.ts); test/mcp-action-create.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1105
-    fix_prs: [1107]
+    fix_prs: [1107, 1697]
   - number: 1106
     title: "AGENTMEMORY_TOOLS env var in ~/.agentmemory/.env is ignored — MCP server always exposes all tools"
     severity: med
@@ -1997,6 +2046,7 @@ issues:
     fixed_by: "viewer token in localStorage"
     status: "fixed-here — getViewerToken/setViewerToken use localStorage, so the token survives new tabs and browser restarts."
     url: https://github.com/rohitg00/agentmemory/issues/1116
+    mentioned_by_prs: [1611]
   - number: 1117
     title: "Viewer stores bearer token in sessionStorage — users must re-enter on every new tab"
     severity: low
@@ -2006,6 +2056,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "duplicate of 1116"
     url: https://github.com/rohitg00/agentmemory/issues/1117
+    mentioned_by_prs: [1611]
   - number: 1119
     title: "createEmbeddingProvider's \"openai\" case hardcodes OPENAI_API_KEY, defeating OPENAI_EMBEDDING_API_KEY fallback"
     severity: med
@@ -2035,7 +2086,7 @@ issues:
     wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1127
     fix_prs: [1128]
-    mentioned_by_prs: [1384]
+    mentioned_by_prs: [1384, 1639]
   - number: 1131
     title: "Session summarization is quadratic: the Stop hook re-summarizes the entire session every assistant turn"
     severity: high
@@ -2114,9 +2165,10 @@ issues:
     kind: bug
     note: "Eviction leaves session observationCount and graph provenance stale."
     disposition: already-fixed
-    status: "fixed-here — src/functions/observe.ts lowerObservationCounts, shared by src/functions/evict.ts and src/functions/auto-forget.ts: mem::evict, observe's per-Session cap and auto-forget lower observationCount; graph Provenance deliberately left (capped evidence of origin, CONTEXT.md)"
     fixed_by: "#128"
+    status: "fixed-here — src/functions/observe.ts lowerObservationCounts, shared by src/functions/evict.ts and src/functions/auto-forget.ts: mem::evict, observe's per-Session cap and auto-forget lower observationCount; graph Provenance deliberately left (capped evidence of origin, CONTEXT.md)"
     url: https://github.com/rohitg00/agentmemory/issues/1157
+    mentioned_by_prs: [1640]
   - number: 1158
     title: "Scheduled Git snapshots grow without a retention policy"
     severity: med
@@ -2265,6 +2317,7 @@ issues:
     fixed_by: "BM25 rebuilt from content on every boot"
     status: "fixed-here — BM25 is never persisted and is rebuilt from content on every boot (src/index.ts:449-458), and vectors for deleted or changed content are pruned at load (src/engine/inproc/vectors.ts:169), so a daemon restart is the full rebuild and loses no valid vectors. No runtime reindex endpoint, by choice."
     url: https://github.com/rohitg00/agentmemory/issues/1179
+    mentioned_by_prs: [1626]
   - number: 1180
     title: "Index persistence is never scheduled after boot: everything indexed at runtime is lost unless the process exits cleanly"
     severity: high
@@ -2322,6 +2375,7 @@ issues:
     disposition: already-fixed
     fixed_by: "mem::graph-reset and persistGraphDelta run under the same keyed lock (GRAPH_WRITE_LOCK in src/functions/graph.ts), so a concurrent extract cannot write the cleared snapshot back; test/graph.test.ts interleaves them and asserts the reset holds."
     url: https://github.com/rohitg00/agentmemory/issues/1189
+    mentioned_by_prs: [1525]
   - number: 1190
     title: "Bug: snapshot restore is additive and omits durable stores"
     severity: high
@@ -2329,9 +2383,10 @@ issues:
     kind: bug
     note: "Snapshot restore is additive and omits durable stores, so it is not a recovery point."
     disposition: already-fixed
-    status: "fixed-here — #127: src/functions/snapshot.ts restore replaces every captured store (rows the snapshot lacks are deleted, snapshot rows rewritten and re-indexed); test/snapshot.test.ts covers it."
     fixed_by: "#127"
+    status: "fixed-here — #127: src/functions/snapshot.ts restore replaces every captured store (rows the snapshot lacks are deleted, snapshot rows rewritten and re-indexed); test/snapshot.test.ts covers it."
     url: https://github.com/rohitg00/agentmemory/issues/1190
+    mentioned_by_prs: [1768]
   - number: 1191
     title: "Semantic and Procedural Memory need a bounded retention path"
     severity: med
@@ -2389,6 +2444,7 @@ issues:
     kind: bug
     note: "Two concurrent mem::summarize runs per Stop hook with no lease; duplicate of 1062."
     disposition: already-fixed
+    fixed_by: "src/hooks/stop.ts and src/triggers/events.ts"
     status: "fixed-here — the Stop hook makes one call, /session/end, which fans the summary out server-side (src/hooks/stop.ts:43, src/triggers/events.ts:99)."
     url: https://github.com/rohitg00/agentmemory/issues/1203
     mentioned_by_prs: [1269, 1399, 1405]
@@ -2483,6 +2539,7 @@ issues:
     fixed_by: "POST /agentmemory/recompress-orphans"
     status: "fixed-here — POST /agentmemory/recompress-orphans (src/triggers/api.ts:2029-2167) re-runs mem::compress on stored raw rows, then parked ones, bounded by limit with dryRun and requeueQuarantined; /diagnostics reports observations-uncompressed:N (src/functions/diagnostics.ts:435)."
     url: https://github.com/rohitg00/agentmemory/issues/1228
+    fix_prs: [1546]
   - number: 1229
     title: "Viewer renders session summary as '[object Object]' (array fields not serialized)"
     severity: low
@@ -2525,6 +2582,7 @@ issues:
     disposition: already-fixed
     fixed_by: "graphWritesDisabled() includes !isGraphExtractionEnabled() and persistGraphDelta returns early on it (src/functions/graph.ts:737-747); the boot log at src/index.ts:280 still says structural extraction is on."
     url: https://github.com/rohitg00/agentmemory/issues/1238
+    fix_prs: [1639]
   - number: 1239
     title: "`POST /agentmemory/graph/reset` reports success while leaving nodes and edges untouched"
     severity: high
@@ -2534,6 +2592,7 @@ issues:
     disposition: already-fixed
     fixed_by: "mem::graph-reset stamps resetAt on an empty snapshot, clears the name shards and flips retrieval onto the resetAt-filtering index path (src/functions/graph.ts:1308-1335); persistGraphDelta drops pre-reset rows from the merge (src/functions/graph.ts:784-791)."
     url: https://github.com/rohitg00/agentmemory/issues/1239
+    fix_prs: [1525]
   - number: 1240
     title: "`mem::summarize` asks for freehand XML and never sends `response_format` - 19% first-attempt parse failure, plus an unreported `narrative: Too small` validation failure"
     severity: med
@@ -2604,7 +2663,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "Windows — CI runs ubuntu only"
     url: https://github.com/rohitg00/agentmemory/issues/1264
-    mentioned_by_prs: [1265, 1266, 1267]
+    mentioned_by_prs: [1265, 1266, 1267, 1804]
   - number: 1270
     title: "Hooks with no tool payload produce empty compression prompts, burning LLM calls on content-free observations"
     severity: med
@@ -2615,6 +2674,7 @@ issues:
     fixed_by: "4a88066"
     status: "fixed-here — 4a88066: with auto-compress on, an Observation with no tool input, output, prompt or image takes the LLM-free synthetic path instead of mem::compress (src/functions/observe.ts hasCompressibleContent). Re-summarize on unchanged count was already fixed (summarize.ts:366-377)."
     url: https://github.com/rohitg00/agentmemory/issues/1270
+    mentioned_by_prs: [1771]
   - number: 1271
     title: "`getXmlTag` is a first-match unanchored regex, so any text before the payload can be parsed as the payload -- and `compressWithRetry` commits a response its own validator rejected"
     severity: high
@@ -2625,6 +2685,7 @@ issues:
     fixed_by: "#131"
     status: "fixed-here — #131: parsers scope to the last complete root element with getXmlPayload and read the first field inside it (src/prompts/xml.ts); compressWithRetry returns no response when every attempt fails validation and mem::compress degrades with reason validation_failed."
     url: https://github.com/rohitg00/agentmemory/issues/1271
+    mentioned_by_prs: [1525, 1628]
   - number: 1273
     title: "Governance delete finds a captured observation but deletes nothing (deleted:0)"
     severity: high
@@ -2642,6 +2703,7 @@ issues:
     kind: feature
     note: "No way to deprecate or supersede a bad capture with an audit trail."
     disposition: candidate
+    status: "present-here — forget hard-deletes; there is no soft-deprecate."
     url: https://github.com/rohitg00/agentmemory/issues/1274
   - number: 1276
     title: "Bug: Azure content filter rejections open the circuit breaker, failing unrelated compressions"
@@ -2663,6 +2725,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "per-tool-call Injection, its pre-tool-use hook and /agentmemory/enrich were removed (#108)"
     url: https://github.com/rohitg00/agentmemory/issues/1278
+    fix_prs: [1693]
   - number: 1279
     title: "[viewer] Dashboard \"Memories\" stat card caps at 500 — uses .length of a limited fetch instead of the total field"
     severity: low
@@ -2813,6 +2876,7 @@ issues:
     disposition: already-fixed
     fixed_by: "No shutdown index save exists to lose: vectors persist per write and BM25 is rebuilt at boot; a boot and hourly fill pass repairs a partial vector index (src/index.ts)."
     url: https://github.com/rohitg00/agentmemory/issues/1335
+    mentioned_by_prs: [1626, 1709]
   - number: 1338
     title: "fix(providers): createFallbackProvider drops baseURL — custom-endpoint fallbacks (DeepSeek/Kimi/etc.) hit the wrong API host"
     severity: med
@@ -2862,7 +2926,7 @@ issues:
     disposition: already-fixed
     fixed_by: "consolidation-pipeline caps sourceSessionIds with capSourceIds and MAX_SOURCE_LIST_IDS, keeping the newest (src/functions/consolidation-pipeline.ts); test/consolidation-pipeline.test.ts. The 16 MiB frame limit is iii-only. Existing Semantic Facts over the cap are trimmed once at boot by the startup maintenance pass (src/state/startup-maintenance.ts); test/startup-maintenance.test.ts."
     url: https://github.com/rohitg00/agentmemory/issues/1360
-    mentioned_by_prs: [1454]
+    mentioned_by_prs: [1454, 1544, 1634, 1636]
   - number: 1361
     title: "Windows hardening: cross-platform build script, test normalization, and audit split"
     severity: med
@@ -2950,7 +3014,7 @@ issues:
     disposition: wont-fix
     wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/issues/1378
-    mentioned_by_prs: [1454]
+    mentioned_by_prs: [1454, 1559]
   - number: 1379
     title: "Bug: iii Console install prompt repeats after accepting installation in v0.9.29"
     severity: low
@@ -3017,7 +3081,9 @@ issues:
     kind: feature
     note: "Deferred observation compression: keep raw at capture and compress in batch during the consolidation window."
     disposition: candidate
+    status: "partly-present-here — compress-batch.ts flushes after BATCH_IDLE_MS (5 s); there is no deferred consolidation window."
     url: https://github.com/rohitg00/agentmemory/issues/1390
+    mentioned_by_prs: [1639]
   - number: 1392
     title: "memory AI"
     severity: low
@@ -3038,6 +3104,7 @@ issues:
     status: "fixed-here — #184: a reply cut at max_tokens with empty content throws before the reasoning fallback, so it is never stored as a Compression or Session Summary."
     url: https://github.com/rohitg00/agentmemory/issues/1393
     fix_prs: [1495]
+    mentioned_by_prs: [1628]
   - number: 1394
     title: "mem::reflect usedFallback reports Jaccard clustering fallback, not LLM fallback"
     severity: low
@@ -3070,6 +3137,7 @@ issues:
     status: "fixed-here — #183: the sk|pk|rk|ak- pattern refuses a preceding alphanumeric, so compound words survive scrubbing; #186 adds a synthetic stop narrative for the turn-ending reply."
     url: https://github.com/rohitg00/agentmemory/issues/1398
     fix_prs: [1475]
+    mentioned_by_prs: [1540, 1542]
   - number: 1404
     title: "Security: request a private channel to report a vulnerability"
     severity: low
@@ -3095,7 +3163,9 @@ issues:
     difficulty: med
     kind: bug
     note: "Sessions stay active forever on reused runtimes: abandoned status is never written and mem::evict is never invoked."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "mem::idle-session-sweep ends stale active Sessions (9124cd13) and a later event reopens one (9115433b)."
+    status: "fixed-here — mem::idle-session-sweep ends stale active Sessions (9124cd13) and a later event reopens one (9115433b)."
     url: https://github.com/rohitg00/agentmemory/issues/1410
     fix_prs: [1411, 1453]
   - number: 1413
@@ -3133,7 +3203,9 @@ issues:
     difficulty: low
     kind: bug
     note: "mem::forget counts deletions it did not perform on the session and observation branches and writes the count into the audit trail."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "mem::forget reports only what it deleted (src/functions/remember.ts:371-480, 66a9c713)."
+    status: "fixed-here — mem::forget reports only what it deleted (src/functions/remember.ts:371-480, 66a9c713)."
     url: https://github.com/rohitg00/agentmemory/issues/1428
     fix_prs: [1449]
     mentioned_by_prs: [1463]
@@ -3183,6 +3255,7 @@ issues:
     kind: feature
     note: "Recover observations captured while the local service is unavailable; a hook can exit 0 without the observation reaching storage."
     disposition: candidate
+    status: "present-here — by design: no hook spool; ObserveRetryQueue is in memory and full-disk only, matching 'never on the critical path'."
     url: https://github.com/rohitg00/agentmemory/issues/1436
     fix_prs: [1460]
     mentioned_by_prs: [1463]
@@ -3193,6 +3266,7 @@ issues:
     kind: feature
     note: "Define persistent acceptance and retry semantics for observation ingestion across a restart."
     disposition: candidate
+    status: "present-here — by design: no hook spool; ObserveRetryQueue is in memory and full-disk only, matching 'never on the critical path'."
     url: https://github.com/rohitg00/agentmemory/issues/1437
     fix_prs: [1460]
     mentioned_by_prs: [1463]
@@ -3203,6 +3277,7 @@ issues:
     kind: bug
     note: "Observation event identity and the five-minute dedup cache do not survive a restart."
     disposition: candidate
+    status: "present-here — by design: no hook spool; ObserveRetryQueue and DedupMap are in memory, matching 'never on the critical path'."
     url: https://github.com/rohitg00/agentmemory/issues/1438
     fix_prs: [1460]
     mentioned_by_prs: [1463]
@@ -3212,7 +3287,8 @@ issues:
     difficulty: med
     kind: bug
     note: "Generated vectors are lost if the first process lifetime ends before the first index checkpoint."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "vectors live one row each in SQLite (src/engine/inproc/vectors.ts) with a boot and hourly fill pass, so there is no serialized index to lose in a crash"
     url: https://github.com/rohitg00/agentmemory/issues/1439
     fix_prs: [1448]
     mentioned_by_prs: [1463]
@@ -3233,7 +3309,8 @@ issues:
     difficulty: med
     kind: chore
     note: "Measure capture and recovery costs with separate storage, RAM and token budgets."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "already covered — npm run eval:burst measures capture under load and /health carries the capture counters"
     url: https://github.com/rohitg00/agentmemory/issues/1441
     fix_prs: [1464]
     mentioned_by_prs: [1463, 1467]
@@ -3273,7 +3350,9 @@ issues:
     difficulty: med
     kind: feature
     note: "Graph retrieval reads the whole graph on every call; proposes adjacency, observation and name-token indexes."
-    disposition: candidate
+    disposition: already-fixed
+    fixed_by: "graph side-indexes (src/state/schema.ts:36-70) replace the whole-graph read; graph extraction is off by default (#420)."
+    status: "fixed-here — graph side-indexes (src/state/schema.ts:36-70) replace the whole-graph read; graph extraction is off by default (#420)."
     url: https://github.com/rohitg00/agentmemory/issues/1450
   - number: 1471
     title: "Stop hook does not capture the assistant's reply (last_assistant_message); /observe cannot store it"
@@ -3345,7 +3424,7 @@ issues:
     kind: bug
     note: "agentmemory status prints Embeddings: bm25-only while vector search is active."
     disposition: candidate
-    status: "present-here — src/cli.ts compares flags.embeddingProvider to the literal \"embeddings\" (status line and doctor), but the server sends the provider description or \"none\"."
+    status: "unresolved — does not reproduce here: src/triggers/api.ts:272 sends 'embeddings' or 'none', matching the comparison in src/cli.ts:561,815."
     url: https://github.com/rohitg00/agentmemory/issues/1488
     fix_prs: [1499]
   - number: 1489
@@ -3370,6 +3449,7 @@ issues:
     status: "fixed-here — #190: sync refuses a target whose first line is not the bridge's auto-sync header, returns {success:false, reason} and logs a warning; it writes only its configured project's Memories."
     url: https://github.com/rohitg00/agentmemory/issues/1490
     fix_prs: [1505]
+    mentioned_by_prs: [1525]
   - number: 1491
     title: "OpenAI-compatible provider cannot send endpoint-specific request fields (OpenRouter provider routing)"
     severity: low
@@ -3453,3 +3533,1019 @@ issues:
     status: "fixed-here — #195: GET /actions honours limit and the viewer labels a truncated list."
     url: https://github.com/rohitg00/agentmemory/issues/1521
     fix_prs: [1524]
+  - number: 1528
+    title: "Feature: jcode adapter support"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Add a jcode adapter to agentmemory connect."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1528
+    fix_prs: [1529]
+  - number: 1530
+    title: "0.9.30 exits at every start on a moderately large store: hardcoded 15 s worker readiness wait"
+    severity: high
+    difficulty: low
+    kind: bug
+    note: "The daemon exits at every start on a moderately large store because the worker readiness wait is hardcoded to 15 s."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1530
+    fix_prs: [1531]
+  - number: 1532
+    title: "Session summary only covers the first turn: server ignores final in /agentmemory/session/end"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "The session summary covers only the first turn because the server ignores final in /agentmemory/session/end."
+    disposition: already-fixed
+    fixed_by: "api.ts:884-908 turnEnd defers end; events.ts:187 summarize debounce"
+    status: "fixed-here — api.ts:884-908 turnEnd defers end; events.ts:187 summarize debounce"
+    url: https://github.com/rohitg00/agentmemory/issues/1532
+    fix_prs: [1550]
+  - number: 1537
+    title: "Search latency ~1.1 s steady-state (~4 s after idle) vs 0.6–17 ms in the project's own benchmark [corrected]"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "Search takes about 1.1 s steady-state and 4 s after idle against the 0.6-17 ms the project's own benchmark reports."
+    disposition: already-fixed
+    fixed_by: "latency was iii scheduling; fork search yields (search-index/searchCooperatively, docs/benchmarks/2026-11-11-search-event-loop.md)"
+    status: "fixed-here — latency was iii scheduling; fork search yields (search-index/searchCooperatively, docs/benchmarks/2026-11-11-search-event-loop.md)"
+    url: https://github.com/rohitg00/agentmemory/issues/1537
+    mentioned_by_prs: [1541]
+  - number: 1539
+    title: "Core observation search drops CJK recall: raw fields are not indexed, query-entity extraction ignores CJK, and vector text excludes concepts"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "Core observation search drops CJK recall because raw fields are not indexed and query-entity extraction ignores CJK."
+    disposition: wont-fix
+    wont_fix_reason: "non-English language support — this fork is English only (it already segments CJK, src/state/cjk-segmenter.ts)"
+    url: https://github.com/rohitg00/agentmemory/issues/1539
+    fix_prs: [1553]
+  - number: 1547
+    title: "feat: `AGENTMEMORY_HEADERS` — send custom headers from clients to a remote agentmemory server (Cloudflare Access, auth proxies)"
+    severity: low
+    difficulty: low
+    kind: feature
+    note: "Let clients send custom headers from AGENTMEMORY_HEADERS to a remote agentmemory server."
+    disposition: wont-fix
+    wont_fix_reason: "multi-user feature — one Operator runs the daemon; the daemon is local, so there is no remote server to authenticate to"
+    url: https://github.com/rohitg00/agentmemory/issues/1547
+  - number: 1548
+    title: "Insight records reach 1.1 MB each: unbounded concept clusters hold 84.8% of a 465 MB mem:insights collection"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Insight records reach 1.1 MB each because the unbounded concept cluster is stored on every record."
+    disposition: candidate
+    status: "partly-present-here — reflect.ts:162-215 jaccard cluster keeps every term, reflect.ts:456-460 stores it twice (sourceConceptCluster, tags); memory ids capped (MAX_SOURCE_LIST_IDS) but the term list is not. Filed as #440."
+    url: https://github.com/rohitg00/agentmemory/issues/1548
+    mentioned_by_prs: [1636, 1783]
+  - number: 1549
+    title: "feat: record which user and team wrote each observation and memory (client-side `AGENTMEMORY_USER_ID` / `AGENTMEMORY_TEAM_ID`)"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Record which user and team wrote each observation and memory."
+    disposition: wont-fix
+    wont_fix_reason: "multi-user feature — one Operator runs the daemon"
+    url: https://github.com/rohitg00/agentmemory/issues/1549
+  - number: 1552
+    title: "hung agentmemory was not saving but giving ids"
+    severity: high
+    difficulty: high
+    kind: bug
+    note: "A hung daemon kept returning ids without saving anything."
+    disposition: candidate
+    status: "partly-present-here — iii does not apply (ADR 0001). PR #487 labels daemon-down Memory saves local-only; the separate durable Lesson queue does not cover Memory saves."
+    url: https://github.com/rohitg00/agentmemory/issues/1552
+    fix_prs: [1563]
+  - number: 1555
+    title: "MAX_OBS_PER_SESSION shares its name with a hardcoded 5000 import limit: raising the cap past 5000 makes the store unrestorable"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "MAX_OBS_PER_SESSION shares a name with a hardcoded 5000 import limit, so raising the cap past 5000 makes the store unrestorable."
+    disposition: candidate
+    status: "present-here — config.ts:194 MAX_OBS_PER_SESSION default 2000 raisable; export-import.ts:236,289 hardcoded 5_000 import cap"
+    url: https://github.com/rohitg00/agentmemory/issues/1555
+    fix_prs: [1556]
+  - number: 1557
+    title: "status: \"Embeddings: bm25-only\" always shown in v0.9.30 even when local embeddings are active"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "agentmemory status always shows Embeddings: bm25-only even when local embeddings are active."
+    disposition: already-fixed
+    fixed_by: "api.ts:272 and cli.ts:561/815 agree on \"embeddings\" when detectEmbeddingProvider() truthy (config.ts:291-296 includes local)"
+    status: "fixed-here — api.ts:272 and cli.ts:561/815 agree on \"embeddings\" when detectEmbeddingProvider() truthy (config.ts:291-296 includes local)"
+    url: https://github.com/rohitg00/agentmemory/issues/1557
+  - number: 1558
+    title: "[graph] searchByEntities scores depend on start-node order: visitedObs is first-come-first-served and never upgraded"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "searchByEntities scores depend on start-node order because visitedObs is first-come-first-served and never upgraded."
+    disposition: candidate
+    status: "present-here — graph-retrieval.ts:184-221 and 285-293 first-come visitedObs; graph extraction is off by default and bought no Recall (#420)"
+    url: https://github.com/rohitg00/agentmemory/issues/1558
+    fix_prs: [1560]
+  - number: 1564
+    title: "Feature Request: Update endpoint for projectScope on existing memories"
+    severity: low
+    difficulty: low
+    kind: feature
+    note: "Add an endpoint to update the project scope of an existing memory."
+    disposition: candidate
+    status: "present-here — no endpoint sets project on an existing Memory (only scripts/repair-lesson-projects.ts for Lessons); a one-off script suffices, marginal"
+    url: https://github.com/rohitg00/agentmemory/issues/1564
+  - number: 1565
+    title: "smart_search: saved memories are capped at 3 by session diversification, and small limits shrink the fusion pool"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "smart_search caps saved memories at 3 through session diversification and small limits shrink the fusion pool."
+    disposition: already-fixed
+    fixed_by: "hybrid-search.ts:535-548 exempts MEMORY_SESSION from diversification; :229-252 depth floor 100"
+    status: "fixed-here — hybrid-search.ts:535-548 exempts MEMORY_SESSION from diversification; :229-252 depth floor 100"
+    url: https://github.com/rohitg00/agentmemory/issues/1565
+    fix_prs: [1696]
+  - number: 1566
+    title: "Observation retention: an age limit that works without LLM compression"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Observation retention needs an age limit that works without LLM compression."
+    disposition: candidate
+    status: "partly-present-here — evict.ts:263-270 age rule needs importance < lowImportanceThreshold, synthetic rows are importance 5 (compress-synthetic); eviction by Summary coverage and project cap exist, so growth is bounded; no pure age limit"
+    url: https://github.com/rohitg00/agentmemory/issues/1566
+  - number: 1567
+    title: "Published v0.9.30: memory_sessions returns nextCursor but the stdio proxy drops it (fix in #1534 is not released)"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "memory_sessions returns nextCursor but the stdio proxy drops it."
+    disposition: already-fixed
+    fixed_by: "tools-registry.ts:196-202 declares limit/offset; server.ts:368-380 and standalone.ts:293-295 forward them"
+    status: "fixed-here — tools-registry.ts:196-202 declares limit/offset; server.ts:368-380 and standalone.ts:293-295 forward them"
+    url: https://github.com/rohitg00/agentmemory/issues/1567
+  - number: 1571
+    title: "connect --with-hooks fails on a hook handler without a command"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "connect --with-hooks fails on a hook handler without a command."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host; agentmemory connect wires only the MCP server"
+    url: https://github.com/rohitg00/agentmemory/issues/1571
+    fix_prs: [1574]
+  - number: 1572
+    title: "doctor: no-llm-provider-key disagrees with the daemon's provider detection"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "doctor's no-llm-provider-key check disagrees with the daemon's provider detection."
+    disposition: candidate
+    status: "present-here — doctor-diagnostics.ts:73-100 own key list ignores OPENAI_API_KEY_FOR_LLM=false and AGENTMEMORY_ALLOW_AGENT_SDK; daemon config.ts:96,147"
+    url: https://github.com/rohitg00/agentmemory/issues/1572
+    fix_prs: [1575]
+  - number: 1573
+    title: "Replace import deletes the store before it validates optional sections"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Replace import deletes the store before it validates the optional sections."
+    disposition: already-fixed
+    fixed_by: "PR #496"
+    status: "fixed-here — PR #496 validates optional sections before replacement and counts keyless rows as invalid; test/export-import.test.ts."
+    url: https://github.com/rohitg00/agentmemory/issues/1573
+    fix_prs: [1576]
+  - number: 1577
+    title: "Startup times out when a custom iii-config.yaml keeps the relative `node dist/index.mjs` iii-exec entry"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Startup times out when a custom iii-config.yaml keeps the relative node dist/index.mjs iii-exec entry."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1577
+    fix_prs: [1578]
+    mentioned_by_prs: [1581]
+  - number: 1579
+    title: "Worker drops its iii connection when an endpoint response exceeds 16 MiB (worker→engine frame cap); semantic/insights provenance lists are unbounded"
+    severity: high
+    difficulty: med
+    kind: bug
+    note: "The worker drops its iii connection when an endpoint response exceeds 16 MiB, and provenance lists are unbounded."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1579
+    mentioned_by_prs: [1634, 1649]
+  - number: 1580
+    title: "Bundled iii-config.yaml ships a development iii-exec worker that custom copies inherit"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The bundled iii-config.yaml ships a development iii-exec worker that custom copies inherit."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1580
+    fix_prs: [1581]
+  - number: 1582
+    title: "fix(integrations/pi): parse and render lessons from smart-search response"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The pi integration does not parse or render lessons from the smart-search response."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1582
+    fix_prs: [1605]
+  - number: 1584
+    title: "No store migration path: engine 0.22.1 cannot serve a 0.11.2 store; 15s readiness gate aborts; memory_export capped at 15 MiB"
+    severity: high
+    difficulty: high
+    kind: bug
+    note: "No store migration path: engine 0.22.1 cannot serve a 0.11.2 store and memory_export is capped at 15 MiB."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1584
+    mentioned_by_prs: [1634]
+  - number: 1585
+    title: "Engine responses over the ws default 100 MiB frame limit tear down the worker connection; state::list has no pagination to bound whole-scope reads"
+    severity: high
+    difficulty: high
+    kind: bug
+    note: "Engine responses over the 100 MiB websocket frame limit tear down the worker connection, and state::list has no pagination."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1585
+    fix_prs: [1636]
+    mentioned_by_prs: [1634]
+  - number: 1586
+    title: "Daemon picks an LLM provider for a placeholder key that doctor reports as missing"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The daemon picks an LLM provider for a placeholder key that doctor reports as missing."
+    disposition: candidate
+    status: "present-here — config.ts:28-30 hasRealValue accepts any non-empty string, so placeholder keys select a provider (config.ts:96,108...) while doctor treats them as absent (doctor-diagnostics.ts:79-100)"
+    url: https://github.com/rohitg00/agentmemory/issues/1586
+    fix_prs: [1588]
+  - number: 1589
+    title: "Deleting a memory does not cascade to its facet records; facet queries keep returning the deleted targetId"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Deleting a memory does not cascade to its facet records, so facet queries keep returning the deleted targetId."
+    disposition: already-fixed
+    fixed_by: "PR #500"
+    status: "fixed-here — PR #500 removes Facets on ordinary Memory deletion."
+    url: https://github.com/rohitg00/agentmemory/issues/1589
+    fix_prs: [1591]
+  - number: 1590
+    title: "MCP stdio shim exits with no diagnostic: no uncaughtException / unhandledRejection handler, nothing written to a crash log"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The MCP stdio shim exits with no diagnostic because it has no uncaughtException or unhandledRejection handler or crash log."
+    disposition: candidate
+    status: "present-here — no uncaughtException/unhandledRejection handler or crash log in src/mcp/standalone.ts or transport.ts (only src/index.ts:155 for the daemon)"
+    url: https://github.com/rohitg00/agentmemory/issues/1590
+  - number: 1593
+    title: "smart-search returns \"Invocation stopped\" on a large store while the worker keeps re-registering"
+    severity: med
+    difficulty: high
+    kind: bug
+    note: "smart-search returns Invocation stopped on a large store while the worker keeps re-registering."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1593
+    mentioned_by_prs: [1636, 1637]
+  - number: 1594
+    title: "Vector index stall: the shortfall check compares the vector count against itself, so a partially-embedded index is never detected"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "The vector index shortfall check compares the vector count against itself, so a partially embedded index is never detected."
+    disposition: already-fixed
+    fixed_by: "fork fill pass compares stored vector rows against records (index-fill.ts, vectorMatchesText); no checkpoint count"
+    status: "fixed-here — fork fill pass compares stored vector rows against records (index-fill.ts, vectorMatchesText); no checkpoint count"
+    url: https://github.com/rohitg00/agentmemory/issues/1594
+    fix_prs: [1687]
+  - number: 1596
+    title: "Copilot subagentStop drops the subagent's response and ignores agentId"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Copilot subagentStop drops the subagent's response and ignores agentId."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1596
+    fix_prs: [1599]
+    mentioned_by_prs: [1598]
+  - number: 1597
+    title: "Hook truncation can end captured text on a lone surrogate"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Hook truncation can end captured text on a lone surrogate."
+    disposition: candidate
+    status: "present-here — lone surrogates can survive local truncation. The investigation did not connect them to hook cuts or provider failures; retry if a provider failure identifies invalid Unicode."
+    url: https://github.com/rohitg00/agentmemory/issues/1597
+    fix_prs: [1598]
+  - number: 1600
+    title: "Hooks cut captured text before redaction, so a `<private>` block across the limit is stored"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Hooks cut captured text before redaction, so a <private> block spanning the limit is stored."
+    disposition: already-fixed
+    fixed_by: "PR #493"
+    status: "fixed-here — PR #493 redacts an unclosed private block to the end of the text; test/privacy.test.ts."
+    url: https://github.com/rohitg00/agentmemory/issues/1600
+    fix_prs: [1695]
+  - number: 1603
+    title: "mem::compress fires one LLM call per observation with no batching/throttle - saturates self-hosted gateway, fail+retry spiral (production numbers)"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "mem::compress fires one LLM call per observation with no batching or throttle, saturating a self-hosted gateway."
+    disposition: already-fixed
+    fixed_by: "compress-batch.ts batches LLM compression per Session (CLAUDE.md \"Auto-compress\"); resilient.ts:12 concurrency cap"
+    status: "fixed-here — compress-batch.ts batches LLM compression per Session (CLAUDE.md \"Auto-compress\"); resilient.ts:12 concurrency cap"
+    url: https://github.com/rohitg00/agentmemory/issues/1603
+    fix_prs: [1639]
+    mentioned_by_prs: [1637]
+  - number: 1604
+    title: "feat(graph): support opt-in full provenance retention with bounded search indexes"
+    severity: low
+    difficulty: high
+    kind: feature
+    note: "Support opt-in full graph provenance retention with bounded search indexes."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — graph provenance retention; graph off by default, provenance bounded by getMaxSourceObservationIds"
+    url: https://github.com/rohitg00/agentmemory/issues/1604
+  - number: 1608
+    title: "targetLayer is accepted by /agentmemory/smart-search but has no effect"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "targetLayer is accepted by /agentmemory/smart-search but has no effect."
+    disposition: already-fixed
+    fixed_by: "server.ts:154-176 targetLayer honoured"
+    status: "fixed-here — server.ts:154-176 targetLayer honoured"
+    url: https://github.com/rohitg00/agentmemory/issues/1608
+  - number: 1613
+    title: "MCP tool catalog advertises memory_slot_* tools even when AGENTMEMORY_SLOTS is disabled (500 'Function not found' on every slot call)"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The MCP catalog advertises memory_slot_* tools even when AGENTMEMORY_SLOTS is disabled, so every slot call returns 500."
+    disposition: already-fixed
+    fixed_by: "server.ts:114 slot tools refused when slots disabled"
+    status: "fixed-here — server.ts:114 slot tools refused when slots disabled"
+    url: https://github.com/rohitg00/agentmemory/issues/1613
+    fix_prs: [1659]
+  - number: 1614
+    title: "memory_heal has no orphan-facet sweep, and facets/remove needs the full targetId+dimension+value triple"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "memory_heal has no orphan-facet sweep and facets/remove needs the full targetId, dimension and value triple."
+    disposition: candidate
+    status: "present-here — PR #500 prevents new orphans from ordinary deletes but deliberately does not sweep pre-existing orphans or change the untag API."
+    url: https://github.com/rohitg00/agentmemory/issues/1614
+    fix_prs: [1698]
+    mentioned_by_prs: [1642, 1699]
+  - number: 1615
+    title: "Worker Compose: stale composePid reused after reboot → infinite start crash loop (reconcile lacks the identity check runStop uses)"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Worker Compose reuses a stale composePid after reboot and loops on start crashes."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1615
+    fix_prs: [1622]
+  - number: 1617
+    title: "graph-index migrate always pauses with an opaque \"storage failure\" at the edges phase (20,091 nodes / 32,881 edges)"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "graph-index migrate always pauses with an opaque storage failure at the edges phase."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1617
+    fix_prs: [1634]
+    mentioned_by_prs: [1636, 1718]
+  - number: 1618
+    title: "bug: agentmemory v0.9.31 + iii-engine v0.25.0 fails to start worker on Windows"
+    severity: high
+    difficulty: med
+    kind: bug
+    note: "agentmemory v0.9.31 with iii-engine v0.25.0 fails to start the worker on Windows."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/issues/1618
+    fix_prs: [1625, 1641]
+    mentioned_by_prs: [1718]
+  - number: 1619
+    title: "agentmemory status always shows 'bm25-only' for embeddings even when a provider is active"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "agentmemory status always shows bm25-only for embeddings even when a provider is active."
+    disposition: already-fixed
+    fixed_by: "same as 1557"
+    status: "fixed-here — same as 1557"
+    url: https://github.com/rohitg00/agentmemory/issues/1619
+  - number: 1623
+    title: "Worker Compose boot race: first state reads fail with state::get not found, and vector recovery stays paused until restart"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "A Worker Compose boot race makes the first state reads fail and keeps vector recovery paused until restart."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1623
+    fix_prs: [1627, 1637]
+  - number: 1624
+    title: "Facet tags survive lesson deletes and observation forgets (follow-up to #1591)"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Facet tags survive lesson deletes and observation forgets."
+    disposition: already-fixed
+    fixed_by: "PR #500"
+    status: "fixed-here — PR #500 removes Facets on ordinary Lesson and Observation deletes."
+    url: https://github.com/rohitg00/agentmemory/issues/1624
+    fix_prs: [1640, 1642]
+  - number: 1631
+    title: "Deploy stack: startup index backfill fails silently (function_not_found at boot is terminal — smart-search empty until manual restart)"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "The deploy stack's startup index backfill fails silently on function_not_found, leaving smart-search empty until a restart."
+    disposition: wont-fix
+    wont_fix_reason: "Docker / PaaS / Kubernetes deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/issues/1631
+    fix_prs: [1637]
+  - number: 1632
+    title: "deploy/Dockerfile prunes --omit=optional, stripping the deps EMBEDDING_PROVIDER=local needs (deploy image ships with local embeddings broken)"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "deploy/Dockerfile prunes optional dependencies, which breaks EMBEDDING_PROVIDER=local in the deploy image."
+    disposition: wont-fix
+    wont_fix_reason: "Docker / PaaS / Kubernetes deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/issues/1632
+    fix_prs: [1651]
+  - number: 1635
+    title: "[Feature] Add Muse Code (muse CLI) support to `agentmemory connect` + auto-capture hooks"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Add Muse Code support to agentmemory connect with auto-capture hooks."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1635
+  - number: 1638
+    title: "Windows Worker Compose follow-ups to #1618: ':'-separated worker PATH, \\\\?\\ path mismatch on re-run/status, console windows"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Windows Worker Compose has a colon-separated worker PATH, a path mismatch on re-run and visible console windows."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/issues/1638
+    mentioned_by_prs: [1625, 1641]
+  - number: 1643
+    title: "Windows: launcher hangs at boot on a hidden install prompt when the 3 s iii --version probe misses"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "On Windows the launcher hangs at boot on a hidden install prompt when the iii --version probe misses."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/issues/1643
+    fix_prs: [1658]
+  - number: 1644
+    title: "mem::session-sweep fails every run when mem:sessions holds a row without an id"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "mem::session-sweep fails every run when mem:sessions holds a row without an id."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — no mem::session-sweep; idle-session-sweep.ts wraps each row in try/catch, an id-less row logs one warn and does not fail the run"
+    url: https://github.com/rohitg00/agentmemory/issues/1644
+    fix_prs: [1645]
+  - number: 1648
+    title: "v0.9.31: vector persistence fails at every boot — `function_not_found: Function state::get` against the pinned iii 0.25.0 engine (vector backfill permanently paused)"
+    severity: high
+    difficulty: med
+    kind: bug
+    note: "Vector persistence fails at every boot with function_not_found against the pinned iii 0.25.0 engine."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1648
+  - number: 1650
+    title: "Contributor PR queue (weekly)"
+    severity: low
+    difficulty: low
+    kind: chore
+    note: "Weekly contributor PR queue."
+    disposition: wont-fix
+    wont_fix_reason: "upstream housekeeping, marketing or repo diary"
+    url: https://github.com/rohitg00/agentmemory/issues/1650
+  - number: 1652
+    title: "Data not loaded after upgrade to 0.9.31 / iii 0.25.0 — state_store.db files present but API/viewer show 0"
+    severity: high
+    difficulty: med
+    kind: bug
+    note: "Data is not loaded after upgrading to 0.9.31 and iii 0.25.0, although the state_store.db files are present."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1652
+  - number: 1653
+    title: "Optional: Listed on droid.aiaaii.com badge for README"
+    severity: low
+    difficulty: low
+    kind: promo
+    note: "Request to be listed on a README badge site."
+    disposition: wont-fix
+    wont_fix_reason: "upstream housekeeping, marketing or repo diary"
+    url: https://github.com/rohitg00/agentmemory/issues/1653
+  - number: 1654
+    title: "Is there any standalone offline installer?"
+    severity: low
+    difficulty: low
+    kind: question
+    note: "Asks whether a standalone offline installer exists."
+    disposition: wont-fix
+    wont_fix_reason: "npm distribution — nothing is published from this fork; install is clone, npm ci, build, npm link"
+    url: https://github.com/rohitg00/agentmemory/issues/1654
+  - number: 1655
+    title: "Windows: _resolve_project hangs forever inside a Hermes Kanban worker (git child inherits the stdin control pipe)"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "On Windows _resolve_project hangs inside a Hermes Kanban worker because the git child inherits the stdin control pipe."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host (Hermes), and Windows"
+    url: https://github.com/rohitg00/agentmemory/issues/1655
+  - number: 1656
+    title: "memory_lesson_save MCP tool can't set sourceIds — lessons saved via MCP always have empty sources"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The memory_lesson_save MCP tool cannot set sourceIds, so lessons saved over MCP have no sources."
+    disposition: candidate
+    status: "present-here — tools-registry.ts:613-635 has no sourceIds; server.ts:941-948 does not forward it (mem::lesson-save accepts it)"
+    url: https://github.com/rohitg00/agentmemory/issues/1656
+  - number: 1657
+    title: "memory_lesson_save MCP tool drops sourceIds: lessons saved over MCP can never link to their source session"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The memory_lesson_save MCP tool drops sourceIds, so lessons cannot link to their source session."
+    disposition: candidate
+    status: "present-here — duplicate of 1656"
+    url: https://github.com/rohitg00/agentmemory/issues/1657
+  - number: 1668
+    title: "smart-search returns an empty scoped page when stronger rows from other projects or agents fill the over-fetch window"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "smart-search returns an empty scoped page when stronger rows from other projects or agents fill the over-fetch window."
+    disposition: already-fixed
+    fixed_by: "PR #484"
+    status: "fixed-here — PR #484 expands scoped search pages when initial candidates are out of scope."
+    url: https://github.com/rohitg00/agentmemory/issues/1668
+    fix_prs: [1669]
+  - number: 1685
+    title: "procedural tier can never produce a single procedure: `frequency` is derived from `sessionIds`, which is always empty"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Procedural tier frequency is derived from sessionIds, which saved patterns leave empty, so a saved pattern never reaches frequency above 1."
+    disposition: candidate
+    status: "partly-present-here — consolidation-pipeline.ts:362-367 frequency from sessionIds; remember.ts:260 sets sessionIds only when a sessionId is passed, and MCP memory_save leaves it optional (server.ts:241-259), so saved patterns are frequency 1; consolidation-written patterns carry sessionIds (consolidate.ts:146)"
+    url: https://github.com/rohitg00/agentmemory/issues/1685
+    fix_prs: [1690]
+  - number: 1686
+    title: "fix(summarize): hardcoded 120s SUMMARY_TIMEOUT_MS aborts multi-chunk sessions on local LLMs with summary_timeout"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "A hardcoded 120 s SUMMARY_TIMEOUT_MS aborts multi-chunk sessions on local LLMs."
+    disposition: already-fixed
+    fixed_by: "summarize.ts has no 120 s whole-session deadline"
+    status: "fixed-here — summarize.ts has no 120 s whole-session deadline"
+    url: https://github.com/rohitg00/agentmemory/issues/1686
+    fix_prs: [1689]
+  - number: 1702
+    title: "Add opt-in effort control for the Anthropic provider"
+    severity: low
+    difficulty: low
+    kind: feature
+    note: "Add an opt-in effort control for the Anthropic provider."
+    disposition: already-fixed
+    fixed_by: "anthropic.ts:27-44 ANTHROPIC_EFFORT"
+    status: "fixed-here — anthropic.ts:27-44 ANTHROPIC_EFFORT"
+    url: https://github.com/rohitg00/agentmemory/issues/1702
+  - number: 1706
+    title: "[viewer]  Fact Type Count should reflect current Selected Project."
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The viewer's Fact Type Count should follow the selected project."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — viewer has no Fact Type Count panel"
+    url: https://github.com/rohitg00/agentmemory/issues/1706
+    fix_prs: [1777]
+  - number: 1710
+    title: "graph-index migrate fails with payload_too_large on legacy graph scopes (16 MiB engine RPC limit)"
+    severity: med
+    difficulty: med
+    kind: bug
+    note: "graph-index migrate fails with payload_too_large on legacy graph scopes against the 16 MiB engine RPC limit."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1710
+  - number: 1724
+    title: "fix(opencode): repeated plugin setup stores every event multiple times - send a stable eventId"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The opencode plugin stores every event several times on repeated setup because it sends no stable eventId."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1724
+    fix_prs: [1751]
+  - number: 1725
+    title: "Superseded memories stay in search indexes after consolidation, auto-forget and mesh sync"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Superseded memories stay in the search indexes after consolidation, auto-forget and mesh sync."
+    disposition: already-fixed
+    fixed_by: "PR #498"
+    status: "fixed-here — PR #498 keeps Recall indexes current across consolidation and mesh Memory writes."
+    url: https://github.com/rohitg00/agentmemory/issues/1725
+  - number: 1726
+    title: "Auto-forget contradiction pass supersedes memories across projects and agents"
+    severity: high
+    difficulty: low
+    kind: bug
+    note: "The auto-forget contradiction pass supersedes memories across projects and agents."
+    disposition: already-fixed
+    fixed_by: "PR #489"
+    status: "fixed-here — PR #489 matches both scope and Global marker before auto-forget supersedes a Memory."
+    url: https://github.com/rohitg00/agentmemory/issues/1726
+    fix_prs: [1744]
+  - number: 1727
+    title: "AUTO_FORGET_INTERVAL_MS is not validated: \"1h\" or a typo runs auto-forget every millisecond"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "AUTO_FORGET_INTERVAL_MS is not validated, so 1h or a typo runs auto-forget every millisecond."
+    disposition: already-fixed
+    fixed_by: "PR #489"
+    status: "fixed-here — PR #489 validates AUTO_FORGET_INTERVAL_MS and falls back to one hour; the separate consolidation interval is not covered."
+    url: https://github.com/rohitg00/agentmemory/issues/1727
+    fix_prs: [1744]
+  - number: 1728
+    title: "Memory delete paths (governance, evict, retention, auto-forget) skip the mem:remember lock, so deleted memories can come back"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Memory delete paths skip the mem:remember lock, so deleted memories can come back."
+    disposition: candidate
+    status: "present-here — remember.ts:133 serialises on mem:remember but auto-forget.ts:50-53, retention.ts:349-354 and governance delete do not take it"
+    url: https://github.com/rohitg00/agentmemory/issues/1728
+    fix_prs: [1746]
+  - number: 1729
+    title: "mem::relate locks the id pair instead of the memories: lost relatedIds and superseded memories marked latest again"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "mem::relate locks the id pair instead of the memories, losing relatedIds and re-marking superseded memories latest."
+    disposition: candidate
+    status: "present-here — relations.ts:49-53 locks the id pair not each Memory, so concurrent relate calls sharing one Memory race"
+    url: https://github.com/rohitg00/agentmemory/issues/1729
+    mentioned_by_prs: [1746]
+  - number: 1730
+    title: "Image refcount is decremented before the memory delete succeeds in auto-forget and retention"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The image refcount is decremented before the memory delete succeeds in auto-forget and retention."
+    disposition: already-fixed
+    fixed_by: "PR #489"
+    status: "fixed-here — PR #489 releases image refs only after the record is deleted; test/auto-forget.test.ts and test/retention.test.ts."
+    url: https://github.com/rohitg00/agentmemory/issues/1730
+    fix_prs: [1744]
+    mentioned_by_prs: [1746]
+  - number: 1731
+    title: "Spool drain unlinks claimed files it failed to read, losing captured observations"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "The spool drain unlinks claimed files it failed to read, losing captured observations."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — no spool in the fork (hooks fire and forget)"
+    url: https://github.com/rohitg00/agentmemory/issues/1731
+    fix_prs: [1748]
+  - number: 1732
+    title: "Provider circuit breaker lets every caller through in half-open state"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The provider circuit breaker lets every caller through in the half-open state."
+    disposition: candidate
+    status: "present-here — circuit-breaker.ts:34-45 isAllowed returns true for every caller while half-open"
+    url: https://github.com/rohitg00/agentmemory/issues/1732
+    fix_prs: [1749]
+  - number: 1733
+    title: "PreToolUse enrich scans all sessions and memories on every tool call and ignores project for file history"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "PreToolUse enrich scans all sessions and memories on every tool call and ignores project for file history."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — no /enrich or PreToolUse hook in the fork"
+    url: https://github.com/rohitg00/agentmemory/issues/1733
+    mentioned_by_prs: [1747]
+  - number: 1734
+    title: "Observe and compress reload the whole session up to three times per observation, twice under the session lock"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Observe and compress reload the whole session up to three times per observation, twice under the session lock."
+    disposition: candidate
+    status: "partly-present-here — observe.ts:571 evictOverCap lists the whole Session on every Observation under the obs lock (:92); compress.ts does not reload"
+    url: https://github.com/rohitg00/agentmemory/issues/1734
+    mentioned_by_prs: [1773]
+  - number: 1735
+    title: "Count and list endpoints load full scopes instead of using key counts and listPage"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Count and list endpoints load full scopes instead of using key counts and listPage."
+    disposition: candidate
+    status: "partly-present-here — api.ts:672 and :1917 kv.list full Session scope for counts/pages; sqlite in-process so cost is local, not a frame limit"
+    url: https://github.com/rohitg00/agentmemory/issues/1735
+    mentioned_by_prs: [1772, 1789]
+  - number: 1736
+    title: "memory_save over MCP drops array concepts/files, ttlDays and sourceObservationIds"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "memory_save over MCP drops array concepts and files, ttlDays and sourceObservationIds."
+    disposition: candidate
+    status: "present-here — server.ts:222-231 only string concepts/files; :251-259 no ttlDays/sourceObservationIds; schema advertises strings (tools-registry.ts:104-110) so only array callers lose data"
+    url: https://github.com/rohitg00/agentmemory/issues/1736
+    fix_prs: [1745]
+  - number: 1737
+    title: "CI gaps: src/ is never typechecked, docs:check runs only at publish, .env.example checker has no caller, double build"
+    severity: low
+    difficulty: low
+    kind: chore
+    note: "CI gaps: src/ is not typechecked, docs:check runs only at publish and the build runs twice."
+    disposition: already-fixed
+    fixed_by: "ci.yml runs npm run typecheck (tsc --noEmit over src/**/*)"
+    status: "fixed-here — ci.yml runs npm run typecheck (tsc --noEmit over src/**/*)"
+    url: https://github.com/rohitg00/agentmemory/issues/1737
+    fix_prs: [1775]
+  - number: 1738
+    title: "Capture hooks have no direct tests and are excluded from typecheck"
+    severity: low
+    difficulty: med
+    kind: chore
+    note: "Capture hooks have no direct tests and are excluded from typecheck."
+    disposition: already-fixed
+    fixed_by: "tsconfig.json includes src/hooks; only per-hook tests thin"
+    status: "fixed-here — tsconfig.json includes src/hooks; only per-hook tests thin"
+    url: https://github.com/rohitg00/agentmemory/issues/1738
+    fix_prs: [1785]
+  - number: 1739
+    title: "Cleanups: unused dotenv, broken npm run migrate, stale ROADMAP, Node 20 EOL, undocumented --legacy-peer-deps"
+    severity: low
+    difficulty: low
+    kind: chore
+    note: "Cleanups: unused dotenv, a broken npm run migrate, a stale ROADMAP, Node 20 EOL and an undocumented --legacy-peer-deps."
+    disposition: candidate
+    status: "present-here — package.json:76 dotenv unused in src; :23 migrate script points at dist/functions/migrate.js, never built (tsdown.config.ts has no entry)"
+    url: https://github.com/rohitg00/agentmemory/issues/1739
+    mentioned_by_prs: [1750]
+  - number: 1740
+    title: "Tracking: split api.ts into route modules, one MCP tool table, split cli.ts"
+    severity: low
+    difficulty: high
+    kind: chore
+    note: "Tracking issue to split api.ts into route modules, one MCP tool table and a split cli.ts."
+    disposition: wont-fix
+    wont_fix_reason: "upstream housekeeping, marketing or repo diary — a refactor tracker, not a defect"
+    url: https://github.com/rohitg00/agentmemory/issues/1740
+    mentioned_by_prs: [1791]
+  - number: 1741
+    title: "Audit log export: multi-subscriber listener, file/stdout sinks, export endpoint"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Audit log export with a multi-subscriber listener, file and stdout sinks and an export endpoint."
+    disposition: wont-fix
+    wont_fix_reason: "multi-user feature — one Operator runs the daemon; audit export sinks serve several subscribers"
+    url: https://github.com/rohitg00/agentmemory/issues/1741
+    mentioned_by_prs: [1788, 1811]
+  - number: 1742
+    title: "GitHub connector: design spike for syncing issues and PRs as observations"
+    severity: low
+    difficulty: high
+    kind: feature
+    note: "Design spike for syncing GitHub issues and PRs as observations."
+    disposition: wont-fix
+    wont_fix_reason: "out of scope — a GitHub issue and PR sync is not Recall; the fork scores external text only in eval:replay"
+    url: https://github.com/rohitg00/agentmemory/issues/1742
+    mentioned_by_prs: [1790]
+  - number: 1743
+    title: "Obsidian import: read vault edits back into memory"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Read Obsidian vault edits back into memory."
+    disposition: wont-fix
+    wont_fix_reason: "out of scope — reading Obsidian vault edits back is not Recall"
+    url: https://github.com/rohitg00/agentmemory/issues/1743
+    fix_prs: [1787]
+  - number: 1762
+    title: "Regression after d53a513 (#1664): agent-sdk fallback silently overrides a configured OpenAI-compatible provider; compression retry loop spawns headless claude sessions"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "The agent-sdk fallback silently overrides a configured OpenAI-compatible provider and its compression retry loop spawns headless claude sessions."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — fork detectProvider (config.ts:96-171) tries keys first, agent-sdk only as opt-in last fallback"
+    url: https://github.com/rohitg00/agentmemory/issues/1762
+    mentioned_by_prs: [1770, 1812]
+  - number: 1763
+    title: "memory_graph_query returns empty results with a misleading \"Graph changed during the query\" warning when the 4 MiB read budget runs out"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "memory_graph_query returns empty results with a misleading warning when the 4 MiB read budget runs out."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1763
+    fix_prs: [1767]
+  - number: 1764
+    title: "Worker Compose writes provider API keys from the env file into worker-compose.yaml in plaintext"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Worker Compose writes provider API keys from the env file into worker-compose.yaml in plaintext."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/issues/1764
+    fix_prs: [1769]
+  - number: 1765
+    title: "Windows: accept DPAPI-encrypted provider keys in ~/.agentmemory/.env"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Accept DPAPI-encrypted provider keys in ~/.agentmemory/.env on Windows."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/issues/1765
+  - number: 1778
+    title: "Feature request: official ZCode support (connect zcode adapter + host-tailored hooks manifest)"
+    severity: low
+    difficulty: med
+    kind: feature
+    note: "Official ZCode support: a connect adapter and a host-tailored hooks manifest."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1778
+    fix_prs: [1786]
+  - number: 1792
+    title: "audit storage is 92% repeated prompt text (98.5% of the 16 MiB frame limit) and export drops 84% of access logs"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Audit storage is 92% repeated prompt text and export drops 84% of access logs."
+    disposition: candidate
+    status: "partly-present-here — lessons.ts:271-274 audits the full query uncapped; bounded by evictOldestAudit row cap (audit.ts:142) and only on mem::lesson-recall via smart-search/MCP"
+    url: https://github.com/rohitg00/agentmemory/issues/1792
+    mentioned_by_prs: [1804, 1812]
+  - number: 1793
+    title: "Consolidation writes near-duplicate semantic facts on every run (exact-string dedup only)"
+    severity: low
+    difficulty: med
+    kind: bug
+    note: "Consolidation writes near-duplicate semantic facts on every run because dedup is exact-string only."
+    disposition: candidate
+    status: "partly-present-here — consolidation-pipeline.ts:210-227 dedup is exact text or same structured key; unkeyed rephrasings accumulate (recall near-twin cap hides them, store grows). Filed as #445."
+    url: https://github.com/rohitg00/agentmemory/issues/1793
+    mentioned_by_prs: [1812]
+  - number: 1794
+    title: "Function metrics are lifetime-only with no reset: stale failures pin status at warn; only mem::summarize is recorded"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Function metrics are lifetime-only with no reset, so stale failures pin health status at warn."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — fork /health does not derive status from lifetime function metrics (api.ts:340-372)"
+    url: https://github.com/rohitg00/agentmemory/issues/1794
+    mentioned_by_prs: [1812]
+  - number: 1795
+    title: "@agentmemory/mcp standalone shim: write EPIPE on client disconnect logged as uncaughtException crash"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "The standalone MCP shim logs a write EPIPE on client disconnect as an uncaught-exception crash."
+    disposition: candidate
+    status: "present-here — transport.ts:233-239 process.stdout.write with no 'error' listener; EPIPE on client disconnect is an uncaught exception"
+    url: https://github.com/rohitg00/agentmemory/issues/1795
+    fix_prs: [1797]
+  - number: 1796
+    title: "Global LLM concurrency limit (AGENTMEMORY_LLM_MAX_CONCURRENCY) to avoid upstream request caps"
+    severity: low
+    difficulty: low
+    kind: feature
+    note: "A global LLM concurrency limit (AGENTMEMORY_LLM_MAX_CONCURRENCY) to avoid upstream request caps."
+    disposition: already-fixed
+    fixed_by: "resilient.ts:12 AGENTMEMORY_LLM_MAX_CONCURRENCY"
+    status: "fixed-here — resilient.ts:12 AGENTMEMORY_LLM_MAX_CONCURRENCY"
+    url: https://github.com/rohitg00/agentmemory/issues/1796
+  - number: 1803
+    title: "memory_save: accept facets (or auto-tag project:<slug>) in the same call"
+    severity: low
+    difficulty: low
+    kind: feature
+    note: "memory_save should accept facets or auto-tag project:<slug> in the same call."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — facets on memory_save; project is already first-class, facets marginal here"
+    url: https://github.com/rohitg00/agentmemory/issues/1803
+  - number: 1805
+    title: "Windows: a stale composePid reused by a service process still blocks startup after reboot (identity is \"unknown\", follow-up to #1615)"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "On Windows a stale composePid reused by a service process still blocks startup after reboot."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/issues/1805
+    mentioned_by_prs: [1812]
+  - number: 1806
+    title: "DSH context recall: does fixed agentId=\"dsh\" intentionally exclude same-project Codex sessions?"
+    severity: low
+    difficulty: low
+    kind: question
+    note: "Asks whether the fixed agentId dsh intentionally excludes same-project Codex sessions from DSH recall."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1806
+  - number: 1807
+    title: "fix(pi): make systemPromptOptions?.cwd optional in before_agent_start hook for oh-my-pi compatibility"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Make systemPromptOptions?.cwd optional in the pi before_agent_start hook for oh-my-pi."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/issues/1807
+    mentioned_by_prs: [1812]
+  - number: 1808
+    title: "Capture hooks treat a 404 from the HTTP worker as a permanent rejection, so a stop or restart window drops both live observations and the whole spool"
+    severity: med
+    difficulty: low
+    kind: bug
+    note: "Capture hooks treat a 404 from the HTTP worker as a permanent rejection and drop the live observations and the whole spool."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — no spool or HTTP-worker 404 path in the fork hooks"
+    url: https://github.com/rohitg00/agentmemory/issues/1808
+    mentioned_by_prs: [1812]
+  - number: 1809
+    title: "Windows: with a non-default data dir, the boot-time spool drain misses the hooks' default spool because APPDATA is not in the worker environment"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "On Windows with a non-default data dir the boot-time spool drain misses the hooks' default spool."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/issues/1809
+    mentioned_by_prs: [1812]
+  - number: 1810
+    title: "Hooks adopt `<cwd>/data` as a legacy data dir, so the capture spool is written inside the user's project"
+    severity: low
+    difficulty: low
+    kind: bug
+    note: "Hooks adopt <cwd>/data as a legacy data dir, so the capture spool is written inside the user's project."
+    disposition: wont-fix
+    wont_fix_reason: "code this fork does not carry — no capture spool; cli-data-dir.ts:115 legacy <cwd>/data adoption is daemon-side and needs a state_store.db"
+    url: https://github.com/rohitg00/agentmemory/issues/1810
+    mentioned_by_prs: [1812]
