@@ -92,6 +92,21 @@ describe('getXmlChildren', () => {
     expect(getXmlChildren(xml, 'concepts', 'concept')).toEqual(['CPAL', 'alsa.headroom'])
   })
 
+  it('preserves nested markup with the same child tag', () => {
+    const xml = '<facts><fact>Use <fact>inner</fact> here</fact><fact>Next</fact></facts>'
+    expect(getXmlChildren(xml, 'facts', 'fact')).toEqual(['Use <fact>inner</fact> here', 'Next'])
+  })
+
+  it('ignores child delimiters inside CDATA, comments and processing instructions', () => {
+    const item = '<![CDATA[<fact>]]><!-- </fact><fact> --><?example <fact>?>Value'
+    expect(getXmlChildren(`<facts><fact>${item}</fact></facts>`, 'facts', 'fact')).toEqual([item])
+  })
+
+  it('drops inter-item comments after a mismatched close', () => {
+    const xml = '<facts><fact>First</typo><!-- note --><fact>Next</fact></facts>'
+    expect(getXmlChildren(xml, 'facts', 'fact')).toEqual(['First', 'Next'])
+  })
+
   it('keeps inline markup inside a properly closed item', () => {
     const xml = '<decisions><decision>Wrap it in <code>x</code></decision></decisions>'
     expect(getXmlChildren(xml, 'decisions', 'decision')).toEqual(['Wrap it in <code>x</code>'])

@@ -46,9 +46,7 @@ export function getXmlTag(xml: string, tag: string): string {
 }
 
 // Models sometimes close an item with the wrong tag (`<concept>x</color>`).
-// Each child runs from its open tag to its own close tag, else to the next
-// open tag, dropping a wrong close tag left at its end.
-const STRAY_TRAILING_CLOSE = /<\/[a-zA-Z_][a-zA-Z0-9_-]*\s*>\s*$/;
+const STRAY_TRAILING_CLOSE = /<\/[a-zA-Z_][a-zA-Z0-9_-]*\s*>\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)*$/;
 
 export function getXmlChildren(
   xml: string,
@@ -58,17 +56,36 @@ export function getXmlChildren(
   if (!VALID_TAG.test(parentTag) || !VALID_TAG.test(childTag)) return [];
   const parent = firstElementContent(xml, parentTag);
   if (parent === null) return [];
-  const close = new RegExp(closeTag(childTag));
-  return parent
-    .split(new RegExp(openTag(childTag)))
-    .slice(1)
-    .map((piece) => {
-      const closed = piece.search(close);
-      return closed >= 0
-        ? piece.slice(0, closed)
-        : piece.replace(STRAY_TRAILING_CLOSE, "");
-    })
-    .map((item) => item.trim());
+  const tokens = new RegExp(
+    `${String.raw`<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>`}|(${openTag(childTag)})|(${closeTag(childTag)})`,
+    "g",
+  );
+  const children: { start: number; contentStart: number; close?: number }[] = [];
+  const open: (typeof children)[number][] = [];
+  for (const match of parent.matchAll(tokens)) {
+    if (match[1] !== undefined) {
+      const child = { start: match.index, contentStart: match.index + match[0].length };
+      children.push(child);
+      open.push(child);
+    } else if (match[2] !== undefined) {
+      const child = open.pop();
+      if (child) child.close = match.index;
+    }
+  }
+
+  const items: string[] = [];
+  let skipBefore = 0;
+  for (const [i, child] of children.entries()) {
+    if (child.start < skipBefore) continue;
+    if (child.close !== undefined) {
+      items.push(parent.slice(child.contentStart, child.close).trim());
+      skipBefore = child.close;
+    } else {
+      const end = children[i + 1]?.start ?? parent.length;
+      items.push(parent.slice(child.contentStart, end).replace(STRAY_TRAILING_CLOSE, "").trim());
+    }
+  }
+  return items;
 }
 
 // Every `<tag id="...">` element, inner text keyed by id. A repeated id is
