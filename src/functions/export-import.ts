@@ -105,9 +105,12 @@ export async function readDurableStores(kv: StateKV): Promise<DurableRows> {
 export function normalizeRelation(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const row = value as Record<string, unknown>;
-  if (!("confidence" in row) || (typeof row.confidence === "number" && Number.isFinite(row.confidence))) return value;
-  const { confidence: _confidence, ...rest } = row;
-  return rest;
+  const normalized = { ...row };
+  if ("type" in normalized && typeof normalized.type !== "string") normalized.type = "related";
+  if ("confidence" in normalized && (typeof normalized.confidence !== "number" || !Number.isFinite(normalized.confidence))) {
+    delete normalized.confidence;
+  }
+  return normalized;
 }
 
 export async function relationEntries(kv: StateKV): Promise<Array<{ key: string; value: unknown }>> {
@@ -158,7 +161,7 @@ export function validRelationEntries(value: unknown): boolean {
     if (!entry || typeof entry !== "object" || typeof entry.key !== "string" || !entry.key ||
         keys.has(entry.key) || !entry.value || typeof entry.value !== "object" || Array.isArray(entry.value) ||
         typeof entry.value.sourceId !== "string" || typeof entry.value.targetId !== "string" ||
-        typeof entry.value.type !== "string") return false;
+        !("type" in entry.value)) return false;
     keys.add(entry.key);
     return true;
   });

@@ -357,6 +357,19 @@ describe("Export/Import Functions", () => {
     expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: "custom" });
   });
 
+  it("round-trips a non-string type accepted by the relation writer", async () => {
+    await kv.set("mem:memories", "mem_2", { ...testMemory, id: "mem_2" });
+    registerRelationsFunction(sdk as never, kv as never);
+    const created = await sdk.trigger("mem::relate", { sourceId: "mem_1", targetId: "mem_2", type: 42 });
+    expect(created.success).toBe(true);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(exported.relations[0].value.type).toBe("related");
+    expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: 42 });
+    exported.relations[0].value.type = 42;
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: "related" });
+  });
+
   it("omits invalid relation confidence in exports and imports without changing the source", async () => {
     const value = { sourceId: "a", targetId: "b", type: "custom", createdAt: "2026-01-01", confidence: "bad" };
     await kv.set("mem:relations", "rel_bad", value);

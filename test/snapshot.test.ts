@@ -268,10 +268,10 @@ describe("snapshot-restore replaces each captured store", () => {
     expect(await kv.get("mem:relations", "rel_existing")).not.toBeNull();
   });
 
-  it("omits invalid confidence when restoring a captured relation", async () => {
-    snapshotFile.content = JSON.stringify({ relations: [{ key: "rel_old", value: { sourceId: "a", targetId: "b", type: "custom", confidence: "bad" } }] });
+  it("normalizes invalid type and confidence when restoring a captured relation", async () => {
+    snapshotFile.content = JSON.stringify({ relations: [{ key: "rel_old", value: { sourceId: "a", targetId: "b", type: 42, confidence: "bad" } }] });
     expect(await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" })).toMatchObject({ success: true });
-    expect(await kv.get("mem:relations", "rel_old")).toEqual({ sourceId: "a", targetId: "b", type: "custom" });
+    expect(await kv.get("mem:relations", "rel_old")).toEqual({ sourceId: "a", targetId: "b", type: "related" });
   });
 
   it("removes rows added after the snapshot and brings back snapshot-time rows", async () => {
