@@ -52,6 +52,30 @@ describe("HybridSearch", () => {
     kv = mockKV();
   });
 
+  it("expands once and embeds each query once per prepared search", async () => {
+    const embed = vi.fn(async (_text: string) => new Float32Array([1]));
+    const vector = { size: 1, search: vi.fn(async () => []) };
+    const provider: EmbeddingProvider = { name: "test", dimensions: 1, embed, embedBatch: async () => [] };
+    const expand = vi.fn(async () => ({
+      original: "query",
+      reformulations: ["reformulated"],
+      temporalConcretizations: [],
+      entityExtractions: [],
+    }));
+    const hybrid = new HybridSearch(bm25, vector as never, provider, kv as never, 0.4, 0.6, 0, false);
+    const search = hybrid.prepareSearch("query", expand);
+
+    await search(100);
+    await search(400);
+    expect(expand).toHaveBeenCalledTimes(1);
+    expect(embed.mock.calls).toEqual([["query"], ["reformulated"]]);
+    expect(vector.search).toHaveBeenCalledTimes(4);
+
+    await hybrid.prepareSearch("query", expand)(100);
+    expect(expand).toHaveBeenCalledTimes(2);
+    expect(embed).toHaveBeenCalledTimes(4);
+  });
+
   it("returns BM25-only results when no vector index is provided", async () => {
     const obs = makeObs({ id: "obs_1", sessionId: "ses_1" });
     bm25.add(obs);

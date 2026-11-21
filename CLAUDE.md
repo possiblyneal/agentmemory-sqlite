@@ -426,7 +426,10 @@ still call `search()` synchronously, holding the loop for one scoring pass; yiel
 
 A project- or agent-scoped `mem::smart-search` page widens its candidate window fourfold when
 it has fewer scoped hits than requested and the window is full, up to 1,600 candidates. It tests
-the scoped count before the relevance floor.
+the scoped count before the relevance floor. Wider scores replace earlier ones for repeat hits;
+when Session diversification drops a scoped hit, the union retains it and reapplies the near-twin
+cap. Each request reuses its query expansion and embeddings across depths (`prepareSearch()`,
+`src/state/hybrid-search.ts`); retrieval and ranking still run at each depth.
 
 ### Auto-compress
 With `AGENTMEMORY_AUTO_COMPRESS=true`, `mem::observe` sends an Observation to LLM Compression

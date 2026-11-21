@@ -6,6 +6,8 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerSmartSearchFunction } from "../src/functions/smart-search.js";
 import { setEmbeddingProvider } from "../src/functions/search.js";
+import { HybridSearch } from "../src/state/hybrid-search.js";
+import { SearchIndex } from "../src/state/search-index.js";
 import type {
   CompressedObservation,
   HybridSearchResult,
@@ -114,7 +116,7 @@ describe("Smart Search Function", () => {
     await kv.set("mem:obs:ses_1", "obs_1", obs1);
     await kv.set("mem:obs:ses_1", "obs_2", obs2);
 
-    const searchFn = async (_query: string, _limit: number) => searchResults;
+    const searchFn = () => async () => searchResults;
     registerSmartSearchFunction(sdk as never, kv as never, searchFn);
   });
 
@@ -333,7 +335,7 @@ describe("Smart Search Function", () => {
 
     it("over-fetches so filtered-out rows do not underfill the page", async () => {
       let requested = 0;
-      registerSmartSearchFunction(sdk as never, kv as never, async (_q, limit) => {
+      registerSmartSearchFunction(sdk as never, kv as never, () => async (limit) => {
         requested = limit;
         return searchResults;
       });
@@ -369,7 +371,7 @@ describe("Smart Search Function", () => {
         hit("obs_3", "ses_1", 6),
       ];
       const requested: number[] = [];
-      registerSmartSearchFunction(sdk as never, kv as never, async (_q, limit) => {
+      registerSmartSearchFunction(sdk as never, kv as never, () => async (limit) => {
         requested.push(limit);
         return ranked.slice(0, limit);
       });
@@ -383,6 +385,64 @@ describe("Smart Search Function", () => {
         query: "auth", project: "my-project", limit: 5,
       })) as { results: CompactSearchResult[] };
       expect(result.results.map((r) => r.obsId)).toEqual(["obs_1", "obs_2", "obs_3"]);
+    });
+
+    it("keeps scoped hits displaced by diversification at a wider depth", async () => {
+      const query = "quartz megabyte tangerine joule";
+      const bm25 = new SearchIndex();
+      const add = async (id: string, sessionId: string, title: string) => {
+        const obs = makeObs({
+          id, sessionId, title, timestamp: "2026-11-20T00:00:00Z",
+          type: "discovery", narrative: "", facts: [], concepts: [], files: [],
+        });
+        bm25.add(obs);
+        await kv.set(`mem:obs:${sessionId}`, id, obs);
+        await kv.set("mem:sessions", sessionId, {
+          id: sessionId, project: sessionId === "target" ? "target" : "foreign",
+        });
+      };
+      for (let i = 0; i < 4; i++) await add(`target${i}`, "target", query);
+      for (let i = 0; i < 196; i++) await add(`early${i}`, `early${i % 32}`, query);
+      for (let i = 0; i < 1600; i++) await add(`late${i}`, `late${i}`, `${query} extra words`);
+      for (let i = 0; i < 3000; i++) await add(`filler${i}`, "filler", "unrelated sample words");
+      const hybrid = new HybridSearch(bm25, null, null, kv as never, 0.4, 0.6, 0, false, 60, 3);
+      const requested: number[] = [];
+      registerSmartSearchFunction(sdk as never, kv as never, (text) => {
+        const search = hybrid.prepareSearch(text);
+        return async (limit) => {
+          requested.push(limit);
+          const hits = await search(limit);
+          expect(hits.some((r) => r.observation.id === "target3")).toBe(limit === 100);
+          return hits;
+        };
+      });
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query, project: "target", agentId: "*", limit: 5, includeLessons: false, includeInsights: false,
+      })) as { results: CompactSearchResult[] };
+
+      expect(requested).toEqual([100, 400, 1600]);
+      expect(result.results.map((r) => r.obsId)).toEqual(["target0", "target1", "target2", "target3"]);
+    });
+
+    it("ranks a newer restatement above a carried hit", async () => {
+      await kv.set("mem:sessions", "foreign", { id: "foreign", project: "other-project" });
+      const foreign = Array.from({ length: 99 }, (_, i) => hit(`foreign${i}`, "foreign", 12));
+      const older = hit("old", "ses_1", 10);
+      const newer = hit("new", "ses_1", 8);
+      older.observation.title = newer.observation.title = "auth handler needs token validation";
+      newer.observation.timestamp = "2026-02-02T10:00:00Z";
+      registerSmartSearchFunction(sdk as never, kv as never, () => async (limit) =>
+        limit === 100 ? [older, ...foreign] : [newer, ...foreign],
+      );
+
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth handler token validation", project: "my-project", agentId: "*", limit: 2,
+        includeLessons: false, includeInsights: false,
+      })) as { results: CompactSearchResult[] };
+
+      expect(result.results.map((r) => r.obsId)).toEqual(["new", "old"]);
+      expect(result.results[1].score).toBeCloseTo(result.results[0].score * 0.99);
     });
 
     it("stops widening at the cap when nothing in scope turns up", async () => {
@@ -651,7 +711,7 @@ describe("Smart Search expandIds — findObservation regressions", () => {
       makeObs({ id: "obs_buried", sessionId: "ses_4", title: "Buried" }),
     );
 
-    registerSmartSearchFunction(sdk as never, kv as never, async () => []);
+    registerSmartSearchFunction(sdk as never, kv as never, () => async () => []);
 
     const result = (await sdk.trigger("mem::smart-search", {
       expandIds: ["obs_buried"],
@@ -681,7 +741,7 @@ describe("Smart Search expandIds — findObservation regressions", () => {
       isLatest: true,
     });
 
-    registerSmartSearchFunction(sdk as never, kv as never, async () => []);
+    registerSmartSearchFunction(sdk as never, kv as never, () => async () => []);
 
     const result = (await sdk.trigger("mem::smart-search", {
       expandIds: ["mem_abc123"],

@@ -74,7 +74,7 @@ describe("Session lookups avoid listing every Session (#196)", () => {
   });
 
   it("expands an Observation id with no Session hint without listing Sessions", async () => {
-    registerSmartSearchFunction(sdk as never, kv as never);
+    registerSmartSearchFunction(sdk as never, kv as never, () => async () => []);
     const o: CompressedObservation = {
       id: "obs_far",
       sessionId: "ses_far",

@@ -98,7 +98,7 @@ describe("Smart-search followup-rate diagnostic (#771)", () => {
     kv = mockKV();
     sdk = mockSdk(kv);
     searchResults = [];
-    registerSmartSearchFunction(sdk, kv as any, async () => searchResults);
+    registerSmartSearchFunction(sdk, kv as any, () => async () => searchResults);
     registerRecentSearchesSweepFunction(sdk, kv as any);
   });
 

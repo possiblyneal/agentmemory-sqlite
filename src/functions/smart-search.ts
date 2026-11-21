@@ -11,6 +11,7 @@ import type {
   Memory,
 } from "../types.js";
 import { KV } from "../state/schema.js";
+import { capOlderNearTwins } from "../state/hybrid-search.js";
 import { memoryToObservation } from "../state/memory-utils.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { StateKV } from "../state/kv.js";
@@ -119,7 +120,7 @@ function preview(content: string): string {
 export function registerSmartSearchFunction(
   sdk: ISdk,
   kv: StateKV,
-  searchFn: (query: string, limit: number) => Promise<HybridSearchResult[]>,
+  prepareSearch: (query: string) => (limit: number) => Promise<HybridSearchResult[]>,
 ): void {
   sdk.registerFunction("mem::smart-search",
     async (data: {
@@ -257,8 +258,9 @@ export function registerSmartSearchFunction(
         ? Math.max(limit * 10, 100)
         : limit;
 
+      const search = prepareSearch(data.query);
       const [firstHybrid, lessons, insights, semanticFacts] = await Promise.all([
-        searchFn(data.query, overFetchLimit),
+        search(overFetchLimit),
         includeLessons
           ? recallLessons(sdk, data.query, recallLimit, project)
           : Promise.resolve([]),
@@ -294,8 +296,21 @@ export function registerSmartSearchFunction(
         fetched < MAX_OVER_FETCH
       ) {
         fetched = Math.min(fetched * OVER_FETCH_GROWTH, MAX_OVER_FETCH);
-        hybridResults = await searchFn(data.query, fetched);
-        inScope = await scopeHits(hybridResults);
+        hybridResults = await search(fetched);
+        const wider = await scopeHits(hybridResults);
+        const seen = new Set(wider.map((r) => r.observation.id));
+        // Session diversification can displace earlier hits. Use wider scores
+        // where available, then cap again for any twins split across windows.
+        const carry = inScope.filter((r) => !seen.has(r.observation.id));
+        if (carry.length === 0) {
+          inScope = wider;
+        } else {
+          const scored = [...wider, ...carry].map((hit) => ({ ...hit, score: hit.combinedScore }));
+          await capOlderNearTwins(kv, scored);
+          inScope = scored.sort((a, b) => b.score - a.score).map(({ score, ...hit }) => ({
+            ...hit, combinedScore: score,
+          }));
+        }
       }
       const aboveFloor = aboveRelevanceFloor(inScope);
       const shadowed = await shadowedMemoryIds(

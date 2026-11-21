@@ -64,7 +64,7 @@ describe("Recall is bounded by project, not branch", () => {
       combinedScore: 0.5,
       sessionId: sessionOnA.id,
     };
-    registerSmartSearchFunction(sdk as never, kv as never, async () => [hit]);
+    registerSmartSearchFunction(sdk as never, kv as never, () => async () => [hit]);
 
     const result = (await sdk.trigger("mem::smart-search", {
       query: "retry budget",

@@ -399,14 +399,8 @@ async function main() {
   // cost to impose on every deployment silently.
   const queryExpansionEnabled =
     getEnvVar("AGENTMEMORY_QUERY_EXPANSION") === "true";
-  registerSmartSearchFunction(sdk, kv, async (query, limit) =>
-    queryExpansionEnabled
-      ? hybridSearch.searchWithExpansion(
-          query,
-          limit,
-          await expandQuery(provider, query),
-        )
-      : hybridSearch.search(query, limit),
+  registerSmartSearchFunction(sdk, kv, (query) =>
+    hybridSearch.prepareSearch(query, queryExpansionEnabled ? () => expandQuery(provider, query) : undefined),
   );
   registerRecentSearchesSweepFunction(sdk, kv);
   registerIdleSessionSweepFunction(sdk, kv);
