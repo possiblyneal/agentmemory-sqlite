@@ -1,10 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { registerSnapshotFunction } from "../src/functions/snapshot.js";
+import { pagedReads } from "./helpers/mocks.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 import { registerExportImportFunction } from "../src/functions/export-import.js";
+import { registerRelationsFunction } from "../src/functions/relations.js";
+import { registerMeshFunction } from "../src/functions/mesh.js";
+import { SqliteState, stateFunctions } from "../src/engine/inproc/state.js";
+import { StateKV } from "../src/state/kv.js";
 import { VERSION } from "../src/version.js";
 import { getSearchIndex } from "../src/functions/search.js";
 import type {
@@ -33,6 +41,7 @@ function mockKV() {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
     },
+    ...pagedReads(store),
     bytes: async (scope: string): Promise<number> => {
       const entries = store.get(scope);
       return entries ? JSON.stringify(Array.from(entries.values())).length : 0;
@@ -328,6 +337,118 @@ describe("Export/Import Functions", () => {
     expect(oldSession).toBeNull();
   });
 
+  it("round-trips legacy-keyed relations through replace without retaining destination relations", async () => {
+    const relation = { sourceId: "mem_1", targetId: "mem_2", type: "related", createdAt: "2026-01-01" };
+    await kv.set("mem:relations", "rel_legacy", relation);
+    const exported = await sdk.trigger("mem::export", {});
+    const destination = mockKV();
+    const target = mockSdk();
+    registerExportImportFunction(target as never, destination as never);
+    await destination.set("mem:relations", "rel_stale", { ...relation, targetId: "stale" });
+    expect(await target.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await destination.list("mem:relations")).toEqual([relation]);
+    expect(await destination.get("mem:relations", "rel_legacy")).toEqual(relation);
+  });
+
+  it("round-trips relation types accepted by the writer", async () => {
+    await kv.set("mem:memories", "mem_2", { ...testMemory, id: "mem_2" });
+    registerRelationsFunction(sdk as never, kv as never);
+    const created = await sdk.trigger("mem::relate", { sourceId: "mem_1", targetId: "mem_2", type: "custom" });
+    expect(created.success).toBe(true);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: "custom" });
+  });
+
+  it("round-trips a non-string type accepted by the relation writer", async () => {
+    await kv.set("mem:memories", "mem_2", { ...testMemory, id: "mem_2" });
+    registerRelationsFunction(sdk as never, kv as never);
+    const created = await sdk.trigger("mem::relate", { sourceId: "mem_1", targetId: "mem_2", type: 42 });
+    expect(created.success).toBe(true);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(exported.relations[0].value.type).toBe("related");
+    expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: 42 });
+    exported.relations[0].value.type = 42;
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: "related" });
+  });
+
+  it("round-trips opaque endpoints accepted by mesh without changing their values or key", async () => {
+    registerMeshFunction(sdk as never, kv as never);
+    const relation = { sourceId: 42, targetId: { id: "target" }, type: "related" };
+    expect(await sdk.trigger("mem::mesh-receive", { relations: [relation] })).toMatchObject({ success: true, accepted: 1 });
+    const exported = await sdk.trigger("mem::export", {});
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "42:[object Object]:related")).toEqual(relation);
+  });
+
+  it("replaces real SQLite relations using exact NUL-containing storage keys", async () => {
+    const state = new SqliteState(":memory:");
+    try {
+      const handlers = stateFunctions(state);
+      const realKV = new StateKV({ trigger: async ({ function_id, payload }: { function_id: string; payload: unknown }) => handlers[function_id](payload) } as never);
+      const realSdk = mockSdk();
+      registerExportImportFunction(realSdk as never, realKV);
+      const relation = { sourceId: null, targetId: "b", type: "related" };
+      await realKV.set("mem:relations", "rel\u0000original", relation);
+      const exported = await realSdk.trigger("mem::export", {});
+      expect(exported.relations[0].key).toBe("rel\u0000original");
+      await realKV.set("mem:relations", "rel\u0000stale", { ...relation, targetId: "stale" });
+      expect(await realSdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+      expect(await realKV.get("mem:relations", "rel\u0000original")).toEqual(relation);
+      expect(await realKV.get("mem:relations", "rel\u0000stale")).toBeNull();
+      expect(await realKV.list("mem:relations")).toEqual([relation]);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("preserves explicit null endpoints in persisted relations", async () => {
+    const relation = { sourceId: null, targetId: "b", type: "related" };
+    await kv.set("mem:relations", "rel_null", relation);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_null")).toEqual(relation);
+  });
+
+  it("omits invalid relation confidence in exports and imports without changing the source", async () => {
+    const value = { sourceId: "a", targetId: "b", type: "custom", createdAt: "2026-01-01", confidence: "bad" };
+    await kv.set("mem:relations", "rel_bad", value);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(exported.relations[0].value).not.toHaveProperty("confidence");
+    expect(await kv.get("mem:relations", "rel_bad")).toEqual(value);
+    exported.relations[0].value.confidence = Infinity;
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_bad")).not.toHaveProperty("confidence");
+  });
+
+  it("leaves relations untouched when replacing from an older export without them", async () => {
+    const relation = { sourceId: "a", targetId: "b", type: "related", createdAt: "2026-01-01" };
+    await kv.set("mem:relations", "rel_old", relation);
+    const oldExport = { version: VERSION, exportedAt: "2026-01-01", sessions: [], observations: {}, memories: [], summaries: [] };
+    expect(await sdk.trigger("mem::import", { exportData: oldExport, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_old")).toEqual(relation);
+  });
+
+  it("restores captured legacy-keyed relations and removes later relations", async () => {
+    mkdirSync("tmp", { recursive: true });
+    const dir = mkdtempSync(join(process.cwd(), "tmp", "snapshot-relations-"));
+    try {
+      registerSnapshotFunction(sdk as never, kv as never, dir);
+      const relation = { sourceId: "mem_1", targetId: "mem_2", type: "related", createdAt: "2026-01-01" };
+      await kv.set("mem:relations", "rel_legacy", relation);
+      const created = await sdk.trigger("mem::snapshot-create", {});
+      expect(created.success).toBe(true);
+      await kv.delete("mem:relations", "rel_legacy");
+      await kv.set("mem:relations", "rel_stale", { ...relation, targetId: "stale" });
+      expect(await sdk.trigger("mem::snapshot-restore", { commitHash: created.snapshot.commitHash })).toMatchObject({ success: true });
+      expect(await kv.list("mem:relations")).toEqual([relation]);
+      expect(await kv.get("mem:relations", "rel_legacy")).toEqual(relation);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("export then import round-trip preserves data", async () => {
     const exported = (await sdk.trigger("mem::export", {})) as ExportData;
 
@@ -424,6 +545,7 @@ describe("Export/Import Functions", () => {
     });
 
     it.each([
+      ["relations are malformed", { relations: [{ key: "rel_1", value: null }] }],
       ["accessLogs is not an array", { accessLogs: {} }],
       ["lessons is not an array", { lessons: {} }],
       ["insights is not an array", { insights: "x" }],

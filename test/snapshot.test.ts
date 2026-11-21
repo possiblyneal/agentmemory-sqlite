@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { pagedReads } from "./helpers/mocks.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -65,6 +66,7 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    ...pagedReads(store),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -257,6 +259,21 @@ describe("snapshot-restore replaces each captured store", () => {
     getSearchIndex().add(memoryToIndexDoc(memory("mem_1", "Original")));
   });
 
+  it("rejects malformed relation entries before replacing any captured store", async () => {
+    snapshotFile.content = JSON.stringify({ sessions: [], memories: [], observations: {}, relations: [{ key: "bad", value: null }] });
+    await kv.set("mem:relations", "rel_existing", { sourceId: "a", targetId: "b", type: "custom" });
+    const result = await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" });
+    expect(result).toMatchObject({ success: false });
+    expect(await kv.get("mem:memories", "mem_1")).not.toBeNull();
+    expect(await kv.get("mem:relations", "rel_existing")).not.toBeNull();
+  });
+
+  it("normalizes invalid type and confidence when restoring a captured relation", async () => {
+    snapshotFile.content = JSON.stringify({ relations: [{ key: "rel_old", value: { sourceId: "a", targetId: "b", type: 42, confidence: "bad" } }] });
+    expect(await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_old")).toEqual({ sourceId: "a", targetId: "b", type: "related" });
+  });
+
   it("removes rows added after the snapshot and brings back snapshot-time rows", async () => {
     await sdk.trigger("mem::snapshot-create", { message: "before" });
 
@@ -416,6 +433,7 @@ describe("snapshot-create reentrancy guard", () => {
         return data;
       },
       delete: async () => {},
+      listPage: async () => [],
       list: async <T>(scope: string): Promise<T[]> => {
         listCalls++;
         // Park the first snapshot inside its initial list() so a second

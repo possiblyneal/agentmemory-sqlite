@@ -123,6 +123,22 @@ describe("inproc state store", () => {
     expect(next).toEqual([{ key: "c", value: "c" }, { key: "d", value: "d" }]);
   });
 
+  it("pages keys containing NUL without truncating the cursor", async () => {
+    const fns = stateFunctions(store);
+    for (const key of ["a", "a\u0000b", "a\u0000c", "b"]) {
+      await fns["state::set"]({ scope: "s", key, value: key });
+    }
+    const keys: string[] = [];
+    let after: string | undefined;
+    for (let i = 0; i < 4; i++) {
+      const page = await fns["state::list-page"]({ scope: "s", after, limit: 1 }) as Array<{ key: string }>;
+      expect(page).toHaveLength(1);
+      keys.push(page[0].key);
+      after = page[0].key;
+    }
+    expect(keys).toEqual(["a", "a\u0000b", "a\u0000c", "b"]);
+  });
+
   it("counts exactly the current rows in one scope", async () => {
     const fns = stateFunctions(store);
     expect(await fns["state::count"]({ scope: "s" })).toBe(0);

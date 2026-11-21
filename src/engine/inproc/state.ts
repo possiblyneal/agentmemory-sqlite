@@ -306,9 +306,9 @@ export class SqliteState {
 
   listPage(scope: string, after: string | undefined, limit: number): Array<{ key: string; value: unknown }> {
     const rows = this.db
-      .prepare("SELECT key, value FROM kv WHERE scope = ? AND key > ? ORDER BY key LIMIT ?")
-      .all(scope, after ?? "", limit) as Array<{ key: string; value: string }>;
-    return rows.map((r) => ({ key: r.key, value: JSON.parse(r.value) }));
+      .prepare("SELECT CAST(key AS BLOB) AS key, value FROM kv WHERE scope = ? AND key > ? ORDER BY kv.key LIMIT ?")
+      .all(scope, after ?? "", limit) as Array<{ key: Uint8Array; value: string }>;
+    return rows.map((r) => ({ key: Buffer.from(r.key).toString("utf8"), value: JSON.parse(r.value) }));
   }
 
   listNewest(
