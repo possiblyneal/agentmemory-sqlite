@@ -213,6 +213,12 @@ reinforces that Lesson on replay. A `memory_save` using the shim's local fallbac
 replies `localOnly: true` for the returned local ID; the daemon save is unconfirmed, so check
 the daemon before saving again. The local fallback is not queued.
 
+### Auto-forget scope and image references
+`mem::auto-forget` compares contradictions only when project, Global marker and agent ID
+match, including missing values. Invalid or nonpositive `AUTO_FORGET_INTERVAL_MS` values
+warn and fall back to one hour. Auto-forget and retention release a Memory's image reference
+after its indexed delete succeeds; concurrent deletion locking is outside this contract.
+
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
 eviction, `mem::auto-forget`, `mem::forget`, `mem::retention-evict`, `mem::governance-delete`,

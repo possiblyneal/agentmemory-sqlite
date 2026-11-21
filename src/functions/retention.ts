@@ -346,10 +346,10 @@ export function registerRetentionFunctions(
           }
 
           const mem = await kv.get<Memory>(scope, candidate.memoryId);
+          await deleteIndexed(kv, scope, candidate.memoryId);
           if (mem && mem.imageRef) {
             await decrementImageRef(kv, sdk, mem.imageRef);
           }
-          await deleteIndexed(kv, scope, candidate.memoryId);
           await kv.delete(KV.retentionScores, candidate.memoryId);
           evicted++;
           evictedIds.push(candidate.memoryId);

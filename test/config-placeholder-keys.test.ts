@@ -57,3 +57,27 @@ describe("LLM provider detection ignores placeholder keys", () => {
     expect(await detect()).toEqual({ provider: "anthropic", kind: "llm" });
   });
 });
+
+describe("auto-forget interval", () => {
+  const original = process.env.AUTO_FORGET_INTERVAL_MS;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.AUTO_FORGET_INTERVAL_MS;
+    else process.env.AUTO_FORGET_INTERVAL_MS = original;
+    vi.restoreAllMocks();
+  });
+
+  it.each(["abc", "1h", "0", "-5", "1.5", "", "Infinity"])("warns and defaults for %s", async (raw) => {
+    process.env.AUTO_FORGET_INTERVAL_MS = raw;
+    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const { getAutoForgetIntervalMs } = await import("../src/config.js");
+    expect(getAutoForgetIntervalMs()).toBe(3_600_000);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Invalid AUTO_FORGET_INTERVAL_MS"));
+  });
+
+  it("accepts a positive integer", async () => {
+    process.env.AUTO_FORGET_INTERVAL_MS = "600000";
+    const { getAutoForgetIntervalMs } = await import("../src/config.js");
+    expect(getAutoForgetIntervalMs()).toBe(600_000);
+  });
+});

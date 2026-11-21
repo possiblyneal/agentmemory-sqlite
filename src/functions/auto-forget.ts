@@ -12,6 +12,12 @@ import { logger } from "../logger.js";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const CONTRADICTION_THRESHOLD = 0.9;
 
+function sameSupersessionScope(a: Memory, b: Memory): boolean {
+  return a.project === b.project &&
+    (a.global === true) === (b.global === true) &&
+    a.agentId === b.agentId;
+}
+
 interface AutoForgetResult {
   ttlExpired: string[];
   contradictions: Array<{
@@ -47,10 +53,10 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             result.ttlExpired.push(mem.id);
             deletedIds.add(mem.id);
             if (!dryRun) {
+              await deleteIndexed(kv, KV.memories, mem.id);
               if (mem.imageRef) {
                 await decrementImageRef(kv, sdk, mem.imageRef);
               }
-              await deleteIndexed(kv, KV.memories, mem.id);
               evictedSourceIds.push(mem.id);
               await recordAudit(kv, "delete", "mem::auto-forget", [mem.id], {
                 resource: "memory",
@@ -119,6 +125,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             if (sim > CONTRADICTION_THRESHOLD) {
               const memA = memById.get(memIds[i])!;
               const memB = memById.get(memIds[j])!;
+              if (!sameSupersessionScope(memA, memB)) continue;
               // Two daily reports of two different days are not a
               // contradiction. Without this, auto-forget silently re-demotes
               // exactly the rows a lineage repair just restored - measured
