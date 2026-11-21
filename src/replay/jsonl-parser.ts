@@ -124,8 +124,9 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
 
   let sessionId = "";
   let cwd = "";
-  let firstTs = "";
-  let lastTs = "";
+  const firstTs = entries.find(({ entry }) => entry.timestamp)?.entry.timestamp;
+  const defaultTs = firstTs || new Date().toISOString();
+  let lastTs = defaultTs;
 
   const observations: RawObservation[] = [];
   const compactions: number[] = [];
@@ -135,9 +136,8 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
     const nextId = () => fingerprintId("obs", `${position++}:${line}`);
     if (entry.sessionId && !sessionId) sessionId = entry.sessionId;
     if (typeof entry.cwd === "string" && entry.cwd.trim() && !cwd) cwd = entry.cwd;
-    const ts = entry.timestamp || new Date().toISOString();
-    if (!firstTs) firstTs = ts;
-    lastTs = ts;
+    if (entry.timestamp) lastTs = entry.timestamp;
+    const ts = lastTs;
 
     const role = entry.message?.role;
     const content = entry.message?.content;
@@ -209,13 +209,12 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
     }
   }
 
-  const nowIso = new Date().toISOString();
   return {
     sessionId: effectiveSessionId,
     project: deriveProject(cwd),
     cwd: cwd || process.cwd(),
-    startedAt: firstTs || nowIso,
-    endedAt: lastTs || nowIso,
+    startedAt: defaultTs,
+    endedAt: lastTs,
     observations,
     compactions,
   };
