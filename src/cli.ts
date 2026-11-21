@@ -38,6 +38,8 @@ import { generateId } from "./state/schema.js";
 import { envFilePath, readEnvFile } from "./hooks/_env.js";
 import {
   buildDiagnostics,
+  captureDoctorProcessEnv,
+  doctorPromptsAllowed,
   dryRunPlan,
   type Diagnostic,
   type DiagnosticFixResult,
@@ -85,7 +87,12 @@ const IS_RESET = args.includes("--reset");
 // (getRestPort/getBaseUrl/getStreamPort) or the --port /
 // --instance / --tools handlers below. Only-if-unset, so a real
 // process.env value — including one just set by a CLI flag — still wins.
-hydrateProcessEnvFromFile();
+let doctorProcessEnv: Record<string, string | undefined> = {};
+if (args[0] === "doctor") {
+  doctorProcessEnv = captureDoctorProcessEnv(hydrateProcessEnvFromFile);
+} else {
+  hydrateProcessEnvFromFile();
+}
 
 // --version / -V early exit. Print VERSION + exit before any side effects
 // (engine boot, env load, dir mkdir). `-v` is taken by --verbose so we
@@ -672,6 +679,7 @@ function buildDoctorEffects(): DoctorEffects {
         return {};
       }
     },
+    readProcessEnv: () => doctorProcessEnv,
     pidfileExists: () => existsSync(workerPidfilePath()),
     pidfilePidIsAlive: () => {
       const pid = readWorkerPidfile();
@@ -953,6 +961,13 @@ async function runDoctor() {
     return;
   }
 
+  const promptsAllowed =
+    applyAll ||
+    doctorPromptsAllowed(process.env, Boolean(process.stdin.isTTY), Boolean(process.stdout.isTTY));
+  if (!promptsAllowed) {
+    p.log.info("Not an interactive terminal: reporting only. Run `agentmemory doctor --all` to apply the fixes.");
+  }
+
   let failed = 0;
   let fixed = 0;
   let skipped = 0;
@@ -976,12 +991,22 @@ async function runDoctor() {
       p.log.info(`(manual fix only — see "${d.id}" docs)`);
     }
 
+    if (applyAll && d.manualOnly) {
+      skipped++;
+      continue;
+    }
+
     if (applyAll) {
       const r = await applyFixWithReport(d, ctx, false);
       if (r.ok) fixed++;
       // Re-check only this diagnostic.
       const after = await d.check(ctx);
       if (!after.ok) p.log.warn(`${d.id} still failing after fix.`);
+      continue;
+    }
+
+    if (!promptsAllowed) {
+      skipped++;
       continue;
     }
 

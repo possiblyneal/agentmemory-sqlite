@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { refreshBootVerbose } from "./logger.js";
 import { hydrateEnvFromFile, loadEnvFile } from "./hooks/_env.js";
 import pc from "picocolors";
+import { isPlaceholderKey } from "./utils/placeholder-key.js";
 import type {
   AgentMemoryConfig,
   ProviderType,
@@ -27,6 +28,10 @@ let warnPremiumModelShown = false;
 
 function hasRealValue(v: string | undefined): v is string {
   return typeof v === "string" && v.trim().length > 0;
+}
+
+function hasRealKey(v: string | undefined): v is string {
+  return hasRealValue(v) && !isPlaceholderKey(v);
 }
 
 // Hydrate ~/.agentmemory/.env into process.env at boot. loadEnvFile() is
@@ -88,12 +93,22 @@ function warnIfPremiumModel(
   );
 }
 
+function selectProvider(env: Record<string, string | undefined>): ProviderType {
+  if (hasRealKey(env["OPENAI_API_KEY"]) && env["OPENAI_API_KEY_FOR_LLM"] !== "false") return "openai";
+  if (hasRealKey(env["MINIMAX_API_KEY"])) return "minimax";
+  if (hasRealKey(env["ANTHROPIC_API_KEY"])) return "anthropic";
+  if (hasRealKey(env["GEMINI_API_KEY"]) || hasRealKey(env["GOOGLE_API_KEY"])) return "gemini";
+  if (hasRealKey(env["OPENROUTER_API_KEY"])) return "openrouter";
+  return env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true" ? "agent-sdk" : "noop";
+}
+
 function detectProvider(env: Record<string, string>): ProviderConfig {
   const readEnv = (key: string) => env[key];
   const maxTokens = parseInt(env["MAX_TOKENS"] || "4096", 10);
+  const selected = selectProvider(env);
 
   // OpenAI-compatible: supports OpenAI, DeepSeek, SiliconFlow, Azure, vLLM, LM Studio
-  if (hasRealValue(env["OPENAI_API_KEY"]) && env["OPENAI_API_KEY_FOR_LLM"] !== "false") {
+  if (selected === "openai") {
     const model = resolveModel("openai", readEnv);
     warnIfPremiumModel("OPENAI_MODEL", model, env);
     return {
@@ -105,7 +120,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
   }
 
   // MiniMax: Anthropic-compatible API, requires raw fetch to avoid SDK stainless headers
-  if (hasRealValue(env["MINIMAX_API_KEY"])) {
+  if (selected === "minimax") {
     return {
       provider: "minimax",
       model: resolveModel("minimax", readEnv),
@@ -113,7 +128,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
     };
   }
 
-  if (hasRealValue(env["ANTHROPIC_API_KEY"])) {
+  if (selected === "anthropic") {
     return {
       provider: "anthropic",
       model: resolveModel("anthropic", readEnv),
@@ -121,8 +136,8 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
       baseURL: env["ANTHROPIC_BASE_URL"],
     };
   }
-  if (hasRealValue(env["GEMINI_API_KEY"]) || hasRealValue(env["GOOGLE_API_KEY"])) {
-    if (!hasRealValue(env["GEMINI_API_KEY"]) && hasRealValue(env["GOOGLE_API_KEY"])) {
+  if (selected === "gemini") {
+    if (!hasRealKey(env["GEMINI_API_KEY"]) && hasRealKey(env["GOOGLE_API_KEY"])) {
       process.stderr.write(
         "[agentmemory] GOOGLE_API_KEY detected — treating as GEMINI_API_KEY. " +
           "Set GEMINI_API_KEY in ~/.agentmemory/.env to silence this warning.\n",
@@ -134,7 +149,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
       maxTokens,
     };
   }
-  if (hasRealValue(env["OPENROUTER_API_KEY"])) {
+  if (selected === "openrouter") {
     const model = resolveModel("openrouter", readEnv);
     warnIfPremiumModel("OPENROUTER_MODEL", model, env);
     return {
@@ -144,8 +159,7 @@ function detectProvider(env: Record<string, string>): ProviderConfig {
     };
   }
 
-  const allowAgentSdk = env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true";
-  if (!allowAgentSdk) {
+  if (selected === "noop") {
     process.stderr.write(
       pc.dim(
         "[agentmemory] No LLM provider key set — running zero-LLM (BM25 + on-device embeddings). " +
@@ -239,19 +253,7 @@ export function getModelCacheDir(): string {
 }
 
 export function detectLlmProviderKind(): "llm" | "noop" {
-  const env = getMergedEnv();
-  if (
-    hasRealValue(env["ANTHROPIC_API_KEY"]) ||
-    hasRealValue(env["GEMINI_API_KEY"]) ||
-    hasRealValue(env["GOOGLE_API_KEY"]) ||
-    hasRealValue(env["OPENROUTER_API_KEY"]) ||
-    hasRealValue(env["MINIMAX_API_KEY"]) ||
-    (hasRealValue(env["OPENAI_API_KEY"]) &&
-      env["OPENAI_API_KEY_FOR_LLM"] !== "false")
-  ) {
-    return "llm";
-  }
-  return "noop";
+  return selectProvider(getMergedEnv()) === "noop" ? "noop" : "llm";
 }
 
 export function loadEmbeddingConfig(): EmbeddingConfig {
@@ -564,15 +566,15 @@ function hasLLMProviderConfigured(env: Record<string, string | undefined>): bool
   const provider = (env["AGENTMEMORY_PROVIDER"] || "").toLowerCase();
   if (provider === "noop") return false;
   const openaiKeyForLlm =
-    env["OPENAI_API_KEY"] &&
+    hasRealKey(env["OPENAI_API_KEY"]) &&
     (env["OPENAI_API_KEY_FOR_LLM"] || "").toLowerCase() !== "false";
   return Boolean(
-    env["ANTHROPIC_API_KEY"] ||
+    hasRealKey(env["ANTHROPIC_API_KEY"]) ||
       openaiKeyForLlm ||
-      env["OPENROUTER_API_KEY"] ||
-      env["GEMINI_API_KEY"] ||
-      env["GOOGLE_API_KEY"] ||
-      env["MINIMAX_API_KEY"] ||
+      hasRealKey(env["OPENROUTER_API_KEY"]) ||
+      hasRealKey(env["GEMINI_API_KEY"]) ||
+      hasRealKey(env["GOOGLE_API_KEY"]) ||
+      hasRealKey(env["MINIMAX_API_KEY"]) ||
       env["OPENAI_BASE_URL"] ||
       provider === "agent-sdk",
   );

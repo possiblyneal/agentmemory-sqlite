@@ -73,6 +73,14 @@ describe("OpenRouterEmbeddingProvider dimension regression", () => {
     expect(provider.dimensions).toBe(3072);
   });
 
+  it("resolves variant suffixes only for OpenRouter", () => {
+    process.env["OPENROUTER_EMBEDDING_MODEL"] = "openai/text-embedding-3-large:floor";
+    expect(new OpenRouterEmbeddingProvider("test-key").dimensions).toBe(3072);
+    process.env["OPENROUTER_EMBEDDING_DIMENSIONS"] = "1024";
+    expect(new OpenRouterEmbeddingProvider("test-key").dimensions).toBe(1024);
+    expect(() => resolveDimensions("text-embedding-3-large:floor", undefined, "OPENAI_EMBEDDING_DIMENSIONS")).toThrow(/unknown/);
+  });
+
   it("defaults to 1536 for openai/text-embedding-3-small", () => {
     const provider = new OpenRouterEmbeddingProvider("test-key");
     expect(provider.dimensions).toBe(1536);
@@ -170,6 +178,22 @@ describe("requested dimensions reach the request body (PR #1369)", () => {
     process.env["OPENAI_EMBEDDING_DIMENSIONS"] = "1024";
     const spy = stubFetch(1024);
     await new OpenAIEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy).dimensions).toBe(1024);
+  });
+
+  it("omits dimensions for a tagged OpenAI-compatible model", async () => {
+    process.env["OPENAI_EMBEDDING_MODEL"] = "text-embedding-3-large:custom";
+    process.env["OPENAI_EMBEDDING_DIMENSIONS"] = "1024";
+    const spy = stubFetch(1024);
+    await new OpenAIEmbeddingProvider("test-key").embed("x");
+    expect(sentBody(spy)).not.toHaveProperty("dimensions");
+  });
+
+  it("sends shortened dimensions for an OpenRouter variant", async () => {
+    process.env["OPENROUTER_EMBEDDING_MODEL"] = "openai/text-embedding-3-large:floor";
+    process.env["OPENROUTER_EMBEDDING_DIMENSIONS"] = "1024";
+    const spy = stubFetch(1024);
+    await new OpenRouterEmbeddingProvider("test-key").embed("x");
     expect(sentBody(spy).dimensions).toBe(1024);
   });
 

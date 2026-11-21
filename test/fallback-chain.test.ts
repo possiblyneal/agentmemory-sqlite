@@ -10,6 +10,7 @@ function makeProvider(
     name,
     compress: impl?.compress ?? (async () => `compressed by ${name}`),
     summarize: impl?.summarize ?? (async () => `summarized by ${name}`),
+    ...(impl?.describeImage ? { describeImage: impl.describeImage } : {}),
   };
 }
 
@@ -97,5 +98,22 @@ describe("FallbackChainProvider", () => {
       maxTokens: 2048,
     });
     expect(compress).toHaveBeenCalledWith("s", "u", { maxTokens: 2048 });
+  });
+
+  it("describes an image through the first capable provider that succeeds", async () => {
+    const down = vi.fn().mockRejectedValue(new Error("vision down"));
+    const up = vi.fn().mockResolvedValue("a diagram");
+    const chain = new FallbackChainProvider([
+      makeProvider("text-only"),
+      makeProvider("vision-a", { describeImage: down }),
+      makeProvider("vision-b", { describeImage: up }),
+    ]);
+    expect(await chain.describeImage?.("b64", "image/png", "describe")).toBe("a diagram");
+    expect(down).toHaveBeenCalledWith("b64", "image/png", "describe");
+  });
+
+  it("offers no image description when no provider in the chain can", () => {
+    const chain = new FallbackChainProvider([makeProvider("a"), makeProvider("b")]);
+    expect(chain.describeImage).toBeUndefined();
   });
 });
