@@ -257,6 +257,12 @@ before any store mutation. Rows without string keys are dropped and counted in `
 legacy keyless Session stubs do not prevent restoring the rest. Access logs and legacy Memory
 session IDs retain their normal normalization. This preflight does not make replacement transactional.
 
+### Relation backups
+Full exports and snapshots carry Memory relations with their original storage keys, including legacy
+`rel_` keys. Replace import and snapshot restore replace that scope when the backup contains it;
+older backups without a `relations` section leave the scope untouched. Import validates relation
+entries before a replace can delete anything.
+
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
 eviction, `mem::auto-forget`, `mem::forget`, `mem::retention-evict`, `mem::governance-delete`,

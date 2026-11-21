@@ -19,6 +19,10 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number): Promise<Array<{ key: string; value: T }>> =>
+      Array.from(store.get(scope)?.entries() ?? []).sort(([a], [b]) => a.localeCompare(b))
+        .filter(([key]) => after === undefined || key > after).slice(0, limit)
+        .map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];

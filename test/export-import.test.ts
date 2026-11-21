@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { registerSnapshotFunction } from "../src/functions/snapshot.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -33,6 +36,10 @@ function mockKV() {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number): Promise<Array<{ key: string; value: T }>> =>
+      Array.from(store.get(scope)?.entries() ?? []).sort(([a], [b]) => a.localeCompare(b))
+        .filter(([key]) => after === undefined || key > after).slice(0, limit)
+        .map(([key, value]) => ({ key, value: value as T })),
     bytes: async (scope: string): Promise<number> => {
       const entries = store.get(scope);
       return entries ? JSON.stringify(Array.from(entries.values())).length : 0;
@@ -328,6 +335,46 @@ describe("Export/Import Functions", () => {
     expect(oldSession).toBeNull();
   });
 
+  it("round-trips legacy-keyed relations through replace without retaining destination relations", async () => {
+    const relation = { sourceId: "mem_1", targetId: "mem_2", type: "related", createdAt: "2026-01-01" };
+    await kv.set("mem:relations", "rel_legacy", relation);
+    const exported = await sdk.trigger("mem::export", {});
+    const destination = mockKV();
+    const target = mockSdk();
+    registerExportImportFunction(target as never, destination as never);
+    await destination.set("mem:relations", "rel_stale", { ...relation, targetId: "stale" });
+    expect(await target.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await destination.list("mem:relations")).toEqual([relation]);
+    expect(await destination.get("mem:relations", "rel_legacy")).toEqual(relation);
+  });
+
+  it("leaves relations untouched when replacing from an older export without them", async () => {
+    const relation = { sourceId: "a", targetId: "b", type: "related", createdAt: "2026-01-01" };
+    await kv.set("mem:relations", "rel_old", relation);
+    const oldExport = { version: VERSION, exportedAt: "2026-01-01", sessions: [], observations: {}, memories: [], summaries: [] };
+    expect(await sdk.trigger("mem::import", { exportData: oldExport, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_old")).toEqual(relation);
+  });
+
+  it("restores captured legacy-keyed relations and removes later relations", async () => {
+    mkdirSync("tmp", { recursive: true });
+    const dir = mkdtempSync(join(process.cwd(), "tmp", "snapshot-relations-"));
+    try {
+      registerSnapshotFunction(sdk as never, kv as never, dir);
+      const relation = { sourceId: "mem_1", targetId: "mem_2", type: "related", createdAt: "2026-01-01" };
+      await kv.set("mem:relations", "rel_legacy", relation);
+      const created = await sdk.trigger("mem::snapshot-create", {});
+      expect(created.success).toBe(true);
+      await kv.delete("mem:relations", "rel_legacy");
+      await kv.set("mem:relations", "rel_stale", { ...relation, targetId: "stale" });
+      expect(await sdk.trigger("mem::snapshot-restore", { commitHash: created.snapshot.commitHash })).toMatchObject({ success: true });
+      expect(await kv.list("mem:relations")).toEqual([relation]);
+      expect(await kv.get("mem:relations", "rel_legacy")).toEqual(relation);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("export then import round-trip preserves data", async () => {
     const exported = (await sdk.trigger("mem::export", {})) as ExportData;
 
@@ -424,6 +471,7 @@ describe("Export/Import Functions", () => {
     });
 
     it.each([
+      ["relations are malformed", { relations: [{ key: "rel_1", value: null }] }],
       ["accessLogs is not an array", { accessLogs: {} }],
       ["lessons is not an array", { lessons: {} }],
       ["insights is not an array", { insights: "x" }],

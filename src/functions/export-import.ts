@@ -77,6 +77,7 @@ export const DURABLE_STORES: readonly DurableStore[] = [
   { field: "semanticMemories", scope: KV.semantic, keyOf: byId },
   { field: "proceduralMemories", scope: KV.procedural, keyOf: byId },
   { field: "facets", scope: KV.facets, keyOf: byId },
+  { field: "relations", scope: KV.relations, keyOf: (row) => String(row.key) },
   { field: "lessons", scope: KV.lessons, keyOf: byId },
   { field: "insights", scope: KV.insights, keyOf: byId },
   { field: "signals", scope: KV.signals, keyOf: byId },
@@ -95,8 +96,21 @@ function readableStores(): DurableStore[] {
 // fields are absent rather than empty.
 export async function readDurableStores(kv: StateKV): Promise<DurableRows> {
   const readable = readableStores();
-  const lists = await Promise.all(readable.map((s) => kv.list(s.scope)));
+  const lists = await Promise.all(readable.map((s) =>
+    s.field === "relations" ? relationEntries(kv) : kv.list(s.scope),
+  ));
   return Object.fromEntries(readable.map((s, i) => [s.field, lists[i]]));
+}
+
+export async function relationEntries(kv: StateKV): Promise<Array<{ key: string; value: unknown }>> {
+  const entries: Array<{ key: string; value: unknown }> = [];
+  let after: string | undefined;
+  for (;;) {
+    const page = await kv.listPage(KV.relations, after, 1000);
+    entries.push(...page);
+    if (page.length < 1000) return entries;
+    after = page[page.length - 1].key;
+  }
 }
 
 function nonEmpty<T>(rows: T[] | undefined): T[] | undefined {
@@ -135,6 +149,12 @@ function invalidImportSection(importData: ExportData): string | null {
     const rows: unknown = importData[section];
     if (rows != null && !Array.isArray(rows)) return `${section} must be an array`;
   }
+  const relations: unknown = importData.relations;
+  if (relations != null && (!Array.isArray(relations) || relations.some((entry) =>
+    !entry || typeof entry.key !== "string" || !entry.key || !entry.value ||
+    typeof entry.value.sourceId !== "string" || typeof entry.value.targetId !== "string" ||
+    !["supersedes", "extends", "derives", "contradicts", "related"].includes(entry.value.type)
+  ))) return "relations must contain keyed relation rows";
   const accessLogs: unknown = importData.accessLogs;
   if (accessLogs != null && !Array.isArray(accessLogs)) return "accessLogs must be an array";
   if (Array.isArray(accessLogs) && accessLogs.length > MAX_ACCESS_LOGS) {
@@ -283,6 +303,7 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         semanticMemories: nonEmpty(stores.semanticMemories),
         proceduralMemories: nonEmpty(stores.proceduralMemories),
         facets: nonEmpty(stores.facets),
+        relations: stores.relations,
         lessons: nonEmpty(stores.lessons),
         insights: nonEmpty(stores.insights),
         signals: nonEmpty(stores.signals),
@@ -459,6 +480,9 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           (l) => kv.delete(KV.lessons, l.id),
         );
         resetLessonIndex();
+        if (importData.relations) {
+          await runChunked(await relationEntries(kv), ({ key }) => kv.delete(KV.relations, key));
+        }
         await runChunked(
           await kv.list<Insight>(KV.insights).catch(() => []),
           (i) => kv.delete(KV.insights, i.id),
@@ -634,6 +658,12 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
             if (existing) { stats.skipped++; return; }
           }
           await kv.set(KV.signals, signal.id, signal);
+        });
+      }
+      if (importData.relations) {
+        await runChunked(importData.relations, async ({ key, value }) => {
+          if (strategy === "skip" && await kv.get(KV.relations, key)) { stats.skipped++; return; }
+          await kv.set(KV.relations, key, value);
         });
       }
       if (importData.facets) {
