@@ -139,10 +139,10 @@ describe("mem::consolidate dedup", () => {
 
   it("indexes the successor when the predecessor audit fails", async () => {
     getSearchIndex().clear();
-    const { run, kv, latest } = await setup([["auth"], ["auth"], ["auth"]]);
+    const { run, kv, latest } = await setup([["auth", "login"], ["auth", "login"], ["auth", "login"]]);
     await run();
     const [first] = await latest();
-    await kv.set(KV.observations("s1"), "o3", obs("o3", ["auth"]));
+    await kv.set(KV.observations("s1"), "o3", obs("o3", ["auth", "login"]));
     const set = kv.set.bind(kv);
     let auditFailed = false;
     kv.set = async (scope, key, data) => {
@@ -153,7 +153,9 @@ describe("mem::consolidate dedup", () => {
       return set(scope, key, data);
     };
     await run();
-    const [second] = await latest();
+    const current = await latest();
+    expect(current).toHaveLength(1);
+    const [second] = current;
     expect(auditFailed).toBe(true);
     expect(second.parentId).toBe(first.id);
     expect(getSearchIndex().has(first.id)).toBe(false);

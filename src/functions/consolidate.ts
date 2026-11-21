@@ -206,20 +206,20 @@ export function registerConsolidateFunction(
             await kv.set(KV.memories, evolved.id, evolved);
             existingMatch.isLatest = false;
             await kv.set(KV.memories, existingMatch.id, existingMatch);
+            existingMemories.push(evolved);
+            writtenTitles.add(evolved.title.toLowerCase());
             deindexSupersededMemory(existingMatch.id);
             await indexNewMemoryVersion(evolved);
             await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
               action: "mark_non_latest",
               concept,
             });
-            existingMemories.push(evolved);
             await recordAudit(kv, "evolve", "mem::consolidate", [evolved.id], {
               action: "evolve_memory",
               oldId: existingMatch.id,
               newId: evolved.id,
               concept,
             });
-            writtenTitles.add(evolved.title.toLowerCase());
             consolidated++;
           } else {
             const memory: Memory = {
@@ -234,11 +234,11 @@ export function registerConsolidateFunction(
             };
             await kv.set(KV.memories, memory.id, memory);
             existingMemories.push(memory);
+            writtenTitles.add(memory.title.toLowerCase());
             await recordAudit(kv, "remember", "mem::consolidate", [memory.id], {
               action: "create_memory",
               concept,
             });
-            writtenTitles.add(memory.title.toLowerCase());
             consolidated++;
           }
         } catch (err) {
