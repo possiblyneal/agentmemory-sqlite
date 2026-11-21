@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -568,7 +569,7 @@ Layered protection for security means input validation, safe APIs and deny-lists
       expect(result.clusterStrategy).toBe("graph");
     });
 
-    it("handles LLM failure gracefully", async () => {
+    it("reports failure when every reflect call fails (#440)", async () => {
       provider.summarize.mockRejectedValue(new Error("LLM timeout"));
 
       await seedNode(kv, makeConceptNode("concept_a"));
@@ -580,10 +581,14 @@ Layered protection for security means input validation, safe APIs and deny-lists
 
       const result = (await sdk.trigger("mem::reflect", {})) as {
         success: boolean;
+        error?: string;
         newInsights: number;
+        clustersFailed: number;
       };
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/LLM timeout/);
+      expect(result.clustersFailed).toBe(1);
       expect(result.newInsights).toBe(0);
     });
   });
@@ -939,5 +944,67 @@ describe("mem::reflect project scope (#1344)", () => {
     for (const [, prompt] of provider.summarize.mock.calls) {
       expect(String(prompt)).not.toMatch(/spotify/i);
     }
+  });
+});
+
+describe("mem::reflect Insight identity (#440)", () => {
+  async function seedProject(
+    kv: ReturnType<typeof mockKV>,
+    project: string,
+    concepts: [string, string],
+  ): Promise<void> {
+    const sessionId = `ses_${project}`;
+    await kv.set("mem:sessions", sessionId, { id: sessionId, project });
+    for (const name of concepts) await seedNode(kv, { ...makeConceptNode(name), sessionId });
+    await seedEdge(kv, makeEdge(concepts[0], concepts[1]));
+    const [a, b] = concepts;
+    for (const [i, fact] of [`${a} first fact`, `${b} second fact`, `${a} with ${b}`].entries()) {
+      const id = `sem_${project}${i}`;
+      await kv.set("mem:semantic", id, { ...makeSemantic(fact, id), sourceSessionIds: [sessionId] });
+    }
+  }
+
+  function setup() {
+    const sdk = mockSdk();
+    const kv = mockKV();
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue(XML_RESPONSE) };
+    registerReflectFunctions(sdk as never, kv as never, provider as never);
+    return { sdk, kv };
+  }
+
+  it("writes each project its own Insight when two projects reach the same conclusion", async () => {
+    const { sdk, kv } = setup();
+    await markGraphIndexesReady(kv as never);
+    await seedProject(kv, "alpha", ["security", "validation"]);
+    await seedProject(kv, "beta", ["tokens", "rotation"]);
+
+    await sdk.trigger("mem::reflect", { project: "alpha" });
+    const beta = (await sdk.trigger("mem::reflect", { project: "beta" })) as { newInsights: number; reinforced: number };
+
+    expect(beta).toMatchObject({ newInsights: 2, reinforced: 0 });
+    const insights = await kv.list<Insight>("mem:insights");
+    expect(insights.filter((i) => i.project === "alpha")).toHaveLength(2);
+    expect(insights.filter((i) => i.project === "beta")).toHaveLength(2);
+    expect(insights.every((i) => i.reinforcements === 0)).toBe(true);
+  });
+
+  it("reinforces a project's Insight stored under its content-only id rather than duplicating it", async () => {
+    const { sdk, kv } = setup();
+    await markGraphIndexesReady(kv as never);
+    await seedProject(kv, "alpha", ["security", "validation"]);
+    await sdk.trigger("mem::reflect", { project: "alpha" });
+    const legacy = (await kv.list<Insight>("mem:insights")).map((i) => {
+      const content = i.content.trim().toLowerCase();
+      const id = `ins_${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
+      return { ...i, id };
+    });
+    for (const i of await kv.list<Insight>("mem:insights")) await kv.delete("mem:insights", i.id);
+    for (const i of legacy) await kv.set("mem:insights", i.id, i);
+    await kv.set("mem:semantic", "sem_alpha3", { ...makeSemantic("security again", "sem_alpha3"), sourceSessionIds: ["ses_alpha"] });
+
+    const result = (await sdk.trigger("mem::reflect", { project: "alpha" })) as { newInsights: number; reinforced: number };
+
+    expect(result).toMatchObject({ newInsights: 0, reinforced: 2 });
+    expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
   });
 });

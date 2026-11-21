@@ -26,6 +26,23 @@ import { getInsightMaxIdleWeeks } from "../config.js";
 import { insightClusterKey, compareShown, factBelongsToProject } from "./insight-merge.js";
 
 const MIN_CLUSTER_ITEMS = 3;
+
+function insightId(project: string | undefined, content: string): string {
+  const normalized = content.trim().toLowerCase();
+  return fingerprintId("ins", project ? `${project}\n${normalized}` : normalized);
+}
+
+// Insights written before the id carried the project are keyed by content alone.
+async function findStoredInsight(
+  kv: StateKV,
+  project: string | undefined,
+  content: string,
+): Promise<Insight | null> {
+  const scoped = await kv.get<Insight>(KV.insights, insightId(project, content));
+  if (scoped && !scoped.deleted) return scoped;
+  const legacy = await kv.get<Insight>(KV.insights, insightId(undefined, content));
+  return legacy && !legacy.deleted && legacy.project === project ? legacy : null;
+}
 // Nodes one reflect pass reads from the graph indexes.
 const REFLECT_GRAPH_NODE_LIMIT = 5000;
 // What a cluster's reflect last read, under KV.config, keyed by the cluster.
@@ -324,6 +341,8 @@ export function registerReflectFunctions(
       let clustersSkipped = 0;
       let clustersUnchanged = 0;
       let totalInsights = 0;
+      let clustersFailed = 0;
+      let lastError = "";
 
       for (const conceptNames of conceptClusters) {
         if (totalInsights >= maxTotal) break;
@@ -432,14 +451,11 @@ export function registerReflectFunctions(
 
             if (!content) continue;
 
-            const fp = fingerprintId("ins", content.trim().toLowerCase());
-            const existing = await kv.get<Insight>(KV.insights, fp);
+            const fp = insightId(data?.project, content);
+            const existing = await findStoredInsight(kv, data?.project, content);
             // The id must name an Insight of this cluster and project; any
             // other id is the model inventing one, so the Insight is new.
-            const restated =
-              existing && !existing.deleted
-                ? existing
-                : siblings.find((i) => i.id === reinforcesId);
+            const restated = existing ?? siblings.find((i) => i.id === reinforcesId);
 
             if (restated) {
               reinforceInsight(restated);
@@ -474,7 +490,9 @@ export function registerReflectFunctions(
           if (clusterCount > 0 && !cutByTotal) {
             await kv.set(KV.config, inputsKey, { hash: inputsHash, at: new Date().toISOString() });
           }
-        } catch {
+        } catch (err) {
+          clustersFailed++;
+          lastError = err instanceof Error ? err.message : String(err);
           continue;
         }
       }
@@ -486,15 +504,20 @@ export function registerReflectFunctions(
           clustersProcessed: conceptClusters.length - clustersSkipped - clustersUnchanged,
           clustersSkipped,
           clustersUnchanged,
+          clustersFailed,
           clusterStrategy,
         });
       } catch {}
 
+      const clustersProcessed = conceptClusters.length - clustersSkipped - clustersUnchanged;
+      const everyCallFailed = clustersFailed > 0 && clustersFailed === clustersProcessed;
       return {
-        success: true,
+        success: !everyCallFailed,
+        ...(everyCallFailed ? { error: lastError } : {}),
         newInsights,
         reinforced,
-        clustersProcessed: conceptClusters.length - clustersSkipped - clustersUnchanged,
+        clustersProcessed,
+        clustersFailed,
         clustersSkipped,
         clustersUnchanged,
         clusterStrategy,
