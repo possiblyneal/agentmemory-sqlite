@@ -257,6 +257,13 @@ before any store mutation. Rows without string keys are dropped and counted in `
 legacy keyless Session stubs do not prevent restoring the rest. Access logs and legacy Memory
 session IDs retain their normal normalization. This preflight does not make replacement transactional.
 
+### Facet cleanup
+Ordinary hard deletes of Observations, Memories and Lessons use `deleteWithFacets()`
+(`src/functions/facets.ts`), which serializes deletion with Facet tag and untag mutations and
+best-effort removes Facets for the IDs actually deleted. A later tag on a missing ID remains
+allowed. Import replacement and snapshot restore keep their own replacement semantics; this is
+not an orphan sweep. Memory writers take `MEMORY_WRITE_LOCK` before the Facet lock.
+
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
 eviction, `mem::auto-forget`, `mem::forget`, `mem::retention-evict`, `mem::governance-delete`,

@@ -1,3 +1,4 @@
+import { deleteWithFacets } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
 import type { Memory, CompressedObservation, Session } from "../types.js";
 import { KV } from "../state/schema.js";
@@ -73,7 +74,10 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
               await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
                 const current = await kv.get<Memory>(KV.memories, mem.id);
                 if (!current) return;
-                await deleteIndexed(kv, KV.memories, mem.id);
+                await deleteWithFacets(kv, async (removed) => {
+                  await deleteIndexed(kv, KV.memories, mem.id);
+                  removed.push(mem.id);
+                });
                 if (current.imageRef) {
                   await decrementImageRef(kv, sdk, current.imageRef).catch((error) => {
                     logger.warn("Auto-forget could not release image reference", { memoryId: current.id, error: String(error) });
@@ -181,7 +185,10 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             if (!dryRun) {
               let deletedOk = false;
               try {
-                await deleteIndexed(kv, KV.observations(sessions[i].id), obs.id);
+                await deleteWithFacets(kv, async (removed) => {
+                  await deleteIndexed(kv, KV.observations(sessions[i].id), obs.id);
+                  removed.push(obs.id);
+                });
                 deletedOk = true;
               } catch {
                 deletedOk = false;

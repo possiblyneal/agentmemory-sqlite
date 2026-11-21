@@ -1,3 +1,4 @@
+import { deleteWithFacets } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
 import type {
   Session,
@@ -275,7 +276,10 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               lowImportanceIds.add(o.id);
             } else {
               try {
-                await deleteIndexed(kv, KV.observations(session.id), o.id);
+                await deleteWithFacets(kv, async (removed) => {
+                  await deleteIndexed(kv, KV.observations(session.id), o.id);
+                  removed.push(o.id);
+                });
                 stats.lowImportanceObs++;
                 lowImportanceIds.add(o.id);
                 countRemoval(session.id);
@@ -321,7 +325,10 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           } else {
             for (const o of toEvict) {
               try {
-                await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
+                await deleteWithFacets(kv, async (removed) => {
+                  await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
+                  removed.push(o.id);
+                });
                 stats.capEvictions++;
                 countRemoval(o.sessionId);
                 evictedSourceIds.push(o.id);
@@ -363,7 +370,10 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 const removed = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
                   const current = await kv.get<Memory>(KV.memories, mem.id);
                   if (!current) return false;
-                  await deleteIndexed(kv, KV.memories, mem.id);
+                  await deleteWithFacets(kv, async (removed) => {
+                    await deleteIndexed(kv, KV.memories, mem.id);
+                    removed.push(mem.id);
+                  });
                   if (current.imageRef) {
                     await decrementImageRef(kv, sdk, current.imageRef).catch((err: unknown) => {
                       logger.warn("Eviction could not release image reference", {
@@ -410,7 +420,10 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                 const removed = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
                   const current = await kv.get<Memory>(KV.memories, mem.id);
                   if (!current) return false;
-                  await deleteIndexed(kv, KV.memories, mem.id);
+                  await deleteWithFacets(kv, async (removed) => {
+                    await deleteIndexed(kv, KV.memories, mem.id);
+                    removed.push(mem.id);
+                  });
                   if (current.imageRef) {
                     await decrementImageRef(kv, sdk, current.imageRef).catch((err: unknown) => {
                       logger.warn("Eviction could not release image reference", {

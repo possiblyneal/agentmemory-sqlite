@@ -4,6 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { registerFacetsFunction } from "../src/functions/facets.js";
 import { registerLessonsFunctions, resetLessonIndex } from "../src/functions/lessons.js";
 import { recordProjectActivity } from "../src/state/project-time.js";
 import type { Lesson } from "../src/types.js";
@@ -50,6 +51,7 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number) => [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values(), (v) => structuredClone(v)) as T[]) : [];
@@ -84,9 +86,17 @@ describe("Lessons", () => {
     kv = mockKV();
     resetLessonIndex();
     registerLessonsFunctions(sdk as never, kv as never);
+    registerFacetsFunction(sdk as never, kv as never);
     for (const project of ["/test", "/app", "/other"]) {
       await kv.set("mem:sessions", `ses${project}`, { id: `ses${project}`, project });
     }
+  });
+
+  it("removes Facets when a Lesson is deleted", async () => {
+    const saved = await sdk.trigger("mem::lesson-save", { content: "Test lesson for Facet deletion", project: "/app" });
+    await sdk.trigger("mem::facet-tag", { targetId: saved.lesson.id, targetType: "memory", dimension: "kind", value: "test" });
+    await sdk.trigger("mem::lesson-delete", { lessonId: saved.lesson.id });
+    expect((await sdk.trigger("mem::facet-get", { targetId: saved.lesson.id })).dimensions).toEqual([]);
   });
 
   describe("mem::lesson-save near-twin re-save (#378)", () => {

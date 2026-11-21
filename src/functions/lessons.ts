@@ -1,3 +1,4 @@
+import { deleteWithFacets } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, fingerprintId, jaccardOverlap, jaccardText } from "../state/schema.js";
@@ -348,7 +349,10 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "lesson not found" };
       }
 
-      await kv.delete(KV.lessons, lesson.id);
+      await deleteWithFacets(kv, async (removed) => {
+        await kv.delete(KV.lessons, lesson.id);
+        removed.push(lesson.id);
+      });
       lessonRecords.delete(lesson.id);
       if (lessonIndex) lessonIndex.remove(lesson.id);
       noteLessonMutation();
@@ -369,7 +373,11 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
     reason: string,
   ): Promise<string[]> {
     if (expired.length === 0) return [];
-    const deletedIds = await kv.deleteManyIfUnchanged(KV.lessons, expired);
+    const deletedIds = await deleteWithFacets(kv, async (removed) => {
+      const ids = await kv.deleteManyIfUnchanged(KV.lessons, expired);
+      removed.push(...ids);
+      return ids;
+    });
     for (const id of deletedIds) {
       lessonRecords.delete(id);
       if (lessonIndex) lessonIndex.remove(id);

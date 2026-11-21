@@ -4,7 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { registerFacetsFunction } from "../src/functions/facets.js";
+import { deleteWithFacets, registerFacetsFunction } from "../src/functions/facets.js";
 import type { Facet } from "../src/types.js";
 
 function mockKV() {
@@ -21,6 +21,8 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number) =>
+      [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -54,6 +56,83 @@ describe("Facets Functions", () => {
     sdk = mockSdk();
     kv = mockKV();
     registerFacetsFunction(sdk as never, kv as never);
+  });
+
+  it("removes tags of deleted targets but preserves unrelated tags", async () => {
+    for (const targetId of ["gone", "kept"]) {
+      await sdk.trigger("mem::facet-tag", { targetId, targetType: "memory", dimension: "kind", value: "test" });
+    }
+    await deleteWithFacets(kv as never, async (deleted) => { deleted.push("gone"); });
+    const result = await sdk.trigger("mem::facet-query", { matchAny: ["kind:test"] }) as { results: Array<{ targetId: string }> };
+    expect(result.results.map((item) => item.targetId)).toEqual(["kept"]);
+  });
+
+  it("orders a concurrent tag before deletion and allows a later tag", async () => {
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const originalSet = kv.set;
+    kv.set = async (...args) => { entered(); await wait; return originalSet(...args); };
+    const data = { targetId: "gone", targetType: "memory", dimension: "kind", value: "test" };
+    const tag = sdk.trigger("mem::facet-tag", data);
+    await started;
+    const deletion = deleteWithFacets(kv as never, async (deleted) => { deleted.push("gone"); });
+    release();
+    await Promise.all([tag, deletion]);
+    expect((await sdk.trigger("mem::facet-get", { targetId: "gone" })).dimensions).toEqual([]);
+    await sdk.trigger("mem::facet-tag", data);
+    expect((await sdk.trigger("mem::facet-get", { targetId: "gone" })).dimensions).toHaveLength(1);
+  });
+
+  it("cleans successful IDs when a batch fails", async () => {
+    for (const targetId of ["one", "two"]) await sdk.trigger("mem::facet-tag", { targetId, targetType: "memory", dimension: "kind", value: "test" });
+    await expect(deleteWithFacets(kv as never, async (deleted) => { deleted.push("one"); throw new Error("delete failed"); })).rejects.toThrow("delete failed");
+    const result = await sdk.trigger("mem::facet-query", { matchAny: ["kind:test"] });
+    expect(result.results.map((item: { targetId: string }) => item.targetId)).toEqual(["two"]);
+  });
+
+  it("preserves deletion results when Facet cleanup fails", async () => {
+    await sdk.trigger("mem::facet-tag", { targetId: "gone", targetType: "memory", dimension: "kind", value: "test" });
+    kv.listPage = async () => { throw new Error("cleanup failed"); };
+    const result = await deleteWithFacets(kv as never, async (deleted) => { deleted.push("gone"); return "removed"; });
+    expect(result).toBe("removed");
+  });
+
+  it("keeps a tag ordered after a deletion already in progress", async () => {
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const data = { targetId: "gone", targetType: "memory", dimension: "kind", value: "test" };
+    await sdk.trigger("mem::facet-tag", data);
+    const deletion = deleteWithFacets(kv as never, async (removed) => { entered(); await wait; removed.push("gone"); });
+    await started;
+    const tag = sdk.trigger("mem::facet-tag", data);
+    release();
+    await Promise.all([deletion, tag]);
+    expect((await sdk.trigger("mem::facet-get", { targetId: "gone" })).dimensions).toHaveLength(1);
+  });
+
+  it("continues cleanup when one Facet cannot be removed", async () => {
+    for (const targetId of ["one", "two"]) await sdk.trigger("mem::facet-tag", { targetId, targetType: "memory", dimension: "kind", value: "test" });
+    const originalDelete = kv.delete;
+    let failed = false;
+    kv.delete = async (scope, key) => { if (!failed) { failed = true; throw new Error("delete failed"); } await originalDelete(scope, key); };
+    await deleteWithFacets(kv as never, async (removed) => { removed.push("one", "two"); });
+    const result = await sdk.trigger("mem::facet-query", { matchAny: ["kind:test"] });
+    expect(result.results).toHaveLength(1);
+  });
+
+  it("cleans a batch across Facet pages without skipping survivors", async () => {
+    for (let i = 0; i < 520; i++) {
+      const id = String(i).padStart(4, "0");
+      await kv.set("mem:facets", id, { id, targetId: i % 2 ? "keep" : "remove", dimension: "kind", value: "test" });
+    }
+    await deleteWithFacets(kv as never, async (removed) => { removed.push("remove"); });
+    const remaining = await kv.list<Facet>("mem:facets");
+    expect(remaining).toHaveLength(260);
+    expect(remaining.every((facet) => facet.targetId === "keep")).toBe(true);
   });
 
   describe("mem::facet-tag", () => {

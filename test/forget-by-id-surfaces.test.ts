@@ -8,6 +8,7 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
   withKeyedLock: <T>(_key: string, fn: () => Promise<T>) => fn(),
 }));
 
+import { registerFacetsFunction } from "../src/functions/facets.js";
 import { registerRememberFunction } from "../src/functions/remember.js";
 import { registerGovernanceFunction } from "../src/functions/governance.js";
 import { registerApiTriggers } from "../src/triggers/api.js";
@@ -38,6 +39,7 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number) => [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     update: async () => {},
     list: async <T>(scope: string): Promise<T[]> =>
       Array.from(store.get(scope)?.values() ?? []) as T[],
@@ -93,6 +95,7 @@ function surfaces(): Surfaces {
   const kv = mockKV();
   const sdk = mockSdk();
   registerRememberFunction(sdk as never, kv as never);
+  registerFacetsFunction(sdk as never, kv as never);
   registerGovernanceFunction(sdk as never, kv as never);
   registerApiTriggers(sdk as never, kv as never, SECRET);
   registerMcpEndpoints(sdk as never, kv as never, SECRET);
@@ -131,6 +134,14 @@ async function auditRows(kv: ReturnType<typeof mockKV>) {
 describe("memory_forget MCP tool", () => {
   beforeEach(() => {
     getSearchIndex().clear();
+  });
+
+  it("removes Facets when forgetting a memory", async () => {
+    const { kv, sdk, callTool } = surfaces();
+    await kv.set(KV.memories, "mem_a", makeMemory("mem_a"));
+    await sdk._fns.get("mem::facet-tag")!({ targetId: "mem_a", targetType: "memory", dimension: "kind", value: "test" });
+    await callTool("memory_forget", { memoryId: "mem_a" });
+    expect((await sdk._fns.get("mem::facet-get")!({ targetId: "mem_a" })).dimensions).toEqual([]);
   });
 
   it("removes one memory by id, from search as well as the store", async () => {

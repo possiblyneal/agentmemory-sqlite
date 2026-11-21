@@ -4,6 +4,7 @@ vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { registerFacetsFunction } from "../src/functions/facets.js";
 import { registerGovernanceFunction } from "../src/functions/governance.js";
 import {
   getSearchIndex,
@@ -27,6 +28,7 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number) => [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -96,10 +98,25 @@ describe("Governance Functions", () => {
     sdk = mockSdk();
     kv = mockKV();
     registerGovernanceFunction(sdk as never, kv as never);
+    registerFacetsFunction(sdk as never, kv as never);
 
     await kv.set("mem:memories", "mem_1", makeMemory("mem_1", "pattern"));
     await kv.set("mem:memories", "mem_2", makeMemory("mem_2", "bug"));
     await kv.set("mem:memories", "mem_3", makeMemory("mem_3", "pattern"));
+  });
+
+  it("governance-delete removes the deleted memory's Facets", async () => {
+    await sdk.trigger("mem::facet-tag", { targetId: "mem_1", targetType: "memory", dimension: "kind", value: "test" });
+    await sdk.trigger("mem::governance-delete", { memoryIds: ["mem_1"], reason: "outdated" });
+    const result = await sdk.trigger("mem::facet-get", { targetId: "mem_1" });
+    expect(result.dimensions).toEqual([]);
+  });
+
+  it("governance-bulk removes Facets for every deleted memory", async () => {
+    for (const targetId of ["mem_1", "mem_3"]) await sdk.trigger("mem::facet-tag", { targetId, targetType: "memory", dimension: "kind", value: "test" });
+    await sdk.trigger("mem::governance-bulk", { type: ["pattern"] });
+    const result = await sdk.trigger("mem::facet-query", { matchAny: ["kind:test"] });
+    expect(result.results).toEqual([]);
   });
 
   it("governance-delete removes specified memories", async () => {
