@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseJsonlText } from "../src/replay/jsonl-parser.js";
 
-const turn = (type: "user" | "assistant", ts: string, text: string) =>
+const turn = (type: "user" | "assistant", ts: string | number, text: string) =>
   JSON.stringify({
     type,
     sessionId: "ses-ts",
@@ -27,6 +27,19 @@ describe("import-jsonl session times", () => {
   it("dates leading undated Observations from the first timestamp", () => {
     const parsed = parseJsonlText([turn("user", "", "leading prompt"), text].join("\n"));
     expect(parsed.observations[0]?.timestamp).toBe(parsed.startedAt);
+  });
+
+  it("ignores invalid timestamp values when dating Observations and Session bounds", () => {
+    const parsed = parseJsonlText([
+      turn("user", 1776420000000, "leading prompt"),
+      text,
+      turn("assistant", "not a date", "last answer"),
+    ].join("\n"));
+    expect(parsed.startedAt).toBe("2026-04-17T10:00:00.000Z");
+    expect(parsed.endedAt).toBe("2026-04-17T10:00:05.000Z");
+    expect(parsed.observations.map((o) => o.timestamp)).toEqual([
+      parsed.startedAt, parsed.startedAt, parsed.endedAt, parsed.endedAt,
+    ]);
   });
 
   it("dates a timestampless entry's Observation from the last timestamp seen, not the import time", () => {
