@@ -210,6 +210,9 @@ export class AgentSDKProvider implements MemoryProvider {
             systemPrompt,
             maxTurns: 1,
             allowedTools: [],
+            settingSources: [],
+            strictMcpConfig: true,
+            persistSession: false,
             abortController,
           },
         })

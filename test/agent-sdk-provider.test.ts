@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 const state = vi.hoisted(() => ({
   queryCalls: [] as Array<{ systemPrompt: string; userPrompt: string }>,
   lastAbortController: undefined as AbortController | undefined,
+  lastOptions: undefined as Record<string, unknown> | undefined,
   mockResult: "<result>ok</result>" as
     | string
     | ((systemPrompt: string, userPrompt: string) => string),
@@ -24,6 +25,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
     prompt: string;
     options: { systemPrompt: string; abortController?: AbortController };
   }) => {
+    state.lastOptions = options;
     state.queryCalls.push({ systemPrompt: options.systemPrompt, userPrompt: prompt });
     state.lastAbortController = options.abortController;
     async function* gen() {
@@ -359,5 +361,16 @@ describe("AgentSDKProvider call timeout", () => {
     };
 
     expect(await provider.summarize("slow", "user")).toBe("<result>slow</result>");
+  });
+});
+
+describe("AgentSDKProvider child session isolation (#446)", () => {
+  it("loads no settings, plugins or MCP servers and persists no transcript", async () => {
+    await new AgentSDKProvider().summarize("sys", "user");
+    expect(state.lastOptions).toMatchObject({
+      settingSources: [],
+      strictMcpConfig: true,
+      persistSession: false,
+    });
   });
 });
