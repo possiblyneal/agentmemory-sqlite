@@ -241,6 +241,8 @@ Concurrent deletion locking is outside this contract.
 `MEMORY_WRITE_LOCK` (`src/state/memory-utils.ts`) serializes Memory saves, deletes,
 relations, evolution, and auto-forget demotion. Before demoting, auto-forget rechecks both
 live rows under the lock and reports only completed demotions; dry runs report snapshot matches.
+Mesh receive, mesh sync and heal hold the same lock across each Memory write and its index update.
+Heal rechecks the stored supersession edge under the lock before demoting.
 Consolidation checks the predecessor again under the lock after the provider call. Release the
 lock before graph eviction. Import and snapshot restore keep their own replacement semantics.
 Eviction decrements image references after deleting the row and logs a failed release without
@@ -425,8 +427,9 @@ Memories, not Lessons.
   and it is not yet injected; it goes directly above the first passed Memory it shadows, within
   the 3 results, and skips the gate.
 - **De-indexing** — every path that sets a Memory `isLatest: false` (`mem::remember`, `mem::evolve`,
-  `mem::consolidate`, `mem::auto-forget`) calls `deindexSupersededMemory()`; evolve and
-  consolidate index the new version with `indexNewMemoryVersion()` (`src/functions/search.ts`).
+  `mem::consolidate`, `mem::auto-forget`, `mem::heal`, mesh receive and sync) calls
+  `deindexSupersededMemory()`; every other path that writes a latest Memory (evolve, consolidate,
+  `mem::auto-page`, mesh) indexes it with `indexNewMemoryVersion()` (`src/functions/search.ts`).
 - **Keyed Semantic Facts** — see the `SemanticMemory` consistency rule; a keyed fact whose text
   matches an unkeyed one keys it when every Session that fact cites is this project's, so the
   corpus written before keys can be superseded without one project closing another's fact.

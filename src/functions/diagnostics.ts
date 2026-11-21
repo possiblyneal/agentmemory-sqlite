@@ -2,6 +2,8 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
+import { deindexSupersededMemory } from "./search.js";
 import { recordAudit } from "./audit.js";
 import { storeAcceptsWrite } from "../health/store-probe.js";
 import { readMissedInjections } from "../hooks/_missed-injection.js";
@@ -768,7 +770,8 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
         }
 
         for (const memory of memories) {
-          if (memory.isLatest && supersededBy.has(memory.id)) {
+          const successorId = supersededBy.get(memory.id);
+          if (memory.isLatest && successorId && successorId !== memory.id) {
             if (dryRun) {
               details.push(
                 `[dry-run] Would set isLatest=false on memory "${memory.title}" (${memory.id})`,
@@ -776,22 +779,23 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
               fixed++;
               continue;
             }
-            const didFix = await withKeyedLock(
-              `mem:memory:${memory.id}`,
-              async () => {
-                const fresh = await kv.get<Memory>(KV.memories, memory.id);
-                if (!fresh || !fresh.isLatest) return false;
-                fresh.isLatest = false;
-                fresh.updatedAt = new Date().toISOString();
-                await kv.set(KV.memories, fresh.id, fresh);
-                await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
-                  entityType: "memory",
-                  reason: "superseded-memory-mark-non-latest",
-                  action: "update",
-                });
-                return true;
-              },
-            );
+            const didFix = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+              const [fresh, successor] = await Promise.all([
+                kv.get<Memory>(KV.memories, memory.id),
+                kv.get<Memory>(KV.memories, successorId),
+              ]);
+              if (!fresh?.isLatest || !successor?.supersedes?.includes(fresh.id)) return false;
+              await kv.set(KV.memories, fresh.id, {
+                ...fresh, isLatest: false, updatedAt: new Date().toISOString(),
+              });
+              deindexSupersededMemory(fresh.id);
+              await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
+                entityType: "memory",
+                reason: "superseded-memory-mark-non-latest",
+                action: "update",
+              });
+              return true;
+            });
             if (didFix) {
               details.push(
                 `Set isLatest=false on memory "${memory.title}" (${memory.id})`,

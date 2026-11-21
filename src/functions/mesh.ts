@@ -2,11 +2,13 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import {
   indexGraphEdge,
   indexGraphNode,
   graphLegDisabled,
 } from "../state/graph-indexes.js";
+import { deindexSupersededMemory, indexNewMemoryVersion } from "./search.js";
 import { recordAudit } from "./audit.js";
 import { capRecordProvenance } from "./graph-provenance.js";
 import { GRAPH_WRITE_LOCK } from "./graph.js";
@@ -82,7 +84,7 @@ async function lwwMergeList<T extends { id: string }>(
   kv: StateKV,
   scope: string,
   items: T[] | undefined,
-  lockPrefix: string,
+  lockKey: (id: string) => string,
   tsField: "updatedAt" | "createdAt",
   onWrite?: (item: T) => Promise<void>,
 ): Promise<number> {
@@ -92,25 +94,22 @@ async function lwwMergeList<T extends { id: string }>(
     if (!item.id || typeof item.id !== "string") continue;
     const ts = (item as Record<string, unknown>)[tsField];
     if (typeof ts !== "string" || Number.isNaN(new Date(ts).getTime())) continue;
-    const wrote = await withKeyedLock(`${lockPrefix}:${item.id}`, async () => {
+    const wrote = await withKeyedLock(lockKey(item.id), async () => {
       const existing = await kv.get<T>(scope, item.id);
-      if (!existing) {
-        await kv.set(scope, item.id, item);
-        return true;
-      }
-      const existingTs = (existing as Record<string, unknown>)[tsField] as string;
-      if (new Date(ts) > new Date(existingTs)) {
-        await kv.set(scope, item.id, item);
-        return true;
-      }
-      return false;
-    });
-    if (wrote) {
-      count++;
+      const existingTs = existing && (existing as Record<string, unknown>)[tsField] as string | undefined;
+      if (existing && !(new Date(ts) > new Date(existingTs!))) return false;
+      await kv.set(scope, item.id, item);
       if (onWrite) await onWrite(item);
-    }
+      return true;
+    });
+    if (wrote) count++;
   }
   return count;
+}
+
+async function reindexMergedMemory(memory: Memory): Promise<void> {
+  deindexSupersededMemory(memory.id);
+  if (memory.isLatest) await indexNewMemoryVersion(memory);
 }
 
 function graphNodeTs(node: GraphNode): string {
@@ -354,9 +353,9 @@ export function registerMeshFunction(
       }
       let accepted = 0;
 
-      accepted += await lwwMergeList(kv, KV.memories, data.memories, "mem:memory", "updatedAt");
-      accepted += await lwwMergeList(kv, KV.semantic, data.semantic, "mem:semantic", "updatedAt");
-      accepted += await lwwMergeList(kv, KV.procedural, data.procedural, "mem:procedural", "updatedAt");
+      accepted += await lwwMergeList(kv, KV.memories, data.memories, () => MEMORY_WRITE_LOCK, "updatedAt", reindexMergedMemory);
+      accepted += await lwwMergeList(kv, KV.semantic, data.semantic, (id) => `mem:semantic:${id}`, "updatedAt");
+      accepted += await lwwMergeList(kv, KV.procedural, data.procedural, (id) => `mem:procedural:${id}`, "updatedAt");
       if (data.relations && Array.isArray(data.relations)) {
         for (const rel of data.relations) {
           if (!rel.sourceId || !rel.targetId || !rel.type) continue;
@@ -380,7 +379,7 @@ export function registerMeshFunction(
           kv,
           KV.graphEdges,
           data.graphEdges?.map(capRecordProvenance),
-          "mem:gedge",
+          (id) => `mem:gedge:${id}`,
           "createdAt",
           (edge) => indexGraphEdge(kv, edge),
         )),
@@ -519,13 +518,13 @@ async function applySyncData(
   let applied = 0;
 
   if (scopes.includes("memories")) {
-    applied += await lwwMergeList(kv, KV.memories, data.memories, "mem:memory", "updatedAt");
+    applied += await lwwMergeList(kv, KV.memories, data.memories, () => MEMORY_WRITE_LOCK, "updatedAt", reindexMergedMemory);
   }
   if (scopes.includes("semantic")) {
-    applied += await lwwMergeList(kv, KV.semantic, data.semantic, "mem:semantic", "updatedAt");
+    applied += await lwwMergeList(kv, KV.semantic, data.semantic, (id) => `mem:semantic:${id}`, "updatedAt");
   }
   if (scopes.includes("procedural")) {
-    applied += await lwwMergeList(kv, KV.procedural, data.procedural, "mem:procedural", "updatedAt");
+    applied += await lwwMergeList(kv, KV.procedural, data.procedural, (id) => `mem:procedural:${id}`, "updatedAt");
   }
   if (scopes.includes("relations") && data.relations) {
     for (const rel of data.relations) {
@@ -554,7 +553,7 @@ async function applySyncData(
         kv,
         KV.graphEdges,
         data.graphEdges?.map(capRecordProvenance),
-        "mem:gedge",
+        (id) => `mem:gedge:${id}`,
         "createdAt",
         (edge) => indexGraphEdge(kv, edge),
       ),
