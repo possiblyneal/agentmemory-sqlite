@@ -10,6 +10,7 @@ import { getSearchIndex } from "../src/functions/search.js";
 import { KV } from "../src/state/schema.js";
 
 function mockKV() {
+  const lists: string[] = [];
   const store = new Map<string, Map<string, unknown>>();
   return {
     get: async <T>(scope: string, key: string): Promise<T | null> =>
@@ -34,8 +35,12 @@ function mockKV() {
       }
       return row;
     },
-    list: async <T>(scope: string): Promise<T[]> =>
-      Array.from(store.get(scope)?.values() ?? []) as T[],
+    list: async <T>(scope: string): Promise<T[]> => {
+      lists.push(scope);
+      return Array.from(store.get(scope)?.values() ?? []) as T[];
+    },
+    count: async (scope: string): Promise<number> => store.get(scope)?.size ?? 0,
+    lists,
   };
 }
 
@@ -221,7 +226,7 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect((await kv.list<{ id: string }>(KV.observations(SESSION))).map((o) => o.id)).toEqual(["a", "b"]);
   });
 
-  it("stores the Observation and counts it when eviction fails", async () => {
+  it.each(["count", "list"] as const)("stores the Observation and counts it when eviction %s fails", async (failure) => {
     const kv = mockKV();
     const sdk = mockSdk();
     await kv.set(KV.observations(SESSION), "a", stored("a", 2, "2026-01-01T00:00:00Z"));
@@ -233,11 +238,15 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
       status: "active",
       observationCount: 1,
     });
-    const list = kv.list;
-    kv.list = async <T>(scope: string): Promise<T[]> => {
-      if (scope === KV.observations(SESSION)) throw new Error("boom");
-      return list<T>(scope);
-    };
+    if (failure === "count") {
+      kv.count = async () => { throw new Error("boom"); };
+    } else {
+      const list = kv.list;
+      kv.list = async <T>(scope: string): Promise<T[]> => {
+        if (scope === KV.observations(SESSION)) throw new Error("boom");
+        return list<T>(scope);
+      };
+    }
     registerObserveFunction(sdk as never, kv as never, undefined, 1);
 
     const result = (await sdk.trigger({
@@ -297,6 +306,11 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     full = false;
     await observe("next.ts");
     expect(await kv.get(KV.imageRefs, "/nonexistent/a.png")).toBeNull();
+  });
+
+  it.each([2, 3])("does not list the Session's rows when its count is at most the cap %i", async (cap) => {
+    const { kv } = await setup([stored("a", 1, "2026-01-01T00:00:00Z")], cap);
+    expect(kv.lists.filter((s) => s === KV.observations(SESSION))).toHaveLength(1);
   });
 
   it("evicts nothing under the cap", async () => {

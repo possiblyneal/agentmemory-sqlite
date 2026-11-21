@@ -196,7 +196,9 @@ queue behind it so each Session stores them in arrival order (one already writin
 write fails may still store ahead of it); past the cap one is dropped (500), never
 written ahead of the queue. A failure after the row is stored is never queued, since replaying
 it would duplicate the row. Session-cap eviction runs only after the row is stored, and its
-errors are logged, not returned. A daemon restart before a write succeeds loses the queue.
+errors are logged, not returned. It counts the Session's rows with `StateKV.count()` before
+listing them, and lists and sorts victims only when the count exceeds the cap. A daemon restart
+before a write succeeds loses the queue.
 `GET /agentmemory/health` carries `capture: { lastArrivalAt, lastStoredAt, oldestPendingAt }` (ISO
 or `null` since boot; `src/telemetry/capture.ts`): arrival is stamped by `api::observe` once the
 body validates, before any work, and stored by `mem::observe` right after the row write, so the

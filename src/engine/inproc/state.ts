@@ -337,6 +337,11 @@ export class SqliteState {
     return rows.map((r) => JSON.parse(r.value));
   }
 
+  count(scope: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM kv WHERE scope = ?").get(scope) as { n: number };
+    return row.n;
+  }
+
   bytes(scope: string): number {
     const row = this.db
       .prepare("SELECT COALESCE(SUM(LENGTH(CAST(value AS BLOB))), 0) AS n FROM kv WHERE scope = ?")
@@ -621,6 +626,7 @@ export function stateFunctions(
     "state::delete": async (p) => cooperate(store.delete(p.scope, p.key)),
     "state::list": async (p) => cooperate(store.list(p.scope)),
     "state::list-page": async (p) => cooperate(store.listPage(p.scope, p.after, p.limit)),
+    "state::count": async (p) => cooperate(store.count(p.scope)),
     "state::bytes": async (p) => cooperate(store.bytes(p.scope)),
     "state::list-newest": async (p) => cooperate(store.listNewest(p.scope, p.opts)),
     "state::list-scopes": async (p) => cooperate(store.listScopes(p.prefix)),

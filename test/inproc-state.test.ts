@@ -123,6 +123,19 @@ describe("inproc state store", () => {
     expect(next).toEqual([{ key: "c", value: "c" }, { key: "d", value: "d" }]);
   });
 
+  it("counts exactly the current rows in one scope", async () => {
+    const fns = stateFunctions(store);
+    expect(await fns["state::count"]({ scope: "s" })).toBe(0);
+    await fns["state::set"]({ scope: "s", key: "a", value: 1 });
+    await fns["state::set"]({ scope: "s", key: "a", value: 2 });
+    await fns["state::set"]({ scope: "s", key: "b", value: 3 });
+    await fns["state::set"]({ scope: "s:other", key: "a", value: 4 });
+    expect(await fns["state::count"]({ scope: "s" })).toBe(2);
+    await fns["state::delete"]({ scope: "s", key: "a" });
+    expect(await fns["state::count"]({ scope: "s" })).toBe(1);
+    expect(await fns["state::count"]({ scope: "s:other" })).toBe(1);
+  });
+
   it("reports the stored byte size of a scope", async () => {
     const fns = stateFunctions(store);
     expect(await fns["state::bytes"]({ scope: "s" })).toBe(0);

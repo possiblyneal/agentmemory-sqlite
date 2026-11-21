@@ -89,6 +89,7 @@ async function evictOverCap(
   pendingRefReleases: string[],
 ): Promise<number> {
   const scope = KV.observations(sessionId);
+  if ((await kv.count(scope)) <= cap) return 0;
   const existing = await kv.list<{
     id: string;
     timestamp?: string;

@@ -208,6 +208,13 @@ export class StateKV {
     })
   }
 
+  async count(scope: string): Promise<number> {
+    return this.sdk.trigger<{ scope: string }, number>({
+      function_id: 'state::count',
+      payload: { scope },
+    })
+  }
+
   async bytes(scope: string): Promise<number> {
     return this.sdk.trigger<{ scope: string }, number>({
       function_id: 'state::bytes',
