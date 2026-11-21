@@ -335,7 +335,7 @@ async function handleLocal(
         saved: id,
         localOnly: true,
         message:
-          "agentmemory daemon unreachable; this Memory is in the MCP shim's local store only and the daemon will never recall it. Save it again once the daemon is up.",
+          "The returned ID is in the MCP shim's local store only; a daemon save was not confirmed. When the daemon is available, check whether the Memory was saved there before saving it again.",
       });
     }
 
