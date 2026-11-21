@@ -209,7 +209,9 @@ other than 401, 403, 408 or 429 drops the entry with a stderr line; any other fa
 replay and keeps the rest. The
 concurrent shims of several Sessions share the directory: a replay claims each file by rename,
 and a claim older than 60 s is taken over. A save that timed out after the daemon stored it
-reinforces that Lesson on replay.
+reinforces that Lesson on replay. A `memory_save` using the shim's local fallback instead
+replies `localOnly: true` for the returned local ID; the daemon save is unconfirmed, so check
+the daemon before saving again. The local fallback is not queued.
 
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap

@@ -331,7 +331,12 @@ async function handleLocal(
         ...(v.global && { global: true }),
       });
       kvInstance.persist();
-      return textResponse({ saved: id });
+      return textResponse({
+        saved: id,
+        localOnly: true,
+        message:
+          "The returned ID is in the MCP shim's local store only; a daemon save was not confirmed. When the daemon is available, check whether the Memory was saved there before saving it again.",
+      });
     }
 
     case "memory_recall":
