@@ -879,6 +879,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           sessionId: r.sessionId,
           title: r.observation.title,
           type: r.observation.type,
+          memoryType: r.observation.memoryType,
           score: r.score,
           timestamp: r.observation.timestamp,
         }))

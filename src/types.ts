@@ -77,6 +77,7 @@ export interface CompressedObservation {
   concepts: string[];
   files: string[];
   importance: number;
+  memoryType?: Memory["type"];
   confidence?: number;
   imageRef?: string;
   imageData?: string;
@@ -377,6 +378,7 @@ export interface CompactSearchResult {
   sessionId: string;
   title: string;
   type: ObservationType;
+  memoryType?: Memory["type"];
   score: number;
   timestamp: string;
 }

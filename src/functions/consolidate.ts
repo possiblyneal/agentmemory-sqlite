@@ -7,6 +7,7 @@ import type {
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { deindexSupersededMemory, indexNewMemoryVersion } from "./search.js";
 
@@ -69,8 +70,7 @@ export function registerConsolidateFunction(
   kv: StateKV,
   provider: MemoryProvider,
 ): void {
-  sdk.registerFunction("mem::consolidate", 
-    async (data: { project?: string; minObservations?: number }) => {
+  const consolidate = async (data: { project?: string; minObservations?: number }) => {
       const minObs = data.minObservations ?? 10;
 
       const sessions = await kv.list<Session>(KV.sessions);
@@ -167,11 +167,11 @@ export function registerConsolidateFunction(
           .join("\n\n");
 
         try {
+          llmCallCount++;
           const response = await provider.compress(
             CONSOLIDATION_SYSTEM,
             `Concept: "${concept}"\n\nObservations:\n${prompt}`,
           );
-          llmCallCount++;
           const parsed = parseMemoryXml(response, sessionIds);
           if (!parsed || writtenTitles.has(parsed.title.toLowerCase())) continue;
 
@@ -186,14 +186,6 @@ export function registerConsolidateFunction(
             );
 
           if (existingMatch) {
-            existingMatch.isLatest = false;
-            await kv.set(KV.memories, existingMatch.id, existingMatch);
-            deindexSupersededMemory(existingMatch.id);
-            await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
-              action: "mark_non_latest",
-              concept,
-            });
-
             const evolved: Memory = {
               id: generateId("mem"),
               createdAt: now,
@@ -212,6 +204,13 @@ export function registerConsolidateFunction(
               ...(scopedProject !== undefined && { project: scopedProject }),
             };
             await kv.set(KV.memories, evolved.id, evolved);
+            existingMatch.isLatest = false;
+            await kv.set(KV.memories, existingMatch.id, existingMatch);
+            deindexSupersededMemory(existingMatch.id);
+            await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
+              action: "mark_non_latest",
+              concept,
+            });
             await indexNewMemoryVersion(evolved);
             existingMemories.push(evolved);
             await recordAudit(kv, "evolve", "mem::consolidate", [evolved.id], {
@@ -255,6 +254,9 @@ export function registerConsolidateFunction(
         totalObs: allObs.length,
       });
       return { consolidated, totalObservations: allObs.length };
-    },
+  };
+
+  sdk.registerFunction("mem::consolidate", (data: { project?: string; minObservations?: number }) =>
+    withKeyedLock("mem::consolidate", () => consolidate(data)),
   );
 }
