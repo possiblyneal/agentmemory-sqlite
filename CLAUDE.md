@@ -260,8 +260,9 @@ session IDs retain their normal normalization. This preflight does not make repl
 ### Relation backups
 Full exports and snapshots carry Memory relations with their original storage keys, including legacy
 `rel_` keys. Replace import and snapshot restore replace that scope when the backup contains it;
-older backups without a `relations` section leave the scope untouched. Import validates relation
-entries before a replace can delete anything.
+older backups without a `relations` section leave the scope untouched. Import and snapshot restore
+validate relation entries before replacing any scope, accept any string relation type, and omit
+nonnumeric or nonfinite confidence from backup data without changing the source row.
 
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap

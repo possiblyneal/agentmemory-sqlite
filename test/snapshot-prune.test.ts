@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { pagedReads } from "./helpers/mocks.js";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,10 +20,7 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
-    listPage: async <T>(scope: string, after: string | undefined, limit: number): Promise<Array<{ key: string; value: T }>> =>
-      Array.from(store.get(scope)?.entries() ?? []).sort(([a], [b]) => a.localeCompare(b))
-        .filter(([key]) => after === undefined || key > after).slice(0, limit)
-        .map(([key, value]) => ({ key, value: value as T })),
+    ...pagedReads(store),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];

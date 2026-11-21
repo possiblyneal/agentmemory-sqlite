@@ -102,12 +102,20 @@ export async function readDurableStores(kv: StateKV): Promise<DurableRows> {
   return Object.fromEntries(readable.map((s, i) => [s.field, lists[i]]));
 }
 
+export function normalizeRelation(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const row = value as Record<string, unknown>;
+  if (!("confidence" in row) || (typeof row.confidence === "number" && Number.isFinite(row.confidence))) return value;
+  const { confidence: _confidence, ...rest } = row;
+  return rest;
+}
+
 export async function relationEntries(kv: StateKV): Promise<Array<{ key: string; value: unknown }>> {
   const entries: Array<{ key: string; value: unknown }> = [];
   let after: string | undefined;
   for (;;) {
     const page = await kv.listPage(KV.relations, after, 1000);
-    entries.push(...page);
+    entries.push(...page.map(({ key, value }) => ({ key, value: normalizeRelation(value) })));
     if (page.length < 1000) return entries;
     after = page[page.length - 1].key;
   }
@@ -142,6 +150,20 @@ function isKeyedRow(row: unknown, key: string): boolean {
   );
 }
 
+export function validRelationEntries(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  const keys = new Set<string>();
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object" || typeof entry.key !== "string" || !entry.key ||
+        keys.has(entry.key) || !entry.value || typeof entry.value !== "object" || Array.isArray(entry.value) ||
+        typeof entry.value.sourceId !== "string" || typeof entry.value.targetId !== "string" ||
+        typeof entry.value.type !== "string") return false;
+    keys.add(entry.key);
+    return true;
+  });
+}
+
 // A replace import deletes every store before it writes, so a malformed
 // section must fail first, leaving the store untouched.
 function invalidImportSection(importData: ExportData): string | null {
@@ -149,12 +171,7 @@ function invalidImportSection(importData: ExportData): string | null {
     const rows: unknown = importData[section];
     if (rows != null && !Array.isArray(rows)) return `${section} must be an array`;
   }
-  const relations: unknown = importData.relations;
-  if (relations != null && (!Array.isArray(relations) || relations.some((entry) =>
-    !entry || typeof entry.key !== "string" || !entry.key || !entry.value ||
-    typeof entry.value.sourceId !== "string" || typeof entry.value.targetId !== "string" ||
-    !["supersedes", "extends", "derives", "contradicts", "related"].includes(entry.value.type)
-  ))) return "relations must contain keyed relation rows";
+  if (!validRelationEntries(importData.relations)) return "relations must contain keyed relation rows";
   const accessLogs: unknown = importData.accessLogs;
   if (accessLogs != null && !Array.isArray(accessLogs)) return "accessLogs must be an array";
   if (Array.isArray(accessLogs) && accessLogs.length > MAX_ACCESS_LOGS) {
@@ -663,7 +680,7 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
       if (importData.relations) {
         await runChunked(importData.relations, async ({ key, value }) => {
           if (strategy === "skip" && await kv.get(KV.relations, key)) { stats.skipped++; return; }
-          await kv.set(KV.relations, key, value);
+          await kv.set(KV.relations, key, normalizeRelation(value));
         });
       }
       if (importData.facets) {

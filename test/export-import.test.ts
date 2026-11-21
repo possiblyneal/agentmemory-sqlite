@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { registerSnapshotFunction } from "../src/functions/snapshot.js";
+import { pagedReads } from "./helpers/mocks.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 import { registerExportImportFunction } from "../src/functions/export-import.js";
+import { registerRelationsFunction } from "../src/functions/relations.js";
 import { VERSION } from "../src/version.js";
 import { getSearchIndex } from "../src/functions/search.js";
 import type {
@@ -36,10 +38,7 @@ function mockKV() {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
     },
-    listPage: async <T>(scope: string, after: string | undefined, limit: number): Promise<Array<{ key: string; value: T }>> =>
-      Array.from(store.get(scope)?.entries() ?? []).sort(([a], [b]) => a.localeCompare(b))
-        .filter(([key]) => after === undefined || key > after).slice(0, limit)
-        .map(([key, value]) => ({ key, value: value as T })),
+    ...pagedReads(store),
     bytes: async (scope: string): Promise<number> => {
       const entries = store.get(scope);
       return entries ? JSON.stringify(Array.from(entries.values())).length : 0;
@@ -346,6 +345,27 @@ describe("Export/Import Functions", () => {
     expect(await target.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
     expect(await destination.list("mem:relations")).toEqual([relation]);
     expect(await destination.get("mem:relations", "rel_legacy")).toEqual(relation);
+  });
+
+  it("round-trips relation types accepted by the writer", async () => {
+    await kv.set("mem:memories", "mem_2", { ...testMemory, id: "mem_2" });
+    registerRelationsFunction(sdk as never, kv as never);
+    const created = await sdk.trigger("mem::relate", { sourceId: "mem_1", targetId: "mem_2", type: "custom" });
+    expect(created.success).toBe(true);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: "custom" });
+  });
+
+  it("omits invalid relation confidence in exports and imports without changing the source", async () => {
+    const value = { sourceId: "a", targetId: "b", type: "custom", createdAt: "2026-01-01", confidence: "bad" };
+    await kv.set("mem:relations", "rel_bad", value);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(exported.relations[0].value).not.toHaveProperty("confidence");
+    expect(await kv.get("mem:relations", "rel_bad")).toEqual(value);
+    exported.relations[0].value.confidence = Infinity;
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_bad")).not.toHaveProperty("confidence");
   });
 
   it("leaves relations untouched when replacing from an older export without them", async () => {

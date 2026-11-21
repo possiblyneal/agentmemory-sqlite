@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { pagedReads } from "./helpers/mocks.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -65,10 +66,7 @@ function mockKV() {
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
     },
-    listPage: async <T>(scope: string, after: string | undefined, limit: number): Promise<Array<{ key: string; value: T }>> =>
-      Array.from(store.get(scope)?.entries() ?? []).sort(([a], [b]) => a.localeCompare(b))
-        .filter(([key]) => after === undefined || key > after).slice(0, limit)
-        .map(([key, value]) => ({ key, value: value as T })),
+    ...pagedReads(store),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -259,6 +257,21 @@ describe("snapshot-restore replaces each captured store", () => {
     await kv.set("mem:memories", "mem_1", memory("mem_1", "Original"));
     await kv.set("mem:lessons", "lsn_1", lesson("lsn_1", "Run tests before pushing"));
     getSearchIndex().add(memoryToIndexDoc(memory("mem_1", "Original")));
+  });
+
+  it("rejects malformed relation entries before replacing any captured store", async () => {
+    snapshotFile.content = JSON.stringify({ sessions: [], memories: [], observations: {}, relations: [{ key: "bad", value: null }] });
+    await kv.set("mem:relations", "rel_existing", { sourceId: "a", targetId: "b", type: "custom" });
+    const result = await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" });
+    expect(result).toMatchObject({ success: false });
+    expect(await kv.get("mem:memories", "mem_1")).not.toBeNull();
+    expect(await kv.get("mem:relations", "rel_existing")).not.toBeNull();
+  });
+
+  it("omits invalid confidence when restoring a captured relation", async () => {
+    snapshotFile.content = JSON.stringify({ relations: [{ key: "rel_old", value: { sourceId: "a", targetId: "b", type: "custom", confidence: "bad" } }] });
+    expect(await sdk.trigger("mem::snapshot-restore", { commitHash: "abc1234" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_old")).toEqual({ sourceId: "a", targetId: "b", type: "custom" });
   });
 
   it("removes rows added after the snapshot and brings back snapshot-time rows", async () => {
