@@ -124,6 +124,20 @@ describe("GraphRetrieval", () => {
     expect(obsIds).toContain("obs_2");
   });
 
+  it("scores an observation at its best path, not the first start node to reach it", async () => {
+    const nodes = [
+      makeNode("n1", "alpha", "concept", ["obs_a"]),
+      makeNode("n2", "relay", "concept", ["obs_r"]),
+      makeNode("n3", "beta", "concept", ["obs_shared"]),
+    ];
+    const edges = [makeEdge("e1", "n1", "n2"), makeEdge("e2", "n2", "n3")];
+    const kv = await mockKV(nodes, edges);
+    const retrieval = new GraphRetrieval(kv as never);
+
+    const results = await retrieval.searchByEntities(["alpha", "beta"], 2);
+    expect(results.find((r) => r.obsId === "obs_shared")?.score).toBe(1);
+  });
+
   it("returns empty for no matches", async () => {
     const kv = await mockKV([], []);
     const retrieval = new GraphRetrieval(kv as never);

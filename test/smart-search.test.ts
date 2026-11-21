@@ -12,8 +12,10 @@ import type {
   CompressedObservation,
   HybridSearchResult,
   CompactSearchResult,
+  Memory,
   Session,
 } from "../src/types.js";
+import { memoryToObservation } from "../src/state/memory-utils.js";
 import { keyedLookups, pagedReads } from "./helpers/mocks.js";
 
 function mockKV() {
@@ -133,6 +135,36 @@ describe("Smart Search Function", () => {
     expect(result.results[0]).toHaveProperty("score");
     expect(result.results[0]).toHaveProperty("timestamp");
     expect(result.results[0]).not.toHaveProperty("narrative");
+  });
+
+  it("compact results keep a saved Memory's own type beside the normalized observation type", async () => {
+    const memory: Memory = {
+      id: "mem_fact",
+      createdAt: "2026-02-01T10:00:00Z",
+      updatedAt: "2026-02-01T10:00:00Z",
+      type: "fact",
+      title: "Redis port",
+      content: "Redis listens on 6380",
+      concepts: ["redis"],
+      files: [],
+      sessionIds: [],
+      strength: 5,
+      version: 1,
+      isLatest: true,
+    };
+    searchResults = [
+      {
+        observation: memoryToObservation(memory),
+        bm25Score: 8,
+        vectorScore: 0,
+        combinedScore: 0.8,
+        sessionId: "memory",
+      },
+    ];
+    const result = (await sdk.trigger("mem::smart-search", { query: "redis" })) as {
+      results: CompactSearchResult[];
+    };
+    expect(result.results[0].memoryType).toBe("fact");
   });
 
   describe("relevance floor", () => {

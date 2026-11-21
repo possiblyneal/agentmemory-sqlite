@@ -879,6 +879,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           sessionId: r.sessionId,
           title: r.observation.title,
           type: r.observation.type,
+          memoryType: r.observation.memoryType,
           score: r.score,
           timestamp: r.observation.timestamp,
         }))
@@ -900,6 +901,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           sessionId: r.sessionId,
           title: r.observation.title,
           narrative: r.observation.narrative,
+          ...(r.observation.memoryType !== undefined && { memoryType: r.observation.memoryType }),
           score: r.score,
           timestamp: r.observation.timestamp,
         }))
