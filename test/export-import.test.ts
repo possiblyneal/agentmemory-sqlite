@@ -10,6 +10,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerExportImportFunction } from "../src/functions/export-import.js";
 import { registerRelationsFunction } from "../src/functions/relations.js";
+import { registerMeshFunction } from "../src/functions/mesh.js";
 import { VERSION } from "../src/version.js";
 import { getSearchIndex } from "../src/functions/search.js";
 import type {
@@ -368,6 +369,15 @@ describe("Export/Import Functions", () => {
     exported.relations[0].value.type = 42;
     expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
     expect(await kv.get("mem:relations", created.relationId)).toMatchObject({ type: "related" });
+  });
+
+  it("round-trips opaque endpoints accepted by mesh without changing their values or key", async () => {
+    registerMeshFunction(sdk as never, kv as never);
+    const relation = { sourceId: 42, targetId: { id: "target" }, type: "related" };
+    expect(await sdk.trigger("mem::mesh-receive", { relations: [relation] })).toMatchObject({ success: true, accepted: 1 });
+    const exported = await sdk.trigger("mem::export", {});
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "42:[object Object]:related")).toEqual(relation);
   });
 
   it("omits invalid relation confidence in exports and imports without changing the source", async () => {
