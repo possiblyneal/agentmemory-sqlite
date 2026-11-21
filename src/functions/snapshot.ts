@@ -1,3 +1,4 @@
+import { withFacetLock } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -346,7 +347,9 @@ export function registerSnapshotFunction(
           } else if (store.graph && graphWritesDisabled()) {
             skipped.push(store.field);
           } else {
-            counts[store.field] = await replaceStore(kv, store, rows);
+            counts[store.field] = store.scope === KV.facets
+              ? await withFacetLock(() => replaceStore(kv, store, rows))
+              : await replaceStore(kv, store, rows);
           }
         }
 

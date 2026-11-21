@@ -12,16 +12,20 @@ import { KV } from "../src/state/schema.js";
 function mockKV() {
   const lists: string[] = [];
   const store = new Map<string, Map<string, unknown>>();
+  let facetGeneration = 0;
   return {
+    writeGeneration: async () => facetGeneration,
     get: async <T>(scope: string, key: string): Promise<T | null> =>
       (store.get(scope)?.get(key) as T) ?? null,
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());
       store.get(scope)!.set(key, data);
+      if (scope === "mem:facets") facetGeneration++;
       return data;
     },
     delete: async (scope: string, key: string) => {
       store.get(scope)?.delete(key);
+      if (scope === "mem:facets") facetGeneration++;
     },
     update: async (
       scope: string,

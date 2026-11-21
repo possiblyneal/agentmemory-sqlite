@@ -11,13 +11,16 @@ import type { Lesson } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
+  let facetGeneration = 0;
   return {
+    writeGeneration: async () => facetGeneration,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());
       store.get(scope)!.set(key, data);
+      if (scope === "mem:facets") facetGeneration++;
       return data;
     },
     setManyIfUnchanged: async <T>(
@@ -50,6 +53,7 @@ function mockKV() {
     },
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
+      if (scope === "mem:facets") facetGeneration++;
     },
     listPage: async <T>(scope: string, after: string | undefined, limit: number) => [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {

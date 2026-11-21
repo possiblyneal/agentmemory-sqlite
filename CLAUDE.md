@@ -260,9 +260,12 @@ session IDs retain their normal normalization. This preflight does not make repl
 ### Facet cleanup
 Ordinary hard deletes of Observations, Memories and Lessons use `deleteWithFacets()`
 (`src/functions/facets.ts`), which serializes deletion with Facet tag and untag mutations and
-best-effort removes Facets for the IDs actually deleted. A later tag on a missing ID remains
-allowed. Import replacement and snapshot restore keep their own replacement semantics; this is
-not an orphan sweep. Memory writers take `MEMORY_WRITE_LOCK` before the Facet lock.
+best-effort removes Facets for the IDs actually deleted. It caches a per-`StateKV` target-to-key
+lookup, rebuilding in pages when `KV.facets`'s write generation changes; successful cleanup
+updates the cache without a rescan. A later tag on a missing ID remains allowed. Import and
+snapshot restore hold the same Facet lock around their Facet mutations, while retaining their
+replacement semantics; this is not an orphan sweep. Memory writers take `MEMORY_WRITE_LOCK`
+before the Facet lock.
 
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
