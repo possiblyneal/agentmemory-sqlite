@@ -1,8 +1,8 @@
 # Upstream orphan-PR triage — rohitg00/agentmemory
 #
-# Scope: the 209 upstream PRs that reference no upstream issue in
-# docs/upstream-issue-triage.yaml, and are therefore absent from it. The other 177 PRs are
-# cross-linked from the issues they reference in that file.
+# Scope: the 305 upstream PRs that reference no upstream issue in
+# docs/upstream-issue-triage.yaml, and are therefore absent from it. That file cross-links
+# 265 distinct PRs; three of the reported 573 are not accounted for by the two files.
 #
 # This fork does not merge, rebase or cherry-pick from upstream (see CLAUDE.md). These
 # rows are read for the defect and the diagnosis, not for the patch.
@@ -29,9 +29,9 @@
 # defect reproduces here as reported; "partly-present-here" means part of it was already
 # fixed. Absent means unchecked: the note is still upstream's claim.
 #
-# Snapshot: 209 orphan PRs as of 2026-10-11 (168 open on 2026-09-21 plus 41 opened since, some
-# since merged or closed; gh pr list --repo rohitg00/agentmemory, changed files from
-# repos/rohitg00/agentmemory/pulls/N/files).
+# Snapshot: 305 orphan PRs as of 2026-11-18 (209 as of 2026-10-11 — 168 open on 2026-09-21 plus
+# 41 opened since — plus 96 opened after that, some since merged or closed; gh pr list --repo
+# rohitg00/agentmemory, changed files from repos/rohitg00/agentmemory/pulls/N/files).
 
 prs:
   - number: 228
@@ -392,7 +392,7 @@ prs:
       - src/triggers/api.ts
     note: "No search endpoint covers memories written by remember — /memories only lists."
     disposition: candidate
-    status: "present-here — no /agentmemory/memories/search route in src/triggers/api.ts."
+    status: "present-here — no /agentmemory/memories/search route in src/triggers/api.ts; mem::search with targetLayer=memory (src/triggers/api.ts:595) already reaches saved Memories."
     url: https://github.com/rohitg00/agentmemory/pull/1247
   - number: 1259
     title: "fix(providers): bound LLM provider concurrency and stop counting 429s as breaker failures"
@@ -635,6 +635,7 @@ prs:
       - src/functions/smart-search.ts
     note: "format=full/narrative/compact on mem::smart-search, matching mem::search."
     disposition: candidate
+    status: "present-here — mem::search takes a format parameter; smart-search (src/triggers/api.ts:1506) does not."
     url: https://github.com/rohitg00/agentmemory/pull/223
   - number: 224
     title: "feat(search): add CJK character bigram tokenization | 添加 CJK Bigram 分词"
@@ -742,6 +743,7 @@ prs:
       - test/embedding-provider.test.ts
     note: "OPENAI_EMBEDDING_PATH for OpenAI-compatible endpoints that do not use /v1/embeddings."
     disposition: candidate
+    status: "present-here — the OpenAI-compatible embedding calls append /embeddings to the base URL (src/providers/_openai-shared.ts:103-141); no path override exists."
     url: https://github.com/rohitg00/agentmemory/pull/467
   - number: 468
     title: "fix(memory): audit remember attribution"
@@ -820,7 +822,9 @@ prs:
       - plugin/skills/agentmemory-config/REFERENCE.md
       - src/providers/openai.ts
     note: "AGENTMEMORY_DISABLE_THINKING to recover structured output from hybrid-reasoning models (Qwen3/GLM/Kimi)."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — OPENAI_EXTRA_BODY and OPENAI_REASONING_EFFORT turn off thinking for hybrid-reasoning models."
+    fixed_by: "1ba30c89"
     url: https://github.com/rohitg00/agentmemory/pull/569
   - number: 610
     title: "fix: iii reconnect route loss + Voyage env config + heap calc against actual ceiling"
@@ -933,7 +937,9 @@ prs:
     paths:
       - src/providers/embedding/local.ts
     note: "XENOVA_CACHE_HOME to redirect the local embedding model path out of node_modules."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — getModelCacheDir honours the cache-home override (src/config.ts:233-239)."
+    fixed_by: "1902f336"
     url: https://github.com/rohitg00/agentmemory/pull/862
   - number: 927
     title: "fix(cli): add clear warning when import-jsonl brings zero files"
@@ -1008,6 +1014,7 @@ prs:
       - test/replay.test.ts
     note: "parseJsonlText only knows the Claude Code transcript shape; OpenAI chat-format JSONL imports produce zero observations."
     disposition: candidate
+    status: "present-here — the replay parser reads only the Claude Code transcript shape (src/replay/jsonl-parser.ts)."
     url: https://github.com/rohitg00/agentmemory/pull/1011
   - number: 1023
     title: "fix(replay): surface compressed observation content in replay detail"
@@ -1304,6 +1311,7 @@ prs:
       - src/viewer/server.ts
     note: "--host/AGENTMEMORY_HOST to bind off localhost; the fork already runs one local daemon."
     disposition: candidate
+    status: "present-here — sdk.ts accepts opts.host but src/index.ts never passes it, so the daemon binds loopback only; closed upstream."
     url: https://github.com/rohitg00/agentmemory/pull/194
   - number: 219
     title: "feat(providers): add Azure OpenAI provider"
@@ -1382,6 +1390,7 @@ prs:
       - src/types.ts
     note: "PageIndex-style outline index, 3 MCP tools + 3 endpoints; a new subsystem."
     disposition: candidate
+    status: "present-here — no outline index or its tools exist here."
     url: https://github.com/rohitg00/agentmemory/pull/241
   - number: 245
     title: "feat: add Codex Desktop hooks integration"
@@ -1403,6 +1412,7 @@ prs:
       - src/functions/auto-forget.ts
     note: "Redundancy tracking in auto-forget; CodeRabbit-authored, thin rationale."
     disposition: candidate
+    status: "present-here — auto-forget (src/functions/auto-forget.ts) tracks no redundancy; closed upstream."
     url: https://github.com/rohitg00/agentmemory/pull/267
   - number: 302
     title: "fix(openclaw): register memory capability for memory slot"
@@ -1440,6 +1450,7 @@ prs:
       - src/viewer/server.ts
     note: "Configurable bind host for engine and viewer; overlaps #194."
     disposition: candidate
+    status: "present-here — sdk.ts accepts opts.host but src/index.ts never passes it, so the daemon binds loopback only; closed upstream."
     url: https://github.com/rohitg00/agentmemory/pull/376
   - number: 378
     title: "build(docker): unify per-platform deploys behind single GHCR image"
@@ -1565,6 +1576,7 @@ prs:
       - src/types.ts
     note: "external_id + metadata passthrough for imported memories."
     disposition: candidate
+    status: "present-here — no external_id or metadata passthrough exists here."
     url: https://github.com/rohitg00/agentmemory/pull/583
   - number: 594
     title: "feat(providers): add Azure OpenAI / AI Foundry provider with HTTP CONNECT proxy support"
@@ -1641,6 +1653,7 @@ prs:
       - test/audit.test.ts
     note: "Hashed privacy-safe audit receipt format."
     disposition: candidate
+    status: "present-here — no audit receipt format exists here."
     url: https://github.com/rohitg00/agentmemory/pull/617
   - number: 624
     title: "fix(cli): honor --force on unresponsive engine; detect listening PIDs on Windows"
@@ -1690,6 +1703,7 @@ prs:
       - test/viewer-session-id.test.ts
     note: "Viewer timeline newest/oldest sort toggle."
     disposition: candidate
+    status: "present-here — the viewer timeline has no sort toggle."
     url: https://github.com/rohitg00/agentmemory/pull/672
   - number: 679
     title: "feat: add memory metacognition foundation"
@@ -1704,6 +1718,7 @@ prs:
       - src/types.ts
     note: "Metacognition phase 1: policy, write candidates, readback, 8 endpoints."
     disposition: candidate
+    status: "present-here — no metacognition layer exists here."
     url: https://github.com/rohitg00/agentmemory/pull/679
   - number: 693
     title: "fix(cli): prioritize user iii config lookup"
@@ -2036,7 +2051,8 @@ prs:
       - plugin/scripts/pre-tool-use.mjs
       # +41 more
     note: "Durable candidates MVP, traceable recall and a Codex archive watcher; 7.7k churn across 92 files."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — the PR's Codex archive watcher targets a host other than Claude Code"
     url: https://github.com/rohitg00/agentmemory/pull/1055
   - number: 1056
     title: "Update MiniMax provider defaults for MiniMax-M3"
@@ -2599,7 +2615,8 @@ prs:
       - src/functions/search.ts
       - src/triggers/api.ts
     note: "Throttle index saves and report each leg's save state."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no IndexPersistence here — the in-process SQLite Engine rebuilds BM25 from content at boot (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/pull/1415
   - number: 1416
     title: "perf(index): store vectors in fixed buckets and rebuild BM25 from content"
@@ -2617,7 +2634,8 @@ prs:
       - src/triggers/api.ts
       - test/search.test.ts
     note: "Store vectors in fixed buckets and rebuild BM25 from content."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "vectors live in SQLite (src/engine/inproc/vectors.ts) and BM25 is rebuilt from content (rebuildBm25FromContent), so there are no bucket files"
     url: https://github.com/rohitg00/agentmemory/pull/1416
   - number: 1417
     title: "perf(consolidation): write only decayed rows that changed"
@@ -2674,7 +2692,8 @@ prs:
       - src/triggers/api.ts
       - src/types.ts
     note: "Store the audit log in monthly scopes."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "the audit log is one KV.audit scope in SQLite with a retention sweep (src/functions/audit.ts:104-183); monthly scopes target the iii state store"
     url: https://github.com/rohitg00/agentmemory/pull/1419
   - number: 1420
     title: "perf(stream): stop per-session stream groups and bound the viewer backlog"
@@ -2715,6 +2734,7 @@ prs:
       - src/triggers/events.ts
     note: "Lock session and graph read-modify-write paths."
     disposition: candidate
+    status: "partly-present-here — withKeyedLock guards observe, replay, session start and diagnostics, and GRAPH_WRITE_LOCK the graph; session writes in src/functions/events.ts:74,208, src/functions/migrate.ts:153 and src/functions/export-import.ts:319-403 take no lock."
     url: https://github.com/rohitg00/agentmemory/pull/1421
   - number: 1423
     title: "perf(remember): move the embedding call out of the global save lock"
@@ -2769,7 +2789,8 @@ prs:
       - src/functions/governance.ts
       - src/functions/graph.ts
     note: "Stream every viewer page and rebuild the viewer."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no iii stream — the viewer has its own live relay (relayLiveStream, src/viewer/server.ts)"
     url: https://github.com/rohitg00/agentmemory/pull/1433
   - number: 1447
     title: "fix(api): page /semantic and /procedural so they fit the frame limit"
@@ -2781,7 +2802,8 @@ prs:
       - src/triggers/api.ts
       - src/viewer/index.html
     note: "Page /semantic and /procedural so responses fit the frame limit."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "no engine frame limit in-process, so /semantic and /procedural need no paging"
     url: https://github.com/rohitg00/agentmemory/pull/1447
   - number: 1451
     title: "feat(opencode): support OpenCode 2.x plugin API alongside V1"
@@ -2812,6 +2834,7 @@ prs:
       - src/hooks/post-tool-use.ts
     note: "Hooks stop exiting before the observe request is sent."
     disposition: candidate
+    status: "partly-present-here — the 500 ms exit timer is deliberate; the corresponding fetch timeouts include 800 ms in subagent-start and up to 3,000 ms. The timer does not prove delivery."
     url: https://github.com/rohitg00/agentmemory/pull/1456
   - number: 1457
     title: "fix(cli): faster state saves, bounded glibc arenas and a higher fd limit for the engine"
@@ -2918,7 +2941,9 @@ prs:
       - src/viewer/index.html
       - test/health-thresholds.test.ts
     note: "Stop orphaned index generations and false degraded health."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — health thresholds and the heap-limit check cover false degraded health (src/health/thresholds.ts:88-94, src/health/monitor.ts:78); orphaned index generations do not exist here."
+    fixed_by: "src/health/thresholds.ts:88-94"
     url: https://github.com/rohitg00/agentmemory/pull/1465
   - number: 1466
     title: "fix(search): stop per-search full graph loads from OOMing the engine"
@@ -2932,7 +2957,9 @@ prs:
       - test/graph-retrieval.test.ts
       - test/hybrid-search.test.ts
     note: "Stop per-search full graph loads from OOMing the engine."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — graph side-indexes (src/state/schema.ts:36-70) replace the per-search full graph load, and graph extraction is off by default (#420)."
+    fixed_by: "src/state/schema.ts:36-70"
     url: https://github.com/rohitg00/agentmemory/pull/1466
   - number: 1468
     title: "fix(capture): distinct ids for repeated prompts, lock-safe spool, authenticated recovery commands"
@@ -2945,6 +2972,7 @@ prs:
       - src/hooks/session-end.ts
     note: "Distinct ids for repeated prompts, a lock-safe spool and authenticated spool replay."
     disposition: candidate
+    status: "partly-present-here — no spool exists; an identical prompt collapses in the 5-minute DedupMap (src/functions/observe.ts:384-410)."
     url: https://github.com/rohitg00/agentmemory/pull/1468
   - number: 1469
     title: "chore: remove issue and PR references from code and tests"
@@ -3009,7 +3037,8 @@ prs:
     in_fork: 0/1
     churn: 80
     note: "Restore the index_persist audit gating coverage."
-    disposition: candidate
+    disposition: wont-fix
+    wont_fix_reason: "test for index_persist audit gating; no IndexPersistence here (ADR 0001)"
     url: https://github.com/rohitg00/agentmemory/pull/1477
   - number: 1479
     title: "docs: translate README into 32 languages"
@@ -3104,7 +3133,9 @@ prs:
     paths:
       - src/functions/smart-search.ts
     note: "Harden smart-search project validation."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — the project matcher is cached and the first pass runs sequentially (src/functions/search.ts:574-600,744-755)."
+    fixed_by: "src/functions/search.ts:574-600"
     url: https://github.com/rohitg00/agentmemory/pull/1517
   - number: 1518
     title: "Harden smart-search project validation"
@@ -3115,7 +3146,9 @@ prs:
     paths:
       - src/functions/smart-search.ts
     note: "Harden smart-search project validation (duplicate of rohitg00/agentmemory#1517)."
-    disposition: candidate
+    disposition: already-fixed
+    status: "fixed-here — the project matcher is cached and the first pass runs sequentially (src/functions/search.ts:574-600,744-755)."
+    fixed_by: "src/functions/search.ts:574-600"
     url: https://github.com/rohitg00/agentmemory/pull/1518
   - number: 1520
     title: "fix(release): wait for vector persistence and recovery"
@@ -3127,3 +3160,1328 @@ prs:
     disposition: wont-fix
     wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
     url: https://github.com/rohitg00/agentmemory/pull/1520
+  - number: 1526
+    title: "fix(import-jsonl): ignore timestampless entries for session times and make re-import idempotent"
+    kind: fix
+    relevance: low
+    in_fork: 3/5
+    churn: 107
+    paths:
+      - src/functions/replay.ts
+      - src/replay/jsonl-parser.ts
+      - test/replay.test.ts
+    note: "Ignore timestampless entries for session times and make import-jsonl re-import idempotent."
+    disposition: already-fixed
+    status: "fixed-here — PR #483 derives Session time bounds only from valid timestamps; replay.ts already imports only fresh Sessions on re-import."
+    url: https://github.com/rohitg00/agentmemory/pull/1526
+  - number: 1527
+    title: "feat(sessions): filter by startedAt and endedAt"
+    kind: feature
+    relevance: low
+    in_fork: 1/5
+    churn: 104
+    paths:
+      - src/triggers/api.ts
+    note: "Filter sessions by startedAt and endedAt."
+    disposition: wont-fix
+    wont_fix_reason: "the sessions time-range filter has no counterpart here (src/triggers/api.ts takes no startedAt/endedAt filter) and no Recall defect sits behind it"
+    url: https://github.com/rohitg00/agentmemory/pull/1527
+  - number: 1533
+    title: "fix: validate reflection evidence and isolate insight identities"
+    kind: fix
+    relevance: med
+    in_fork: 4/6
+    churn: 935
+    paths:
+      - src/functions/reflect.ts
+      - src/prompts/reflect.ts
+      - src/types.ts
+      - test/reflect.test.ts
+    note: "Validate reflection evidence and give each project's Insights their own identity."
+    disposition: candidate
+    status: "partly-present-here — PR #481 scopes Insight identity by project. The broader citation and provider-result claims are separate from that fix."
+    url: https://github.com/rohitg00/agentmemory/pull/1533
+  - number: 1534
+    title: "fix: harden Hermes and OpenClaw plugins and skills"
+    kind: host
+    relevance: low
+    in_fork: 43/144
+    churn: 7776
+    paths:
+      - .gitignore
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - package.json
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/session-start.mjs
+      - plugin/scripts/stop.mjs
+      - plugin/skills/_shared/TROUBLESHOOTING.md
+      - plugin/skills/agentmemory-agents/REFERENCE.md
+    note: "Harden the Hermes and OpenClaw plugins and skills."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1534
+  - number: 1535
+    title: "deps(deps): bump the minor-and-patch group across 1 directory with 3 updates"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 6
+    paths:
+      - package.json
+    note: "Dependabot minor-and-patch group bump."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1535
+  - number: 1536
+    title: "deps(deps-dev): bump vitest from 4.1.12 to 5.0.5"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 2
+    paths:
+      - package.json
+    note: "Dependabot bump of vitest 4.1.12 to 5.0.5."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1536
+  - number: 1538
+    title: "Add Sol AI as a production example"
+    kind: docs
+    relevance: low
+    in_fork: 0/1
+    churn: 4
+    note: "Add Sol AI as a production example."
+    disposition: wont-fix
+    wont_fix_reason: "upstream housekeeping, marketing or repo diary"
+    url: https://github.com/rohitg00/agentmemory/pull/1538
+  - number: 1545
+    title: "fix: preserve consolidation provenance and version heads"
+    kind: fix
+    relevance: low
+    in_fork: 6/43
+    churn: 787
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - src/functions/consolidate.ts
+      - src/functions/remember.ts
+      - src/types.ts
+      - test/consolidate-project-scope.test.ts
+    note: "Preserve consolidation provenance and version heads."
+    disposition: candidate
+    status: "partly-present-here — PR #486 serializes mem::consolidate and writes its successor before demotion. The separate mem::evolve path still demotes first."
+    url: https://github.com/rohitg00/agentmemory/pull/1545
+  - number: 1551
+    title: "fix: recover stale session summaries after late capture and restart"
+    kind: fix
+    relevance: med
+    in_fork: 15/61
+    churn: 1384
+    paths:
+      - package.json
+      - src/functions/evict.ts
+      - src/functions/export-import.ts
+      - src/functions/observe.ts
+      - src/functions/remember.ts
+      - src/functions/snapshot.ts
+      - src/functions/summarize.ts
+      - src/index.ts
+      - src/state/schema.ts
+      - src/triggers/api.ts
+    note: "Recover stale session summaries after late capture and restart."
+    disposition: candidate
+    status: "partly-present-here — the awaitingCompression hold-back and recompress sweep cover failed-compression retention; late-capture re-summarization remains unverified."
+    url: https://github.com/rohitg00/agentmemory/pull/1551
+  - number: 1554
+    title: "feat: add Cheaper Inference provider"
+    kind: provider
+    relevance: low
+    in_fork: 6/9
+    churn: 130
+    paths:
+      - .env.example
+      - src/cli/doctor-diagnostics.ts
+      - src/cli/onboarding.ts
+      - src/config.ts
+      - src/providers/index.ts
+      - src/types.ts
+    note: "Add a Cheaper Inference provider."
+    disposition: wont-fix
+    wont_fix_reason: "third-party LLM or embedding provider — this fork runs only the OpenAI-compatible, Anthropic and local paths"
+    url: https://github.com/rohitg00/agentmemory/pull/1554
+  - number: 1561
+    title: "fix(release): verify gated npm artifacts and provenance"
+    kind: ci
+    relevance: low
+    in_fork: 1/8
+    churn: 642
+    paths:
+      - package.json
+    note: "Verify gated npm artifacts and provenance in the release workflow."
+    disposition: wont-fix
+    wont_fix_reason: "npm publishing — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1561
+  - number: 1562
+    title: "fix: preserve vector recovery across checkpoints and restarts"
+    kind: fix
+    relevance: med
+    in_fork: 4/14
+    churn: 1220
+    paths:
+      - package.json
+      - src/functions/search.ts
+      - src/index.ts
+      - src/state/search-index.ts
+    note: "Preserve vector recovery across checkpoints and restarts."
+    disposition: already-fixed
+    status: "fixed-here — the fork keeps vectors in SQLite; dropMismatchedVectors and the fill pass re-embed after a restart (src/functions/index-fill.ts), so the iii checkpoint design does not apply."
+    fixed_by: "dropMismatchedVectors and the fill pass (src/functions/index-fill.ts)"
+    url: https://github.com/rohitg00/agentmemory/pull/1562
+  - number: 1568
+    title: "fix: serialize Redis state mutations per key"
+    kind: fix
+    relevance: low
+    in_fork: 1/36
+    churn: 389
+    paths:
+      - src/state/kv.ts
+    note: "Serialize Redis state mutations per key."
+    disposition: wont-fix
+    wont_fix_reason: "alternative state backend — this fork runs one in-process SQLite Engine (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/pull/1568
+  - number: 1569
+    title: "fix: preserve structured capture redaction"
+    kind: fix
+    relevance: high
+    in_fork: 3/7
+    churn: 329
+    paths:
+      - src/functions/observe.ts
+      - src/functions/privacy.ts
+      - test/privacy.test.ts
+    note: "Preserve structured capture redaction so a secret in a JSON payload does not break the stored observation."
+    disposition: already-fixed
+    status: "fixed-here — PR #493 preserves structured tool captures during redaction; test/capture-redaction.test.ts."
+    url: https://github.com/rohitg00/agentmemory/pull/1569
+  - number: 1570
+    title: "fix(devin): capture sessions from the Devin plugin and prepare it for the marketplace"
+    kind: host
+    relevance: low
+    in_fork: 2/8
+    churn: 136
+    paths:
+      - plugin/skills/agentmemory-agents/SKILL.md
+      - plugin/skills/agentmemory-hooks/SKILL.md
+    note: "Capture sessions from the Devin plugin."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1570
+  - number: 1583
+    title: "fix(gateway): バックエンドのタイムアウト・接続失敗を区別して記録する"
+    kind: fix
+    relevance: low
+    in_fork: 12/372
+    churn: 138295
+    paths:
+      - .env.example
+      - .gitignore
+      - package.json
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - plugin/skills/agentmemory-rest-api/REFERENCE.md
+      - src/functions/search.ts
+      - src/index.ts
+      - src/state/memory-utils.ts
+      - src/triggers/api.ts
+      - src/types.ts
+    note: "Record gateway backend timeouts and connection failures separately (Japanese title)."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry; the 138k-churn diff is harness files and a gateway this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/1583
+  - number: 1587
+    title: "fix(config): raise the default MAX_TOKENS from 4096 to 16384"
+    kind: fix
+    relevance: low
+    in_fork: 4/6
+    churn: 72
+    paths:
+      - .env.example
+      - src/config.ts
+      - src/providers/minimax.ts
+      - src/providers/openai.ts
+    note: "Raise the default MAX_TOKENS from 4096 to 16384."
+    disposition: candidate
+    status: "present-here — src/config.ts:93 still defaults MAX_TOKENS to 4096, so a long compression or summary reply can be cut off; closed upstream unmerged."
+    url: https://github.com/rohitg00/agentmemory/pull/1587
+  - number: 1592
+    title: "Upgrade to iii 0.25.0 with Worker Compose"
+    kind: deploy
+    relevance: low
+    in_fork: 41/217
+    churn: 35663
+    paths:
+      - .env.example
+      - assets/tags/light/section-agents.svg
+      - assets/tags/section-agents.svg
+      - eval/README.md
+      - eval/runner/sandbox.ts
+      - package.json
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/session-start.mjs
+      - plugin/skills/agentmemory-architecture/SKILL.md
+    note: "Upgrade to iii 0.25.0 with Worker Compose."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1592
+  - number: 1595
+    title: "feat(website): research citations, live stats and a scrolling featured strip"
+    kind: docs
+    relevance: low
+    in_fork: 0/28
+    churn: 956
+    note: "Website research citations, live stats and a featured strip."
+    disposition: wont-fix
+    wont_fix_reason: "website — this fork carries no website tree"
+    url: https://github.com/rohitg00/agentmemory/pull/1595
+  - number: 1601
+    title: "fix(evict): remove evicted memories from search indexes"
+    kind: fix
+    relevance: med
+    in_fork: 2/2
+    churn: 98
+    paths:
+      - src/functions/evict.ts
+      - test/evict.test.ts
+    note: "Remove evicted memories from the search indexes."
+    disposition: already-fixed
+    status: "fixed-here — evict.ts calls deleteIndexed at :362 and :398, so evicted Memories leave the indexes."
+    fixed_by: "deleteIndexed in src/functions/evict.ts:362,398"
+    url: https://github.com/rohitg00/agentmemory/pull/1601
+  - number: 1602
+    title: "feat(embedding): make the local model configurable"
+    kind: feature
+    relevance: low
+    in_fork: 3/4
+    churn: 202
+    paths:
+      - .env.example
+      - src/providers/embedding/local.ts
+      - test/local-embedding-provider.test.ts
+    note: "Make the local embedding model configurable (CJK model knob)."
+    disposition: wont-fix
+    wont_fix_reason: "non-English language support — this fork is English only"
+    url: https://github.com/rohitg00/agentmemory/pull/1602
+  - number: 1606
+    title: "fix(dsh): preserve config and forward daemon credentials"
+    kind: host
+    relevance: low
+    in_fork: 0/3
+    churn: 290
+    note: "Preserve config and forward daemon credentials in the dsh integration."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1606
+  - number: 1607
+    title: "feat(pi): make the native extension installable as a package"
+    kind: host
+    relevance: low
+    in_fork: 5/54
+    churn: 1486
+    paths:
+      - .gitignore
+      - package.json
+      - plugin/skills/agentmemory-agents/REFERENCE.md
+      - src/cli/connect/index.ts
+      - tsdown.config.ts
+    note: "Make the Pi native extension installable as a package."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1607
+  - number: 1609
+    title: "feat(dsh): bundle native capture with AgentMemory"
+    kind: host
+    relevance: low
+    in_fork: 5/48
+    churn: 1029
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - plugin/skills/agentmemory-agents/REFERENCE.md
+      - src/cli/connect/util.ts
+      - tsdown.config.ts
+    note: "Bundle native dsh capture with AgentMemory."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1609
+  - number: 1610
+    title: "deps(deps): bump the minor-and-patch group across 1 directory with 2 updates"
+    kind: deps
+    relevance: low
+    in_fork: 1/1
+    churn: 4
+    paths:
+      - package.json
+    note: "Dependabot minor-and-patch group bump."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1610
+  - number: 1612
+    title: "chore: prepare 0.9.31"
+    kind: chore
+    relevance: low
+    in_fork: 14/50
+    churn: 441
+    paths:
+      - .env.example
+      - package.json
+      - packages/mcp/package.json
+      - plugin/.claude-plugin/plugin.json
+      - plugin/skills/_shared/TROUBLESHOOTING.md
+      - plugin/skills/agentmemory-agents/SKILL.md
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - plugin/skills/agentmemory-config/SKILL.md
+      - plugin/skills/agentmemory-hooks/SKILL.md
+      - plugin/skills/agentmemory-mcp-tools/SKILL.md
+    note: "Prepare release 0.9.31."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1612
+  - number: 1620
+    title: "feat(hooks): send repository-relative paths with AGENTMEMORY_RELATIVE_PATHS"
+    kind: feature
+    relevance: low
+    in_fork: 9/53
+    churn: 1425
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - plugin/skills/agentmemory-mcp-tools/REFERENCE.md
+      - src/functions/file-index.ts
+      - src/hooks/_project.ts
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+      - src/triggers/api.ts
+    note: "AGENTMEMORY_RELATIVE_PATHS: send repository-relative paths from hooks."
+    disposition: wont-fix
+    wont_fix_reason: "per-tool-call Injection, its pre-tool-use hook and /agentmemory/enrich were removed (#108); closed upstream unmerged"
+    url: https://github.com/rohitg00/agentmemory/pull/1620
+  - number: 1621
+    title: "feat: accept an explicit title on memory_save"
+    kind: feature
+    relevance: low
+    in_fork: 5/6
+    churn: 198
+    paths:
+      - src/functions/remember.ts
+      - src/mcp/server.ts
+      - src/mcp/standalone.ts
+      - src/mcp/tools-registry.ts
+      - src/triggers/api.ts
+    note: "Accept an explicit title on memory_save."
+    disposition: wont-fix
+    wont_fix_reason: "feature with no defect behind it; memory_save has no title parameter and nothing in Recall asks for one"
+    url: https://github.com/rohitg00/agentmemory/pull/1621
+  - number: 1629
+    title: "docs: refresh the viewer walkthrough"
+    kind: docs
+    relevance: low
+    in_fork: 1/5
+    churn: 15
+    paths:
+      - assets/demo.gif
+    note: "Refresh the viewer walkthrough in the docs."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1629
+  - number: 1630
+    title: "fix(viewer): clarify runtime worker health"
+    kind: fix
+    relevance: low
+    in_fork: 2/3
+    churn: 123
+    paths:
+      - src/types.ts
+      - src/viewer/index.html
+    note: "Clarify runtime worker health in the viewer."
+    disposition: wont-fix
+    wont_fix_reason: "iii worker runtime health — this fork runs one in-process Engine with no separate worker process (ADR 0001)"
+    url: https://github.com/rohitg00/agentmemory/pull/1630
+  - number: 1633
+    title: "Fix Cline CLI MCP configuration path"
+    kind: host
+    relevance: low
+    in_fork: 1/37
+    churn: 158
+    paths:
+      - plugin/skills/agentmemory-agents/REFERENCE.md
+    note: "Fix the Cline CLI MCP configuration path."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1633
+  - number: 1646
+    title: "fix: preserve original memory types in search responses"
+    kind: fix
+    relevance: low
+    in_fork: 5/8
+    churn: 180
+    paths:
+      - src/functions/smart-search.ts
+      - src/mcp/standalone.ts
+      - src/state/memory-utils.ts
+      - src/types.ts
+      - test/mcp-standalone.test.ts
+    note: "Preserve the original memory type in search responses."
+    disposition: already-fixed
+    status: "fixed-here — PR #486 preserves the original type as memoryType in search responses; memory_recall rendering is unchanged."
+    url: https://github.com/rohitg00/agentmemory/pull/1646
+  - number: 1647
+    title: "fix: exclude unscoped memories from project-filtered recall"
+    kind: fix
+    relevance: med
+    in_fork: 4/7
+    churn: 609
+    paths:
+      - src/functions/search.ts
+      - src/index.ts
+      - src/state/hybrid-search.ts
+      - test/hybrid-search.test.ts
+    note: "Exclude unscoped memories from project-filtered recall."
+    disposition: already-fixed
+    status: "fixed-here — PR #494 excludes unresolvable unscoped Memories from project Recall."
+    url: https://github.com/rohitg00/agentmemory/pull/1647
+  - number: 1660
+    title: "fix: follow up the boot race fixes with the open review findings"
+    kind: fix
+    relevance: low
+    in_fork: 1/4
+    churn: 104
+    paths:
+      - src/functions/search.ts
+    note: "Follow up the boot race fixes with open review findings."
+    disposition: wont-fix
+    wont_fix_reason: "iii boot-race and state-readiness code is absent here; the fork rebuilds BM25 in one in-process walk (src/functions/search.ts:137)"
+    url: https://github.com/rohitg00/agentmemory/pull/1660
+  - number: 1661
+    title: "fix(mcp): accept sourceIds on memory_lesson_save"
+    kind: fix
+    relevance: low
+    in_fork: 3/4
+    churn: 87
+    paths:
+      - plugin/skills/agentmemory-mcp-tools/REFERENCE.md
+      - src/mcp/server.ts
+      - src/mcp/tools-registry.ts
+    note: "Accept sourceIds on memory_lesson_save."
+    disposition: candidate
+    status: "present-here — src/mcp/tools-registry.ts:613-635 memory_lesson_save has no sourceIds although src/functions/lessons.ts accepts it, so Lessons saved over MCP carry empty provenance."
+    url: https://github.com/rohitg00/agentmemory/pull/1661
+  - number: 1662
+    title: "fix(mcp): record why the stdio shim dies"
+    kind: fix
+    relevance: low
+    in_fork: 3/6
+    churn: 268
+    paths:
+      - src/mcp/in-memory-kv.ts
+      - src/mcp/standalone.ts
+      - test/mcp-standalone.test.ts
+    note: "Record why the stdio MCP shim dies."
+    disposition: candidate
+    status: "present-here — src/mcp/standalone.ts installs no uncaughtException/unhandledRejection handler or crash log, only SIGINT/SIGTERM."
+    url: https://github.com/rohitg00/agentmemory/pull/1662
+  - number: 1663
+    title: "fix(hermes): stop the project git probe from inheriting stdin"
+    kind: host
+    relevance: low
+    in_fork: 0/2
+    churn: 15
+    note: "Stop the Hermes project git probe from inheriting stdin."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1663
+  - number: 1664
+    title: "fix(plugin): address the directory review on data capture, providers and listing"
+    kind: host
+    relevance: low
+    in_fork: 34/57
+    churn: 1788
+    paths:
+      - .env.example
+      - plugin/.claude-plugin/plugin.json
+      - plugin/.mcp.json
+      - plugin/scripts/post-commit.mjs
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/session-end.mjs
+      - plugin/scripts/session-start.mjs
+      - plugin/scripts/stop.mjs
+      - plugin/skills/agentmemory-architecture/SKILL.md
+      - plugin/skills/agentmemory-config/REFERENCE.md
+    note: "Address the plugin directory review on data capture, providers and listing (Codex and Devin manifests)."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1664
+  - number: 1665
+    title: "fix(memory): bump updatedAt when a supersede marks a memory non-latest"
+    kind: fix
+    relevance: low
+    in_fork: 9/10
+    churn: 68
+    paths:
+      - src/functions/auto-forget.ts
+      - src/functions/consolidate.ts
+      - src/functions/relations.ts
+      - src/functions/remember.ts
+      - src/state/memory-utils.ts
+      - test/auto-forget.test.ts
+      - test/consolidate-project-scope.test.ts
+      - test/relations.test.ts
+      - test/remember-project-scope.test.ts
+    note: "Bump updatedAt when a supersede marks a Memory non-latest."
+    disposition: candidate
+    status: "present-here — updatedAt is not bumped where isLatest becomes false in src/functions/relations.ts:157, remember.ts:280, consolidate.ts:189 and auto-forget.ts:143; only mesh sync and updatedAt readers are affected."
+    url: https://github.com/rohitg00/agentmemory/pull/1665
+  - number: 1666
+    title: "test(release-gate): accept the worker's own error in inline-worker-fatal"
+    kind: test
+    relevance: low
+    in_fork: 0/1
+    churn: 7
+    note: "Release-gate test accepts the worker's own error."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1666
+  - number: 1667
+    title: "test(windows): require a zero exit from the second start"
+    kind: test
+    relevance: low
+    in_fork: 0/1
+    churn: 1
+    note: "Windows test requires a zero exit from the second start."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/pull/1667
+  - number: 1670
+    title: "fix(cli): install the pinned iii engine on Windows"
+    kind: fix
+    relevance: low
+    in_fork: 1/3
+    churn: 517
+    paths:
+      - src/cli.ts
+    note: "Install the pinned iii engine on Windows."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/pull/1670
+  - number: 1671
+    title: "fix(doctor): do not prompt Fix/Skip in a non-interactive shell"
+    kind: fix
+    relevance: low
+    in_fork: 3/4
+    churn: 43
+    paths:
+      - src/cli.ts
+      - src/cli/doctor-diagnostics.ts
+      - test/cli-doctor-fixes.test.ts
+    note: "Do not prompt Fix/Skip in a non-interactive doctor run."
+    disposition: already-fixed
+    status: "fixed-here — PR #488 requires both terminals and no CI for doctor prompts."
+    url: https://github.com/rohitg00/agentmemory/pull/1671
+  - number: 1672
+    title: "fix(cli): keep iii SDK debug lines out of status and stop output"
+    kind: fix
+    relevance: low
+    in_fork: 0/2
+    churn: 94
+    note: "Keep iii SDK debug lines out of status and stop output."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1672
+  - number: 1673
+    title: "chore: remove a test comment left by #1260"
+    kind: chore
+    relevance: low
+    in_fork: 1/1
+    churn: 1
+    paths:
+      - test/mcp-resources.test.ts
+    note: "Remove a stray test comment."
+    disposition: wont-fix
+    wont_fix_reason: "upstream housekeeping, marketing or repo diary"
+    url: https://github.com/rohitg00/agentmemory/pull/1673
+  - number: 1674
+    title: "fix(mcp): save the store before stderr on the crash path"
+    kind: fix
+    relevance: low
+    in_fork: 3/40
+    churn: 524
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - src/mcp/standalone.ts
+    note: "Save the store before writing stderr on the MCP crash path."
+    disposition: candidate
+    status: "present-here — src/mcp/standalone.ts has no uncaughtException handler, so no crash path saves the local fallback store before exit (only SIGINT/SIGTERM)."
+    url: https://github.com/rohitg00/agentmemory/pull/1674
+  - number: 1675
+    title: "docs(env): name the Agent SDK route and correct the fallback and cap comments"
+    kind: docs
+    relevance: low
+    in_fork: 1/1
+    churn: 12
+    paths:
+      - .env.example
+    note: "Name the Agent SDK route and correct the fallback and cap comments in the env docs."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1675
+  - number: 1676
+    title: "chore: prepare 0.9.32"
+    kind: chore
+    relevance: low
+    in_fork: 6/21
+    churn: 94
+    paths:
+      - package.json
+      - packages/mcp/package.json
+      - plugin/.claude-plugin/plugin.json
+      - src/functions/export-import.ts
+      - src/types.ts
+      - src/version.ts
+    note: "Prepare release 0.9.32."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1676
+  - number: 1677
+    title: "ci: publish the Docker image to Docker Hub on release"
+    kind: ci
+    relevance: low
+    in_fork: 0/2
+    churn: 231
+    note: "Publish the Docker image to Docker Hub on release."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1677
+  - number: 1678
+    title: "docs: sync documented counts with main"
+    kind: docs
+    relevance: low
+    in_fork: 2/37
+    churn: 148
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+    note: "Sync documented counts with main."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1678
+  - number: 1679
+    title: "docs: refresh stale release references for 0.9.32"
+    kind: docs
+    relevance: low
+    in_fork: 0/37
+    churn: 100
+    note: "Refresh stale release references for 0.9.32."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1679
+  - number: 1680
+    title: "docs: document the Hermes catalog and ClawHub installs"
+    kind: docs
+    relevance: low
+    in_fork: 0/5
+    churn: 86
+    note: "Document the Hermes catalog and ClawHub installs."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1680
+  - number: 1681
+    title: "fix(plugin): pass settings under accepted names and run hooks in exec form"
+    kind: host
+    relevance: low
+    in_fork: 6/18
+    churn: 355
+    paths:
+      - plugin/.mcp.json
+      - plugin/hooks/hooks.json
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/session-start.mjs
+      - src/mcp/rest-proxy.ts
+      - test/mcp-surface-default.test.ts
+    note: "Pass plugin settings under accepted names and run hooks in exec form (Codex and Devin manifests)."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1681
+  - number: 1682
+    title: "docs(readme): separate plugin settings from the connect route for a remote server"
+    kind: docs
+    relevance: low
+    in_fork: 0/1
+    churn: 3
+    note: "Separate plugin settings from the connect route in the README for a remote server."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1682
+  - number: 1683
+    title: "chore: bump @agentmemory/pi to 0.1.1 and @agentmemory/fs-watcher to 0.2.0"
+    kind: deps
+    relevance: low
+    in_fork: 1/2
+    churn: 4
+    paths:
+      - integrations/filesystem-watcher/package.json
+    note: "Bump @agentmemory/pi to 0.1.1 and @agentmemory/fs-watcher to 0.2.0."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1683
+  - number: 1684
+    title: "fix(cursor): map subagent stop type and summary fields"
+    kind: host
+    relevance: low
+    in_fork: 0/4
+    churn: 143
+    note: "Map Cursor subagent stop type and summary fields."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1684
+  - number: 1688
+    title: "fix(cli): stop demo-owned Compose workers on Windows"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 95
+    paths:
+      - src/cli.ts
+    note: "Stop demo-owned Compose workers on Windows."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/pull/1688
+  - number: 1694
+    title: "chore: move to iii 0.25.1"
+    kind: deps
+    relevance: low
+    in_fork: 5/56
+    churn: 160
+    paths:
+      - .env.example
+      - eval/README.md
+      - package.json
+      - src/cli.ts
+      - src/version.ts
+    note: "Move to iii 0.25.1."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1694
+  - number: 1700
+    title: "fix(deploy): pass the provider selectors to Docker workers"
+    kind: deploy
+    relevance: low
+    in_fork: 0/5
+    churn: 36
+    note: "Pass the provider selectors to Docker workers."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/1700
+  - number: 1701
+    title: "fix(hooks): redact compound secret key names before truncating"
+    kind: fix
+    relevance: med
+    in_fork: 2/4
+    churn: 49
+    paths:
+      - plugin/scripts/post-tool-failure.mjs
+      - plugin/scripts/post-tool-use.mjs
+    note: "Redact compound secret key names before truncating hook output."
+    disposition: candidate
+    status: "partly-present-here — PR #493 redacts structured captures at the daemon; post-tool-use still truncates before sending output."
+    url: https://github.com/rohitg00/agentmemory/pull/1701
+  - number: 1704
+    title: "fix(index): unindex superseded and wiped memories"
+    kind: fix
+    relevance: low
+    in_fork: 8/10
+    churn: 701
+    paths:
+      - src/functions/auto-forget.ts
+      - src/functions/consolidate.ts
+      - src/functions/diagnostics.ts
+      - src/functions/export-import.ts
+      - src/functions/mesh.ts
+      - src/functions/search.ts
+      - src/functions/smart-search.ts
+      - src/state/hybrid-search.ts
+    note: "Unindex superseded and wiped memories."
+    disposition: already-fixed
+    status: "fixed-here — PR #498 de-indexes Memories demoted by heal and maintains indexes across Memory writes."
+    url: https://github.com/rohitg00/agentmemory/pull/1704
+  - number: 1705
+    title: "fix(skills): regenerate the config reference env count"
+    kind: docs
+    relevance: low
+    in_fork: 1/2
+    churn: 8
+    paths:
+      - plugin/skills/agentmemory-config/REFERENCE.md
+    note: "Regenerate the config reference env count."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1705
+  - number: 1708
+    title: "fix(cli): preserve newlines in generated Compose values"
+    kind: deploy
+    relevance: low
+    in_fork: 1/6
+    churn: 130
+    paths:
+      - .env.example
+    note: "Preserve newlines in generated Compose values."
+    disposition: wont-fix
+    wont_fix_reason: "deploy target this fork does not carry"
+    url: https://github.com/rohitg00/agentmemory/pull/1708
+  - number: 1711
+    title: "fix(release-gate): fail the Windows leftover check when the process query fails"
+    kind: ci
+    relevance: low
+    in_fork: 1/2
+    churn: 5
+    paths:
+      - src/cli.ts
+    note: "Fail the Windows leftover check when the process query fails."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/pull/1711
+  - number: 1712
+    title: "fix(clip): drop leftover comments and tighten text tower tests"
+    kind: fix
+    relevance: low
+    in_fork: 2/2
+    churn: 54
+    paths:
+      - src/providers/embedding/clip.ts
+      - test/clip-embedding-provider.test.ts
+    note: "Drop leftover comments and tighten the CLIP text tower tests."
+    disposition: wont-fix
+    wont_fix_reason: "CLIP embedding cleanup — a provider path this fork does not use; it runs only the OpenAI-compatible, Anthropic and local paths"
+    url: https://github.com/rohitg00/agentmemory/pull/1712
+  - number: 1713
+    title: "chore: prepare 0.9.33"
+    kind: chore
+    relevance: low
+    in_fork: 8/55
+    churn: 232
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - package.json
+      - packages/mcp/package.json
+      - plugin/.claude-plugin/plugin.json
+      - src/functions/export-import.ts
+      - src/types.ts
+      - src/version.ts
+    note: "Prepare release 0.9.33."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1713
+  - number: 1714
+    title: "ci(publish): stage npm releases through trusted publishing"
+    kind: ci
+    relevance: low
+    in_fork: 0/4
+    churn: 19
+    note: "Stage npm releases through trusted publishing."
+    disposition: wont-fix
+    wont_fix_reason: "npm publishing — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1714
+  - number: 1715
+    title: "feat(website): show the developer experience and the performance work"
+    kind: docs
+    relevance: low
+    in_fork: 0/7
+    churn: 662
+    note: "Website pages on developer experience and performance work."
+    disposition: wont-fix
+    wont_fix_reason: "website — this fork carries no website tree"
+    url: https://github.com/rohitg00/agentmemory/pull/1715
+  - number: 1716
+    title: "ci(release-gate): run the packed gate on arm64 and Intel machines"
+    kind: ci
+    relevance: low
+    in_fork: 0/3
+    churn: 43
+    note: "Run the packed release gate on arm64 and Intel machines."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1716
+  - number: 1719
+    title: "fix(install): retry transient iii engine download failures"
+    kind: fix
+    relevance: low
+    in_fork: 0/2
+    churn: 119
+    note: "Retry transient iii engine download failures."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1719
+  - number: 1720
+    title: "docs(changelog): add #1716 and #1719 to 0.9.33"
+    kind: docs
+    relevance: low
+    in_fork: 0/1
+    churn: 3
+    note: "Add #1716 and #1719 to the 0.9.33 changelog."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1720
+  - number: 1721
+    title: "fix(lessons): apply recall filters before the candidate limit"
+    kind: fix
+    relevance: high
+    in_fork: 3/3
+    churn: 43
+    paths:
+      - src/functions/lessons.ts
+      - src/state/search-index.ts
+      - test/lesson-index-recall.test.ts
+    note: "Apply Lesson recall filters before the candidate limit."
+    disposition: candidate
+    status: "present-here — src/functions/lessons.ts:244-251 (lesson-recall) and :61-65 (searchLessons, the prompt-submit Lesson candidate) take the top fetchLimit BM25 hits before the project and confidence filters, so a matching project Lesson ranked past about 100 globally never surfaces. Filed as #438."
+    url: https://github.com/rohitg00/agentmemory/pull/1721
+  - number: 1722
+    title: "fix: skip unnecessary session reads for scoped recall"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 26
+    paths:
+      - src/functions/search.ts
+    note: "Skip unnecessary session reads for scoped recall (closed duplicate of rohitg00/agentmemory#1723)."
+    disposition: already-fixed
+    status: "fixed-here — PR #494 honors a Memory project before probing Session provenance."
+    url: https://github.com/rohitg00/agentmemory/pull/1722
+  - number: 1723
+    title: "fix: skip unnecessary session reads for scoped recall"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 26
+    paths:
+      - src/functions/search.ts
+    note: "Skip unnecessary session reads for scoped recall."
+    disposition: already-fixed
+    status: "fixed-here — PR #494 honors a Memory project before probing Session provenance."
+    url: https://github.com/rohitg00/agentmemory/pull/1723
+  - number: 1752
+    title: "fix(agent-sdk): run summary child sessions in SDK isolation mode"
+    kind: provider
+    relevance: med
+    in_fork: 3/3
+    churn: 91
+    paths:
+      - src/providers/agent-sdk.ts
+      - src/providers/index.ts
+      - test/agent-sdk-provider.test.ts
+    note: "Run agent-sdk summary child sessions in SDK isolation mode."
+    disposition: already-fixed
+    status: "fixed-here — PR #485 disables user, project and local settings and child persistence. Managed plugins can still run; managed MCP configuration can prevent strict-mode startup."
+    url: https://github.com/rohitg00/agentmemory/pull/1752
+  - number: 1753
+    title: "feat(runtime): move to iii 0.26 observers"
+    kind: deploy
+    relevance: low
+    in_fork: 32/121
+    churn: 4935
+    paths:
+      - .env.example
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - eval/README.md
+      - package.json
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - src/cli-data-dir.ts
+      - src/cli.ts
+      - src/cli/doctor-diagnostics.ts
+      - src/config.ts
+    note: "Move the runtime to iii 0.26 observers."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1753
+  - number: 1754
+    title: "fix(connect): support native Windows in agentmemory connect"
+    kind: host
+    relevance: low
+    in_fork: 3/18
+    churn: 802
+    paths:
+      - src/cli/connect/claude-code.ts
+      - src/cli/connect/index.ts
+      - src/cli/connect/util.ts
+    note: "Support native Windows in agentmemory connect."
+    disposition: wont-fix
+    wont_fix_reason: "Windows — CI runs ubuntu only"
+    url: https://github.com/rohitg00/agentmemory/pull/1754
+  - number: 1755
+    title: "fix(search): retry failed keyword index sessions in the background"
+    kind: fix
+    relevance: low
+    in_fork: 6/44
+    churn: 655
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - src/functions/search.ts
+      - src/index.ts
+      - src/triggers/api.ts
+      - src/viewer/index.html
+    note: "Retry failed keyword index sessions in the background."
+    disposition: wont-fix
+    wont_fix_reason: "no iii session listing to retry — the fork rebuilds BM25 in one in-process walk (src/functions/search.ts:137)"
+    url: https://github.com/rohitg00/agentmemory/pull/1755
+  - number: 1756
+    title: "fix(cli): say when an agent is connected with MCP only"
+    kind: host
+    relevance: low
+    in_fork: 5/59
+    churn: 643
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - src/cli.ts
+      - src/cli/connect/claude-code.ts
+      - src/cli/connect/index.ts
+    note: "Say in agentmemory connect when an agent is connected with MCP only."
+    disposition: wont-fix
+    wont_fix_reason: "no connect adapter for this host in src/cli/connect/"
+    url: https://github.com/rohitg00/agentmemory/pull/1756
+  - number: 1757
+    title: "fix(graph): report graphify import truncation and index readiness"
+    kind: feature
+    relevance: low
+    in_fork: 6/6
+    churn: 292
+    paths:
+      - .env.example
+      - docs/recipes/pairings.md
+      - plugin/skills/agentmemory-config/REFERENCE.md
+      - src/config.ts
+      - src/functions/graph-import.ts
+      - test/graph-import.test.ts
+    note: "Report graphify import truncation and index readiness."
+    disposition: wont-fix
+    wont_fix_reason: "graphify import feeds the graph, which is off by default (#420); a third-party tool path this fork does not run"
+    url: https://github.com/rohitg00/agentmemory/pull/1757
+  - number: 1758
+    title: "fix(cli): explain an engine that runs without the agentmemory worker"
+    kind: fix
+    relevance: low
+    in_fork: 3/5
+    churn: 585
+    paths:
+      - src/cli.ts
+      - src/cli/doctor-diagnostics.ts
+      - test/cli-doctor-fixes.test.ts
+    note: "Explain an engine that runs without the agentmemory worker."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1758
+  - number: 1759
+    title: "fix(hermes): declare no plugin hooks so plugins doctor passes"
+    kind: host
+    relevance: low
+    in_fork: 0/35
+    churn: 183
+    note: "Declare no plugin hooks so Hermes plugins doctor passes."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1759
+  - number: 1760
+    title: "fix(cli): make demo wait until seeded observations are searchable"
+    kind: fix
+    relevance: low
+    in_fork: 1/4
+    churn: 587
+    paths:
+      - src/cli.ts
+    note: "Make demo wait until seeded observations are searchable."
+    disposition: wont-fix
+    wont_fix_reason: "the miss came from a capture spool and a half-started iii worker, both absent here; the in-process Engine indexes an Observation before observe answers"
+    url: https://github.com/rohitg00/agentmemory/pull/1760
+  - number: 1761
+    title: "fix(search): skip stored-memory reads when index has memoryType"
+    kind: fix
+    relevance: low
+    in_fork: 1/2
+    churn: 16
+    paths:
+      - src/functions/smart-search.ts
+    note: "Skip stored-memory reads when the index carries memoryType."
+    disposition: wont-fix
+    wont_fix_reason: "the index here carries no memoryType metadata, so there is no read to skip"
+    url: https://github.com/rohitg00/agentmemory/pull/1761
+  - number: 1766
+    title: "fix(release-gate): force the dead-letter capture failure without the session cap"
+    kind: test
+    relevance: low
+    in_fork: 4/41
+    churn: 176
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - src/functions/observe.ts
+      - test/auto-compress.test.ts
+    note: "Force the dead-letter capture failure in the release gate without the session cap."
+    disposition: wont-fix
+    wont_fix_reason: "release chore — this fork publishes nothing (no release workflow)"
+    url: https://github.com/rohitg00/agentmemory/pull/1766
+  - number: 1774
+    title: "feat(orca): add an agentmemory panel plugin for Orca"
+    kind: host
+    relevance: low
+    in_fork: 1/16
+    churn: 1624
+    paths:
+      - vitest.config.ts
+    note: "Add an agentmemory panel plugin for Orca."
+    disposition: wont-fix
+    wont_fix_reason: "unsupported host — Claude Code is the only supported host"
+    url: https://github.com/rohitg00/agentmemory/pull/1774
+  - number: 1776
+    title: "fix(runtime): stop checkpoint retry loops and runtime polling in the iii 0.26 observer stack"
+    kind: deploy
+    relevance: low
+    in_fork: 2/17
+    churn: 864
+    paths:
+      - .env.example
+      - src/index.ts
+    note: "Stop checkpoint retry loops and runtime polling in the iii 0.26 observers."
+    disposition: wont-fix
+    wont_fix_reason: "no iii engine here"
+    url: https://github.com/rohitg00/agentmemory/pull/1776
+  - number: 1779
+    title: "fix(mcp): require HTTPS for remote proxy endpoints"
+    kind: fix
+    relevance: low
+    in_fork: 3/13
+    churn: 203
+    paths:
+      - plugin/scripts/pre-compact.mjs
+      - plugin/scripts/session-start.mjs
+      - src/mcp/rest-proxy.ts
+    note: "Require HTTPS for remote MCP proxy endpoints."
+    disposition: candidate
+    status: "present-here — src/mcp/rest-proxy.ts:1 accepts any http:// URL and bearer; that fits single-Operator LAN use, so likely wont-fix."
+    url: https://github.com/rohitg00/agentmemory/pull/1779
+  - number: 1780
+    title: "fix(capture): hash complete inputs for deduplication"
+    kind: fix
+    relevance: high
+    in_fork: 2/3
+    churn: 156
+    paths:
+      - src/functions/dedup.ts
+      - src/functions/observe.ts
+    note: "Hash complete inputs for capture deduplication."
+    disposition: already-fixed
+    status: "fixed-here — PR #490 hashes full prompt inputs rather than a truncated prefix."
+    url: https://github.com/rohitg00/agentmemory/pull/1780
+  - number: 1781
+    title: "fix(mcp): preserve fallback writes across processes"
+    kind: fix
+    relevance: low
+    in_fork: 2/5
+    churn: 417
+    paths:
+      - src/mcp/in-memory-kv.ts
+      - test/mcp-standalone.test.ts
+    note: "Preserve MCP fallback writes across processes."
+    disposition: candidate
+    status: "present-here — PR #487 labels daemon-down saves local-only; it does not serialize the local fallback file across shims."
+    url: https://github.com/rohitg00/agentmemory/pull/1781
+  - number: 1782
+    title: "fix(import): track restored image references"
+    kind: fix
+    relevance: low
+    in_fork: 4/6
+    churn: 576
+    paths:
+      - src/functions/export-import.ts
+      - src/functions/image-refs.ts
+      - src/triggers/api.ts
+      - test/helpers/mocks.ts
+    note: "Track restored image references on import."
+    disposition: candidate
+    status: "present-here — src/functions/export-import.ts:419-440 restores Observations and Memories with imageRef/imageData but never calls incrementImageRef, and image-quota-cleanup.ts:54-71 deletes refcount-0 files."
+    url: https://github.com/rohitg00/agentmemory/pull/1782
+  - number: 1784
+    title: "fix: hardening for consolidate, search, eviction, and export/snapshot"
+    kind: fix
+    relevance: low
+    in_fork: 23/70
+    churn: 3270
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+      - plugin/skills/agentmemory-mcp-tools/REFERENCE.md
+      - src/functions/consolidate.ts
+      - src/functions/consolidation-pipeline.ts
+      - src/functions/evict.ts
+      - src/functions/export-import.ts
+      - src/functions/facets.ts
+      - src/functions/image-refs.ts
+      - src/functions/observe.ts
+    note: "Hardening bundle for consolidate, search, eviction and export/snapshot."
+    disposition: candidate
+    status: "partly-present-here — PR #499 preserves Relations in export and snapshots. The reported consolidation crash on missing Memory fields did not reproduce in #458; invalid smart-search limits are separate."
+    url: https://github.com/rohitg00/agentmemory/pull/1784
+  - number: 1798
+    title: "fix: preserve optional vision through provider wrappers"
+    kind: fix
+    relevance: low
+    in_fork: 2/3
+    churn: 103
+    paths:
+      - src/providers/fallback-chain.ts
+      - src/providers/resilient.ts
+    note: "Preserve optional vision through provider wrappers."
+    disposition: already-fixed
+    status: "fixed-here — PR #488 exposes describeImage on a fallback chain when a provider supports it and tries capable providers in order."
+    url: https://github.com/rohitg00/agentmemory/pull/1798
+  - number: 1800
+    title: "docs(readme): add architecture, pipeline and stack diagrams kept current by docs-sync"
+    kind: docs
+    relevance: low
+    in_fork: 3/44
+    churn: 1231
+    paths:
+      - .github/workflows/ci.yml
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+    note: "README architecture, pipeline and stack diagrams kept current by docs sync."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1800
+  - number: 1801
+    title: "fix(routines): reject cyclic step dependencies"
+    kind: fix
+    relevance: low
+    in_fork: 2/39
+    churn: 257
+    paths:
+      - assets/tags/light/stat-tests.svg
+      - assets/tags/stat-tests.svg
+    note: "Reject cyclic step dependencies in routines."
+    disposition: wont-fix
+    wont_fix_reason: "src/functions/routines.ts is absent here"
+    url: https://github.com/rohitg00/agentmemory/pull/1801
+  - number: 1813
+    title: "docs: sync README, reliability docs and pipeline diagram with recent merges"
+    kind: docs
+    relevance: low
+    in_fork: 0/5
+    churn: 25
+    note: "Sync README, reliability docs and pipeline diagram with recent merges."
+    disposition: wont-fix
+    wont_fix_reason: "upstream doc/count sync or dependency bump"
+    url: https://github.com/rohitg00/agentmemory/pull/1813
