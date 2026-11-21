@@ -9,7 +9,7 @@ interface JsonlEntry {
   type?: string;
   uuid?: string;
   sessionId?: string;
-  timestamp?: string;
+  timestamp?: unknown;
   cwd?: string;
   message?: {
     role?: string;
@@ -112,11 +112,16 @@ function extractToolResults(content: unknown): Array<{ toolUseId: string; output
 
 export function parseJsonlText(text: string, fallbackSessionId?: string): ParsedTranscript {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
-  const entries: Array<{ entry: JsonlEntry; line: string }> = [];
+  const entries: Array<{ entry: JsonlEntry; line: string; timestamp?: string }> = [];
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line);
-      if (parsed && typeof parsed === "object") entries.push({ entry: parsed as JsonlEntry, line });
+      if (!parsed || typeof parsed !== "object") continue;
+      const entry: JsonlEntry = parsed;
+      const timestamp = typeof entry.timestamp === "string" && Number.isFinite(Date.parse(entry.timestamp))
+        ? entry.timestamp
+        : undefined;
+      entries.push({ entry, line, timestamp });
     } catch {
       // skip malformed lines
     }
@@ -124,20 +129,20 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
 
   let sessionId = "";
   let cwd = "";
-  let firstTs = "";
-  let lastTs = "";
+  const firstTs = entries.find(({ timestamp }) => timestamp !== undefined)?.timestamp;
+  const defaultTs = firstTs ?? new Date().toISOString();
+  let lastTs = defaultTs;
 
   const observations: RawObservation[] = [];
   const compactions: number[] = [];
 
-  for (const { entry, line } of entries) {
+  for (const { entry, line, timestamp } of entries) {
     let position = 0;
     const nextId = () => fingerprintId("obs", `${position++}:${line}`);
     if (entry.sessionId && !sessionId) sessionId = entry.sessionId;
     if (typeof entry.cwd === "string" && entry.cwd.trim() && !cwd) cwd = entry.cwd;
-    const ts = entry.timestamp || new Date().toISOString();
-    if (!firstTs) firstTs = ts;
-    lastTs = ts;
+    lastTs = timestamp ?? lastTs;
+    const ts = lastTs;
 
     const role = entry.message?.role;
     const content = entry.message?.content;
@@ -209,13 +214,12 @@ export function parseJsonlText(text: string, fallbackSessionId?: string): Parsed
     }
   }
 
-  const nowIso = new Date().toISOString();
   return {
     sessionId: effectiveSessionId,
     project: deriveProject(cwd),
     cwd: cwd || process.cwd(),
-    startedAt: firstTs || nowIso,
-    endedAt: lastTs || nowIso,
+    startedAt: defaultTs,
+    endedAt: lastTs,
     observations,
     compactions,
   };

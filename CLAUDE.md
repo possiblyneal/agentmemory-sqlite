@@ -484,6 +484,10 @@ Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). 
 
 Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_project.ts`): the main checkout's basename, shared by every worktree. The first repo to claim a basename (recorded in `~/.agentmemory/project-names.json`) keeps it bare; a later same-named repo gets a `-<6 hex>` suffix from its origin URL, or its common-dir path when it has no remote.
 
+**JSONL import** (`src/replay/jsonl-parser.ts`): only valid timestamps set the Session's time bounds.
+An undated Observation inherits the last timestamp, or the first timestamp for leading undated
+lines. A wholly undated transcript uses one import timestamp.
+
 ## Coding Standards
 
 - TypeScript, ESM only (`"type": "module"`)
