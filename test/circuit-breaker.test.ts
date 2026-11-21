@@ -115,3 +115,77 @@ describe("CircuitBreaker", () => {
     expect(cb.getState().state).toBe("half-open");
   });
 });
+
+describe("CircuitBreaker half-open probe", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function openThenRecover(): CircuitBreaker {
+    const cb = new CircuitBreaker();
+    cb.recordFailure();
+    cb.recordFailure();
+    cb.recordFailure();
+    vi.advanceTimersByTime(30_000);
+    return cb;
+  }
+
+  it("lets one caller probe while half-open and holds the rest", () => {
+    const cb = openThenRecover();
+    expect(cb.isAllowed).toBe(true);
+    expect(cb.isAllowed).toBe(false);
+    expect(cb.isAllowed).toBe(false);
+  });
+
+  it("closes after the probe succeeds and lets everyone through", () => {
+    const cb = openThenRecover();
+    expect(cb.isAllowed).toBe(true);
+    cb.recordSuccess();
+    expect(cb.isAllowed).toBe(true);
+    expect(cb.isAllowed).toBe(true);
+  });
+
+  it("reopens with a fresh window after the probe fails", () => {
+    const cb = openThenRecover();
+    expect(cb.isAllowed).toBe(true);
+    cb.recordFailure();
+    expect(cb.isAllowed).toBe(false);
+    vi.advanceTimersByTime(30_000);
+    expect(cb.isAllowed).toBe(true);
+  });
+
+  it("does not replace a pending probe after the recovery timeout", () => {
+    const cb = openThenRecover();
+    expect(cb.isAllowed).toBe(true);
+    expect(cb.isAllowed).toBe(false);
+    vi.advanceTimersByTime(60_000);
+    expect(cb.isAllowed).toBe(false);
+    cb.releaseProbe();
+    expect(cb.isAllowed).toBe(true);
+  });
+});
+
+describe("CircuitBreaker probe ownership", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("ignores a stale probe completion after another probe starts", () => {
+    vi.useFakeTimers();
+    const cb = new CircuitBreaker({ failureThreshold: 1 });
+    cb.recordFailure();
+    vi.advanceTimersByTime(30_000);
+    const first = cb.acquire()!;
+    cb.releaseProbe(first);
+    const second = cb.acquire()!;
+    cb.recordSuccess(first);
+    cb.recordFailure(first);
+    cb.releaseProbe(first);
+    expect(cb.getState().state).toBe("half-open");
+    expect(cb.acquire()).toBeNull();
+    cb.recordSuccess(second);
+    expect(cb.getState().state).toBe("closed");
+  });
+});

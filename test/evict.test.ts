@@ -708,7 +708,7 @@ describe("mem::evict default importance floor", () => {
         .sort();
     const keptMem = async () =>
       (await kv.list<Memory>(KV.memories)).map((m) => m.id).sort();
-    return { run, keptObs, keptMem };
+    return { run, keptObs, keptMem, kv };
   }
 
   it("removes a one-day-old Observation of importance 4 and keeps importance 5 and a fresh one", async () => {
@@ -735,6 +735,25 @@ describe("mem::evict default importance floor", () => {
 
     expect(stats).toMatchObject({ nonLatestMemories: 1 });
     expect(await t.keptMem()).toEqual(["latest", "young"]);
+  });
+
+  it.each([
+    ["expiredMemories", "expired_memory", { ...memory("old", 100, true), forgetAfter: daysAgo(1) }],
+    ["nonLatestMemories", "old_non_latest_memory", memory("old", 100, false)],
+  ] as const)("counts and audits %s when image release fails", async (counter, reason, old) => {
+    const t = setup([], [{ ...old, imageRef: "images/old.png" }]);
+    const get = t.kv.get;
+    vi.spyOn(t.kv, "get").mockImplementation((scope, key) => {
+      if (scope === KV.imageRefs) throw new Error("image refs unavailable");
+      return get(scope, key);
+    });
+
+    expect(await t.run()).toMatchObject({ [counter]: 1 });
+    expect(await t.keptMem()).toEqual([]);
+    expect(await t.kv.list(KV.audit)).toContainEqual(expect.objectContaining({
+      operation: "delete",
+      details: expect.objectContaining({ reason }),
+    }));
   });
 
   it("reports the default removals on a dry run without deleting", async () => {

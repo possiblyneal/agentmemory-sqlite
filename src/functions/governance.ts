@@ -4,6 +4,8 @@ import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { recordAudit, safeAudit, queryAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { logger } from "../logger.js";
 import { NOT_A_MEMORY_HINT } from "../mcp/tools-registry.js";
@@ -24,18 +26,20 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
       const deletedIds: string[] = [];
       const notFound: string[] = [];
       for (const id of data.memoryIds) {
-        const mem = await kv.get<Memory>(KV.memories, id);
-        if (!mem) {
-          notFound.push(id);
-        } else {
-          await deleteIndexed(kv, KV.memories, id);
-          // The same teardown mem::forget does, so the two single-item
-          // delete paths cannot diverge in what they release.
-          if (mem.imageRef) {
-            await decrementImageRef(kv, sdk, mem.imageRef);
+        await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+          const mem = await kv.get<Memory>(KV.memories, id);
+          if (!mem) {
+            notFound.push(id);
+          } else {
+            await deleteIndexed(kv, KV.memories, id);
+            // The same teardown mem::forget does, so the two single-item
+            // delete paths cannot diverge in what they release.
+            if (mem.imageRef) {
+              await decrementImageRef(kv, sdk, mem.imageRef);
+            }
+            deletedIds.push(id);
           }
-          deletedIds.push(id);
-        }
+        });
       }
       const deleted = deletedIds.length;
 
@@ -126,9 +130,11 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
         const batch = candidates.slice(i, i + BATCH_SIZE);
         const results = await Promise.allSettled(
-          batch.map(async (mem) => {
-            await deleteIndexed(kv, KV.memories, mem.id);
-          }),
+          batch.map((mem) =>
+            withKeyedLock(MEMORY_WRITE_LOCK, () =>
+              deleteIndexed(kv, KV.memories, mem.id),
+            ),
+          ),
         );
         results.forEach((result, j) => {
           const mem = batch[j];

@@ -3,6 +3,7 @@ import type { Memory, MemoryRelation } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { safeAudit } from "./audit.js";
 import { scrubFields } from "./privacy.js";
 import { recordAccessBatch } from "./access-tracker.js";
@@ -46,11 +47,7 @@ export function registerRelationsFunction(sdk: ISdk, kv: StateKV): void {
       type: MemoryRelation["type"];
       confidence?: number;
     }) => {
-      const [firstId, secondId] = [data.sourceId, data.targetId].sort();
-      const lockKey =
-        firstId === secondId ? `mem:${firstId}` : `mem:${firstId}:${secondId}`;
-
-      return withKeyedLock(lockKey, async () => {
+      return withKeyedLock(MEMORY_WRITE_LOCK, async () => {
         const source = await kv.get<Memory>(KV.memories, data.sourceId);
         const target = await kv.get<Memory>(KV.memories, data.targetId);
         if (!source || !target) {
@@ -135,64 +132,66 @@ export function registerRelationsFunction(sdk: ISdk, kv: StateKV): void {
       newTitle?: string;
     }) => {
       data = scrubFields(data, "newContent", "newTitle");
-      const existing = await kv.get<Memory>(KV.memories, data.memoryId);
-      if (!existing) {
-        return { success: false, error: "memory not found" };
-      }
+      return withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+        const existing = await kv.get<Memory>(KV.memories, data.memoryId);
+        if (!existing) {
+          return { success: false, error: "memory not found" };
+        }
 
-      const now = new Date().toISOString();
-      const evolved: Memory = {
-        ...existing,
-        id: generateId("mem"),
-        createdAt: now,
-        updatedAt: now,
-        title: data.newTitle || existing.title,
-        content: data.newContent,
-        version: (existing.version || 1) + 1,
-        parentId: existing.id,
-        supersedes: [existing.id, ...(existing.supersedes || [])],
-        isLatest: true,
-      };
+        const now = new Date().toISOString();
+        const evolved: Memory = {
+          ...existing,
+          id: generateId("mem"),
+          createdAt: now,
+          updatedAt: now,
+          title: data.newTitle || existing.title,
+          content: data.newContent,
+          version: (existing.version || 1) + 1,
+          parentId: existing.id,
+          supersedes: [existing.id, ...(existing.supersedes || [])],
+          isLatest: true,
+        };
 
-      existing.isLatest = false;
-      await kv.set(KV.memories, existing.id, existing);
-      await safeAudit(kv, "evolve", "mem::evolve", [existing.id], {
-        operation: "evolve",
-        action: "mark_non_latest",
-        newId: evolved.id,
+        existing.isLatest = false;
+        await kv.set(KV.memories, existing.id, existing);
+        await safeAudit(kv, "evolve", "mem::evolve", [existing.id], {
+          operation: "evolve",
+          action: "mark_non_latest",
+          newId: evolved.id,
+        });
+
+        deindexSupersededMemory(existing.id);
+        await kv.set(KV.memories, evolved.id, evolved);
+        await indexNewMemoryVersion(evolved);
+        await safeAudit(kv, "evolve", "mem::evolve", [evolved.id], {
+          operation: "evolve",
+          oldId: existing.id,
+          newId: evolved.id,
+          version: evolved.version,
+        });
+
+        const relation: MemoryRelation = {
+          type: "supersedes",
+          sourceId: evolved.id,
+          targetId: existing.id,
+          createdAt: now,
+          confidence: 1.0,
+        };
+        const relationId = generateId("rel");
+        await kv.set(KV.relations, relationId, relation);
+        await safeAudit(kv, "evolve", "mem::evolve", [relationId], {
+          operation: "supersedes",
+          oldId: existing.id,
+          newId: evolved.id,
+        });
+
+        logger.info("Memory evolved", {
+          oldId: existing.id,
+          newId: evolved.id,
+          version: evolved.version,
+        });
+        return { success: true, memory: evolved, previousId: existing.id };
       });
-
-      deindexSupersededMemory(existing.id);
-      await kv.set(KV.memories, evolved.id, evolved);
-      await indexNewMemoryVersion(evolved);
-      await safeAudit(kv, "evolve", "mem::evolve", [evolved.id], {
-        operation: "evolve",
-        oldId: existing.id,
-        newId: evolved.id,
-        version: evolved.version,
-      });
-
-      const relation: MemoryRelation = {
-        type: "supersedes",
-        sourceId: evolved.id,
-        targetId: existing.id,
-        createdAt: now,
-        confidence: 1.0,
-      };
-      const relationId = generateId("rel");
-      await kv.set(KV.relations, relationId, relation);
-      await safeAudit(kv, "evolve", "mem::evolve", [relationId], {
-        operation: "supersedes",
-        oldId: existing.id,
-        newId: evolved.id,
-      });
-
-      logger.info("Memory evolved", {
-        oldId: existing.id,
-        newId: evolved.id,
-        version: evolved.version,
-      });
-      return { success: true, memory: evolved, previousId: existing.id };
     },
   );
 

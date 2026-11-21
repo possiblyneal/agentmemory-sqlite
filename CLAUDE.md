@@ -237,6 +237,18 @@ Auto-forget and retention release a Memory's image reference after its indexed d
 A failed release is logged without blocking deletion bookkeeping; it may leave an unused image.
 Concurrent deletion locking is outside this contract.
 
+### Memory writes and provider recovery
+`MEMORY_WRITE_LOCK` (`src/state/memory-utils.ts`) serializes Memory saves, deletes,
+relations, evolution, and auto-forget demotion. Before demoting, auto-forget rechecks both
+live rows under the lock and reports only completed demotions; dry runs report snapshot matches.
+Consolidation checks the predecessor again under the lock after the provider call. Release the
+lock before graph eviction. Import and snapshot restore keep their own replacement semantics.
+Eviction decrements image references after deleting the row and logs a failed release without
+skipping bookkeeping.
+`ResilientProvider` admits one half-open probe per operation after acquiring a provider slot.
+The reservation lasts until the call settles; busy and content-filter responses release it,
+and probe generations discard stale completions. An open circuit rejects before waiting for a slot.
+
 ### Replace import
 `mem::import` validates section shapes, size limits and keyed fields used by import indexing
 before any store mutation. Rows without string keys are dropped and counted in `invalid`, so
@@ -469,7 +481,7 @@ short forms count only beside an ordinal, a year, or after "on". The in-process 
 BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
-`memoryToObservation()` carries the saved Memory type as optional `memoryType` on full, compact and narrative `mem::search` results and smart-search results; `memory_recall` rendering is unchanged. Graph retrieval keeps an Observation's best score among paths returned from different start nodes. `mem::consolidate` serializes its own runs, counts failed model calls toward its ten-call budget, writes a successor before demoting its predecessor, and updates the index before the predecessor audit. A failed demotion can leave two latest versions; cross-writer snapshot races are not covered by this lock.
+`memoryToObservation()` carries the saved Memory type as optional `memoryType` on full, compact and narrative `mem::search` results and smart-search results; `memory_recall` rendering is unchanged. Graph retrieval keeps an Observation's best score among paths returned from different start nodes. `mem::consolidate` serializes its own runs, counts failed model calls toward its ten-call budget, writes a successor before demoting its predecessor, and updates the index before the predecessor audit. A failed demotion can leave two latest versions; the write lock does not make both writes transactional.
 
 ### Search on the event loop
 Search runs on the daemon's one event loop, which also answers `/livez` and the hooks. BM25
