@@ -179,6 +179,12 @@ the inbound bearer on a non-loopback bind (a browser carries it as the second su
 upstream. Observe and compress publish to the `viewer` group alone; there are no per-Session
 stream groups.
 
+### Observation deduplication
+`DedupMap` (`src/functions/dedup.ts`) hashes the complete input and output with the Session,
+hook type and tool name; its five-minute in-memory window retains hashes, not payloads.
+Distinct long Observations sharing a prefix are stored; exact repeats within the window deduplicate.
+Dedup runs before the existing privacy sanitization and does not change what gets stored.
+
 ### Observations on a full disk or a locked database
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
 hits a full disk or `database is locked` (another connection holds the write lock; the store

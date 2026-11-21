@@ -142,4 +142,26 @@ describe("observe dedup for hooks without tool_input (#1173)", () => {
     expect(second.deduplicated).toBeUndefined();
     expect(second.observationId).toBeTruthy();
   });
+
+  it("records two long prompts that share their first 600 characters (#439)", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const { DedupMap } = await import("../src/functions/dedup.js");
+    const sdk = mockSdk({ looseTrigger: true });
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never, new DedupMap());
+
+    const shared = "Review the failing deploy. ".repeat(23);
+    const first = (await sdk.trigger(
+      "mem::observe",
+      observePayload("prompt_submit", { prompt: shared + "Then fix the helm chart." }),
+    )) as { observationId?: string; deduplicated?: boolean };
+    const second = (await sdk.trigger(
+      "mem::observe",
+      observePayload("prompt_submit", { prompt: shared + "Then roll back the release." }),
+    )) as { observationId?: string; deduplicated?: boolean };
+
+    expect(first.observationId).toBeTruthy();
+    expect(second.deduplicated).toBeUndefined();
+    expect(second.observationId).toBeTruthy();
+  });
 });

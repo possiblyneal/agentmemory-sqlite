@@ -28,4 +28,11 @@ describe("DedupMap.computeHash", () => {
       map.computeHash("ses", "post_tool_use", "Bash", {}, long + "b"),
     );
   });
+
+  it("hashes the whole input, not a prefix (#439)", () => {
+    const long = "x".repeat(600);
+    expect(map.computeHash("ses", "post_tool_use", "Bash", { command: long + "a" }, "")).not.toBe(
+      map.computeHash("ses", "post_tool_use", "Bash", { command: long + "b" }, ""),
+    );
+  });
 });

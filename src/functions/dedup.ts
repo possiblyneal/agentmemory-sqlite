@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+function sha256(value: unknown): string {
+  return createHash("sha256")
+    .update(typeof value === "string" ? value : JSON.stringify(value ?? ""))
+    .digest("hex");
+}
+
 const TTL_MS = 5 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60_000;
 
@@ -24,18 +30,7 @@ export class DedupMap {
     toolInput: unknown,
     toolOutput?: unknown,
   ): string {
-    const input =
-      typeof toolInput === "string"
-        ? toolInput.slice(0, 500)
-        : JSON.stringify(toolInput ?? "").slice(0, 500);
-    const outputHash = createHash("sha256")
-      .update(
-        typeof toolOutput === "string"
-          ? toolOutput
-          : JSON.stringify(toolOutput ?? ""),
-      )
-      .digest("hex");
-    const raw = `${sessionId}:${hookType}:${toolName}:${input}:${outputHash}`;
+    const raw = `${sessionId}:${hookType}:${toolName}:${sha256(toolInput)}:${sha256(toolOutput)}`;
     return createHash("sha256").update(raw).digest("hex");
   }
 
