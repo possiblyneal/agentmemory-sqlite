@@ -4,6 +4,8 @@ import {
 } from "../src/functions/search.js";
 import { memoryToObservation } from "../src/state/memory-utils.js";
 import type { Memory, SemanticMemory } from "../src/types.js";
+import { KV } from "../src/state/schema.js";
+import { pagedReads } from "./helpers/mocks.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -25,17 +27,23 @@ function mockKV(
 
   store.set("mem:retention", new Map());
 
+  const { listPage } = pagedReads(store);
+  let facetGeneration = 0;
   return {
+    listPage,
+    writeGeneration: async () => facetGeneration,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());
       store.get(scope)!.set(key, data);
+      if (scope === KV.facets) facetGeneration++;
       return data;
     },
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
+      if (scope === KV.facets) facetGeneration++;
     },
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
@@ -532,6 +540,25 @@ describe("RetentionScoring", () => {
 
       expect(getSearchIndex().has("mem_evict")).toBe(false);
     });
+  });
+
+  it("keeps Facets for missing targets while clearing stale retention scores", async () => {
+    const { registerRetentionFunctions } = await import("../src/functions/retention.js");
+    const present = makeMemory("mem_present", "fact", 500);
+    const missing = makeMemory("mem_missing", "fact", 500);
+    const sdk = mockSdk();
+    const kv = mockKV([present, missing]);
+    registerRetentionFunctions(sdk as never, kv as never);
+    await sdk.trigger({ function_id: "mem::retention-score", payload: {} });
+    await kv.delete(KV.memories, missing.id);
+    await kv.set(KV.facets, "present", { targetId: present.id });
+    await kv.set(KV.facets, "missing", { targetId: missing.id });
+
+    await sdk.trigger({ function_id: "mem::retention-evict", payload: { threshold: 0.9 } });
+
+    expect(await kv.get(KV.facets, "present")).toBeNull();
+    expect(await kv.get(KV.facets, "missing")).toEqual({ targetId: missing.id });
+    expect(await kv.get(KV.retentionScores, missing.id)).toBeNull();
   });
 
   it("mem::retention-evict keeps the image ref when the delete fails (#437)", async () => {

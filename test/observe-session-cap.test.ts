@@ -12,16 +12,20 @@ import { KV } from "../src/state/schema.js";
 function mockKV() {
   const lists: string[] = [];
   const store = new Map<string, Map<string, unknown>>();
+  let facetGeneration = 0;
   return {
+    writeGeneration: async () => facetGeneration,
     get: async <T>(scope: string, key: string): Promise<T | null> =>
       (store.get(scope)?.get(key) as T) ?? null,
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());
       store.get(scope)!.set(key, data);
+      if (scope === "mem:facets") facetGeneration++;
       return data;
     },
     delete: async (scope: string, key: string) => {
       store.get(scope)?.delete(key);
+      if (scope === "mem:facets") facetGeneration++;
     },
     update: async (
       scope: string,
@@ -35,6 +39,7 @@ function mockKV() {
       }
       return row;
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number) => [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       lists.push(scope);
       return Array.from(store.get(scope)?.values() ?? []) as T[];
@@ -108,6 +113,16 @@ describe("mem::observe at MAX_OBS_PER_SESSION (PR#1174)", () => {
     expect(audits).toContainEqual(
       expect.objectContaining({ operation: "delete", functionId: "mem::observe", targetIds: ["drop"] }),
     );
+  });
+
+  it("removes Facets of observations evicted by the session cap", async () => {
+    const kv = mockKV();
+    const sdk = mockSdk();
+    await kv.set(KV.observations(SESSION), "drop", stored("drop", 2, "2026-01-01T00:00:00Z"));
+    await kv.set(KV.facets, "facet", { id: "facet", targetId: "drop", targetType: "observation", dimension: "kind", value: "test" });
+    registerObserveFunction(sdk as never, kv as never, undefined, 1);
+    await sdk.trigger({ function_id: "mem::observe", payload: { sessionId: SESSION, hookType: "post_tool_use", timestamp: "2026-05-01T00:00:00Z", data: { tool_name: "Read", tool_input: { file_path: "new.ts" } } } });
+    expect(await kv.get(KV.facets, "facet")).toBeNull();
   });
 
   it("deletes the evicted observation's obs-nodes row", async () => {

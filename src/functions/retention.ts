@@ -1,3 +1,4 @@
+import { deleteWithFacets } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
 import type {
   Memory,
@@ -349,8 +350,12 @@ export function registerRetentionFunctions(
 
           const evictScope = scope;
           const remove = async () => {
-            const mem = await kv.get<Memory>(evictScope, candidate.memoryId);
-            await deleteIndexed(kv, evictScope, candidate.memoryId);
+            const mem = await deleteWithFacets(kv, async (removed) => {
+              const current = await kv.get<Memory>(evictScope, candidate.memoryId);
+              await deleteIndexed(kv, evictScope, candidate.memoryId);
+              if (current) removed.push(candidate.memoryId);
+              return current;
+            });
             if (mem && mem.imageRef) {
               await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {
                 logger.warn("Retention could not release image reference", { memoryId: mem.id, error: String(error) });

@@ -1,3 +1,4 @@
+import { deleteWithFacets } from "./facets.js";
 import { TriggerAction, type ISdk } from "../engine/types.js";
 import type { Memory } from "../types.js";
 import { KV, generateId, jaccardSimilarity, fingerprintId } from "../state/schema.js";
@@ -397,7 +398,10 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
           const mem = await kv.get<Memory>(KV.memories, memoryId);
           if (mem) {
-            await deleteIndexed(kv, KV.memories, memoryId);
+            await deleteWithFacets(kv, async (removed) => {
+              await deleteIndexed(kv, KV.memories, memoryId);
+              removed.push(memoryId);
+            });
             if (mem.imageRef) {
               await decrementImageRef(kv, sdk, mem.imageRef);
             }
@@ -412,23 +416,26 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         data.observationIds &&
         data.observationIds.length > 0
       ) {
-        for (const obsId of data.observationIds) {
-          const obs = await kv.get<{ imageData?: string; imageRef?: string }>(
-            KV.observations(data.sessionId),
-            obsId,
-          );
-          // An id that is not there is not an error, but it is also not a
-          // removal: counting it would tell the caller their record is
-          // gone when nothing of theirs was ever found.
-          if (!obs) continue;
-          await deleteIndexed(kv, KV.observations(data.sessionId), obsId);
-          if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
-          if (obs.imageRef && obs.imageRef !== obs.imageData) {
-            await decrementImageRef(kv, sdk, obs.imageRef);
+        await deleteWithFacets(kv, async (removed) => {
+          for (const obsId of data.observationIds!) {
+            const obs = await kv.get<{ imageData?: string; imageRef?: string }>(
+              KV.observations(data.sessionId!),
+              obsId,
+            );
+            // An id that is not there is not an error, but it is also not a
+            // removal: counting it would tell the caller their record is
+            // gone when nothing of theirs was ever found.
+            if (!obs) continue;
+            await deleteIndexed(kv, KV.observations(data.sessionId!), obsId);
+            removed.push(obsId);
+            if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
+            if (obs.imageRef && obs.imageRef !== obs.imageData) {
+              await decrementImageRef(kv, sdk, obs.imageRef);
+            }
+            deletedObservationIds.push(obsId);
+            deleted++;
           }
-          deletedObservationIds.push(obsId);
-          deleted++;
-        }
+        });
       }
 
       if (
@@ -439,15 +446,19 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         const observations = await kv.list<{ id: string; imageData?: string; imageRef?: string }>(
           KV.observations(data.sessionId),
         );
-        for (const obs of observations) {
-          await deleteIndexed(kv, KV.observations(data.sessionId), obs.id);
-          if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
-          if (obs.imageRef && obs.imageRef !== obs.imageData) {
-            await decrementImageRef(kv, sdk, obs.imageRef);
+        await deleteWithFacets(kv, async (removed) => {
+          for (const obs of observations) {
+            const existed = await kv.get(KV.observations(data.sessionId!), obs.id);
+            await deleteIndexed(kv, KV.observations(data.sessionId!), obs.id);
+            if (existed) removed.push(obs.id);
+            if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
+            if (obs.imageRef && obs.imageRef !== obs.imageData) {
+              await decrementImageRef(kv, sdk, obs.imageRef);
+            }
+            deletedObservationIds.push(obs.id);
+            deleted++;
           }
-          deletedObservationIds.push(obs.id);
-          deleted++;
-        }
+        });
         // Counted only where a record was actually there, the same rule
         // the memory and observation branches follow.
         const [session, summary] = await Promise.all([

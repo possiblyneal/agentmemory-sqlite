@@ -1,3 +1,4 @@
+import { withFacetLock } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
 import type {
   Session,
@@ -491,10 +492,12 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
           await kv.list<Signal>(KV.signals).catch(() => []),
           (s) => kv.delete(KV.signals, s.id),
         );
-        await runChunked(
-          await kv.list<Facet>(KV.facets).catch(() => []),
-          (f) => kv.delete(KV.facets, f.id),
-        );
+        await withFacetLock(async () => {
+          await runChunked(
+            await kv.list<Facet>(KV.facets).catch(() => []),
+            (f) => kv.delete(KV.facets, f.id),
+          );
+        });
         await runChunked(
           await kv.list<Lesson>(KV.lessons).catch(() => []),
           (l) => kv.delete(KV.lessons, l.id),
@@ -687,12 +690,14 @@ export function registerExportImportFunction(sdk: ISdk, kv: StateKV): void {
         });
       }
       if (importData.facets) {
-        await runChunked(importData.facets, async (facet) => {
-          if (strategy === "skip") {
-            const existing = await kv.get(KV.facets, facet.id).catch(() => null);
-            if (existing) { stats.skipped++; return; }
-          }
-          await kv.set(KV.facets, facet.id, facet);
+        await withFacetLock(async () => {
+          await runChunked(importData.facets!, async (facet) => {
+            if (strategy === "skip") {
+              const existing = await kv.get(KV.facets, facet.id).catch(() => null);
+              if (existing) { stats.skipped++; return; }
+            }
+            await kv.set(KV.facets, facet.id, facet);
+          });
         });
       }
       if (importData.lessons) {

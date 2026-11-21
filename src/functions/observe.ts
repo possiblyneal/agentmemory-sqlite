@@ -1,3 +1,4 @@
+import { deleteWithFacets } from "./facets.js";
 import { TriggerAction, type ISdk } from "../engine/types.js";
 import type { CompressedObservation, RawObservation, HookPayload, Origin, Session } from "../types.js";
 
@@ -108,18 +109,25 @@ async function evictOverCap(
     )
     .slice(0, excess);
   const evictedIds: string[] = [];
-  for (const obs of victims) {
-    try {
-      await deleteIndexed(kv, scope, obs.id);
-      evictedIds.push(obs.id);
-    } catch (err) {
-      logger.warn("Session cap eviction failed", {
-        sessionId,
-        obsId: obs.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      continue;
+  await deleteWithFacets(kv, async (removed) => {
+    for (const obs of victims) {
+      try {
+        const existed = await kv.get(scope, obs.id);
+        await deleteIndexed(kv, scope, obs.id);
+        if (existed) removed.push(obs.id);
+        evictedIds.push(obs.id);
+      } catch (err) {
+        logger.warn("Session cap eviction failed", {
+          sessionId,
+          obsId: obs.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
+  });
+  const evictedSet = new Set(evictedIds);
+  for (const obs of victims) {
+    if (!evictedSet.has(obs.id)) continue;
     // The row is gone, so it counts as evicted even if releasing its image
     // fails; a failed release is retried with the others.
     for (const filePath of new Set([obs.imageData, obs.imageRef].filter((p): p is string => !!p))) {

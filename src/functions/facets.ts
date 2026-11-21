@@ -2,7 +2,102 @@ import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, generateId } from "../state/schema.js";
 import type { Facet } from "../types.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
+import { logger } from "../logger.js";
 import { scrubFields } from "./privacy.js";
+
+const FACET_LOCK = "mem:facet:mutate";
+
+export function withFacetLock<T>(fn: () => Promise<T>): Promise<T> {
+  return withKeyedLock(FACET_LOCK, fn);
+}
+
+type FacetIndex = { generation: number; targets: Map<string, Set<string>> };
+const facetIndexes = new WeakMap<StateKV, FacetIndex>();
+
+async function facetIndex(kv: StateKV): Promise<FacetIndex> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const generation = await kv.writeGeneration(KV.facets);
+    const cached = facetIndexes.get(kv);
+    if (cached?.generation === generation) return cached;
+    const targets = new Map<string, Set<string>>();
+    let after: string | undefined;
+    for (;;) {
+      const page = await kv.listPage<Facet>(KV.facets, after, 256);
+      for (const row of page) {
+        let keys = targets.get(row.value.targetId);
+        if (!keys) targets.set(row.value.targetId, keys = new Set());
+        keys.add(row.key);
+      }
+      if (page.length < 256) break;
+      after = page[page.length - 1].key;
+    }
+    if (generation === await kv.writeGeneration(KV.facets)) {
+      const index = { generation, targets };
+      facetIndexes.set(kv, index);
+      return index;
+    }
+  }
+  throw new Error("Facet scope changed during index rebuild");
+}
+
+async function cleanupFacets(kv: StateKV, deleted: string[]): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const index = await facetIndex(kv);
+    let stale = false;
+    for (const target of new Set(deleted)) {
+      const keys = index.targets.get(target);
+      if (!keys) continue;
+      for (const key of keys) {
+        const facet = await kv.get<Facet>(KV.facets, key);
+        if (await kv.writeGeneration(KV.facets) !== index.generation) {
+          stale = true;
+          break;
+        }
+        if (facet?.targetId !== target) {
+          keys.delete(key);
+          continue;
+        }
+        try {
+          await kv.delete(KV.facets, key);
+          keys.delete(key);
+          const generation = await kv.writeGeneration(KV.facets);
+          if (generation !== index.generation + 1) {
+            stale = true;
+            break;
+          }
+          index.generation = generation;
+        } catch (error) {
+          facetIndexes.delete(kv);
+          logger.warn("Facet cleanup failed", { facetId: key, error: String(error) });
+        }
+      }
+      if (stale) break;
+      if (keys.size === 0) index.targets.delete(target);
+    }
+    if (!stale) return;
+    facetIndexes.delete(kv);
+  }
+  throw new Error("Facet scope changed during cleanup");
+}
+
+export async function deleteWithFacets<T>(kv: StateKV, remove: (deleted: string[]) => Promise<T>): Promise<T> {
+  return withFacetLock(async () => {
+    const deleted: string[] = [];
+    try {
+      return await remove(deleted);
+    } finally {
+      if (deleted.length) {
+        try {
+          await cleanupFacets(kv, deleted);
+        } catch (error) {
+          facetIndexes.delete(kv);
+          logger.warn("Facet cleanup failed", { error: String(error) });
+        }
+      }
+    }
+  });
+}
 
 export function registerFacetsFunction(sdk: ISdk, kv: StateKV): void {
   sdk.registerFunction("mem::facet-tag", 
@@ -44,28 +139,30 @@ export function registerFacetsFunction(sdk: ISdk, kv: StateKV): void {
       const dimension = data.dimension.trim();
       const value = data.value.trim();
 
-      const existing = await kv.list<Facet>(KV.facets);
-      const duplicate = existing.find(
-        (f) =>
-          f.targetId === data.targetId &&
-          f.dimension === dimension &&
-          f.value === value,
-      );
-      if (duplicate) {
-        return { success: true, facet: duplicate, skipped: true };
-      }
+      return withFacetLock(async () => {
+        const existing = await kv.list<Facet>(KV.facets);
+        const duplicate = existing.find(
+          (f) =>
+            f.targetId === data.targetId &&
+            f.dimension === dimension &&
+            f.value === value,
+        );
+        if (duplicate) {
+          return { success: true, facet: duplicate, skipped: true };
+        }
 
-      const facet: Facet = {
-        id: generateId("fct"),
-        targetId: data.targetId,
-        targetType: data.targetType as Facet["targetType"],
-        dimension,
-        value,
-        createdAt: new Date().toISOString(),
-      };
+        const facet: Facet = {
+          id: generateId("fct"),
+          targetId: data.targetId,
+          targetType: data.targetType as Facet["targetType"],
+          dimension,
+          value,
+          createdAt: new Date().toISOString(),
+        };
 
-      await kv.set(KV.facets, facet.id, facet);
-      return { success: true, facet };
+        await kv.set(KV.facets, facet.id, facet);
+        return { success: true, facet };
+      });
     },
   );
 
@@ -82,22 +179,24 @@ export function registerFacetsFunction(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "dimension is required" };
       }
 
-      const all = await kv.list<Facet>(KV.facets);
-      const matches = all.filter((f) => {
-        if (f.targetId !== data.targetId || f.dimension !== data.dimension) {
-          return false;
+      return withFacetLock(async () => {
+        const all = await kv.list<Facet>(KV.facets);
+        const matches = all.filter((f) => {
+          if (f.targetId !== data.targetId || f.dimension !== data.dimension) {
+            return false;
+          }
+          if (data.value !== undefined) {
+            return f.value === data.value;
+          }
+          return true;
+        });
+
+        for (const f of matches) {
+          await kv.delete(KV.facets, f.id);
         }
-        if (data.value !== undefined) {
-          return f.value === data.value;
-        }
-        return true;
+
+        return { success: true, removed: matches.length };
       });
-
-      for (const f of matches) {
-        await kv.delete(KV.facets, f.id);
-      }
-
-      return { success: true, removed: matches.length };
     },
   );
 

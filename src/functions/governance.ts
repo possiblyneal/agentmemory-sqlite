@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { recordAudit, safeAudit, queryAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { deleteWithFacets } from "./facets.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { evictGraphForSources } from "./graph-eviction.js";
@@ -31,7 +32,10 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
           if (!mem) {
             notFound.push(id);
           } else {
-            await deleteIndexed(kv, KV.memories, id);
+            await deleteWithFacets(kv, async (deleted) => {
+              await deleteIndexed(kv, KV.memories, id);
+              deleted.push(id);
+            });
             // The same teardown mem::forget does, so the two single-item
             // delete paths cannot diverge in what they release.
             if (mem.imageRef) {
@@ -129,11 +133,13 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
       const failures: Array<{ id: string; error: string }> = [];
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
         const batch = candidates.slice(i, i + BATCH_SIZE);
-        const results = await Promise.allSettled(
-          batch.map((mem) =>
-            withKeyedLock(MEMORY_WRITE_LOCK, () =>
-              deleteIndexed(kv, KV.memories, mem.id),
-            ),
+        const results = await withKeyedLock(MEMORY_WRITE_LOCK, () =>
+          deleteWithFacets(kv, async (deleted) =>
+            Promise.allSettled(batch.map(async (mem) => {
+              const existed = await kv.get(KV.memories, mem.id);
+              await deleteIndexed(kv, KV.memories, mem.id);
+              if (existed) deleted.push(mem.id);
+            })),
           ),
         );
         results.forEach((result, j) => {

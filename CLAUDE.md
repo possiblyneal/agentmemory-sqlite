@@ -257,6 +257,16 @@ before any store mutation. Rows without string keys are dropped and counted in `
 legacy keyless Session stubs do not prevent restoring the rest. Access logs and legacy Memory
 session IDs retain their normal normalization. This preflight does not make replacement transactional.
 
+### Facet cleanup
+Ordinary hard deletes of Observations, Memories and Lessons use `deleteWithFacets()`
+(`src/functions/facets.ts`), which serializes deletion with Facet tag and untag mutations and
+best-effort removes Facets for the IDs actually deleted. It caches a per-`StateKV` target-to-key
+lookup, rebuilding in pages when `KV.facets`'s write generation changes; successful cleanup
+updates the cache without a rescan. A later tag on a missing ID remains allowed. Import and
+snapshot restore hold the same Facet lock around their Facet mutations, while retaining their
+replacement semantics; this is not an orphan sweep. Memory writers take `MEMORY_WRITE_LOCK`
+before the Facet lock.
+
 ### Relation backups
 Full exports and snapshots carry Memory relations with their original storage keys, including legacy
 `rel_` keys. Replace import and snapshot restore replace that scope when the backup contains it;
@@ -265,7 +275,8 @@ validate relation entries before replacing any scope, preserve present endpoint 
 (including explicit nulls and non-strings accepted by mesh), retain string relation types, map
 non-string types to `related`, and omit nonnumeric or nonfinite confidence from backup data without
 changing the source row. `StateKV.listPage` returns complete SQLite keys, including embedded NULs,
-so those keys remain valid paging cursors and can be restored exactly.
+so those keys remain valid paging cursors and can be restored exactly. Its first page includes the
+empty key; a supplied cursor, including `""`, is exclusive.
 
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap

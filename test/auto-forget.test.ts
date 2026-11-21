@@ -13,17 +13,21 @@ import type { Memory, CompressedObservation, Session } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
+  let facetGeneration = 0;
   return {
+    writeGeneration: async () => facetGeneration,
     get: async <T>(scope: string, key: string): Promise<T | null> => {
       return (store.get(scope)?.get(key) as T) ?? null;
     },
     set: async <T>(scope: string, key: string, data: T): Promise<T> => {
       if (!store.has(scope)) store.set(scope, new Map());
       store.get(scope)!.set(key, data);
+      if (scope === "mem:facets") facetGeneration++;
       return data;
     },
     delete: async (scope: string, key: string): Promise<void> => {
       store.get(scope)?.delete(key);
+      if (scope === "mem:facets") facetGeneration++;
     },
     update: async (
       scope: string,
@@ -37,6 +41,7 @@ function mockKV() {
       }
       return row;
     },
+    listPage: async <T>(scope: string, after: string | undefined, limit: number) => [...(store.get(scope)?.entries() ?? [])].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !after || key > after).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       const entries = store.get(scope);
       return entries ? (Array.from(entries.values()) as T[]) : [];
@@ -88,6 +93,27 @@ describe("Auto-Forget Function", () => {
     sdk = mockSdk();
     kv = mockKV();
     registerAutoForgetFunction(sdk as never, kv as never);
+  });
+
+  it("cleans Facets of expired Memories without changing the indexed deletion", async () => {
+    const memory = makeMemory({ id: "mem_expired", forgetAfter: "2020-01-01T00:00:00Z" });
+    await kv.set("mem:memories", memory.id, memory);
+    await kv.set("mem:facets", "facet", { id: "facet", targetId: memory.id });
+    getSearchIndex().add(memoryToObservation(memory));
+    await sdk.trigger("mem::auto-forget", {});
+    expect(await kv.get("mem:facets", "facet")).toBeNull();
+    expect(await kv.get("mem:memories", memory.id)).toBeNull();
+    expect(getSearchIndex().has(memory.id)).toBe(false);
+  });
+
+  it("keeps deletion and index cleanup when Facet lookup fails", async () => {
+    const memory = makeMemory({ id: "mem_failed_cleanup", forgetAfter: "2020-01-01T00:00:00Z" });
+    await kv.set("mem:memories", memory.id, memory);
+    getSearchIndex().add(memoryToObservation(memory));
+    kv.listPage = async () => { throw new Error("Facet lookup failed"); };
+    await sdk.trigger("mem::auto-forget", {});
+    expect(await kv.get("mem:memories", memory.id)).toBeNull();
+    expect(getSearchIndex().has(memory.id)).toBe(false);
   });
 
   it("detects and deletes TTL-expired memories", async () => {
