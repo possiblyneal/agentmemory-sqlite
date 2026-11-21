@@ -452,6 +452,7 @@ export interface ExportData {
   proceduralMemories?: ProceduralMemory[];
   signals?: Signal[];
   facets?: Facet[];
+  relations?: Array<{ key: string; value: MemoryRelation }>;
   lessons?: Lesson[];
   insights?: Insight[];
   accessLogs?: AccessLogExport[];

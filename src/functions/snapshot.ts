@@ -20,6 +20,9 @@ import { graphWritesDisabled } from "./graph.js";
 import {
   DURABLE_STORES,
   readDurableStores,
+  relationEntries,
+  normalizeRelation,
+  validRelationEntries,
   runChunked,
   type DurableStore,
   type DurableStoreField,
@@ -105,7 +108,9 @@ async function replaceStore(
   const rows =
     store.field === "lessons" ? captured.filter((r) => r.deleted !== true) : captured;
   const keep = new Set(rows.map(store.keyOf));
-  const existing = await kv.list<SnapshotRow>(store.scope);
+  const existing = store.field === "relations"
+    ? await relationEntries(kv)
+    : await kv.list<SnapshotRow>(store.scope);
   const stale = existing.map(store.keyOf).filter((key) => !keep.has(key));
 
   await runChunked(stale, (key) =>
@@ -124,7 +129,7 @@ async function replaceStore(
       await kv.set(store.scope, edge.id, edge);
       await indexGraphEdge(kv, edge);
     } else {
-      await kv.set(store.scope, store.keyOf(row), row);
+      await kv.set(store.scope, store.keyOf(row), store.field === "relations" ? normalizeRelation(row.value) : row);
     }
   });
 
@@ -323,6 +328,9 @@ export function registerSnapshotFunction(
         ]);
         const content = readFileSync(join(snapshotDir, "state.json"), "utf-8");
         const state = JSON.parse(content) as SnapshotState;
+        if (!validRelationEntries(state.relations)) {
+          throw new Error("relations must contain keyed relation rows");
+        }
 
         const counts: Record<string, StoreCounts> = {};
         const notCaptured: string[] = [];

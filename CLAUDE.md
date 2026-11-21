@@ -267,6 +267,16 @@ snapshot restore hold the same Facet lock around their Facet mutations, while re
 replacement semantics; this is not an orphan sweep. Memory writers take `MEMORY_WRITE_LOCK`
 before the Facet lock.
 
+### Relation backups
+Full exports and snapshots carry Memory relations with their original storage keys, including legacy
+`rel_` keys. Replace import and snapshot restore replace that scope when the backup contains it;
+older backups without a `relations` section leave the scope untouched. Import and snapshot restore
+validate relation entries before replacing any scope, preserve present endpoint values as stored
+(including explicit nulls and non-strings accepted by mesh), retain string relation types, map
+non-string types to `related`, and omit nonnumeric or nonfinite confidence from backup data without
+changing the source row. `StateKV.listPage` returns complete SQLite keys, including embedded NULs,
+so those keys remain valid paging cursors and can be restored exactly.
+
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
 eviction, `mem::auto-forget`, `mem::forget`, `mem::retention-evict`, `mem::governance-delete`,
