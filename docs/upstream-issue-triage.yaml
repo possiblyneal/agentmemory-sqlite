@@ -344,7 +344,7 @@ issues:
     kind: bug
     note: "Server becomes unresponsive under three concurrent Claude Code sessions."
     disposition: candidate
-    status: "partly-present-here — no hang (`/livez` stays under 500 ms at realistic load), but a burst of Sessions opening together queues their first prompt-submit Injections past the 1,500 ms hook wait it had then; the wait is now 2,500 ms (#433) and #400 is closed; cause and numbers in docs/benchmarks/2026-11-13-concurrent-sessions-load.md (#394)."
+    status: "partly-present-here — burst tests found delayed first prompt-submit Injections, not a daemon hang. PR #431 raised prompt submit to 2,500 ms; PR #433 matched that limit at session start. See docs/benchmarks/2026-11-13-concurrent-sessions-load.md."
     url: https://github.com/rohitg00/agentmemory/issues/499
   - number: 505
     title: "Viewer Rebuild Graph button calls missing /agentmemory/graph/build endpoint"
@@ -640,7 +640,7 @@ issues:
     kind: feature
     note: "Signal local-fallback writes in the tool response and add a strict no-fallback mode."
     disposition: candidate
-    status: "partly-present-here — strictDaemonUrl() fails loudly only when AGENTMEMORY_URL is set explicitly (src/mcp/standalone.ts); the default fallback to local is silent."
+    status: "partly-present-here — PR #487 makes daemon-down memory_save report localOnly: true with a warning. An explicit AGENTMEMORY_URL is already strict; there is no separate no-fallback option."
     url: https://github.com/rohitg00/agentmemory/issues/695
   - number: 700
     title: "iii-engine state_store.db pollutes user's data/ directory — should use hidden path"
@@ -712,9 +712,8 @@ issues:
     difficulty: med
     kind: feature
     note: "Resolve project identity from the canonical repo URL rather than the directory basename."
-    disposition: already-fixed
-    fixed_by: "hooks/_project.ts disambiguates same-named repos with a -<6 hex> suffix (f0ab3dd6, 71d873e5); the bare name is still the main checkout's basename."
-    status: "fixed-here — hooks/_project.ts disambiguates same-named repos with a -<6 hex> suffix (f0ab3dd6, 71d873e5); the bare name is still the main checkout's basename."
+    disposition: candidate
+    status: "partly-present-here — src/hooks/_project.ts uses a remote-derived suffix for basename collisions. Differently named clones of the same remote can still resolve to different projects."
     url: https://github.com/rohitg00/agentmemory/issues/716
     fix_prs: [717]
   - number: 720
@@ -911,9 +910,8 @@ issues:
     difficulty: high
     kind: feature
     note: "LongMemEval-S retrieval benchmark harness with a CI gate."
-    disposition: already-fixed
-    fixed_by: "eval/runner/longmemeval.ts and the eval:gate CI step cover and exceed the request."
-    status: "fixed-here — eval/runner/longmemeval.ts and the eval:gate CI step cover and exceed the request."
+    disposition: candidate
+    status: "partly-present-here — eval/runner/longmemeval.ts supplies a standalone runner; eval:gate runs coding-life, not LongMemEval."
     url: https://github.com/rohitg00/agentmemory/issues/769
   - number: 770
     title: "feat(smart-search): index semantic facts, procedural skills, crystals, insights, facets"
@@ -3255,7 +3253,7 @@ issues:
     kind: feature
     note: "Recover observations captured while the local service is unavailable; a hook can exit 0 without the observation reaching storage."
     disposition: candidate
-    status: "present-here — by design: no hook spool; ObserveRetryQueue is in memory and full-disk only, matching 'never on the critical path'."
+    status: "present-here — there is no durable hook spool. ObserveRetryQueue retries full-disk and SQLite write-lock failures in memory (PR #434)."
     url: https://github.com/rohitg00/agentmemory/issues/1436
     fix_prs: [1460]
     mentioned_by_prs: [1463]
@@ -3266,7 +3264,7 @@ issues:
     kind: feature
     note: "Define persistent acceptance and retry semantics for observation ingestion across a restart."
     disposition: candidate
-    status: "present-here — by design: no hook spool; ObserveRetryQueue is in memory and full-disk only, matching 'never on the critical path'."
+    status: "present-here — there is no durable hook spool. ObserveRetryQueue retries full-disk and SQLite write-lock failures in memory (PR #434)."
     url: https://github.com/rohitg00/agentmemory/issues/1437
     fix_prs: [1460]
     mentioned_by_prs: [1463]
@@ -3649,8 +3647,9 @@ issues:
     difficulty: low
     kind: bug
     note: "searchByEntities scores depend on start-node order because visitedObs is first-come-first-served and never upgraded."
-    disposition: candidate
-    status: "present-here — graph-retrieval.ts:184-221 and 285-293 first-come visitedObs; graph extraction is off by default and bought no Recall (#420)"
+    disposition: already-fixed
+    fixed_by: "6a182c41"
+    status: "fixed-here — graph-retrieval.ts retains each Observation’s best score across start nodes."
     url: https://github.com/rohitg00/agentmemory/issues/1558
     fix_prs: [1560]
   - number: 1564
@@ -3688,9 +3687,8 @@ issues:
     difficulty: low
     kind: bug
     note: "memory_sessions returns nextCursor but the stdio proxy drops it."
-    disposition: already-fixed
-    fixed_by: "tools-registry.ts:196-202 declares limit/offset; server.ts:368-380 and standalone.ts:293-295 forward them"
-    status: "fixed-here — tools-registry.ts:196-202 declares limit/offset; server.ts:368-380 and standalone.ts:293-295 forward them"
+    disposition: wont-fix
+    wont_fix_reason: "This fork’s memory_sessions uses limit/offset pagination on both MCP paths and has no nextCursor to forward."
     url: https://github.com/rohitg00/agentmemory/issues/1567
   - number: 1571
     title: "connect --with-hooks fails on a hook handler without a command"
@@ -3708,8 +3706,9 @@ issues:
     difficulty: low
     kind: bug
     note: "doctor's no-llm-provider-key check disagrees with the daemon's provider detection."
-    disposition: candidate
-    status: "present-here — doctor-diagnostics.ts:73-100 own key list ignores OPENAI_API_KEY_FOR_LLM=false and AGENTMEMORY_ALLOW_AGENT_SDK; daemon config.ts:96,147"
+    disposition: already-fixed
+    fixed_by: "PR #488"
+    status: "fixed-here — doctor honors OPENAI_API_KEY_FOR_LLM=false and AGENTMEMORY_ALLOW_AGENT_SDK."
     url: https://github.com/rohitg00/agentmemory/issues/1572
     fix_prs: [1575]
   - number: 1573
@@ -3791,8 +3790,9 @@ issues:
     difficulty: low
     kind: bug
     note: "The daemon picks an LLM provider for a placeholder key that doctor reports as missing."
-    disposition: candidate
-    status: "present-here — config.ts:28-30 hasRealValue accepts any non-empty string, so placeholder keys select a provider (config.ts:96,108...) while doctor treats them as absent (doctor-diagnostics.ts:79-100)"
+    disposition: already-fixed
+    fixed_by: "PR #488"
+    status: "fixed-here — provider detection and doctor share isPlaceholderKey; placeholders do not select a provider."
     url: https://github.com/rohitg00/agentmemory/issues/1586
     fix_prs: [1588]
   - number: 1589
@@ -3895,9 +3895,8 @@ issues:
     difficulty: low
     kind: bug
     note: "targetLayer is accepted by /agentmemory/smart-search but has no effect."
-    disposition: already-fixed
-    fixed_by: "server.ts:154-176 targetLayer honoured"
-    status: "fixed-here — server.ts:154-176 targetLayer honoured"
+    disposition: candidate
+    status: "present-here — REST /agentmemory/smart-search does not forward targetLayer. The separate memory_recall handler routes layer-aware requests through /agentmemory/search."
     url: https://github.com/rohitg00/agentmemory/issues/1608
   - number: 1613
     title: "MCP tool catalog advertises memory_slot_* tools even when AGENTMEMORY_SLOTS is disabled (500 'Function not found' on every slot call)"
@@ -3905,9 +3904,8 @@ issues:
     difficulty: low
     kind: bug
     note: "The MCP catalog advertises memory_slot_* tools even when AGENTMEMORY_SLOTS is disabled, so every slot call returns 500."
-    disposition: already-fixed
-    fixed_by: "server.ts:114 slot tools refused when slots disabled"
-    status: "fixed-here — server.ts:114 slot tools refused when slots disabled"
+    disposition: candidate
+    status: "partly-present-here — disabled slot calls return 503, but the default catalog still advertises the tools."
     url: https://github.com/rohitg00/agentmemory/issues/1613
     fix_prs: [1659]
   - number: 1614
@@ -4224,8 +4222,9 @@ issues:
     difficulty: low
     kind: bug
     note: "Memory delete paths skip the mem:remember lock, so deleted memories can come back."
-    disposition: candidate
-    status: "present-here — remember.ts:133 serialises on mem:remember but auto-forget.ts:50-53, retention.ts:349-354 and governance delete do not take it"
+    disposition: already-fixed
+    fixed_by: "PR #497"
+    status: "fixed-here — governance, eviction, retention and auto-forget share MEMORY_WRITE_LOCK with Memory saves."
     url: https://github.com/rohitg00/agentmemory/issues/1728
     fix_prs: [1746]
   - number: 1729
@@ -4234,8 +4233,9 @@ issues:
     difficulty: med
     kind: bug
     note: "mem::relate locks the id pair instead of the memories, losing relatedIds and re-marking superseded memories latest."
-    disposition: candidate
-    status: "present-here — relations.ts:49-53 locks the id pair not each Memory, so concurrent relate calls sharing one Memory race"
+    disposition: already-fixed
+    fixed_by: "PR #497"
+    status: "fixed-here — mem::relate holds MEMORY_WRITE_LOCK across the Memory writes."
     url: https://github.com/rohitg00/agentmemory/issues/1729
     mentioned_by_prs: [1746]
   - number: 1730
@@ -4266,8 +4266,9 @@ issues:
     difficulty: low
     kind: bug
     note: "The provider circuit breaker lets every caller through in the half-open state."
-    disposition: candidate
-    status: "present-here — circuit-breaker.ts:34-45 isAllowed returns true for every caller while half-open"
+    disposition: already-fixed
+    fixed_by: "PR #497"
+    status: "fixed-here — provider recovery reserves one in-flight half-open probe per operation."
     url: https://github.com/rohitg00/agentmemory/issues/1732
     fix_prs: [1749]
   - number: 1733
@@ -4287,7 +4288,7 @@ issues:
     kind: bug
     note: "Observe and compress reload the whole session up to three times per observation, twice under the session lock."
     disposition: candidate
-    status: "partly-present-here — observe.ts:571 evictOverCap lists the whole Session on every Observation under the obs lock (:92); compress.ts does not reload"
+    status: "partly-present-here — PR #491 counts Session rows before listing; it lists the whole Session only to choose eviction victims above the cap."
     url: https://github.com/rohitg00/agentmemory/issues/1734
     mentioned_by_prs: [1773]
   - number: 1735
@@ -4307,7 +4308,7 @@ issues:
     kind: bug
     note: "memory_save over MCP drops array concepts and files, ttlDays and sourceObservationIds."
     disposition: candidate
-    status: "present-here — server.ts:222-231 only string concepts/files; :251-259 no ttlDays/sourceObservationIds; schema advertises strings (tools-registry.ts:104-110) so only array callers lose data"
+    status: "partly-present-here — PR #482 normalizes array or CSV concepts and files on both MCP paths; ttlDays and sourceObservationIds are not forwarded."
     url: https://github.com/rohitg00/agentmemory/issues/1736
     fix_prs: [1745]
   - number: 1737
@@ -4467,8 +4468,9 @@ issues:
     difficulty: low
     kind: bug
     note: "The standalone MCP shim logs a write EPIPE on client disconnect as an uncaught-exception crash."
-    disposition: candidate
-    status: "present-here — transport.ts:233-239 process.stdout.write with no 'error' listener; EPIPE on client disconnect is an uncaught exception"
+    disposition: already-fixed
+    fixed_by: "PR #482"
+    status: "fixed-here — the stdio output error listener exits cleanly on EPIPE and ERR_STREAM_DESTROYED."
     url: https://github.com/rohitg00/agentmemory/issues/1795
     fix_prs: [1797]
   - number: 1796

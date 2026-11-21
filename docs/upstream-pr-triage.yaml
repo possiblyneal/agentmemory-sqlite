@@ -2834,7 +2834,7 @@ prs:
       - src/hooks/post-tool-use.ts
     note: "Hooks stop exiting before the observe request is sent."
     disposition: candidate
-    status: "partly-present-here — 7 hooks still exit on an unref'd 500 ms timer while their abort timeout is 2000-3000 ms; that is the fire-and-forget contract (CLAUDE.md Hook Scripts), not a loss."
+    status: "partly-present-here — the 500 ms exit timer is deliberate; the corresponding fetch timeouts include 800 ms in subagent-start and up to 3,000 ms. The timer does not prove delivery."
     url: https://github.com/rohitg00/agentmemory/pull/1456
   - number: 1457
     title: "fix(cli): faster state saves, bounded glibc arenas and a higher fd limit for the engine"
@@ -3171,8 +3171,8 @@ prs:
       - src/replay/jsonl-parser.ts
       - test/replay.test.ts
     note: "Ignore timestampless entries for session times and make import-jsonl re-import idempotent."
-    disposition: candidate
-    status: "partly-present-here — re-import idempotency is fixed (src/functions/replay.ts:416-424 imports fresh sessions only, with fingerprint ids), but src/replay/jsonl-parser.ts:138 `entry.timestamp || new Date()` feeds firstTs/lastTs, so timestampless Claude Code metadata lines make startedAt/endedAt the import time."
+    disposition: already-fixed
+    status: "fixed-here — PR #483 derives Session time bounds only from valid timestamps; replay.ts already imports only fresh Sessions on re-import."
     url: https://github.com/rohitg00/agentmemory/pull/1526
   - number: 1527
     title: "feat(sessions): filter by startedAt and endedAt"
@@ -3271,7 +3271,7 @@ prs:
       - test/consolidate-project-scope.test.ts
     note: "Preserve consolidation provenance and version heads."
     disposition: candidate
-    status: "partly-present-here — src/functions/consolidate.ts:189-215 and relations.ts:157 demote the predecessor (isLatest=false) before the successor is written, so a failed write leaves no head; consolidate.ts takes no lock, so concurrent runs can publish duplicates."
+    status: "partly-present-here — PR #486 serializes mem::consolidate and writes its successor before demotion. The separate mem::evolve path still demotes first."
     url: https://github.com/rohitg00/agentmemory/pull/1545
   - number: 1551
     title: "fix: recover stale session summaries after late capture and restart"
@@ -3291,9 +3291,8 @@ prs:
       - src/state/schema.ts
       - src/triggers/api.ts
     note: "Recover stale session summaries after late capture and restart."
-    disposition: already-fixed
-    status: "fixed-here — compress-batch.ts, recompress-orphans.ts and the awaitingCompression hold-back cover failed-compression retention; the late-capture re-summarize path was not traced in depth."
-    fixed_by: "awaitingCompression hold-back (src/functions/compress-synthetic.ts), recompress sweep (src/functions/recompress-orphans.ts)"
+    disposition: candidate
+    status: "partly-present-here — the awaitingCompression hold-back and recompress sweep cover failed-compression retention; late-capture re-summarization remains unverified."
     url: https://github.com/rohitg00/agentmemory/pull/1551
   - number: 1554
     title: "feat: add Cheaper Inference provider"
@@ -3635,8 +3634,8 @@ prs:
       - src/types.ts
       - test/mcp-standalone.test.ts
     note: "Preserve the original memory type in search responses."
-    disposition: candidate
-    status: "present-here — src/state/memory-utils.ts:78,100 memoryToObservation always returns `type: \"decision\"`, so a saved Memory's type (a rule, for one) is lost in search results."
+    disposition: already-fixed
+    status: "fixed-here — PR #486 preserves the original type as memoryType in search responses; memory_recall rendering is unchanged."
     url: https://github.com/rohitg00/agentmemory/pull/1646
   - number: 1647
     title: "fix: exclude unscoped memories from project-filtered recall"
@@ -3787,8 +3786,8 @@ prs:
       - src/cli/doctor-diagnostics.ts
       - test/cli-doctor-fixes.test.ts
     note: "Do not prompt Fix/Skip in a non-interactive doctor run."
-    disposition: candidate
-    status: "present-here — src/cli.ts runDoctor shows the Fix/Skip prompt for every fixable failure unless --all is passed and checks neither CI nor whether stdin and stdout are terminals."
+    disposition: already-fixed
+    status: "fixed-here — PR #488 requires both terminals and no CI for doctor prompts."
     url: https://github.com/rohitg00/agentmemory/pull/1671
   - number: 1672
     title: "fix(cli): keep iii SDK debug lines out of status and stop output"
@@ -3995,8 +3994,8 @@ prs:
       - plugin/scripts/post-tool-failure.mjs
       - plugin/scripts/post-tool-use.mjs
     note: "Redact compound secret key names before truncating hook output."
-    disposition: already-fixed
-    status: "fixed-here — PR #493 redacts secret-valued JSON fields without discarding the surrounding capture; test/capture-redaction.test.ts."
+    disposition: candidate
+    status: "partly-present-here — PR #493 redacts structured captures at the daemon; post-tool-use still truncates before sending output."
     url: https://github.com/rohitg00/agentmemory/pull/1701
   - number: 1704
     title: "fix(index): unindex superseded and wiped memories"
@@ -4185,7 +4184,7 @@ prs:
       - test/agent-sdk-provider.test.ts
     note: "Run agent-sdk summary child sessions in SDK isolation mode."
     disposition: already-fixed
-    status: "fixed-here — PR #485 isolates SDK child sessions from host settings and tools and disables persistence."
+    status: "fixed-here — PR #485 disables user, project and local settings and child persistence. Managed plugins can still run; managed MCP configuration can prevent strict-mode startup."
     url: https://github.com/rohitg00/agentmemory/pull/1752
   - number: 1753
     title: "feat(runtime): move to iii 0.26 observers"
@@ -4446,8 +4445,8 @@ prs:
       - src/providers/fallback-chain.ts
       - src/providers/resilient.ts
     note: "Preserve optional vision through provider wrappers."
-    disposition: candidate
-    status: "partly-present-here — ResilientProvider forwards describeImage (src/providers/resilient.ts:45) but src/providers/fallback-chain.ts has none, so a fallback chain drops vision."
+    disposition: already-fixed
+    status: "fixed-here — PR #488 exposes describeImage on a fallback chain when a provider supports it and tries capable providers in order."
     url: https://github.com/rohitg00/agentmemory/pull/1798
   - number: 1800
     title: "docs(readme): add architecture, pipeline and stack diagrams kept current by docs-sync"
