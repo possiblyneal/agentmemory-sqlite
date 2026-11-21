@@ -207,11 +207,11 @@ export function registerConsolidateFunction(
             existingMatch.isLatest = false;
             await kv.set(KV.memories, existingMatch.id, existingMatch);
             deindexSupersededMemory(existingMatch.id);
+            await indexNewMemoryVersion(evolved);
             await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
               action: "mark_non_latest",
               concept,
             });
-            await indexNewMemoryVersion(evolved);
             existingMemories.push(evolved);
             await recordAudit(kv, "evolve", "mem::consolidate", [evolved.id], {
               action: "evolve_memory",

@@ -419,7 +419,7 @@ short forms count only beside an ordinal, a year, or after "on". The in-process 
 BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
-`memoryToObservation()` carries the saved Memory type as optional `memoryType` on full and compact search results; `type` remains the normalized Observation type. Graph retrieval scores an Observation by its best path, not the first path visited. `mem::consolidate` serializes runs, counts failed model calls toward its ten-call budget, and writes a successor before demoting its predecessor; a failed demotion can leave two latest versions.
+`memoryToObservation()` carries the saved Memory type as optional `memoryType` on full, compact and narrative `mem::search` results and smart-search results; `memory_recall` rendering is unchanged. Graph retrieval keeps an Observation's best score among paths returned from different start nodes. `mem::consolidate` serializes its own runs, counts failed model calls toward its ten-call budget, writes a successor before demoting its predecessor, and updates the index before the predecessor audit. A failed demotion can leave two latest versions; cross-writer snapshot races are not covered by this lock.
 
 ### Search on the event loop
 Search runs on the daemon's one event loop, which also answers `/livez` and the hooks. BM25

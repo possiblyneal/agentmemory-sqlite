@@ -137,6 +137,31 @@ describe("mem::consolidate dedup", () => {
     expect(getSearchIndex().has(second.id)).toBe(true);
   });
 
+  it("indexes the successor when the predecessor audit fails", async () => {
+    getSearchIndex().clear();
+    const { run, kv, latest } = await setup([["auth"], ["auth"], ["auth"]]);
+    await run();
+    const [first] = await latest();
+    await kv.set(KV.observations("s1"), "o3", obs("o3", ["auth"]));
+    const set = kv.set.bind(kv);
+    let auditFailed = false;
+    kv.set = async (scope, key, data) => {
+      if (scope === KV.audit && !auditFailed) {
+        auditFailed = true;
+        throw new Error("audit write failed");
+      }
+      return set(scope, key, data);
+    };
+    await run();
+    const [second] = await latest();
+    expect(auditFailed).toBe(true);
+    expect(second.parentId).toBe(first.id);
+    expect(getSearchIndex().has(first.id)).toBe(false);
+    expect(getSearchIndex().has(second.id)).toBe(true);
+    await run();
+    expect(getSearchIndex().has(second.id)).toBe(true);
+  });
+
   it("keeps one latest Memory when two runs overlap", async () => {
     const { run, latest } = await setup([["auth"], ["auth"], ["auth"]]);
     await Promise.all([run(), run()]);
