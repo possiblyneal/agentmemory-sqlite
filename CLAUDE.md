@@ -497,10 +497,13 @@ lines. A wholly undated transcript uses one import timestamp.
 
 ### Agent SDK child sessions
 
-The opt-in Agent SDK provider (`src/providers/agent-sdk.ts`) disables filesystem settings,
-uses only explicitly supplied MCP servers, and disables session persistence. Credentials
-supplied only through settings `env` are therefore unavailable to the child; use the process
-environment or the SDK's credentials file instead. The child does not receive plugins explicitly.
+The opt-in Agent SDK provider (`src/providers/agent-sdk.ts`) disables user, project and local
+settings, passes no plugins or MCP servers explicitly, and sets `persistSession: false`.
+Credentials supplied only through those settings' `env` are unavailable to the child; use the
+process environment or the SDK's credentials file instead. Managed policies still apply: managed
+plugins may run, so plugin-free use is not supported on such hosts, and a valid managed MCP
+configuration can prevent the child from starting in strict MCP mode. Select a configured non-SDK
+provider on managed hosts rather than weakening strict mode; existing fallback handling is unchanged.
 
 ## Coding Standards
 
