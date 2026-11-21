@@ -237,6 +237,12 @@ Auto-forget and retention release a Memory's image reference after its indexed d
 A failed release is logged without blocking deletion bookkeeping; it may leave an unused image.
 Concurrent deletion locking is outside this contract.
 
+### Replace import
+`mem::import` validates section shapes, size limits and keyed fields used by import indexing
+before any store mutation. Rows without string keys are dropped and counted in `invalid`, so
+legacy keyless Session stubs do not prevent restoring the rest. Access logs and legacy Memory
+session IDs retain their normal normalization. This preflight does not make replacement transactional.
+
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap
 eviction, `mem::auto-forget`, `mem::forget`, `mem::retention-evict`, `mem::governance-delete`,
