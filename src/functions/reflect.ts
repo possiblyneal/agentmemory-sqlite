@@ -29,7 +29,7 @@ const MIN_CLUSTER_ITEMS = 3;
 
 function insightId(project: string | undefined, content: string): string {
   const normalized = content.trim().toLowerCase();
-  return fingerprintId("ins", project ? `${project}\n${normalized}` : normalized);
+  return fingerprintId("ins_v2", JSON.stringify([project ?? null, normalized]));
 }
 
 // Insights written before the id carried the project are keyed by content alone.
@@ -39,8 +39,8 @@ async function findStoredInsight(
   content: string,
 ): Promise<Insight | null> {
   const scoped = await kv.get<Insight>(KV.insights, insightId(project, content));
-  if (scoped && !scoped.deleted) return scoped;
-  const legacy = await kv.get<Insight>(KV.insights, insightId(undefined, content));
+  if (scoped && !scoped.deleted && scoped.project === project) return scoped;
+  const legacy = await kv.get<Insight>(KV.insights, fingerprintId("ins", content.trim().toLowerCase()));
   return legacy && !legacy.deleted && legacy.project === project ? legacy : null;
 }
 // Nodes one reflect pass reads from the graph indexes.
@@ -341,6 +341,7 @@ export function registerReflectFunctions(
       let clustersSkipped = 0;
       let clustersUnchanged = 0;
       let totalInsights = 0;
+      let clustersProcessed = 0;
       let clustersFailed = 0;
       let lastError = "";
 
@@ -427,6 +428,7 @@ export function registerReflectFunctions(
           existingInsights: shownInsights,
         };
 
+        clustersProcessed++;
         try {
           const prompt = buildReflectPrompt(cluster);
           const response = await provider.summarize(REFLECT_SYSTEM, prompt);
@@ -501,7 +503,7 @@ export function registerReflectFunctions(
         await recordAudit(kv, "reflect", "mem::reflect", [], {
           newInsights,
           reinforced,
-          clustersProcessed: conceptClusters.length - clustersSkipped - clustersUnchanged,
+          clustersProcessed,
           clustersSkipped,
           clustersUnchanged,
           clustersFailed,
@@ -509,7 +511,6 @@ export function registerReflectFunctions(
         });
       } catch {}
 
-      const clustersProcessed = conceptClusters.length - clustersSkipped - clustersUnchanged;
       const everyCallFailed = clustersFailed > 0 && clustersFailed === clustersProcessed;
       return {
         success: !everyCallFailed,

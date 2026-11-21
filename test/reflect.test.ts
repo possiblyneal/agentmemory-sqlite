@@ -988,7 +988,7 @@ describe("mem::reflect Insight identity (#440)", () => {
     expect(insights.every((i) => i.reinforcements === 0)).toBe(true);
   });
 
-  it("reinforces a project's Insight stored under its content-only id rather than duplicating it", async () => {
+  it.each(["alpha", undefined])("keeps legacy Insights in their own scope when reflecting %s", async (project) => {
     const { sdk, kv } = setup();
     await markGraphIndexesReady(kv as never);
     await seedProject(kv, "alpha", ["security", "validation"]);
@@ -1002,9 +1002,13 @@ describe("mem::reflect Insight identity (#440)", () => {
     for (const i of legacy) await kv.set("mem:insights", i.id, i);
     await kv.set("mem:semantic", "sem_alpha3", { ...makeSemantic("security again", "sem_alpha3"), sourceSessionIds: ["ses_alpha"] });
 
-    const result = (await sdk.trigger("mem::reflect", { project: "alpha" })) as { newInsights: number; reinforced: number };
+    const result = await sdk.trigger("mem::reflect", { project });
 
-    expect(result).toMatchObject({ newInsights: 0, reinforced: 2 });
-    expect(await kv.list<Insight>("mem:insights")).toHaveLength(2);
+    expect(result).toMatchObject(project
+      ? { newInsights: 0, reinforced: 2 }
+      : { newInsights: 2, reinforced: 0 });
+    const insights = await kv.list<Insight>("mem:insights");
+    expect(insights.filter((i) => i.project === "alpha").map((i) => i.id).sort()).toEqual(legacy.map((i) => i.id).sort());
+    expect(insights.filter((i) => i.project === undefined)).toHaveLength(project ? 0 : 2);
   });
 });
