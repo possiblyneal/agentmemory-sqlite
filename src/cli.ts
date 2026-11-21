@@ -38,6 +38,7 @@ import { generateId } from "./state/schema.js";
 import { envFilePath, readEnvFile } from "./hooks/_env.js";
 import {
   buildDiagnostics,
+  captureDoctorProcessEnv,
   doctorPromptsAllowed,
   dryRunPlan,
   type Diagnostic,
@@ -86,7 +87,12 @@ const IS_RESET = args.includes("--reset");
 // (getRestPort/getBaseUrl/getStreamPort) or the --port /
 // --instance / --tools handlers below. Only-if-unset, so a real
 // process.env value — including one just set by a CLI flag — still wins.
-hydrateProcessEnvFromFile();
+let doctorProcessEnv: Record<string, string | undefined> = {};
+if (args[0] === "doctor") {
+  doctorProcessEnv = captureDoctorProcessEnv(hydrateProcessEnvFromFile);
+} else {
+  hydrateProcessEnvFromFile();
+}
 
 // --version / -V early exit. Print VERSION + exit before any side effects
 // (engine boot, env load, dir mkdir). `-v` is taken by --verbose so we
@@ -673,7 +679,7 @@ function buildDoctorEffects(): DoctorEffects {
         return {};
       }
     },
-    readProcessEnv: () => process.env,
+    readProcessEnv: () => doctorProcessEnv,
     pidfileExists: () => existsSync(workerPidfilePath()),
     pidfilePidIsAlive: () => {
       const pid = readWorkerPidfile();

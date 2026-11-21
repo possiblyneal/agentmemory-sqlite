@@ -6,6 +6,10 @@
 // driven by clack — exercising it would require a TTY and is out of scope.
 
 import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildDiagnostics,
   DIAGNOSTIC_IDS,
@@ -222,6 +226,41 @@ describe("doctor agrees with the daemon on the LLM provider", () => {
     expect((await providerStatus({ ANTHROPIC_API_KEY: "sk-ant-test-value" }, { ANTHROPIC_API_KEY: "" })).ok).toBe(false);
     expect((await providerStatus({ OPENAI_API_KEY: "sk-test-value", OPENAI_API_KEY_FOR_LLM: "true" }, { OPENAI_API_KEY_FOR_LLM: "false" })).ok).toBe(false);
     expect((await providerStatus({ AGENTMEMORY_ALLOW_AGENT_SDK: "true" }, { AGENTMEMORY_ALLOW_AGENT_SDK: "false" })).ok).toBe(false);
+  });
+
+  it("rechecks the edited file after startup hydration without losing shell precedence", () => {
+    const home = mkdtempSync(join(tmpdir(), "doctor-hydration-"));
+    try {
+      const dir = join(home, ".agentmemory");
+      mkdirSync(dir);
+      writeFileSync(join(dir, ".env"), "ANTHROPIC_API_KEY=...\nOPENAI_API_KEY=sk-file-test\n");
+      const script = `
+        import { hydrateEnvFromFile, readEnvFile, envFilePath } from './src/hooks/_env.ts';
+        import { buildDiagnostics, captureDoctorProcessEnv } from './src/cli/doctor-diagnostics.ts';
+        import { writeFileSync } from 'node:fs';
+        const shell = captureDoctorProcessEnv(() => hydrateEnvFromFile((value) => value === undefined));
+        const check = buildDiagnostics({
+          readEnvFile, readProcessEnv: () => shell,
+          openEditor: async (path) => {
+            writeFileSync(path, 'ANTHROPIC_API_KEY=sk-test-value\\nOPENAI_API_KEY=sk-file-test\\n');
+            return { ok: true };
+          },
+        }).find((d) => d.id === 'no-llm-provider-key');
+        const ctx = { envPath: envFilePath() };
+        const before = await check.check(ctx);
+        await check.fix(ctx);
+        const after = await check.check(ctx);
+        if (before.ok || !after.ok || process.env.ANTHROPIC_API_KEY !== '...') process.exit(1);
+      `;
+      const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH, HOME: home, OPENAI_API_KEY: "" },
+        encoding: "utf8",
+      });
+      expect(child.status, child.stderr).toBe(0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("marks only editor fixes manual while keeping other fixes automatic", () => {

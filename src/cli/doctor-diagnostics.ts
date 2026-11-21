@@ -235,6 +235,12 @@ export function buildDiagnostics(effects: DoctorEffects): Diagnostic[] {
   ];
 }
 
+export function captureDoctorProcessEnv(hydrate: () => void): Record<string, string | undefined> {
+  const env = { ...process.env };
+  hydrate();
+  return env;
+}
+
 export function doctorPromptsAllowed(
   env: Record<string, string | undefined>,
   stdinIsTTY: boolean,

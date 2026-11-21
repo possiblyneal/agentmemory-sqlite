@@ -386,7 +386,8 @@ Memories, not Lessons.
 LLM detection and doctor share `isPlaceholderKey()` (`src/utils/placeholder-key.ts`); a
 placeholder cannot select a provider. `OPENAI_API_KEY_FOR_LLM=false` excludes the OpenAI
 key from LLM detection, and doctor accepts `AGENTMEMORY_ALLOW_AGENT_SDK=true` as a fallback.
-Doctor checks provider readiness against the file overlaid by the process environment; its
+Doctor checks provider readiness against the freshly read file overlaid by the process environment
+captured before CLI hydration, so an edited file is rechecked without losing shell overrides; its
 missing-file and placeholder-file diagnostics remain separate. Doctor reports without prompting
 when either terminal is not a TTY or `CI` is set; `--all` applies safe fixes but skips editor
 fixes. A noop primary stays noop; other fallback chains skip placeholder credentials and expose
