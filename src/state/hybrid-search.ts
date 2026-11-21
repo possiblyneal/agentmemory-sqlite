@@ -153,13 +153,40 @@ export class HybridSearch {
   }
 
   async search(query: string, limit = 20): Promise<HybridSearchResult[]> {
-    return this.tripleStreamSearch(query, limit);
+    return this.prepareSearch(query)(limit);
   }
 
   async searchWithExpansion(
     query: string,
     limit: number,
     expansion: QueryExpansion,
+  ): Promise<HybridSearchResult[]> {
+    return this.prepareSearch(query, async () => expansion)(limit);
+  }
+
+  prepareSearch(query: string, expand?: () => Promise<QueryExpansion>) {
+    const embeddings = new Map<string, Promise<Float32Array>>();
+    const search = (text: string, limit: number, entities?: string[]) =>
+      this.tripleStreamSearch(text, limit, entities, (provider) => {
+        let embedding = embeddings.get(text);
+        if (!embedding) {
+          embedding = embedQuery(provider, text);
+          embeddings.set(text, embedding);
+        }
+        return embedding;
+      });
+    let expansion: Promise<QueryExpansion> | undefined;
+    return async (limit: number): Promise<HybridSearchResult[]> =>
+      expand
+        ? this.searchExpanded(query, limit, await (expansion ??= expand()), search)
+        : search(query, limit);
+  }
+
+  private async searchExpanded(
+    query: string,
+    limit: number,
+    expansion: QueryExpansion,
+    search: (query: string, limit: number, entityHints?: string[]) => Promise<HybridSearchResult[]>,
   ): Promise<HybridSearchResult[]> {
     const allQueries = [
       query,
@@ -178,11 +205,11 @@ export class HybridSearch {
     // keeps a failed or empty expansion byte-identical to no expansion at all
     // rather than silently reshuffling every page.
     if (allQueries.length === 1 && expansion.entityExtractions.length === 0) {
-      return this.tripleStreamSearch(query, limit);
+      return search(query, limit);
     }
 
     const resultSets = await Promise.all(
-      allQueries.map((q) => this.tripleStreamSearch(q, limit, allEntities)),
+      allQueries.map((q) => search(q, limit, allEntities)),
     );
 
     const merged = new Map<string, HybridSearchResult>();
@@ -223,7 +250,8 @@ export class HybridSearch {
   private async tripleStreamSearch(
     query: string,
     limit: number,
-    entityHints?: string[],
+    entityHints: string[] | undefined,
+    getEmbedding: (provider: EmbeddingProvider) => Promise<Float32Array>,
   ): Promise<HybridSearchResult[]> {
     // Each leg must be fetched to a DEPTH FLOOR, not to a multiple of the
     // caller's page size. With `limit * 2`, a document that is rank ~10 in
@@ -257,11 +285,10 @@ export class HybridSearch {
       sessionId: string;
       score: number;
     }> = [];
-    let queryEmbedding: Float32Array | null = null;
 
     if (this.vector && this.embeddingProvider && this.vector.size > 0) {
       try {
-        queryEmbedding = await embedQuery(this.embeddingProvider, query);
+        const queryEmbedding = await getEmbedding(this.embeddingProvider);
         vectorResults = await this.vector.search(queryEmbedding, depth);
       } catch {
         // fall through to BM25-only

@@ -72,7 +72,7 @@ describe("mem::smart-search is not reranker-gated", () => {
 
     sdk = mockSdk();
     const hits = [hit("obs_a", 9), hit("obs_b", 8), hit("obs_c", 7)];
-    registerSmartSearchFunction(sdk as never, mockKV() as never, async () => hits);
+    registerSmartSearchFunction(sdk as never, mockKV() as never, () => async () => hits);
   });
 
   afterEach(async () => {

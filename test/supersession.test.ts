@@ -182,7 +182,7 @@ beforeEach(async () => {
   registerContextFunction(sdk as never, kv as never, 8000);
   registerPromptContextFunction(sdk as never, kv as never);
   const hybrid = new HybridSearch(getSearchIndex(), null, null, kv as never, 1, 0, 0);
-  registerSmartSearchFunction(sdk as never, kv as never, (query, limit) => hybrid.search(query, limit));
+  registerSmartSearchFunction(sdk as never, kv as never, (query) => hybrid.prepareSearch(query));
   await seedFillerSessions(40);
 });
 

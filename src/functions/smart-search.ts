@@ -11,6 +11,7 @@ import type {
   Memory,
 } from "../types.js";
 import { KV } from "../state/schema.js";
+import { capOlderNearTwins } from "../state/hybrid-search.js";
 import { memoryToObservation } from "../state/memory-utils.js";
 import { newerAboveShadowed, shadowedMemoryIds } from "./memory-shadow.js";
 import { StateKV } from "../state/kv.js";
@@ -41,6 +42,8 @@ import { recallSemanticFacts } from "./semantic-recall.js";
 const MIN_BM25_SCORE = 3.5;
 const MIN_BM25_RATIO_TO_BEST = 0.5;
 const MIN_COSINE_SCORE = 0.3;
+const OVER_FETCH_GROWTH = 4;
+const MAX_OVER_FETCH = 1600;
 
 function aboveRelevanceFloor(hits: HybridSearchResult[]): HybridSearchResult[] {
   const best = Math.max(0, ...hits.map((h) => h.bm25Score));
@@ -117,7 +120,7 @@ function preview(content: string): string {
 export function registerSmartSearchFunction(
   sdk: ISdk,
   kv: StateKV,
-  searchFn: (query: string, limit: number) => Promise<HybridSearchResult[]>,
+  prepareSearch: (query: string) => (limit: number) => Promise<HybridSearchResult[]>,
 ): void {
   sdk.registerFunction("mem::smart-search",
     async (data: {
@@ -255,8 +258,9 @@ export function registerSmartSearchFunction(
         ? Math.max(limit * 10, 100)
         : limit;
 
-      const [hybridResults, lessons, insights, semanticFacts] = await Promise.all([
-        searchFn(data.query, overFetchLimit),
+      const search = prepareSearch(data.query);
+      const [firstHybrid, lessons, insights, semanticFacts] = await Promise.all([
+        search(overFetchLimit),
         includeLessons
           ? recallLessons(sdk, data.query, recallLimit, project)
           : Promise.resolve([]),
@@ -271,11 +275,42 @@ export function registerSmartSearchFunction(
       // over-fetch instead of leaving the page short. The floors are
       // corpus-relative, so some hit always clears them.
       const inProject = project ? createProjectMatcher(kv, project) : null;
-      const inScope: HybridSearchResult[] = [];
-      for (const r of hybridResults) {
-        if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
-        if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
-        inScope.push(r);
+      const scopeHits = async (hits: HybridSearchResult[]) => {
+        const kept: HybridSearchResult[] = [];
+        for (const r of hits) {
+          if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
+          if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
+          kept.push(r);
+        }
+        return kept;
+      };
+      let fetched = overFetchLimit;
+      let hybridResults = firstHybrid;
+      let inScope = await scopeHits(hybridResults);
+      // A full over-fetch that left the scoped page short may hide matches
+      // below the window, so widen it, up to MAX_OVER_FETCH.
+      while (
+        (filterAgentId || project) &&
+        inScope.length < limit &&
+        hybridResults.length >= fetched &&
+        fetched < MAX_OVER_FETCH
+      ) {
+        fetched = Math.min(fetched * OVER_FETCH_GROWTH, MAX_OVER_FETCH);
+        hybridResults = await search(fetched);
+        const wider = await scopeHits(hybridResults);
+        const seen = new Set(wider.map((r) => r.observation.id));
+        // Session diversification can displace earlier hits. Use wider scores
+        // where available, then cap again for any twins split across windows.
+        const carry = inScope.filter((r) => !seen.has(r.observation.id));
+        if (carry.length === 0) {
+          inScope = wider;
+        } else {
+          const scored = [...wider, ...carry].map((hit) => ({ ...hit, score: hit.combinedScore }));
+          await capOlderNearTwins(kv, scored);
+          inScope = scored.sort((a, b) => b.score - a.score).map(({ score, ...hit }) => ({
+            ...hit, combinedScore: score,
+          }));
+        }
       }
       const aboveFloor = aboveRelevanceFloor(inScope);
       const shadowed = await shadowedMemoryIds(

@@ -83,7 +83,7 @@ beforeEach(() => {
   sdk = mockSdk();
   kv = mockKV();
   registerApiTriggers(sdk as never, kv as never, SECRET);
-  registerSmartSearchFunction(sdk as never, kv as never, async () => searchHits);
+  registerSmartSearchFunction(sdk as never, kv as never, () => async () => searchHits);
   sdk._fns.set("mem::lesson-recall", () => ({ success: true, lessons: [] }));
   sdk._fns.set("mem::prompt-context", () => ({ context: nextContext }));
   sdk._fns.set("mem::context", () => ({ context: nextContext }));
