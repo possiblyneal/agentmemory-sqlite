@@ -305,9 +305,11 @@ export class SqliteState {
   }
 
   listPage(scope: string, after: string | undefined, limit: number): Array<{ key: string; value: unknown }> {
-    const rows = this.db
-      .prepare("SELECT CAST(key AS BLOB) AS key, value FROM kv WHERE scope = ? AND key > ? ORDER BY kv.key LIMIT ?")
-      .all(scope, after ?? "", limit) as Array<{ key: Uint8Array; value: string }>;
+    const rows = (after === undefined
+      ? this.db.prepare("SELECT CAST(key AS BLOB) AS key, value FROM kv WHERE scope = ? ORDER BY kv.key LIMIT ?")
+        .all(scope, limit)
+      : this.db.prepare("SELECT CAST(key AS BLOB) AS key, value FROM kv WHERE scope = ? AND key > ? ORDER BY kv.key LIMIT ?")
+        .all(scope, after, limit)) as Array<{ key: Uint8Array; value: string }>;
     return rows.map((r) => ({ key: Buffer.from(r.key).toString("utf8"), value: JSON.parse(r.value) }));
   }
 

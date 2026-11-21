@@ -123,6 +123,23 @@ describe("Governance Functions", () => {
     expect(result.results).toEqual([]);
   });
 
+  it("governance-bulk keeps Facets for a candidate deleted after selection", async () => {
+    const list = kv.list;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      const rows = await list<T>(scope);
+      if (scope === "mem:memories") {
+        await kv.delete(scope, "mem_1");
+        await sdk.trigger("mem::facet-tag", { targetId: "mem_1", targetType: "memory", dimension: "kind", value: "test" });
+      }
+      return rows;
+    };
+
+    await sdk.trigger("mem::governance-bulk", { type: ["pattern"] });
+
+    const result = await sdk.trigger("mem::facet-get", { targetId: "mem_1" });
+    expect(result.dimensions).toHaveLength(1);
+  });
+
   it("governance-delete removes specified memories", async () => {
     const result = (await sdk.trigger("mem::governance-delete", {
       memoryIds: ["mem_1"],

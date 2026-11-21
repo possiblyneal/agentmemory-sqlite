@@ -277,8 +277,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
             } else {
               try {
                 await deleteWithFacets(kv, async (removed) => {
+                  const existed = await kv.get(KV.observations(session.id), o.id);
                   await deleteIndexed(kv, KV.observations(session.id), o.id);
-                  removed.push(o.id);
+                  if (existed) removed.push(o.id);
                 });
                 stats.lowImportanceObs++;
                 lowImportanceIds.add(o.id);
@@ -326,8 +327,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
             for (const o of toEvict) {
               try {
                 await deleteWithFacets(kv, async (removed) => {
+                  const existed = await kv.get(KV.observations(o.sessionId), o.id);
                   await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
-                  removed.push(o.id);
+                  if (existed) removed.push(o.id);
                 });
                 stats.capEvictions++;
                 countRemoval(o.sessionId);

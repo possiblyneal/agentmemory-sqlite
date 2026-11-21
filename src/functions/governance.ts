@@ -136,8 +136,9 @@ export function registerGovernanceFunction(sdk: ISdk, kv: StateKV): void {
         const results = await withKeyedLock(MEMORY_WRITE_LOCK, () =>
           deleteWithFacets(kv, async (deleted) =>
             Promise.allSettled(batch.map(async (mem) => {
+              const existed = await kv.get(KV.memories, mem.id);
               await deleteIndexed(kv, KV.memories, mem.id);
-              deleted.push(mem.id);
+              if (existed) deleted.push(mem.id);
             })),
           ),
         );

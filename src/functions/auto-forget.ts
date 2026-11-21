@@ -186,8 +186,9 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
               let deletedOk = false;
               try {
                 await deleteWithFacets(kv, async (removed) => {
+                  const existed = await kv.get(KV.observations(sessions[i].id), obs.id);
                   await deleteIndexed(kv, KV.observations(sessions[i].id), obs.id);
-                  removed.push(obs.id);
+                  if (existed) removed.push(obs.id);
                 });
                 deletedOk = true;
               } catch {

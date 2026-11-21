@@ -112,8 +112,9 @@ async function evictOverCap(
   await deleteWithFacets(kv, async (removed) => {
     for (const obs of victims) {
       try {
+        const existed = await kv.get(scope, obs.id);
         await deleteIndexed(kv, scope, obs.id);
-        removed.push(obs.id);
+        if (existed) removed.push(obs.id);
         evictedIds.push(obs.id);
       } catch (err) {
         logger.warn("Session cap eviction failed", {

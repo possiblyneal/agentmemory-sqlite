@@ -103,6 +103,40 @@ describe("Lessons", () => {
     expect((await sdk.trigger("mem::facet-get", { targetId: saved.lesson.id })).dimensions).toEqual([]);
   });
 
+  it("keeps a Facet tagged between two deletes of the same Lesson", async () => {
+    const { lesson } = await sdk.trigger("mem::lesson-save", { content: "Lesson for concurrent deletes", project: "/app" });
+    const firstDelete = sdk.trigger("mem::lesson-delete", { lessonId: lesson.id });
+    await Promise.resolve();
+    const tag = sdk.trigger("mem::facet-tag", { targetId: lesson.id, targetType: "memory", dimension: "kind", value: "test" });
+    const secondDelete = sdk.trigger("mem::lesson-delete", { lessonId: lesson.id });
+
+    const [first, , second] = await Promise.all([firstDelete, tag, secondDelete]);
+    expect(first.success).toBe(true);
+    expect(second).toEqual({ success: false, error: "lesson not found" });
+    expect((await sdk.trigger("mem::facet-get", { targetId: lesson.id })).dimensions).toHaveLength(1);
+  });
+
+  it("keeps a Lesson re-saved while deletion cleans up Facets searchable", async () => {
+    const content = "Unique searchable lesson during cleanup";
+    const saved = await sdk.trigger("mem::lesson-save", { content, project: "/app" });
+    await sdk.trigger("mem::facet-tag", { targetId: saved.lesson.id, targetType: "memory", dimension: "kind", value: "test" });
+    const listPage = kv.listPage;
+    let resaved = false;
+    kv.listPage = async <T>(scope: string, after: string | undefined, limit: number) => {
+      if (scope === "mem:facets" && !resaved) {
+        resaved = true;
+        await sdk.trigger("mem::lesson-save", { content, project: "/app" });
+      }
+      return listPage<T>(scope, after, limit);
+    };
+
+    await sdk.trigger("mem::lesson-delete", { lessonId: saved.lesson.id });
+
+    expect(await kv.get("mem:lessons", saved.lesson.id)).not.toBeNull();
+    const recalled = await sdk.trigger("mem::lesson-recall", { query: "unique searchable lesson", project: "/app" });
+    expect(recalled.lessons.map((lesson: Lesson) => lesson.id)).toContain(saved.lesson.id);
+  });
+
   describe("mem::lesson-save near-twin re-save (#378)", () => {
     const ORIGINAL =
       "Wrap commit body lines at about ninety columns because commitlint rejects body lines over one hundred characters";
@@ -671,6 +705,24 @@ describe("Lessons", () => {
       expect(result.deleted).toBe(1);
       expect(await kv.get("mem:lessons", tomb.id)).toBeNull();
       expect(await kv.get("mem:lessons", live.lesson.id)).not.toBeNull();
+    });
+
+    it("cleans Facets of committed tombstone chunks if a later chunk fails", async () => {
+      const tomb = await tombstone("chunked tombstone");
+      await sdk.trigger("mem::facet-tag", { targetId: tomb.id, targetType: "memory", dimension: "kind", value: "test" });
+      for (let i = 0; i < 100; i++) {
+        await kv.set("mem:lessons", `extra-${i}`, { ...tomb, id: `extra-${i}` });
+      }
+      const deleteMany = kv.deleteManyIfUnchanged;
+      let calls = 0;
+      kv.deleteManyIfUnchanged = async (scope, entries) => {
+        if (++calls === 2) throw new Error("later chunk failed");
+        return deleteMany(scope, entries);
+      };
+
+      await expect(sdk.trigger("mem::lesson-purge-tombstones", {})).rejects.toThrow("later chunk failed");
+      expect(await kv.get("mem:lessons", tomb.id)).toBeNull();
+      expect((await sdk.trigger("mem::facet-get", { targetId: tomb.id })).dimensions).toEqual([]);
     });
 
     it("strengthening a tombstone reports it not found and leaves it unreinforced", async () => {

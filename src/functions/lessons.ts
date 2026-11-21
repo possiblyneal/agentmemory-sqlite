@@ -1,6 +1,6 @@
 import { deleteWithFacets } from "./facets.js";
 import type { ISdk } from "../engine/types.js";
-import type { StateKV } from "../state/kv.js";
+import { SET_MANY_CHUNK, type StateKV } from "../state/kv.js";
 import { KV, fingerprintId, jaccardOverlap, jaccardText } from "../state/schema.js";
 import { capBehindNewer, RESTATEMENT_OVERLAP } from "./recency-cap.js";
 import type { Lesson, Session } from "../types.js";
@@ -344,18 +344,19 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "lessonId is required" };
       }
 
-      const lesson = await kv.get<Lesson>(KV.lessons, data.lessonId);
+      const lesson = await deleteWithFacets(kv, async (removed) => {
+        const current = await kv.get<Lesson>(KV.lessons, data.lessonId);
+        if (!current) return null;
+        await kv.delete(KV.lessons, current.id);
+        removed.push(current.id);
+        lessonRecords.delete(current.id);
+        if (lessonIndex) lessonIndex.remove(current.id);
+        noteLessonMutation();
+        return current;
+      });
       if (!lesson) {
         return { success: false, error: "lesson not found" };
       }
-
-      await deleteWithFacets(kv, async (removed) => {
-        await kv.delete(KV.lessons, lesson.id);
-        removed.push(lesson.id);
-      });
-      lessonRecords.delete(lesson.id);
-      if (lessonIndex) lessonIndex.remove(lesson.id);
-      noteLessonMutation();
 
       try {
         await recordAudit(kv, "lesson_delete", "mem::lesson-delete", [
@@ -374,16 +375,18 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
   ): Promise<string[]> {
     if (expired.length === 0) return [];
     const deletedIds = await deleteWithFacets(kv, async (removed) => {
-      const ids = await kv.deleteManyIfUnchanged(KV.lessons, expired);
-      removed.push(...ids);
-      return ids;
+      for (let i = 0; i < expired.length; i += SET_MANY_CHUNK) {
+        const ids = await kv.deleteManyIfUnchanged(KV.lessons, expired.slice(i, i + SET_MANY_CHUNK));
+        removed.push(...ids);
+        for (const id of ids) {
+          lessonRecords.delete(id);
+          if (lessonIndex) lessonIndex.remove(id);
+        }
+        if (ids.length > 0) noteLessonMutation();
+      }
+      return removed;
     });
-    for (const id of deletedIds) {
-      lessonRecords.delete(id);
-      if (lessonIndex) lessonIndex.remove(id);
-    }
     if (deletedIds.length > 0) {
-      noteLessonMutation();
       await recordAudit(kv, "lesson_delete", functionId, deletedIds, {
         action: "delete",
         actor: "system",

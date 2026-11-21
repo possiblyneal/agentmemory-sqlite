@@ -123,6 +123,20 @@ describe("inproc state store", () => {
     expect(next).toEqual([{ key: "c", value: "c" }, { key: "d", value: "d" }]);
   });
 
+  it("includes an empty key on the first page and resumes after it", async () => {
+    const fns = stateFunctions(store);
+    for (const key of ["b", "", "a"]) {
+      await fns["state::set"]({ scope: "facets", key, value: { id: key } });
+    }
+    await fns["state::set"]({ scope: "other", key: "", value: { id: "other" } });
+
+    expect(await fns["state::list-page"]({ scope: "facets", limit: 1 })).toEqual([{ key: "", value: { id: "" } }]);
+    expect(await fns["state::list-page"]({ scope: "facets", after: "", limit: 2 })).toEqual([
+      { key: "a", value: { id: "a" } },
+      { key: "b", value: { id: "b" } },
+    ]);
+  });
+
   it("pages keys containing NUL without truncating the cursor", async () => {
     const fns = stateFunctions(store);
     for (const key of ["a", "a\u0000b", "a\u0000c", "b"]) {

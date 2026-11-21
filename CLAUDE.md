@@ -275,7 +275,8 @@ validate relation entries before replacing any scope, preserve present endpoint 
 (including explicit nulls and non-strings accepted by mesh), retain string relation types, map
 non-string types to `related`, and omit nonnumeric or nonfinite confidence from backup data without
 changing the source row. `StateKV.listPage` returns complete SQLite keys, including embedded NULs,
-so those keys remain valid paging cursors and can be restored exactly.
+so those keys remain valid paging cursors and can be restored exactly. Its first page includes the
+empty key; a supplied cursor, including `""`, is exclusive.
 
 ### Graph Eviction
 Every path that hard-deletes Observations or Memories (`mem::evict`, `mem::observe` session-cap

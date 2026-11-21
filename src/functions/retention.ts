@@ -350,10 +350,11 @@ export function registerRetentionFunctions(
 
           const evictScope = scope;
           const remove = async () => {
-            const mem = await kv.get<Memory>(evictScope, candidate.memoryId);
-            await deleteWithFacets(kv, async (removed) => {
+            const mem = await deleteWithFacets(kv, async (removed) => {
+              const current = await kv.get<Memory>(evictScope, candidate.memoryId);
               await deleteIndexed(kv, evictScope, candidate.memoryId);
-              removed.push(candidate.memoryId);
+              if (current) removed.push(candidate.memoryId);
+              return current;
             });
             if (mem && mem.imageRef) {
               await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {

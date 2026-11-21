@@ -448,8 +448,9 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         );
         await deleteWithFacets(kv, async (removed) => {
           for (const obs of observations) {
+            const existed = await kv.get(KV.observations(data.sessionId!), obs.id);
             await deleteIndexed(kv, KV.observations(data.sessionId!), obs.id);
-            removed.push(obs.id);
+            if (existed) removed.push(obs.id);
             if (obs.imageData) await decrementImageRef(kv, sdk, obs.imageData);
             if (obs.imageRef && obs.imageRef !== obs.imageData) {
               await decrementImageRef(kv, sdk, obs.imageRef);
