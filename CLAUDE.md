@@ -268,6 +268,10 @@ case "memory_your_tool": {
 }
 ```
 
+`memory_save` uses `normalizeList()` (`src/mcp/normalize-list.ts`) for `concepts` and `files`
+on both MCP paths; it accepts CSV or arrays of strings. The stdio transport exits cleanly
+when its output pipe closes.
+
 ### Injection Gate
 Prompt-submit Injection (`mem::prompt-context`) is reranker-gated through `gateByRelevance` and fails open to the BM25 selection (`src/functions/prompt-rerank.ts`; `AGENTMEMORY_PROMPT_RERANK`, `_URL`, `_MIN`, `_TIMEOUT_MS`, capped at 1000 ms to stay inside the hooks' 2500 ms `INJECT_TIMEOUT_MS`, `src/hooks/_missed-injection.ts`, `docs/benchmarks/2026-11-18-prompt-submit-inject-wait.md`). Its cooldown and counts are reported under `/diagnostics` `injections` as `injection-gate`; `mem::smart-search` is not gated, nor is a Memory admitted by `withShadowingMemories` (Memory shadowing below). The reranker scores only the 10 best BM25 candidates (`GATE_POOL`, `src/functions/prompt-context.ts`): its latency grows with the pool, and a failed gate falls back to every candidate. A reply that does not score every candidate exactly once is malformed and falls back. One Lesson can take one of the 3 places: the best BM25 match among this project's and Global Lessons that this Session has not been given yet, after the near-twin cap (`searchLessons()`, `src/functions/lessons.ts`), takes the pool's last place, so the pool stays at 10. It is injected only when the reranker scores it at least `AGENTMEMORY_PROMPT_LESSON_MIN` (0.5), higher than the Observation floor because about half the Lessons above it bear on the prompt (`docs/benchmarks/2026-11-11-prompt-submit-lessons.md`). When the gate is off or failed, no Lesson is injected. An Empty Injection whose gate scored a non-empty pool and passed nothing is also counted in `/health` `recall.gateRejectedInjections`, a subset of `emptyInjections`, so an alert can tell "nothing relevant" from a Recall fault. It is on by default and its default host is unreachable from CI, so `vitest.config.ts` and the eval sandbox set `AGENTMEMORY_PROMPT_RERANK=off`; a test that exercises the gate stubs the endpoint with a local `node:http` server.
 

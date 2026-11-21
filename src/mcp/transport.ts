@@ -240,6 +240,10 @@ export function createStdioTransport(handler: RequestHandler): {
   };
 
   const onData = (chunk: Buffer) => parser?.push(chunk);
+  const onStdoutError = (err: NodeJS.ErrnoException) => {
+    if (err.code !== "EPIPE" && err.code !== "ERR_STREAM_DESTROYED") throw err;
+    process.exit(0);
+  };
 
   return {
     start() {
@@ -254,9 +258,11 @@ export function createStdioTransport(handler: RequestHandler): {
         });
       });
       process.stdin.on("data", onData);
+      process.stdout.on("error", onStdoutError);
     },
     stop() {
       process.stdin.off("data", onData);
+      process.stdout.off("error", onStdoutError);
       parser = null;
     },
   };
