@@ -11,6 +11,8 @@ vi.mock("../src/logger.js", () => ({
 import { registerExportImportFunction } from "../src/functions/export-import.js";
 import { registerRelationsFunction } from "../src/functions/relations.js";
 import { registerMeshFunction } from "../src/functions/mesh.js";
+import { SqliteState, stateFunctions } from "../src/engine/inproc/state.js";
+import { StateKV } from "../src/state/kv.js";
 import { VERSION } from "../src/version.js";
 import { getSearchIndex } from "../src/functions/search.js";
 import type {
@@ -378,6 +380,35 @@ describe("Export/Import Functions", () => {
     const exported = await sdk.trigger("mem::export", {});
     expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
     expect(await kv.get("mem:relations", "42:[object Object]:related")).toEqual(relation);
+  });
+
+  it("replaces real SQLite relations using exact NUL-containing storage keys", async () => {
+    const state = new SqliteState(":memory:");
+    try {
+      const handlers = stateFunctions(state);
+      const realKV = new StateKV({ trigger: async ({ function_id, payload }: { function_id: string; payload: unknown }) => handlers[function_id](payload) } as never);
+      const realSdk = mockSdk();
+      registerExportImportFunction(realSdk as never, realKV);
+      const relation = { sourceId: null, targetId: "b", type: "related" };
+      await realKV.set("mem:relations", "rel\u0000original", relation);
+      const exported = await realSdk.trigger("mem::export", {});
+      expect(exported.relations[0].key).toBe("rel\u0000original");
+      await realKV.set("mem:relations", "rel\u0000stale", { ...relation, targetId: "stale" });
+      expect(await realSdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+      expect(await realKV.get("mem:relations", "rel\u0000original")).toEqual(relation);
+      expect(await realKV.get("mem:relations", "rel\u0000stale")).toBeNull();
+      expect(await realKV.list("mem:relations")).toEqual([relation]);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("preserves explicit null endpoints in persisted relations", async () => {
+    const relation = { sourceId: null, targetId: "b", type: "related" };
+    await kv.set("mem:relations", "rel_null", relation);
+    const exported = await sdk.trigger("mem::export", {});
+    expect(await sdk.trigger("mem::import", { exportData: exported, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:relations", "rel_null")).toEqual(relation);
   });
 
   it("omits invalid relation confidence in exports and imports without changing the source", async () => {

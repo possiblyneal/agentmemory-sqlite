@@ -160,7 +160,7 @@ export function validRelationEntries(value: unknown): boolean {
   return value.every((entry) => {
     if (!entry || typeof entry !== "object" || typeof entry.key !== "string" || !entry.key ||
         keys.has(entry.key) || !entry.value || typeof entry.value !== "object" || Array.isArray(entry.value) ||
-        !entry.value.sourceId || !entry.value.targetId ||
+        !("sourceId" in entry.value) || !("targetId" in entry.value) ||
         !("type" in entry.value)) return false;
     keys.add(entry.key);
     return true;
