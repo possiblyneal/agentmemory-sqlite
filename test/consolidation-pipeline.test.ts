@@ -511,14 +511,17 @@ describe("Consolidation Pipeline: per-project scope (#1344)", () => {
     expect(provider.summarize).toHaveBeenCalledTimes(1);
   });
 
-  it("retries a project whose reflect failed on the next unscoped run", async () => {
+  it.each(["total", "partial"])("retries a project after a %s Reflect failure on the next unscoped run", async (failure) => {
     const sdk = mockSdk();
     const kv = mockKV();
     const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
     let calls = 0;
     sdk.registerFunction("mem::reflect", async () => {
       calls++;
-      if (calls === 1) throw new Error("provider busy");
+      if (calls === 1) {
+        if (failure === "total") throw new Error("provider busy");
+        return { success: true, clustersFailed: 1 };
+      }
       return { success: true };
     });
     registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);

@@ -292,7 +292,7 @@ export function registerConsolidationPipelineFunction(
 
   async function reflect(project: string) {
     try {
-      return await sdk.trigger({ function_id: "mem::reflect", payload: {
+      return await sdk.trigger<unknown, { clustersFailed?: number; error?: string }>({ function_id: "mem::reflect", payload: {
         maxClusters: 10,
         project,
       } });
@@ -323,8 +323,8 @@ export function registerConsolidationPipelineFunction(
               .map((s) => s.project),
           ])]
         : [data!.project!];
-      const semanticByProject: Record<string, unknown> = {};
-      const reflectByProject: Record<string, unknown> = {};
+      const semanticByProject: Record<string, Awaited<ReturnType<typeof consolidateSemantic>>> = {};
+      const reflectByProject: Record<string, Awaited<ReturnType<typeof reflect>>> = {};
       for (const project of projects) {
         if (runsSemantic) {
           semanticByProject[project] = await consolidateSemantic(
@@ -333,9 +333,9 @@ export function registerConsolidationPipelineFunction(
           );
         }
         if (runsReflect) reflectByProject[project] = await reflect(project);
-        const failed = [semanticByProject[project], reflectByProject[project]].some(
-          (r) => r !== undefined && r !== null && typeof r === "object" && "error" in r,
-        );
+        const reflectResult = reflectByProject[project];
+        const failed = "error" in (semanticByProject[project] ?? {}) ||
+          reflectResult?.error !== undefined || (reflectResult?.clustersFailed ?? 0) > 0;
         if (data?.project) continue;
         if (failed) retryProjects.add(project);
         else retryProjects.delete(project);

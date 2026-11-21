@@ -250,6 +250,11 @@ that project's (`factBelongsToProject()`), so a fact shared across projects feed
 deleting each project Insight that cites a fact the rule rejects.
 Measurements and rationale are in `docs/research/record-kind-counts.md`.
 
+**Insight identity** includes the project and normalized content. A legacy content-only id is
+reinforced only in its own scope. `mem::reflect` counts only attempted clusters in
+`clustersProcessed`, reports `clustersFailed`, and reports failure when all attempts fail.
+Scheduled consolidation retries a project on any cluster failure; unchanged clusters stay cached.
+
 ### MCP Tool Handler
 ```typescript
 case "memory_your_tool": {
