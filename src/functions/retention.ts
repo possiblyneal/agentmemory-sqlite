@@ -348,7 +348,9 @@ export function registerRetentionFunctions(
           const mem = await kv.get<Memory>(scope, candidate.memoryId);
           await deleteIndexed(kv, scope, candidate.memoryId);
           if (mem && mem.imageRef) {
-            await decrementImageRef(kv, sdk, mem.imageRef);
+            await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {
+              logger.warn("Retention could not release image reference", { memoryId: mem.id, error: String(error) });
+            });
           }
           await kv.delete(KV.retentionScores, candidate.memoryId);
           evicted++;

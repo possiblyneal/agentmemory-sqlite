@@ -541,10 +541,11 @@ export function getSignalDefaultTtlMs(): number {
 export function getAutoForgetIntervalMs(): number {
   const raw = getMergedEnv()["AUTO_FORGET_INTERVAL_MS"];
   const parsed = parseOptionalPositiveInt(raw);
-  if (raw !== undefined && parsed == null) {
+  if (parsed != null && parsed <= 2_147_483_647) return parsed;
+  if (raw !== undefined) {
     logger.warn("Invalid AUTO_FORGET_INTERVAL_MS; using default", { value: raw });
   }
-  return parsed ?? 3_600_000;
+  return 3_600_000;
 }
 
 const BACKUP_KEEP_DEFAULT = 7;

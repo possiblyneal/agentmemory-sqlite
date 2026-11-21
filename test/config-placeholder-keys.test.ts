@@ -67,7 +67,7 @@ describe("auto-forget interval", () => {
     vi.restoreAllMocks();
   });
 
-  it.each(["abc", "1h", "0", "-5", "1.5", "", "Infinity"])("warns and defaults for %s", async (raw) => {
+  it.each(["abc", "1h", "0", "-5", "1.5", "", "Infinity", "2147483648"])("warns and defaults for %s", async (raw) => {
     process.env.AUTO_FORGET_INTERVAL_MS = raw;
     const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const { getAutoForgetIntervalMs } = await import("../src/config.js");

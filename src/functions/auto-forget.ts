@@ -55,7 +55,9 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             if (!dryRun) {
               await deleteIndexed(kv, KV.memories, mem.id);
               if (mem.imageRef) {
-                await decrementImageRef(kv, sdk, mem.imageRef);
+                await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {
+                  logger.warn("Auto-forget could not release image reference", { memoryId: mem.id, error: String(error) });
+                });
               }
               evictedSourceIds.push(mem.id);
               await recordAudit(kv, "delete", "mem::auto-forget", [mem.id], {
