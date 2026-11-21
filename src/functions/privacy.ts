@@ -1,8 +1,11 @@
 import type { ISdk } from "../engine/types.js";
 
-const PRIVATE_TAG_RE = /<private>[\s\S]*?<\/private>/gi;
+const PRIVATE_TAG_RE = /<private>[\s\S]*?(?:<\\*\/private>|$)/gi;
 
 const SECRET_PATTERN_SOURCES = [
+  /\\*["'][\w-]*(?:api[_-]?key|secret|password|passwd|pwd)\\*["']\s*[=:]\s*\\*["'][^"'\\]+\\*["']/gi,
+  /(?:\\*["'][\w-]*(?:api[_-]?key|secret|token|password|credential|auth)\\*["']|(?:api[_-]?key|secret|token|password|credential|auth))\s*[=:]\s*\\*["']?[A-Za-z0-9_\-/.+]{20,}\\*["']?/gi,
+  /(?:\\*["'][\w-]*(?:api[_-]?key|secret|password|passwd|pwd)\\*["']|(?:api[_-]?key|secret|password|passwd|pwd))\s*[=:]\s*\\*["']?(?!(?:true|false|null)\b)[^\s"'\\]+\\*["']?/gi,
   /(?:api[_-]?key|secret|token|password|credential|auth)[\s]*[=:]\s*["']?[A-Za-z0-9_\-/.+]{20,}["']?/gi,
   /(?:api[_-]?key|secret|password|passwd|pwd)[\s]*[=:]\s*["']?[^\s"']+["']?/gi,
   /Bearer\s+[A-Za-z0-9._\-+/=]{20,}/gi,
@@ -30,6 +33,23 @@ export function stripPrivateData(input: string): string {
     result = result.replace(pattern, "[REDACTED_SECRET]");
   }
   return result.replace(URL_CREDENTIAL_RE, "$1[REDACTED_SECRET]$2");
+}
+
+const SECRET_KEY_RE = /(?:api[_-]?key|secret|token|password|passwd|credentials?|auth|authorization|private[_-]?key)$/i;
+
+export function stripPrivateDataDeep(value: unknown, key?: string): unknown {
+  if (typeof value === "string") {
+    return key !== undefined && value !== "" && SECRET_KEY_RE.test(key)
+      ? "[REDACTED_SECRET]"
+      : stripPrivateData(value);
+  }
+  if (Array.isArray(value)) return value.map((item) => stripPrivateDataDeep(item));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [stripPrivateData(k), stripPrivateDataDeep(v, k)]),
+    );
+  }
+  return value;
 }
 
 // Every function that persists Agent-supplied free text scrubs it first,

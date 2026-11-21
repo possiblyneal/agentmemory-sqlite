@@ -4,7 +4,7 @@ import type { CompressedObservation, RawObservation, HookPayload, Origin, Sessio
 const TOOL_HOOKS = new Set(["pre_tool_use", "post_tool_use", "post_tool_failure"]);
 import { KV, STREAM, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
-import { stripPrivateData } from "./privacy.js";
+import { stripPrivateDataDeep } from "./privacy.js";
 import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
@@ -412,14 +412,7 @@ export function registerObserveFunction(
         }
       }
 
-      let sanitizedRaw: unknown = payload.data;
-      try {
-        const jsonStr = JSON.stringify(payload.data);
-        const sanitized = stripPrivateData(jsonStr);
-        sanitizedRaw = JSON.parse(sanitized);
-      } catch {
-        sanitizedRaw = stripPrivateData(String(payload.data));
-      }
+      const sanitizedRaw = stripPrivateDataDeep(payload.data);
 
       let originChannel: Origin["channel"] = "agent";
       if (payload.hookType === "prompt_submit") originChannel = "user";
