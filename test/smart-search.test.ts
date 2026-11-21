@@ -349,6 +349,52 @@ describe("Smart Search Function", () => {
     });
   });
 
+  describe("scoped page when other projects crowd the over-fetch (#444)", () => {
+    const hit = (id: string, sessionId: string, score: number): HybridSearchResult => ({
+      observation: makeObs({ id, sessionId, title: id }),
+      bm25Score: score,
+      vectorScore: 0,
+      combinedScore: score / 10,
+      sessionId,
+    });
+
+    async function crowded(others: number) {
+      await kv.set("mem:sessions", "ses_other", {
+        id: "ses_other", project: "other-project", cwd: "/other",
+        startedAt: "2026-02-01T00:00:00Z", status: "completed", observationCount: others,
+      });
+      const ranked = [
+        ...Array.from({ length: others }, (_, i) => hit(`obs_far_${i}`, "ses_other", 9)),
+        ...["obs_1", "obs_2"].map((id, i) => hit(id, "ses_1", 8 - i)),
+        hit("obs_3", "ses_1", 6),
+      ];
+      const requested: number[] = [];
+      registerSmartSearchFunction(sdk as never, kv as never, async (_q, limit) => {
+        requested.push(limit);
+        return ranked.slice(0, limit);
+      });
+      return requested;
+    }
+
+    it("returns this project's matches when 150 stronger ones belong elsewhere", async () => {
+      await kv.set("mem:obs:ses_1", "obs_3", makeObs({ id: "obs_3", sessionId: "ses_1" }));
+      await crowded(150);
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth", project: "my-project", limit: 5,
+      })) as { results: CompactSearchResult[] };
+      expect(result.results.map((r) => r.obsId)).toEqual(["obs_1", "obs_2", "obs_3"]);
+    });
+
+    it("stops widening at the cap when nothing in scope turns up", async () => {
+      const requested = await crowded(5000);
+      const result = (await sdk.trigger("mem::smart-search", {
+        query: "auth", project: "my-project", limit: 5,
+      })) as { results: CompactSearchResult[] };
+      expect(result.results).toEqual([]);
+      expect(Math.max(...requested)).toBeLessThanOrEqual(1600);
+    });
+  });
+
   describe("lesson inclusion (#lesson-visibility)", () => {
     it("compact mode returns lessons array alongside observation results", async () => {
       sdk.registerFunction("mem::lesson-recall", async (payload: any) => ({

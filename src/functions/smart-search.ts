@@ -41,6 +41,8 @@ import { recallSemanticFacts } from "./semantic-recall.js";
 const MIN_BM25_SCORE = 3.5;
 const MIN_BM25_RATIO_TO_BEST = 0.5;
 const MIN_COSINE_SCORE = 0.3;
+const OVER_FETCH_GROWTH = 4;
+const MAX_OVER_FETCH = 1600;
 
 function aboveRelevanceFloor(hits: HybridSearchResult[]): HybridSearchResult[] {
   const best = Math.max(0, ...hits.map((h) => h.bm25Score));
@@ -255,7 +257,7 @@ export function registerSmartSearchFunction(
         ? Math.max(limit * 10, 100)
         : limit;
 
-      const [hybridResults, lessons, insights, semanticFacts] = await Promise.all([
+      const [firstHybrid, lessons, insights, semanticFacts] = await Promise.all([
         searchFn(data.query, overFetchLimit),
         includeLessons
           ? recallLessons(sdk, data.query, recallLimit, project)
@@ -271,11 +273,29 @@ export function registerSmartSearchFunction(
       // over-fetch instead of leaving the page short. The floors are
       // corpus-relative, so some hit always clears them.
       const inProject = project ? createProjectMatcher(kv, project) : null;
-      const inScope: HybridSearchResult[] = [];
-      for (const r of hybridResults) {
-        if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
-        if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
-        inScope.push(r);
+      const scopeHits = async (hits: HybridSearchResult[]) => {
+        const kept: HybridSearchResult[] = [];
+        for (const r of hits) {
+          if (filterAgentId && r.observation.agentId !== filterAgentId) continue;
+          if (inProject && !(await inProject(r.sessionId, r.observation.id))) continue;
+          kept.push(r);
+        }
+        return kept;
+      };
+      let fetched = overFetchLimit;
+      let hybridResults = firstHybrid;
+      let inScope = await scopeHits(hybridResults);
+      // A full over-fetch that left the scoped page short may hide matches
+      // below the window, so widen it, up to MAX_OVER_FETCH.
+      while (
+        (filterAgentId || project) &&
+        inScope.length < limit &&
+        hybridResults.length >= fetched &&
+        fetched < MAX_OVER_FETCH
+      ) {
+        fetched = Math.min(fetched * OVER_FETCH_GROWTH, MAX_OVER_FETCH);
+        hybridResults = await searchFn(data.query, fetched);
+        inScope = await scopeHits(hybridResults);
       }
       const aboveFloor = aboveRelevanceFloor(inScope);
       const shadowed = await shadowedMemoryIds(
