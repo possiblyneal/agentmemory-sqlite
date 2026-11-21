@@ -9,6 +9,7 @@ import type {
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { isConsolidationEnabled, isGraphExtractionEnabled } from "../config.js";
 import { graphLegDisabled } from "../state/graph-indexes.js";
 import { recordAudit } from "./audit.js";
@@ -359,7 +360,21 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               evictedMemIds.add(mem.id);
             } else {
               try {
-                await deleteIndexed(kv, KV.memories, mem.id);
+                const removed = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+                  const current = await kv.get<Memory>(KV.memories, mem.id);
+                  if (!current) return false;
+                  await deleteIndexed(kv, KV.memories, mem.id);
+                  if (current.imageRef) {
+                    await decrementImageRef(kv, sdk, current.imageRef).catch((err: unknown) => {
+                      logger.warn("Eviction could not release image reference", {
+                        id: mem.id,
+                        error: err instanceof Error ? err.message : String(err),
+                      });
+                    });
+                  }
+                  return true;
+                });
+                if (!removed) continue;
                 stats.expiredMemories++;
                 evictedMemIds.add(mem.id);
                 evictedSourceIds.push(mem.id);
@@ -371,9 +386,6 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                   error: err instanceof Error ? err.message : String(err),
                 });
                 continue;
-              }
-              if (mem.imageRef) {
-                await decrementImageRef(kv, sdk, mem.imageRef);
               }
               await recordAudit(kv, "delete", "mem::evict", [mem.id], {
                 resource: "memory",
@@ -395,7 +407,21 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               stats.nonLatestMemories++;
             } else {
               try {
-                await deleteIndexed(kv, KV.memories, mem.id);
+                const removed = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+                  const current = await kv.get<Memory>(KV.memories, mem.id);
+                  if (!current) return false;
+                  await deleteIndexed(kv, KV.memories, mem.id);
+                  if (current.imageRef) {
+                    await decrementImageRef(kv, sdk, current.imageRef).catch((err: unknown) => {
+                      logger.warn("Eviction could not release image reference", {
+                        id: mem.id,
+                        error: err instanceof Error ? err.message : String(err),
+                      });
+                    });
+                  }
+                  return true;
+                });
+                if (!removed) continue;
                 stats.nonLatestMemories++;
                 evictedSourceIds.push(mem.id);
               } catch (err) {
@@ -406,9 +432,6 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
                   error: err instanceof Error ? err.message : String(err),
                 });
                 continue;
-              }
-              if (mem.imageRef) {
-                await decrementImageRef(kv, sdk, mem.imageRef);
               }
               await recordAudit(kv, "delete", "mem::evict", [mem.id], {
                 resource: "memory",

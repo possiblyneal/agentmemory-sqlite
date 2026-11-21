@@ -4,9 +4,10 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed, deindexSupersededMemory } from "./search.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 import { lowerObservationCounts } from "./observe.js";
 import { evictGraphForSources } from "./graph-eviction.js";
-import { refersToDifferentDates } from "../state/memory-utils.js";
+import { refersToDifferentDates, MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { logger } from "../logger.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -53,12 +54,16 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
             result.ttlExpired.push(mem.id);
             deletedIds.add(mem.id);
             if (!dryRun) {
-              await deleteIndexed(kv, KV.memories, mem.id);
-              if (mem.imageRef) {
-                await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {
-                  logger.warn("Auto-forget could not release image reference", { memoryId: mem.id, error: String(error) });
-                });
-              }
+              await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+                const current = await kv.get<Memory>(KV.memories, mem.id);
+                if (!current) return;
+                await deleteIndexed(kv, KV.memories, mem.id);
+                if (current.imageRef) {
+                  await decrementImageRef(kv, sdk, current.imageRef).catch((error) => {
+                    logger.warn("Auto-forget could not release image reference", { memoryId: current.id, error: String(error) });
+                  });
+                }
+              });
               evictedSourceIds.push(mem.id);
               await recordAudit(kv, "delete", "mem::auto-forget", [mem.id], {
                 resource: "memory",
@@ -149,9 +154,13 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                     new Date(memB.createdAt).getTime()
                     ? memA
                     : memB;
-                older.isLatest = false;
-                await kv.set(KV.memories, older.id, older);
-                deindexSupersededMemory(older.id);
+                await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+                  const current = await kv.get<Memory>(KV.memories, older.id);
+                  if (!current) return;
+                  current.isLatest = false;
+                  await kv.set(KV.memories, current.id, current);
+                  deindexSupersededMemory(current.id);
+                });
                 await recordAudit(kv, "forget", "mem::auto-forget", [older.id], {
                   resource: "memory",
                   reason: "auto-forget contradiction",

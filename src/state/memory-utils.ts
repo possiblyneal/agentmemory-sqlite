@@ -166,3 +166,5 @@ export function memoryChunkJobs(
     text: header + "\n\n" + chunk,
   }));
 }
+
+export const MEMORY_WRITE_LOCK = "mem:remember";

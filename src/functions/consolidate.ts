@@ -7,6 +7,7 @@ import type {
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
 import { deindexSupersededMemory, indexNewMemoryVersion } from "./search.js";
@@ -113,7 +114,7 @@ export function registerConsolidateFunction(
       }
 
       let consolidated = 0;
-      const existingMemories = await kv.list<Memory>(KV.memories);
+      const existingMemories = structuredClone(await kv.list<Memory>(KV.memories));
       const writtenTitles = new Set<string>();
       const scopedProject =
         typeof data.project === "string" && data.project.trim().length > 0
@@ -185,62 +186,66 @@ export function registerConsolidateFunction(
                 m.title.toLowerCase() === parsed.title.toLowerCase(),
             );
 
-          if (existingMatch) {
-            const evolved: Memory = {
-              id: generateId("mem"),
-              createdAt: now,
-              updatedAt: now,
-              ...parsed,
-              version: (existingMatch.version || 1) + 1,
-              parentId: existingMatch.id,
-              supersedes: [
-                existingMatch.id,
-                ...(existingMatch.supersedes || []),
-              ],
-              sourceObservationIds: [
-                ...new Set([...(existingMatch.sourceObservationIds ?? []), ...obsIds]),
-              ],
-              isLatest: true,
-              ...(scopedProject !== undefined && { project: scopedProject }),
-            };
-            await kv.set(KV.memories, evolved.id, evolved);
-            existingMatch.isLatest = false;
-            await kv.set(KV.memories, existingMatch.id, existingMatch);
-            existingMemories.push(evolved);
-            writtenTitles.add(evolved.title.toLowerCase());
-            deindexSupersededMemory(existingMatch.id);
-            await indexNewMemoryVersion(evolved);
-            await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
-              action: "mark_non_latest",
-              concept,
-            });
-            await recordAudit(kv, "evolve", "mem::consolidate", [evolved.id], {
-              action: "evolve_memory",
-              oldId: existingMatch.id,
-              newId: evolved.id,
-              concept,
-            });
-            consolidated++;
-          } else {
-            const memory: Memory = {
-              id: generateId("mem"),
-              createdAt: now,
-              updatedAt: now,
-              ...parsed,
-              sourceObservationIds: obsIds,
-              version: 1,
-              isLatest: true,
-              ...(scopedProject !== undefined && { project: scopedProject }),
-            };
-            await kv.set(KV.memories, memory.id, memory);
-            existingMemories.push(memory);
-            writtenTitles.add(memory.title.toLowerCase());
-            await recordAudit(kv, "remember", "mem::consolidate", [memory.id], {
-              action: "create_memory",
-              concept,
-            });
-            consolidated++;
-          }
+          await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+            if (existingMatch) {
+              const current = await kv.get<Memory>(KV.memories, existingMatch.id);
+              if (!current || !evolvable(current) || current.version !== existingMatch.version || current.updatedAt !== existingMatch.updatedAt) return;
+              const evolved: Memory = {
+                id: generateId("mem"),
+                createdAt: now,
+                updatedAt: now,
+                ...parsed,
+                version: (current.version || 1) + 1,
+                parentId: existingMatch.id,
+                supersedes: [
+                  existingMatch.id,
+                  ...(current.supersedes || []),
+                ],
+                sourceObservationIds: [
+                  ...new Set([...(current.sourceObservationIds ?? []), ...obsIds]),
+                ],
+                isLatest: true,
+                ...(scopedProject !== undefined && { project: scopedProject }),
+              };
+              await kv.set(KV.memories, evolved.id, evolved);
+              existingMatch.isLatest = false;
+              await kv.set(KV.memories, current.id, { ...current, isLatest: false });
+              existingMemories.push(evolved);
+              writtenTitles.add(evolved.title.toLowerCase());
+              deindexSupersededMemory(existingMatch.id);
+              await indexNewMemoryVersion(evolved);
+              await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
+                action: "mark_non_latest",
+                concept,
+              });
+              await recordAudit(kv, "evolve", "mem::consolidate", [evolved.id], {
+                action: "evolve_memory",
+                oldId: existingMatch.id,
+                newId: evolved.id,
+                concept,
+              });
+              consolidated++;
+            } else {
+              const memory: Memory = {
+                id: generateId("mem"),
+                createdAt: now,
+                updatedAt: now,
+                ...parsed,
+                sourceObservationIds: obsIds,
+                version: 1,
+                isLatest: true,
+                ...(scopedProject !== undefined && { project: scopedProject }),
+              };
+              await kv.set(KV.memories, memory.id, memory);
+              existingMemories.push(memory);
+              writtenTitles.add(memory.title.toLowerCase());
+              await recordAudit(kv, "remember", "mem::consolidate", [memory.id], {
+                action: "create_memory",
+                concept,
+              });
+              consolidated++;
+            }
+          });
         } catch (err) {
           logger.warn("Consolidation failed for concept", {
             concept,

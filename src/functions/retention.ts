@@ -11,6 +11,8 @@ import type { AccessLog } from "./access-tracker.js";
 import { emptyAccessLog, normalizeAccessLog } from "./access-tracker.js";
 import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../state/memory-utils.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { logger } from "../logger.js";
 
@@ -345,13 +347,18 @@ export function registerRetentionFunctions(
             continue;
           }
 
-          const mem = await kv.get<Memory>(scope, candidate.memoryId);
-          await deleteIndexed(kv, scope, candidate.memoryId);
-          if (mem && mem.imageRef) {
-            await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {
-              logger.warn("Retention could not release image reference", { memoryId: mem.id, error: String(error) });
-            });
-          }
+          const evictScope = scope;
+          const remove = async () => {
+            const mem = await kv.get<Memory>(evictScope, candidate.memoryId);
+            await deleteIndexed(kv, evictScope, candidate.memoryId);
+            if (mem && mem.imageRef) {
+              await decrementImageRef(kv, sdk, mem.imageRef).catch((error) => {
+                logger.warn("Retention could not release image reference", { memoryId: mem.id, error: String(error) });
+              });
+            }
+          };
+          if (evictScope === KV.memories) await withKeyedLock(MEMORY_WRITE_LOCK, remove);
+          else await remove();
           await kv.delete(KV.retentionScores, candidate.memoryId);
           evicted++;
           evictedIds.push(candidate.memoryId);

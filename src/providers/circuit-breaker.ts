@@ -15,6 +15,8 @@ export class CircuitBreaker {
   private failures = 0;
   private lastFailureAt: number | null = null;
   private openedAt: number | null = null;
+  private probeInFlight = false;
+  private generation = 0;
 
   private readonly failureThreshold: number;
   private readonly failureWindowMs: number;
@@ -31,33 +33,48 @@ export class CircuitBreaker {
 
   get isAllowed(): boolean {
     if (this.state === "closed") return true;
+    const now = Date.now();
     if (this.state === "open") {
-      if (
-        this.openedAt &&
-        Date.now() - this.openedAt >= this.recoveryTimeoutMs
-      ) {
-        this.state = "half-open";
-        return true;
+      if (this.openedAt === null || now - this.openedAt < this.recoveryTimeoutMs) {
+        return false;
       }
-      return false;
+      this.state = "half-open";
+      this.probeInFlight = false;
     }
+    if (this.probeInFlight) return false;
+    this.probeInFlight = true;
+    this.generation++;
     return true;
   }
 
-  recordSuccess(): void {
+  acquire(): number | null {
+    return this.isAllowed ? this.generation : null;
+  }
+
+  releaseProbe(generation = this.generation): void {
+    if (generation === this.generation && this.state === "half-open") this.probeInFlight = false;
+  }
+
+  recordSuccess(generation = this.generation): void {
+    if (generation !== this.generation) return;
     if (this.state === "half-open") {
       this.state = "closed";
+      this.generation++;
       this.failures = 0;
       this.lastFailureAt = null;
       this.openedAt = null;
+      this.probeInFlight = false;
     }
   }
 
-  recordFailure(): void {
+  recordFailure(generation = this.generation): void {
+    if (generation !== this.generation || this.state === "open") return;
     const now = Date.now();
     if (this.state === "half-open") {
       this.state = "open";
+      this.generation++;
       this.openedAt = now;
+      this.probeInFlight = false;
       return;
     }
     if (this.lastFailureAt && now - this.lastFailureAt > this.failureWindowMs) {
@@ -67,6 +84,7 @@ export class CircuitBreaker {
     this.lastFailureAt = now;
     if (this.failures >= this.failureThreshold) {
       this.state = "open";
+      this.generation++;
       this.openedAt = now;
     }
   }

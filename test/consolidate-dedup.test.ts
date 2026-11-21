@@ -6,6 +6,9 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerConsolidateFunction } from "../src/functions/consolidate.js";
 import { KV } from "../src/state/schema.js";
+import { StateKV } from "../src/state/kv.js";
+import { withKeyedLock } from "../src/state/keyed-mutex.js";
+import { MEMORY_WRITE_LOCK } from "../src/state/memory-utils.js";
 import { getSearchIndex } from "../src/functions/search.js";
 import { memoryToIndexDoc } from "../src/state/memory-utils.js";
 import type { CompressedObservation, Memory, MemoryProvider, Session } from "../src/types.js";
@@ -94,6 +97,58 @@ async function setup(concepts: string[][]) {
 }
 
 describe("mem::consolidate dedup", () => {
+  it.each(["delete", "supersede", "update"])("skips a predecessor changed by %s during the model call", async (change) => {
+    const backing = makeMockKV();
+    const sdk = makeMockSdk();
+    const stateSdk = {
+      trigger: async ({ function_id, payload }: { function_id: string; payload: { scope: string; key: string; value: unknown } }) => {
+        if (function_id === "state::get") return backing.get(payload.scope, payload.key);
+        if (function_id === "state::set") return backing.set(payload.scope, payload.key, payload.value);
+        if (function_id === "state::delete") return backing.delete(payload.scope, payload.key);
+        if (function_id === "state::list") return backing.list(payload.scope);
+        throw new Error(`Unexpected function ${function_id}`);
+      },
+    };
+    const kv = new StateKV(stateSdk as never);
+    await kv.set(KV.sessions, session.id, session);
+    for (let i = 0; i < 3; i++) await kv.set(KV.observations("s1"), `o${i}`, obs(`o${i}`, ["auth"]));
+    const first: Memory = {
+      id: "first", title: "old", content: "old content", type: "pattern", concepts: [], files: [],
+      sessionIds: ["s1"], strength: 7, version: 1, isLatest: true, project: "api",
+      createdAt: "2026-01-01", updatedAt: "2026-01-01", sourceObservationIds: ["o0"],
+    };
+    await kv.set(KV.memories, first.id, first);
+    getSearchIndex().clear();
+    getSearchIndex().add(memoryToIndexDoc(first), "memory");
+    let release!: (response: string) => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const provider = rewordingProvider();
+    (provider.compress as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      started();
+      return new Promise<string>((resolve) => { release = resolve; });
+    });
+    registerConsolidateFunction(sdk as never, kv, provider);
+    const running = sdk.trigger("mem::consolidate", { project: "api", minObservations: 1 });
+    await entered;
+    await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+      if (change === "delete") {
+        await kv.delete(KV.memories, first.id);
+        getSearchIndex().remove(first.id);
+      } else if (change === "supersede") {
+        await kv.set(KV.memories, first.id, { ...first, isLatest: false });
+      } else {
+        await kv.set(KV.memories, first.id, { ...first, updatedAt: "2026-02-01", content: "updated" });
+      }
+    });
+    release("<memory><type>pattern</type><title>new</title><content>new content</content></memory>");
+    expect(await running).toMatchObject({ consolidated: 0 });
+    const memories = await kv.list<Memory>(KV.memories);
+    expect(memories).toHaveLength(change === "delete" ? 0 : 1);
+    if (change === "supersede") expect(memories[0].isLatest).toBe(false);
+    if (change === "update") expect(memories[0].content).toBe("updated");
+    if (change === "delete") expect(getSearchIndex().has(first.id)).toBe(false);
+  });
   it("writes nothing on a second run over unchanged input", async () => {
     const { run, kv } = await setup([["auth"], ["auth"], ["auth"]]);
     expect(await run()).toMatchObject({ consolidated: 1 });

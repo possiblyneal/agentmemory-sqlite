@@ -72,19 +72,21 @@ export class ResilientProvider implements MemoryProvider {
     fn: () => Promise<string>,
   ): Promise<string> {
     const breaker = this.breakers[operation];
-    if (!breaker.isAllowed) {
-      throw new Error("circuit_breaker_open");
-    }
+    if (breaker.getState().state === "open") throw new Error("circuit_breaker_open");
     await this.acquireSlot();
     try {
-      const result = await fn();
-      breaker.recordSuccess();
-      return result;
-    } catch (err) {
-      // A provider that says "busy" or filtered one prompt is healthy; opening
-      // the breaker on it would fail unrelated work for the whole cooldown.
-      if (!isProviderBusy(err) && !isContentFilterRejection(err)) breaker.recordFailure();
-      throw err;
+      const generation = breaker.acquire();
+      if (generation === null) throw new Error("circuit_breaker_open");
+      try {
+        const result = await fn();
+        breaker.recordSuccess(generation);
+        return result;
+      } catch (err) {
+        // A busy or filtered prompt does not mean the provider is down.
+        if (!isProviderBusy(err) && !isContentFilterRejection(err)) breaker.recordFailure(generation);
+        else breaker.releaseProbe(generation);
+        throw err;
+      }
     } finally {
       this.releaseSlot();
     }

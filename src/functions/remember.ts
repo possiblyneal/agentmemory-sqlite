@@ -9,6 +9,7 @@ import {
   memoryToObservation,
   refersToDifferentDates,
   MEMORY_SESSION,
+  MEMORY_WRITE_LOCK,
 } from "../state/memory-utils.js";
 import { recordAudit } from "./audit.js";
 import { getSearchIndex, isMemoryIndexReady, vectorIndexAddBatchGuarded, deindexSupersededMemory, deleteIndexed } from "./search.js";
@@ -130,7 +131,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         return { success: false, error: "a Memory cannot have both a project and global" };
       }
 
-      const saved = await withKeyedLock("mem:remember", async () => {
+      const saved = await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
         // Candidate generation: query the BM25 index with the new content
         // and Jaccard-compare only the top hits, instead of walking the
         // full memory corpus on every save. The index receives every
@@ -392,15 +393,18 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
       const { decrementImageRef } = await import("./image-refs.js");
 
       if (data.memoryId) {
-        const mem = await kv.get<Memory>(KV.memories, data.memoryId);
-        if (mem) {
-          await deleteIndexed(kv, KV.memories, data.memoryId);
-          if (mem.imageRef) {
-            await decrementImageRef(kv, sdk, mem.imageRef);
+        const memoryId = data.memoryId;
+        await withKeyedLock(MEMORY_WRITE_LOCK, async () => {
+          const mem = await kv.get<Memory>(KV.memories, memoryId);
+          if (mem) {
+            await deleteIndexed(kv, KV.memories, memoryId);
+            if (mem.imageRef) {
+              await decrementImageRef(kv, sdk, mem.imageRef);
+            }
+            deletedMemoryIds.push(memoryId);
+            deleted++;
           }
-          deletedMemoryIds.push(data.memoryId);
-          deleted++;
-        }
+        });
       }
 
       if (
