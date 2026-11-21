@@ -418,6 +418,9 @@ day-month with an optional year, and month-year. A bare month is not matched; `m
 short forms count only beside an ordinal, a year, or after "on". The in-process Engine rebuilds
 BM25 from content at boot, so there is no migration.
 
+### Search and consolidation
+`memoryToObservation()` carries the saved Memory type as optional `memoryType` on full, compact and narrative `mem::search` results and smart-search results; `memory_recall` rendering is unchanged. Graph retrieval keeps an Observation's best score among paths returned from different start nodes. `mem::consolidate` serializes its own runs, counts failed model calls toward its ten-call budget, writes a successor before demoting its predecessor, and updates the index before the predecessor audit. A failed demotion can leave two latest versions; cross-writer snapshot races are not covered by this lock.
+
 ### Search on the event loop
 Search runs on the daemon's one event loop, which also answers `/livez` and the hooks. BM25
 prefix expansion reads the vocabulary from buckets keyed by a term's first 2 characters, kept

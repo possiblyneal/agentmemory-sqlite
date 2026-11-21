@@ -82,6 +82,7 @@ export function memoryToObservation(memory: Memory): CompressedObservation {
     concepts: memory.concepts,
     files: memory.files,
     importance: memory.strength,
+    memoryType: memory.type,
     // Carry the owning agent through so agent-scoped search filters see
     // memories, not just raw observations. Dropping it made every memory
     // invisible to any agentId-scoped query.

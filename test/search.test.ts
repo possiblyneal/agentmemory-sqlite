@@ -7,7 +7,7 @@ vi.mock("../src/logger.js", () => ({
 import { registerSearchFunction, getSearchIndex, rebuildIndex, setVectorIndex, setEmbeddingProvider, getVectorIndex } from "../src/functions/search.js";
 import { VectorIndex } from "../src/state/vector-index.js";
 import { KV } from "../src/state/schema.js";
-import type { CompressedObservation, Session } from "../src/types.js";
+import type { CompressedObservation, Memory, Session } from "../src/types.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -126,6 +126,23 @@ describe("mem::search", () => {
     expect(result.format).toBe("compact");
     expect(result.results[0]?.obsId).toBe("obs_a");
     expect(result.results[0]?.title).toBe("Auth middleware decision");
+  });
+
+  it("preserves a Memory type in narrative results without changing plain Observations", async () => {
+    const memory: Memory = {
+      id: "mem_auth", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      type: "fact", title: "Auth fact", content: "Auth middleware uses tokens", concepts: ["auth"],
+      files: [], sessionIds: [], strength: 5, version: 1, isLatest: true,
+    };
+    await kv.set(KV.memories, memory.id, memory);
+    await rebuildIndex(kv as never);
+    const result = await sdk.trigger("mem::search", { query: "auth", format: "narrative" }) as {
+      results: Array<{ obsId: string; memoryType?: string }>;
+    };
+    expect(result.results.find((row) => row.obsId === memory.id)?.memoryType).toBe("fact");
+    const observation = result.results.find((row) => row.obsId === "obs_a");
+    expect(observation).toBeDefined();
+    expect(observation).not.toHaveProperty("memoryType");
   });
 
   it("returns narrative text and respects token budget", async () => {

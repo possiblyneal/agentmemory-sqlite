@@ -324,6 +324,7 @@ export function registerSmartSearchFunction(
         sessionId: r.sessionId,
         title: r.observation.title,
         type: r.observation.type,
+        memoryType: r.observation.memoryType,
         score: r.combinedScore,
         timestamp: r.observation.timestamp,
       }));

@@ -173,15 +173,15 @@ export class GraphRetrieval {
   ): Promise<GraphRetrievalResult[]> {
     if (matchingNodes.length === 0) return [];
 
-    // Which start node first claims an observation decides its score,
-    // so iterate in a deterministic order regardless of whether the
-    // matches came from enumeration or the sharded name catalog.
     const orderedMatches = [...matchingNodes].sort((a, b) =>
       a.id.localeCompare(b.id),
     );
 
-    const results: GraphRetrievalResult[] = [];
-    const visitedObs = new Set<string>();
+    const best = new Map<string, GraphRetrievalResult>();
+    const keepBest = (result: GraphRetrievalResult): void => {
+      const held = best.get(result.obsId);
+      if (!held || result.score > held.score) best.set(result.obsId, result);
+    };
 
     for (const startNode of orderedMatches) {
       const paths = await this.dijkstraTraversal(
@@ -193,9 +193,6 @@ export class GraphRetrieval {
       for (const path of paths) {
         const lastNode = path[path.length - 1].node;
         for (const obsId of lastNode.sourceObservationIds) {
-          if (visitedObs.has(obsId)) continue;
-          visitedObs.add(obsId);
-
           const pathLength = path.length;
           const edgeWeights = path
             .filter((s) => s.edge)
@@ -206,7 +203,7 @@ export class GraphRetrieval {
               : 0.5;
           const score = avgWeight * (1 / pathLength);
 
-          results.push({
+          keepBest({
             obsId,
             sessionId: lastNode.sessionId ?? "",
             score,
@@ -217,9 +214,7 @@ export class GraphRetrieval {
       }
 
       for (const obsId of startNode.sourceObservationIds) {
-        if (visitedObs.has(obsId)) continue;
-        visitedObs.add(obsId);
-        results.push({
+        keepBest({
           obsId,
           sessionId: startNode.sessionId ?? "",
           score: 1.0,
@@ -229,8 +224,9 @@ export class GraphRetrieval {
       }
     }
 
-    results.sort((a, b) => b.score - a.score);
-    const top = results.slice(0, maxResults);
+    const top = [...best.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxResults);
     // Resolve sessions only for the surviving top-K so verification/scan
     // work never runs for results that get trimmed away.
     await this.resolveSessionIds(top);
@@ -281,21 +277,22 @@ export class GraphRetrieval {
       a.id.localeCompare(b.id),
     );
 
-    const results: GraphRetrievalResult[] = [];
-    const visitedObs = new Set<string>(obsIds);
+    const given = new Set(obsIds);
+    const best = new Map<string, GraphRetrievalResult>();
 
     for (const node of orderedLinked) {
       const paths = await this.dijkstraTraversal(node, getNeighbors, maxDepth);
       for (const path of paths) {
         const lastNode = path[path.length - 1].node;
         for (const obsId of lastNode.sourceObservationIds) {
-          if (visitedObs.has(obsId)) continue;
-          visitedObs.add(obsId);
+          if (given.has(obsId)) continue;
 
           const pathLength = path.length;
           const score = 0.5 * (1 / (pathLength + 1));
 
-          results.push({
+          const held = best.get(obsId);
+          if (held && held.score >= score) continue;
+          best.set(obsId, {
             obsId,
             sessionId: lastNode.sessionId ?? "",
             score,
@@ -306,8 +303,9 @@ export class GraphRetrieval {
       }
     }
 
-    results.sort((a, b) => b.score - a.score);
-    const top = results.slice(0, maxResults);
+    const top = [...best.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxResults);
     await this.resolveSessionIds(top);
     return top;
   }
