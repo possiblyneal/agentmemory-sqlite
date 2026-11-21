@@ -495,6 +495,13 @@ Hooks and the MCP shim name the project with `resolveProject()` (`src/hooks/_pro
 An undated Observation inherits the last timestamp, or the first timestamp for leading undated
 lines. A wholly undated transcript uses one import timestamp.
 
+### Agent SDK child sessions
+
+The opt-in Agent SDK provider (`src/providers/agent-sdk.ts`) disables filesystem settings,
+uses only explicitly supplied MCP servers, and disables session persistence. Credentials
+supplied only through settings `env` are therefore unavailable to the child; use the process
+environment or the SDK's credentials file instead. The child does not receive plugins explicitly.
+
 ## Coding Standards
 
 - TypeScript, ESM only (`"type": "module"`)
