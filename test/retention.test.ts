@@ -533,4 +533,28 @@ describe("RetentionScoring", () => {
       expect(getSearchIndex().has("mem_evict")).toBe(false);
     });
   });
+
+  it("mem::retention-evict keeps the image ref when the delete fails (#437)", async () => {
+    const { registerRetentionFunctions } = await import(
+      "../src/functions/retention.js"
+    );
+    const sdk = mockSdk();
+    const kv = mockKV([{ ...makeMemory("mem_img", "fact", 500), imageRef: "/images/a.png" }]);
+    await kv.set("mem:image-refs", "/images/a.png", 2);
+    registerRetentionFunctions(sdk as never, kv as never);
+    await sdk.trigger({ function_id: "mem::retention-score", payload: {} });
+    const realDelete = kv.delete;
+    kv.delete = async (scope, key) => {
+      if (scope === "mem:memories") throw new Error("disk full");
+      return realDelete(scope, key);
+    };
+
+    const result = (await sdk.trigger({
+      function_id: "mem::retention-evict",
+      payload: { threshold: 0.9 },
+    })) as { evicted: number };
+
+    expect(result.evicted).toBe(0);
+    expect(await kv.get("mem:image-refs", "/images/a.png")).toBe(2);
+  });
 });

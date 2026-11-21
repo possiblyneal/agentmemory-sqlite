@@ -14,6 +14,7 @@ import {
   isContextInjectionEnabled,
   getSqlitePath,
   getBackupKeep,
+  getAutoForgetIntervalMs,
 } from "./config.js";
 import { createInprocSdk } from "./engine/inproc/sdk.js";
 import { SqliteVectorStore } from "./engine/inproc/vectors.js";
@@ -563,7 +564,7 @@ async function main() {
     config.streamsPort,
   );
 
-  const autoForgetIntervalMs = parseInt(process.env.AUTO_FORGET_INTERVAL_MS || "3600000", 10);
+  const autoForgetIntervalMs = getAutoForgetIntervalMs();
   const consolidationIntervalMs = parseInt(process.env.CONSOLIDATION_INTERVAL_MS || "7200000", 10);
 
   if (process.env.AUTO_FORGET_ENABLED !== "false") {

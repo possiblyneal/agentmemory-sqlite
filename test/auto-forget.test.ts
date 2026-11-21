@@ -317,4 +317,52 @@ describe("Auto-Forget Function", () => {
 
     expect(result.contradictions.length).toBe(0);
   });
+
+  describe("contradiction pass stays within one scope (#437)", () => {
+    const content = "Use React hooks for state management in all components";
+
+    it.each([
+      ["different projects", { project: "alpha" }, { project: "beta" }],
+      ["missing and present project", {}, { project: "alpha" }],
+      ["different agents", { project: "alpha", agentId: "a" }, { project: "alpha", agentId: "b" }],
+      ["missing and present agent", { project: "alpha" }, { project: "alpha", agentId: "a" }],
+      ["a Global and a scoped Memory", { project: "alpha", global: true }, { project: "alpha" }],
+    ])("keeps both latest across %s", async (_label, a, b) => {
+      await kv.set("mem:memories", "mem_1", makeMemory({ id: "mem_1", content, createdAt: "2026-01-01T00:00:00Z", ...a }));
+      await kv.set("mem:memories", "mem_2", makeMemory({ id: "mem_2", content, createdAt: "2026-02-01T00:00:00Z", ...b }));
+
+      const result = (await sdk.trigger("mem::auto-forget", {})) as { contradictions: unknown[] };
+
+      expect(result.contradictions).toHaveLength(0);
+      expect((await kv.get<Memory>("mem:memories", "mem_1"))!.isLatest).toBe(true);
+      expect((await kv.get<Memory>("mem:memories", "mem_2"))!.isLatest).toBe(true);
+    });
+
+    it("still supersedes the older of two in one project", async () => {
+      await kv.set("mem:memories", "mem_1", makeMemory({ id: "mem_1", content, project: "alpha", createdAt: "2026-01-01T00:00:00Z" }));
+      await kv.set("mem:memories", "mem_2", makeMemory({ id: "mem_2", content, project: "alpha", createdAt: "2026-02-01T00:00:00Z" }));
+
+      await sdk.trigger("mem::auto-forget", {});
+
+      expect((await kv.get<Memory>("mem:memories", "mem_1"))!.isLatest).toBe(false);
+    });
+  });
+
+  it("keeps the image ref when the TTL delete fails (#437)", async () => {
+    await kv.set("mem:memories", "mem_img", makeMemory({
+      id: "mem_img",
+      forgetAfter: "2020-01-01T00:00:00Z",
+      imageRef: "/images/a.png",
+    }));
+    await kv.set("mem:image-refs", "/images/a.png", 2);
+    const realDelete = kv.delete;
+    kv.delete = async (scope, key) => {
+      if (scope === "mem:memories") throw new Error("disk full");
+      return realDelete(scope, key);
+    };
+
+    await expect(sdk.trigger("mem::auto-forget", {})).rejects.toThrow("disk full");
+
+    expect(await kv.get("mem:image-refs", "/images/a.png")).toBe(2);
+  });
 });

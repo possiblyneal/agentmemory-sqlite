@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { refreshBootVerbose } from "./logger.js";
+import { logger, refreshBootVerbose } from "./logger.js";
+import { parseOptionalPositiveInt } from "./utils/parse-number.js";
 import { hydrateEnvFromFile, loadEnvFile } from "./hooks/_env.js";
 import pc from "picocolors";
 import { isPlaceholderKey } from "./utils/placeholder-key.js";
@@ -535,6 +536,16 @@ export function getSignalDefaultTtlMs(): number {
     SIGNAL_TTL_DEFAULT_DAYS,
   );
   return days > 0 ? days * 24 * 60 * 60 * 1000 : 0;
+}
+
+export function getAutoForgetIntervalMs(): number {
+  const raw = getMergedEnv()["AUTO_FORGET_INTERVAL_MS"];
+  const parsed = parseOptionalPositiveInt(raw);
+  if (parsed != null && parsed <= 2_147_483_647) return parsed;
+  if (raw !== undefined) {
+    logger.warn("Invalid AUTO_FORGET_INTERVAL_MS; using default", { value: raw });
+  }
+  return 3_600_000;
 }
 
 const BACKUP_KEEP_DEFAULT = 7;
