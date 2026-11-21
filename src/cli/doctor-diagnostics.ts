@@ -16,6 +16,8 @@
 //   agentmemory doctor --all       # apply every available fix without prompting (CI)
 //   agentmemory doctor --dry-run   # show what each fix WOULD do; execute nothing
 
+import { isPlaceholderKey } from "../utils/placeholder-key.js";
+
 export type DiagnosticStatus = {
   ok: boolean;
   /** Short status detail (one line). Shown alongside the check name. */
@@ -69,17 +71,6 @@ export type DiagnosticId = (typeof DIAGNOSTIC_IDS)[number];
 // Pure helpers (no I/O) — exported for direct unit testing.
 // ---------------------------------------------------------------------------
 
-/** Common placeholder values shipped in .env.example. */
-const PLACEHOLDER_VALUES = new Set([
-  "",
-  "your-key-here",
-  "sk-ant-...",
-  "sk-...",
-  "changeme",
-  "todo",
-  "xxx",
-]);
-
 const PROVIDER_KEY_NAMES = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
@@ -89,15 +80,12 @@ const PROVIDER_KEY_NAMES = [
   "MINIMAX_API_KEY",
 ] as const;
 
-/** Returns the list of provider keys that look real (non-placeholder). */
+/** Returns the list of provider keys the daemon would use (non-placeholder). */
 export function realProviderKeys(env: Record<string, string>): string[] {
   return PROVIDER_KEY_NAMES.filter((k) => {
     const v = (env[k] ?? "").trim();
-    if (!v) return false;
-    if (PLACEHOLDER_VALUES.has(v.toLowerCase())) return false;
-    // Reject values that are just dots/placeholders like "xxxx-xxxx".
-    if (/^x+$/i.test(v.replace(/[-_]/g, ""))) return false;
-    return true;
+    if (!v || isPlaceholderKey(v)) return false;
+    return !(k === "OPENAI_API_KEY" && env["OPENAI_API_KEY_FOR_LLM"] === "false");
   });
 }
 
@@ -105,10 +93,7 @@ export function realProviderKeys(env: Record<string, string>): string[] {
 export function placeholderProviderKeys(env: Record<string, string>): string[] {
   return PROVIDER_KEY_NAMES.filter((k) => {
     const v = (env[k] ?? "").trim();
-    if (!v) return false;
-    if (PLACEHOLDER_VALUES.has(v.toLowerCase())) return true;
-    if (/^x+$/i.test(v.replace(/[-_]/g, ""))) return true;
-    return false;
+    return v !== "" && isPlaceholderKey(v);
   });
 }
 
@@ -171,6 +156,9 @@ export function buildDiagnostics(effects: DoctorEffects): Diagnostic[] {
         }
         const env = effects.readEnvFile();
         const real = realProviderKeys(env);
+        if (real.length === 0 && env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true") {
+          return { ok: true, detail: "agent-sdk fallback (AGENTMEMORY_ALLOW_AGENT_SDK)" };
+        }
         return {
           ok: real.length > 0,
           detail: real.length > 0 ? `found: ${real.join(", ")}` : "no provider key set",
@@ -244,6 +232,14 @@ export function buildDiagnostics(effects: DoctorEffects): Diagnostic[] {
       fix: (ctx) => effects.openEditor(ctx.envPath),
     },
   ];
+}
+
+export function doctorPromptsAllowed(
+  env: Record<string, string | undefined>,
+  stdinIsTTY: boolean,
+  stdoutIsTTY: boolean,
+): boolean {
+  return stdinIsTTY && stdoutIsTTY && !env["CI"];
 }
 
 export type DoctorRunMode = "interactive" | "all" | "dry-run";

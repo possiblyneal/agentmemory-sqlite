@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildDiagnostics,
   DIAGNOSTIC_IDS,
+  doctorPromptsAllowed,
   dryRunPlan,
   placeholderProviderKeys,
   realProviderKeys,
@@ -196,5 +197,27 @@ describe("realProviderKeys / placeholderProviderKeys", () => {
     expect(placeholderProviderKeys({ ANTHROPIC_API_KEY: "xxxx-xxxx" })).toEqual([
       "ANTHROPIC_API_KEY",
     ]);
+  });
+});
+
+describe("doctor agrees with the daemon on the LLM provider", () => {
+  it("ignores an OpenAI key the daemon keeps off the LLM", () => {
+    expect(realProviderKeys({ OPENAI_API_KEY: "sk-real-key-value", OPENAI_API_KEY_FOR_LLM: "false" })).toEqual([]);
+  });
+
+  it("accepts the agent-sdk fallback as a provider", async () => {
+    const check = buildDiagnostics(
+      stubEffects({ readEnvFile: () => ({ AGENTMEMORY_ALLOW_AGENT_SDK: "true" }) }),
+    ).find((d) => d.id === "no-llm-provider-key")!;
+    expect((await check.check(stubCtx())).ok).toBe(true);
+  });
+});
+
+describe("doctorPromptsAllowed", () => {
+  it("prompts only with both terminals and no CI", () => {
+    expect(doctorPromptsAllowed({}, true, true)).toBe(true);
+    expect(doctorPromptsAllowed({}, false, true)).toBe(false);
+    expect(doctorPromptsAllowed({}, true, false)).toBe(false);
+    expect(doctorPromptsAllowed({ CI: "1" }, true, true)).toBe(false);
   });
 });

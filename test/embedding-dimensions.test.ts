@@ -18,6 +18,13 @@ describe("resolveDimensions", () => {
     expect(resolveDimensions("text-embedding-ada-002", undefined, ENV)).toBe(1536);
   });
 
+  it("ignores an OpenRouter variant suffix on the model id", () => {
+    expect(resolveDimensions("openai/text-embedding-3-large:floor", undefined, ENV)).toBe(3072);
+    expect(resolveDimensions("text-embedding-3-large:nitro", undefined, ENV)).toBe(3072);
+    expect(resolveDimensions("openai/text-embedding-3-large:floor", "1024", ENV)).toBe(1024);
+    expect(() => resolveDimensions("acme/unknown-embed:floor", undefined, ENV)).toThrow(/unknown/);
+  });
+
   it("lets a valid override win over the model-derived dimensions", () => {
     expect(resolveDimensions("openai/text-embedding-3-large", "1024", ENV)).toBe(1024);
     expect(resolveDimensions("text-embedding-3-small", "768", ENV)).toBe(768);

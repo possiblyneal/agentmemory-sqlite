@@ -12,6 +12,7 @@ import { OpenRouterProvider } from "./openrouter.js";
 import { ResilientProvider } from "./resilient.js";
 import { FallbackChainProvider } from "./fallback-chain.js";
 import { getEnvVar, resolveModel } from "../config.js";
+import { isPlaceholderKey } from "../utils/placeholder-key.js";
 
 export {
   createEmbeddingProvider,
@@ -84,8 +85,9 @@ function createBaseProvider(config: ProviderConfig): MemoryProvider {
         config.baseURL,
       );
     case "gemini": {
-      const geminiKey =
-        getEnvVar("GEMINI_API_KEY") || getEnvVar("GOOGLE_API_KEY");
+      const geminiKey = [getEnvVar("GEMINI_API_KEY"), getEnvVar("GOOGLE_API_KEY")].find(
+        (key) => key && !isPlaceholderKey(key),
+      );
       if (!geminiKey) {
         throw new Error(
           "GEMINI_API_KEY (or GOOGLE_API_KEY) is required for the gemini provider",

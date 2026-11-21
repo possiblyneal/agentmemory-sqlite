@@ -382,6 +382,15 @@ Memories, not Lessons.
   matches an unkeyed one keys it when every Session that fact cites is this project's, so the
   corpus written before keys can be superseded without one project closing another's fact.
 
+### Provider detection and doctor
+LLM detection and doctor share `isPlaceholderKey()` (`src/utils/placeholder-key.ts`); a
+placeholder cannot select a provider. `OPENAI_API_KEY_FOR_LLM=false` excludes the OpenAI
+key from LLM detection, and doctor accepts `AGENTMEMORY_ALLOW_AGENT_SDK=true` as a fallback.
+Doctor reports without prompting when either terminal is not a TTY or `CI` is set, unless
+`--all` explicitly applies fixes. A fallback chain exposes `describeImage` only when a
+provider supports it, trying capable providers in order. Embedding dimension lookup ignores
+an OpenRouter `:variant` suffix; an explicit dimension override still wins.
+
 ### Vector space
 Each `EmbeddingProvider` names the space its vectors live in (`vectorSpace`, default
 `${name}:${dimensions}`; the local provider adds model and pooling). Boot compares it with the

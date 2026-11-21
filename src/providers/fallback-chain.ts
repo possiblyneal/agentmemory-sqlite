@@ -4,12 +4,21 @@ export class FallbackChainProvider implements MemoryProvider {
   name: string;
   // Counts follow the primary: that is the model the text is chunked for.
   countTokens?: (text: string) => Promise<number>;
+  describeImage?: (imageData: string, mimeType: string, prompt: string) => Promise<string>;
 
   constructor(private providers: MemoryProvider[]) {
     this.name = `fallback(${providers.map((p) => p.name).join(" -> ")})`;
     const primary = providers[0];
     if (primary?.countTokens) {
       this.countTokens = (text) => primary.countTokens!(text);
+    }
+    const seeing = providers.filter((p) => p.describeImage);
+    if (seeing.length > 0) {
+      this.describeImage = (imageData, mimeType, prompt) =>
+        this.tryAll(
+          (p) => p.describeImage!(imageData, mimeType, prompt),
+          seeing,
+        );
     }
   }
 
@@ -31,9 +40,10 @@ export class FallbackChainProvider implements MemoryProvider {
 
   private async tryAll(
     fn: (p: MemoryProvider) => Promise<string>,
+    providers: MemoryProvider[] = this.providers,
   ): Promise<string> {
     let lastError: Error | null = null;
-    for (const provider of this.providers) {
+    for (const provider of providers) {
       try {
         return await fn(provider);
       } catch (err) {

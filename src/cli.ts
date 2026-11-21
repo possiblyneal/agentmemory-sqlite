@@ -38,6 +38,7 @@ import { generateId } from "./state/schema.js";
 import { envFilePath, readEnvFile } from "./hooks/_env.js";
 import {
   buildDiagnostics,
+  doctorPromptsAllowed,
   dryRunPlan,
   type Diagnostic,
   type DiagnosticFixResult,
@@ -953,6 +954,13 @@ async function runDoctor() {
     return;
   }
 
+  const promptsAllowed =
+    applyAll ||
+    doctorPromptsAllowed(process.env, Boolean(process.stdin.isTTY), Boolean(process.stdout.isTTY));
+  if (!promptsAllowed) {
+    p.log.info("Not an interactive terminal: reporting only. Run `agentmemory doctor --all` to apply the fixes.");
+  }
+
   let failed = 0;
   let fixed = 0;
   let skipped = 0;
@@ -982,6 +990,11 @@ async function runDoctor() {
       // Re-check only this diagnostic.
       const after = await d.check(ctx);
       if (!after.ok) p.log.warn(`${d.id} still failing after fix.`);
+      continue;
+    }
+
+    if (!promptsAllowed) {
+      skipped++;
       continue;
     }
 
