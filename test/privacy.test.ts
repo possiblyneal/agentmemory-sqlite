@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripPrivateData } from "../src/functions/privacy.js";
+import { stripPrivateData, stripPrivateDataDeep } from "../src/functions/privacy.js";
 
 describe("stripPrivateData scrubber boundaries", () => {
   it.each([
@@ -138,5 +138,84 @@ describe("stripPrivateData", () => {
     expect(stripPrivateData(input)).toBe("[REDACTED_SECRET]");
     expect(stripPrivateData(input)).toBe("[REDACTED_SECRET]");
     expect(stripPrivateData(input)).toBe("[REDACTED_SECRET]");
+  });
+});
+
+describe("JSON-shaped secrets (#435)", () => {
+  const HEX = "0123456789abcdef0123456789abcdef0123456789abcdef";
+
+  it("redacts a secret under a quoted key in JSON text", () => {
+    const out = stripPrivateData(`{ "authToken": "${HEX}", "port": 6768 }`);
+    expect(out).not.toContain(HEX);
+    expect(out).toContain('"port": 6768');
+  });
+
+  it("redacts a secret under an escaped quoted key in double-encoded JSON", () => {
+    const out = stripPrivateData(`{\\"token\\": \\"${HEX}\\"}`);
+    expect(out).not.toContain(HEX);
+  });
+
+  it("redacts a short password under a quoted key", () => {
+    expect(stripPrivateData(`{"password": "hunter2"}`)).not.toContain("hunter2");
+  });
+
+  it("continues to redact boolean-like password strings and unquoted assignments", () => {
+    expect(stripPrivateData('{"password":"true"}')).not.toContain('true');
+    expect(stripPrivateData('password=true')).not.toContain('true');
+  });
+
+  it("leaves a token count alone", () => {
+    expect(stripPrivateData(`{"max_tokens": 4096}`)).toBe(`{"max_tokens": 4096}`);
+  });
+
+  it("redacts an unclosed private block to the end of the text", () => {
+    expect(stripPrivateData("keep <private>cut by a hook before the close")).toBe(
+      "keep [REDACTED]",
+    );
+  });
+
+  it("ends a private block at an escaped close tag", () => {
+    const src = String.raw`const RE = /<private>[\s\S]*?<\/private>/gi; const keep = 1;`;
+    expect(stripPrivateData(src)).toContain("const keep = 1;");
+  });
+
+  it.each([
+    String.raw`docker run -v "$PWD":/src golang`,
+    String.raw`if [[ "$PWD" == "$work" ]]; then`,
+    "ls: cannot access '/srv/nkos/admin-password': No such file or directory",
+    String.raw`{"has_secret":true,"redirects":[]}`,
+  ])("leaves text that only looks like a quoted key: %s", (text) => {
+    expect(stripPrivateData(text)).toBe(text);
+  });
+});
+
+describe("stripPrivateDataDeep", () => {
+  it("redacts string values under secret-named keys at any depth", () => {
+    const out = stripPrivateDataDeep({
+      tool_input: { headers: { Authorization: "abc", "x-api-key": "k1" }, accessToken: "t" },
+      list: [{ client_secret: "s" }],
+    });
+    expect(out).toEqual({
+      tool_input: {
+        headers: { Authorization: "[REDACTED_SECRET]", "x-api-key": "[REDACTED_SECRET]" },
+        accessToken: "[REDACTED_SECRET]",
+      },
+      list: [{ client_secret: "[REDACTED_SECRET]" }],
+    });
+  });
+
+  it("keeps shape, numbers, booleans, nulls and unrelated keys", () => {
+    const input = { max_tokens: 4096, has_secret: true, token: "", n: null, file_path: "/a/b" };
+    expect(stripPrivateDataDeep(input)).toEqual(input);
+  });
+
+  it("scrubs secret assignments in object keys as well as values", () => {
+    expect(JSON.stringify(stripPrivateDataDeep({ "password=abc123": "value" }))).not.toContain("abc123");
+  });
+
+  it("scrubs secrets inside ordinary string values", () => {
+    expect(stripPrivateDataDeep({ command: "export API_KEY=abc123" })).toEqual({
+      command: "export [REDACTED_SECRET]",
+    });
   });
 });

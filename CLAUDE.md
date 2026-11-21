@@ -185,6 +185,12 @@ hook type and tool name; its five-minute in-memory window retains hashes, not pa
 Distinct long Observations sharing a prefix are stored; exact repeats within the window deduplicate.
 Dedup runs before the existing privacy sanitization and does not change what gets stored.
 
+### Observation redaction
+`mem::observe` scrubs structured payload values before capture, preserving their shape and
+redacting strings under secret-named keys. `stripPrivateData()` also scrubs JSON-shaped secret
+assignments and an unclosed `<private>` block through the end of the text. This is defensive
+redaction, not a guarantee that every possible secret format is detected.
+
 ### Observations on a full disk or a locked database
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
 hits a full disk or `database is locked` (another connection holds the write lock; the store
