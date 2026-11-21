@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const ENV_KEYS = [
   "CONSOLIDATION_ENABLED",
+  "AGENTMEMORY_ALLOW_AGENT_SDK",
   "AGENTMEMORY_PROVIDER",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
@@ -58,6 +59,12 @@ describe("isConsolidationEnabled default behavior", () => {
 
   it("returns false when no LLM provider configured (default BM25-only mode)", async () => {
     writeEnv("");
+    const cfg = await freshConfig();
+    expect(cfg.isConsolidationEnabled()).toBe(false);
+  });
+
+  it("does not enable consolidation for placeholders or SDK opt-in alone", async () => {
+    writeEnv("ANTHROPIC_API_KEY=...\nOPENROUTER_API_KEY=sk-or-...\nAGENTMEMORY_ALLOW_AGENT_SDK=true");
     const cfg = await freshConfig();
     expect(cfg.isConsolidationEnabled()).toBe(false);
   });

@@ -6,9 +6,14 @@
 // driven by clack — exercising it would require a TTY and is out of scope.
 
 import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildDiagnostics,
   DIAGNOSTIC_IDS,
+  doctorPromptsAllowed,
   dryRunPlan,
   placeholderProviderKeys,
   realProviderKeys,
@@ -31,6 +36,7 @@ function stubEffects(overrides: Partial<DoctorEffects> = {}): DoctorEffects {
   return {
     envFileExists: () => true,
     readEnvFile: () => ({ ANTHROPIC_API_KEY: "sk-ant-real-key-value" }),
+    readProcessEnv: () => ({}),
     pidfileExists: () => false,
     pidfilePidIsAlive: () => null,
     viewerReachable: async () => true,
@@ -196,5 +202,100 @@ describe("realProviderKeys / placeholderProviderKeys", () => {
     expect(placeholderProviderKeys({ ANTHROPIC_API_KEY: "xxxx-xxxx" })).toEqual([
       "ANTHROPIC_API_KEY",
     ]);
+  });
+});
+
+describe("doctor agrees with the daemon on the LLM provider", () => {
+  async function providerStatus(file: Record<string, string>, processEnv: Record<string, string>, exists = true) {
+    const check = buildDiagnostics(stubEffects({
+      envFileExists: () => exists,
+      readEnvFile: () => file,
+      readProcessEnv: () => processEnv,
+    })).find((d) => d.id === "no-llm-provider-key")!;
+    return check.check(stubCtx());
+  }
+
+  it("recognizes process-only providers and agent-sdk when the file is missing", async () => {
+    expect((await providerStatus({}, { ANTHROPIC_API_KEY: "sk-ant-test-value" }, false)).ok).toBe(true);
+    expect((await providerStatus({}, { AGENTMEMORY_ALLOW_AGENT_SDK: "true" }, false)).ok).toBe(true);
+    expect((await providerStatus({}, {}, false)).ok).toBe(false);
+  });
+
+  it("uses process values over file values for keys and provider controls", async () => {
+    expect((await providerStatus({ ANTHROPIC_API_KEY: "your-key-here" }, { ANTHROPIC_API_KEY: "sk-ant-test-value" })).ok).toBe(true);
+    expect((await providerStatus({ ANTHROPIC_API_KEY: "sk-ant-test-value" }, { ANTHROPIC_API_KEY: "" })).ok).toBe(false);
+    expect((await providerStatus({ OPENAI_API_KEY: "sk-test-value", OPENAI_API_KEY_FOR_LLM: "true" }, { OPENAI_API_KEY_FOR_LLM: "false" })).ok).toBe(false);
+    expect((await providerStatus({ AGENTMEMORY_ALLOW_AGENT_SDK: "true" }, { AGENTMEMORY_ALLOW_AGENT_SDK: "false" })).ok).toBe(false);
+  });
+
+  it("rechecks the edited file after startup hydration without losing shell precedence", () => {
+    const home = mkdtempSync(join(tmpdir(), "doctor-hydration-"));
+    try {
+      const dir = join(home, ".agentmemory");
+      mkdirSync(dir);
+      writeFileSync(join(dir, ".env"), "ANTHROPIC_API_KEY=...\nOPENAI_API_KEY=sk-file-test\n");
+      const script = `
+        import { hydrateEnvFromFile, readEnvFile, envFilePath } from './src/hooks/_env.ts';
+        import { buildDiagnostics, captureDoctorProcessEnv } from './src/cli/doctor-diagnostics.ts';
+        import { writeFileSync } from 'node:fs';
+        const shell = captureDoctorProcessEnv(() => hydrateEnvFromFile((value) => value === undefined));
+        const check = buildDiagnostics({
+          readEnvFile, readProcessEnv: () => shell,
+          openEditor: async (path) => {
+            writeFileSync(path, 'ANTHROPIC_API_KEY=sk-test-value\\nOPENAI_API_KEY=sk-file-test\\n');
+            return { ok: true };
+          },
+        }).find((d) => d.id === 'no-llm-provider-key');
+        const ctx = { envPath: envFilePath() };
+        const before = await check.check(ctx);
+        await check.fix(ctx);
+        const after = await check.check(ctx);
+        if (before.ok || !after.ok || process.env.ANTHROPIC_API_KEY !== '...') process.exit(1);
+      `;
+      const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH, HOME: home, OPENAI_API_KEY: "" },
+        encoding: "utf8",
+      });
+      expect(child.status, child.stderr).toBe(0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("marks only editor fixes manual while keeping other fixes automatic", () => {
+    const diagnostics = buildDiagnostics(stubEffects());
+    expect(diagnostics.filter((d) => d.manualOnly).map((d) => d.id)).toEqual([
+      "no-llm-provider-key", "env-placeholder-keys",
+    ]);
+  });
+
+  it("opens the context's env path when fixing provider readiness", async () => {
+    let opened = "";
+    const check = buildDiagnostics(stubEffects({
+      openEditor: async (path) => { opened = path; return { ok: true }; },
+    })).find((d) => d.id === "no-llm-provider-key")!;
+    await check.fix(stubCtx({ envPath: "/custom/home/.agentmemory/.env" }));
+    expect(opened).toBe("/custom/home/.agentmemory/.env");
+  });
+
+  it("ignores an OpenAI key the daemon keeps off the LLM", () => {
+    expect(realProviderKeys({ OPENAI_API_KEY: "sk-real-key-value", OPENAI_API_KEY_FOR_LLM: "false" })).toEqual([]);
+  });
+
+  it("accepts the agent-sdk fallback as a provider", async () => {
+    const check = buildDiagnostics(
+      stubEffects({ readEnvFile: () => ({ AGENTMEMORY_ALLOW_AGENT_SDK: "true" }) }),
+    ).find((d) => d.id === "no-llm-provider-key")!;
+    expect((await check.check(stubCtx())).ok).toBe(true);
+  });
+});
+
+describe("doctorPromptsAllowed", () => {
+  it("prompts only with both terminals and no CI", () => {
+    expect(doctorPromptsAllowed({}, true, true)).toBe(true);
+    expect(doctorPromptsAllowed({}, false, true)).toBe(false);
+    expect(doctorPromptsAllowed({}, true, false)).toBe(false);
+    expect(doctorPromptsAllowed({ CI: "1" }, true, true)).toBe(false);
   });
 });

@@ -76,6 +76,7 @@ describe("Fallback provider model resolution (#778)", () => {
   const savedEnv: Record<string, string | undefined> = {};
   const envKeys = [
     "OPENAI_API_KEY",
+    "OPENAI_API_KEY_FOR_LLM",
     "OPENAI_MODEL",
     "GEMINI_API_KEY",
     "GEMINI_MODEL",
@@ -101,6 +102,34 @@ describe("Fallback provider model resolution (#778)", () => {
       if (savedEnv[k] === undefined) delete process.env[k];
       else process.env[k] = savedEnv[k];
     }
+  });
+
+  it("skips placeholders and embedding-only OpenAI fallback credentials", () => {
+    process.env.ANTHROPIC_API_KEY = "anth-key";
+    process.env.OPENAI_API_KEY = "openai-key";
+    process.env.OPENAI_API_KEY_FOR_LLM = "false";
+    process.env.OPENROUTER_API_KEY = "sk-or-...";
+    process.env.MINIMAX_API_KEY = "...";
+    createFallbackProvider({ provider: "anthropic", model: "test", maxTokens: 100 },
+      { providers: ["openai", "openrouter", "minimax"] });
+    expect(captured.map((c) => c.provider)).toEqual(["anthropic"]);
+  });
+
+  it("keeps a noop primary from constructing or exposing vision fallbacks", () => {
+    process.env.ANTHROPIC_API_KEY = "anth-key";
+    const provider = createFallbackProvider({ provider: "noop", model: "noop", maxTokens: 100 },
+      { providers: ["anthropic"] });
+    expect(captured).toEqual([]);
+    expect(provider.describeImage).toBeUndefined();
+  });
+
+  it("uses the Google key when Gemini's key is a placeholder", () => {
+    process.env.OPENAI_API_KEY = "openai-key";
+    process.env.GEMINI_API_KEY = "...";
+    process.env.GOOGLE_API_KEY = "google-key";
+    createFallbackProvider({ provider: "openai", model: "test", maxTokens: 100 },
+      { providers: ["gemini"] });
+    expect(captured.map((c) => c.provider)).toEqual(["openai", "gemini"]);
   });
 
   it("primary OpenAI + fallback Gemini: Gemini is built with GEMINI_MODEL, NOT the primary's model", () => {

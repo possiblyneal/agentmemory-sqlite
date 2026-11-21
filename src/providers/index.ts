@@ -12,6 +12,7 @@ import { OpenRouterProvider } from "./openrouter.js";
 import { ResilientProvider } from "./resilient.js";
 import { FallbackChainProvider } from "./fallback-chain.js";
 import { getEnvVar, resolveModel } from "../config.js";
+import { isPlaceholderKey } from "../utils/placeholder-key.js";
 
 export {
   createEmbeddingProvider,
@@ -22,7 +23,7 @@ export {
 
 function requireEnvVar(key: string): string {
   const value = getEnvVar(key);
-  if (!value) {
+  if (!value || isPlaceholderKey(value)) {
     throw new Error(
       `Missing required environment variable: ${key}. Set it in ~/.agentmemory/.env or as an environment variable.`,
     );
@@ -38,13 +39,14 @@ export function createFallbackProvider(
   config: ProviderConfig,
   fallbackConfig: FallbackConfig,
 ): ResilientProvider {
-  if (fallbackConfig.providers.length === 0) {
+  if (config.provider === "noop" || fallbackConfig.providers.length === 0) {
     return createProvider(config);
   }
 
   const providers: MemoryProvider[] = [createBaseProvider(config)];
   for (const providerType of fallbackConfig.providers) {
     if (providerType === config.provider) continue;
+    if (providerType === "openai" && getEnvVar("OPENAI_API_KEY_FOR_LLM") === "false") continue;
     try {
       // #778: resolve the fallback's OWN default model (or its env
       // override) rather than copying config.model from the primary.
@@ -84,8 +86,9 @@ function createBaseProvider(config: ProviderConfig): MemoryProvider {
         config.baseURL,
       );
     case "gemini": {
-      const geminiKey =
-        getEnvVar("GEMINI_API_KEY") || getEnvVar("GOOGLE_API_KEY");
+      const geminiKey = [getEnvVar("GEMINI_API_KEY"), getEnvVar("GOOGLE_API_KEY")].find(
+        (key) => key && !isPlaceholderKey(key),
+      );
       if (!geminiKey) {
         throw new Error(
           "GEMINI_API_KEY (or GOOGLE_API_KEY) is required for the gemini provider",
@@ -107,7 +110,7 @@ function createBaseProvider(config: ProviderConfig): MemoryProvider {
       );
     case "openai": {
       const openaiKey = getEnvVar("OPENAI_API_KEY");
-      if (!openaiKey) {
+      if (!openaiKey || isPlaceholderKey(openaiKey)) {
         throw new Error(
           "OPENAI_API_KEY is required for the openai provider",
         );
