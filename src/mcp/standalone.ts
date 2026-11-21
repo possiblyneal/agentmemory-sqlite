@@ -331,7 +331,12 @@ async function handleLocal(
         ...(v.global && { global: true }),
       });
       kvInstance.persist();
-      return textResponse({ saved: id });
+      return textResponse({
+        saved: id,
+        localOnly: true,
+        message:
+          "agentmemory daemon unreachable; this Memory is in the MCP shim's local store only and the daemon will never recall it. Save it again once the daemon is up.",
+      });
     }
 
     case "memory_recall":
