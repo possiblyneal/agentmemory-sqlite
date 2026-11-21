@@ -10,6 +10,7 @@ import type {
   GraphEdge,
 } from "../types.js";
 import { getVisibleTools, PROJECT_FILTER_DESCRIPTION } from "./tools-registry.js";
+import { normalizeList } from "./normalize-list.js";
 import { timingSafeCompare } from "../auth.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
@@ -220,14 +221,8 @@ export function registerMcpEndpoints(
               };
             }
             const type = (args.type as string) || "fact";
-            const concepts =
-              typeof args.concepts === "string"
-                ? args.concepts.split(",").map((c: string) => c.trim()).filter(Boolean)
-                : [];
-            const files =
-              typeof args.files === "string"
-                ? args.files.split(",").map((f: string) => f.trim()).filter(Boolean)
-                : [];
+            const concepts = normalizeList(args.concepts);
+            const files = normalizeList(args.files);
 
             const project =
               typeof args.project === "string" && args.project.trim().length > 0

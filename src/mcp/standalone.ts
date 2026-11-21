@@ -22,6 +22,7 @@ import {
   type ProxyHandle,
 } from "./rest-proxy.js";
 import { lessonQueueDir, queueLesson, replayLessonQueue } from "./lesson-queue.js";
+import { normalizeList } from "./normalize-list.js";
 
 const IMPLEMENTED_TOOLS = new Set([
   "memory_save",
@@ -84,22 +85,6 @@ function announceMode(handle: Handle): void {
       `[@agentmemory/mcp] no server reachable at ${displayAgentmemoryUrl()}; running reduced LOCAL FALLBACK with ${IMPLEMENTED_TOOLS.size} of ${fullToolCount} tools. Start 'agentmemory' (and point AGENTMEMORY_URL at it) to unlock all ${fullToolCount} tools.\n`,
     );
   }
-}
-
-function normalizeList(value: unknown): string[] {
-  if (!value) return [];
-  if (Array.isArray(value)) {
-    return value
-      .map((v) => (typeof v === "string" ? v.trim() : ""))
-      .filter((v) => v.length > 0);
-  }
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
-  return [];
 }
 
 const DEFAULT_LIMIT = 10;
