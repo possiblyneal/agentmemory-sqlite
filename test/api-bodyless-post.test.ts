@@ -37,7 +37,7 @@ beforeEach(() => {
   sdk = mockSdk();
   registerApiTriggers(sdk as never, mockKV() as never, SECRET);
   received.clear();
-  for (const id of ["mem::consolidate", "mem::patterns", "mem::generate-rules"]) {
+  for (const id of ["mem::consolidate", "mem::patterns", "mem::generate-rules", "mem::recompress-orphans"]) {
     sdk._fns.set(id, (data: unknown) => {
       received.set(id, data);
       return { success: true };
@@ -50,6 +50,7 @@ describe.each([
   ["api::consolidate", "mem::consolidate"],
   ["api::patterns", "mem::patterns"],
   ["api::generate-rules", "mem::generate-rules"],
+  ["api::recompress-orphans", "mem::recompress-orphans"],
 ])("%s with no body", (route, fn) => {
   it("passes an object payload, never null", async () => {
     const res = await sdk._fns.get(route)!({
@@ -79,4 +80,14 @@ describe("api::consolidate field whitelist", () => {
     expect(res.status_code).toBe(400);
     expect(received.has("mem::consolidate")).toBe(false);
   });
+});
+
+it("rejects a malformed retry body without dispatching compression", async () => {
+  const res = await sdk._fns.get("api::recompress-orphans")!({
+    headers: { authorization: `Bearer ${SECRET}` },
+    body: null,
+    bodyParseFailed: true,
+  });
+  expect(res.status_code).toBe(400);
+  expect(received.has("mem::recompress-orphans")).toBe(false);
 });

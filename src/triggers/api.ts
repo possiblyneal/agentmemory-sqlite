@@ -2037,6 +2037,7 @@ export function registerApiTriggers(
     async (req: ApiRequest<{ limit?: number; dryRun?: boolean; requeueQuarantined?: boolean; graceBypassBefore?: string; observationIds?: unknown }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
+      if (req.bodyParseFailed) return { status_code: 400, body: { error: "request body must be valid JSON" } };
       const body = (req.body || {}) as { limit?: number; dryRun?: boolean; requeueQuarantined?: boolean; graceBypassBefore?: string; observationIds?: unknown };
       if (typeof body.graceBypassBefore === "string" && !Number.isFinite(new Date(body.graceBypassBefore).getTime())) {
         return { status_code: 400, body: { error: "graceBypassBefore must be an ISO timestamp" } };

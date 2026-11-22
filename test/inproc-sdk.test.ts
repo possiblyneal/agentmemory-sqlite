@@ -276,6 +276,14 @@ describe("inproc sdk shim", () => {
       body: "not json",
     });
     expect(seen.body).toBeNull();
+    expect(seen.bodyParseFailed).toBe(true);
+
+    await fetch(`${base}/agentmemory/body`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    expect(seen.body).toBeNull();
+    expect(seen.bodyParseFailed).toBeFalsy();
   });
 
   it("answers 404 for an unknown route and 500 for a throwing handler", async () => {

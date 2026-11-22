@@ -501,11 +501,12 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
     }
     const contentType = headers["content-type"] ?? "";
     let body: unknown = null;
-    if (contentType.includes("application/json")) {
+    let bodyParseFailed = false;
+    if (raw.length > 0 && contentType.includes("application/json")) {
       try {
         body = JSON.parse(raw.toString("utf8"));
       } catch {
-        body = null;
+        bodyParseFailed = true;
       }
     }
 
@@ -524,6 +525,7 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
         path: match.route.path,
         method,
         body,
+        ...(bodyParseFailed ? { bodyParseFailed } : {}),
         trigger: { type: "http", path: match.route.path, method },
       });
     } catch (err) {

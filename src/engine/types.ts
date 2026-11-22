@@ -39,6 +39,7 @@ export type ApiRequest<TBody = unknown> = {
   path_params: Record<string, string>;
   query_params: Record<string, string | string[]>;
   body: TBody;
+  bodyParseFailed?: boolean;
   headers: Record<string, string | string[]>;
   method: string;
   request_body?: unknown;
