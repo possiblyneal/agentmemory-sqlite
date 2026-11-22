@@ -2034,10 +2034,10 @@ export function registerApiTriggers(
 
   // The sweep itself is mem::recompress-orphans (src/functions/recompress-orphans.ts).
   sdk.registerFunction("api::recompress-orphans",
-    async (req: ApiRequest<{ limit?: number; dryRun?: boolean; requeueQuarantined?: boolean; graceBypassBefore?: string }>): Promise<Response> => {
+    async (req: ApiRequest<{ limit?: number; dryRun?: boolean; requeueQuarantined?: boolean; graceBypassBefore?: string; observationIds?: unknown }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      const body = (req.body || {}) as { limit?: number; dryRun?: boolean; requeueQuarantined?: boolean; graceBypassBefore?: string };
+      const body = (req.body || {}) as { limit?: number; dryRun?: boolean; requeueQuarantined?: boolean; graceBypassBefore?: string; observationIds?: unknown };
       if (typeof body.graceBypassBefore === "string" && !Number.isFinite(new Date(body.graceBypassBefore).getTime())) {
         return { status_code: 400, body: { error: "graceBypassBefore must be an ISO timestamp" } };
       }
@@ -2048,9 +2048,10 @@ export function registerApiTriggers(
           dryRun: body.dryRun,
           requeueQuarantined: body.requeueQuarantined,
           graceBypassBefore: body.graceBypassBefore,
+          observationIds: body.observationIds,
         },
-      })) as { running?: boolean };
-      return { status_code: result.running ? 409 : 200, body: result };
+      })) as { running?: boolean; success?: boolean };
+      return { status_code: result.running ? 409 : result.success === false ? 400 : 200, body: result };
     },
   );
   sdk.registerTrigger({

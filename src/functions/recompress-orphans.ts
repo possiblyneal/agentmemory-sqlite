@@ -1,7 +1,7 @@
 import type { ISdk } from "../engine/types.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
-import type { Session } from "../types.js";
+import type { RawObservation, Session } from "../types.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { logger } from "../logger.js";
 import { QUEUED } from "./compress-batch.js";
@@ -9,12 +9,23 @@ import { QUEUED } from "./compress-batch.js";
 const GRACE_MS = 60 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 1000;
 
 type RecompressOptions = {
   limit?: number;
   dryRun?: boolean;
   requeueQuarantined?: boolean;
   graceBypassBefore?: string;
+  observationIds?: unknown;
+};
+
+type PendingCompression = {
+  observationId?: string;
+  sessionId?: string;
+  raw?: RawObservation;
+  attempts?: number;
+  reason?: string;
+  queuedAt?: string;
 };
 
 // Re-run compression for observations that a failed mem::compress left in
@@ -43,7 +54,15 @@ export function registerRecompressOrphansFunction(sdk: ISdk, kv: StateKV): void 
 }
 
 async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions) {
-  const limit = Math.max(1, Math.min(1000, Number(body.limit) || DEFAULT_LIMIT));
+  const { observationIds } = body;
+  const exact = observationIds !== undefined;
+  const ids: unknown[] = Array.isArray(observationIds) ? observationIds : [];
+  if (exact && (ids.length === 0 || ids.length > MAX_LIMIT || new Set(ids).size !== ids.length ||
+      body.limit !== undefined || body.requeueQuarantined !== undefined || body.graceBypassBefore !== undefined ||
+      (body.dryRun !== undefined && typeof body.dryRun !== "boolean"))) {
+    return { success: false, error: "exact retry requires unique observationIds, an optional boolean dryRun, and no bulk options" };
+  }
+  const limit = exact ? ids.length : Math.max(1, Math.min(MAX_LIMIT, Number(body.limit) || DEFAULT_LIMIT));
   const dryRun = body.dryRun === true;
   // Records captured before this instant skip the one-hour grace. The
   // cutover passes its freeze timestamp: nothing captured before the
@@ -53,10 +72,23 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
   // Give quarantined entries (attempts >= MAX_ATTEMPTS) one more shot.
   // Meant for after a compression-pipeline fix lands: what was a
   // deterministic failure may compress cleanly under the new code.
-  const requeueQuarantined = body.requeueQuarantined === true;
+  const requeueQuarantined = exact || body.requeueQuarantined === true;
   const now = Date.now();
 
   const targets: Array<{ observationId: string; sessionId: string; raw: unknown }> = [];
+
+  if (exact) {
+    for (const id of ids) {
+      if (typeof id !== "string" || !id.trim()) return { success: false, error: "observationIds must be non-empty strings" };
+      const p = await kv.get<PendingCompression>(KV.compressPending, id);
+      if (!p || p.observationId !== id || typeof p.sessionId !== "string" || !p.sessionId ||
+          p.raw?.id !== id || p.raw.sessionId !== p.sessionId || p.reason !== "compression_failed" ||
+          !Number.isInteger(p.attempts) || (p.attempts ?? 0) < MAX_ATTEMPTS || await isGone(kv, p.sessionId, id)) {
+        return { success: false, error: "an explicitly named observation is missing or is not eligible for quarantine retry" };
+      }
+      targets.push({ observationId: id, sessionId: p.sessionId, raw: p.raw });
+    }
+  }
 
   // Raw-shaped orphans FIRST: they are the records no search can return,
   // so the batch budget belongs to them. Parked entries are already
@@ -66,7 +98,7 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
   // re-parked, so the pending queue never shrank and always ate the
   // whole budget.)
   let rawOrphans = 0;
-  for (const session of await kv.list<Session>(KV.sessions)) {
+  for (const session of exact ? [] : await kv.list<Session>(KV.sessions)) {
     const sid = session?.id;
     if (typeof sid !== "string" || sid.length === 0) continue;
     for (const o of await kv.list<Record<string, unknown>>(KV.observations(sid))) {
@@ -86,15 +118,8 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
 
   const queued = new Set(targets.map((t) => t.observationId));
   let parked = 0;
-  let quarantined = 0;
-  for (const p of await kv.list<{
-    observationId?: string;
-    sessionId?: string;
-    raw?: unknown;
-    attempts?: number;
-    reason?: string;
-    queuedAt?: string;
-  }>(KV.compressPending)) {
+  let quarantined = exact ? targets.length : 0;
+  for (const p of exact ? [] : await kv.list<PendingCompression>(KV.compressPending)) {
     if (typeof p?.observationId !== "string" || typeof p?.sessionId !== "string") continue;
     if (queued.has(p.observationId)) continue;
     // A batch entry inside the grace is still queued or in flight; past it,

@@ -76,6 +76,36 @@ async function park(kv: ReturnType<typeof mockKV>, id: string, extra: object = {
 }
 
 describe("mem::recompress-orphans", () => {
+  it("dry-runs and retries only the named quarantined observations", async () => {
+    const { kv, compressed, run } = setup(async () => ({ success: true }));
+    for (const id of ["one", "two", "unrelated"]) {
+      await park(kv, id, { attempts: 5, reason: "compression_failed", raw: { id, sessionId: "ses_1" } });
+    }
+    await park(kv, "ordinary");
+    const observationIds = ["two", "one"];
+    expect(await run({ observationIds, dryRun: true })).toMatchObject({ success: true, queued: 2 });
+    expect(compressed).toEqual([]);
+    expect(await run({ observationIds })).toMatchObject({ success: true, recompressed: 2 });
+    expect(compressed).toEqual(observationIds);
+  });
+
+  it("rejects invalid or stale exact selections without compressing anything", async () => {
+    const { kv, compressed, run } = setup(async () => ({ success: true }));
+    await park(kv, "target", { attempts: 5, reason: "compression_failed", raw: { id: "target", sessionId: "ses_1" } });
+    await park(kv, "ordinary");
+    for (const payload of [
+      { observationIds: null }, { observationIds: [] }, { observationIds: ["target", "target"] },
+      { observationIds: ["target", "missing"] }, { observationIds: ["target", "ordinary"] },
+      { observationIds: ["target"], limit: 1 }, { observationIds: ["target"], dryRun: "true" },
+    ]) {
+      expect(await run(payload)).toMatchObject({ success: false });
+    }
+    await kv.delete(KV.observations("ses_1"), "target");
+    expect(await run({ observationIds: ["target"], dryRun: true })).toMatchObject({ success: false });
+    expect(compressed).toEqual([]);
+    expect(await kv.get(KV.compressPending, "target")).not.toBeNull();
+  });
+
   it("recompresses a parked entry", async () => {
     const { kv, compressed, run } = setup(async () => ({ success: true }));
     await park(kv, "p1");

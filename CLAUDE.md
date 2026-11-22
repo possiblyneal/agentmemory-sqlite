@@ -570,7 +570,10 @@ options (`limit`, `dryRun`, `requeueQuarantined`, `graceBypassBefore`); 10 strai
 no success end a pass early. The function refuses a pass while another runs (`running: true`, 409
 over REST; a dry run is never refused), and rechecks each target just before compressing it: one whose
 Observation was evicted or forgotten is skipped and its parked entry dropped, so it is not
-compressed back into existence.
+compressed back into existence. For targeted quarantine recovery, pass `observationIds` instead
+of bulk options. Every ID must be unique and name a still-present quarantined Observation with
+matching pending raw input. The entire selection is checked before any retries, and `dryRun`
+reports the eligible count without invoking compression.
 
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:
