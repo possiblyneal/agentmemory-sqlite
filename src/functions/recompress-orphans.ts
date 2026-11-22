@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import type { RawObservation, Session } from "../types.js";
 import { isAutoCompressEnabled } from "../config.js";
 import { logger } from "../logger.js";
+import { COMPRESSION_FAILURE_REASONS } from "./compress.js";
 import { QUEUED } from "./compress-batch.js";
 
 const GRACE_MS = 60 * 60 * 1000;
@@ -82,7 +83,8 @@ async function recompressOrphans(sdk: ISdk, kv: StateKV, body: RecompressOptions
       if (typeof id !== "string" || !id.trim()) return { success: false, error: "observationIds must be non-empty strings" };
       const p = await kv.get<PendingCompression>(KV.compressPending, id);
       if (!p || p.observationId !== id || typeof p.sessionId !== "string" || !p.sessionId ||
-          p.raw?.id !== id || p.raw.sessionId !== p.sessionId || p.reason !== "compression_failed" ||
+          p.raw?.id !== id || p.raw.sessionId !== p.sessionId ||
+          !COMPRESSION_FAILURE_REASONS.some((reason) => reason === p.reason) ||
           !Number.isInteger(p.attempts) || (p.attempts ?? 0) < MAX_ATTEMPTS || await isGone(kv, p.sessionId, id)) {
         return { success: false, error: "an explicitly named observation is missing or is not eligible for quarantine retry" };
       }

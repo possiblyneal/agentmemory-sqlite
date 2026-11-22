@@ -78,14 +78,17 @@ async function park(kv: ReturnType<typeof mockKV>, id: string, extra: object = {
 describe("mem::recompress-orphans", () => {
   it("dry-runs and retries only the named quarantined observations", async () => {
     const { kv, compressed, run } = setup(async () => ({ success: true }));
-    for (const id of ["one", "two", "unrelated"]) {
-      await park(kv, id, { attempts: 5, reason: "compression_failed", raw: { id, sessionId: "ses_1" } });
+    for (const [id, reason] of [
+      ["one", "compression_failed"], ["two", "parse_failed"],
+      ["three", "validation_failed"], ["unrelated", "compression_failed"],
+    ]) {
+      await park(kv, id, { attempts: 5, reason, raw: { id, sessionId: "ses_1" } });
     }
     await park(kv, "ordinary");
-    const observationIds = ["two", "one"];
-    expect(await run({ observationIds, dryRun: true })).toMatchObject({ success: true, queued: 2 });
+    const observationIds = ["two", "one", "three"];
+    expect(await run({ observationIds, dryRun: true })).toMatchObject({ success: true, queued: 3 });
     expect(compressed).toEqual([]);
-    expect(await run({ observationIds })).toMatchObject({ success: true, recompressed: 2 });
+    expect(await run({ observationIds })).toMatchObject({ success: true, recompressed: 3 });
     expect(compressed).toEqual(observationIds);
   });
 
@@ -93,9 +96,10 @@ describe("mem::recompress-orphans", () => {
     const { kv, compressed, run } = setup(async () => ({ success: true }));
     await park(kv, "target", { attempts: 5, reason: "compression_failed", raw: { id: "target", sessionId: "ses_1" } });
     await park(kv, "ordinary");
+    await park(kv, "queued", { attempts: 5, reason: "queued", raw: { id: "queued", sessionId: "ses_1" } });
     for (const payload of [
       { observationIds: null }, { observationIds: [] }, { observationIds: ["target", "target"] },
-      { observationIds: ["target", "missing"] }, { observationIds: ["target", "ordinary"] },
+      { observationIds: ["target", "missing"] }, { observationIds: ["target", "ordinary"] }, { observationIds: ["target", "queued"] },
       { observationIds: ["target"], limit: 1 }, { observationIds: ["target"], dryRun: "true" },
     ]) {
       expect(await run(payload)).toMatchObject({ success: false });

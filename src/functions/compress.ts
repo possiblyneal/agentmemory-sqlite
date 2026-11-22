@@ -46,6 +46,7 @@ const VALID_TYPES = new Set<string>([
 ]);
 
 export const XML_PARSE_FAILED = "xml_parse_failed";
+export const COMPRESSION_FAILURE_REASONS = ["compression_failed", "parse_failed", "validation_failed"] as const;
 
 export type CompressionFields = Omit<CompressedObservation, "id" | "sessionId" | "timestamp">;
 
@@ -101,7 +102,7 @@ export function checkCompression(
 export async function storeDegradedCompression(
   kv: StateKV,
   job: CompressionJob,
-  reason: string,
+  reason: (typeof COMPRESSION_FAILURE_REASONS)[number],
 ): Promise<void> {
   try {
     const prior = await kv.get<{ attempts?: number }>(KV.compressPending, job.observationId);
