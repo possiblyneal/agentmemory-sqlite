@@ -5,6 +5,7 @@ import { join } from "node:path";
 import WebSocket from "ws";
 
 import { createInprocSdk, type InprocSdk } from "../src/engine/inproc/sdk.js";
+import { registerApiTriggers } from "../src/triggers/api.js";
 
 // The contract asserted here is iii 0.11.2's HTTP, state and stream
 // behaviour, read from engine/src/workers/{rest_api,state,stream}. The daemon
@@ -284,6 +285,46 @@ describe("inproc sdk shim", () => {
     });
     expect(seen.body).toBeNull();
     expect(seen.bodyParseFailed).toBeFalsy();
+  });
+
+  describe("recompression request bodies", () => {
+    let dispatched: unknown[];
+
+    beforeEach(() => {
+      dispatched = [];
+      registerApiTriggers(sdk, {} as never, SECRET);
+      sdk.registerFunction("mem::recompress-orphans", async (payload: unknown) => {
+        dispatched.push(payload);
+        return { success: true };
+      });
+    });
+
+    function post(body?: string, contentType = "application/json") {
+      return fetch(`${base}/agentmemory/recompress-orphans`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${SECRET}`, "content-type": contentType },
+        body,
+      });
+    }
+
+    it("forwards exact IDs with a mixed-case JSON media type", async () => {
+      const observationIds = ["obs_selected"];
+      const res = await post(JSON.stringify({ observationIds, dryRun: true }), "Application/JSON; charset=utf-8");
+      expect(res.status).toBe(200);
+      expect(dispatched).toEqual([{ observationIds, dryRun: true }]);
+    });
+
+    it.each(["{", "null", "[]", "false", "0", '""'])("rejects %s without dispatching", async (body) => {
+      const res = await post(body);
+      expect(res.status).toBe(400);
+      expect(dispatched).toEqual([]);
+    });
+
+    it.each([undefined, "{}"])("allows explicit bulk or no body (%s)", async (body) => {
+      const res = await post(body);
+      expect(res.status).toBe(200);
+      expect(dispatched).toEqual([{}]);
+    });
   });
 
   it("answers 404 for an unknown route and 500 for a throwing handler", async () => {

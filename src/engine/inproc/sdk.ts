@@ -32,7 +32,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { SqliteState, stateFunctions, type StateEvent } from "./state.js";
 import { logger } from "../../logger.js";
-import { guardRequest, guardUpgrade, logRejection, refuseUpgrade } from "../../security/request-guard.js";
+import { guardRequest, guardUpgrade, isJsonMediaType, logRejection, refuseUpgrade } from "../../security/request-guard.js";
 import { timingSafeCompare } from "../../auth.js";
 
 type Handler = (payload: any) => Promise<unknown>;
@@ -499,10 +499,10 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
       respond(res, 413, { error: "request body too large" });
       return;
     }
-    const contentType = headers["content-type"] ?? "";
+    const bodyPresent = raw.length > 0;
     let body: unknown = null;
     let bodyParseFailed = false;
-    if (raw.length > 0 && contentType.includes("application/json")) {
+    if (bodyPresent && isJsonMediaType(headers["content-type"])) {
       try {
         body = JSON.parse(raw.toString("utf8"));
       } catch {
@@ -525,6 +525,7 @@ export function createInprocSdk(opts: InprocSdkOptions): InprocSdk {
         path: match.route.path,
         method,
         body,
+        ...(bodyPresent ? { bodyPresent } : {}),
         ...(bodyParseFailed ? { bodyParseFailed } : {}),
         trigger: { type: "http", path: match.route.path, method },
       });

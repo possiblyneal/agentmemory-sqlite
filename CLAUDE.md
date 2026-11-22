@@ -573,8 +573,8 @@ Observation was evicted or forgotten is skipped and its parked entry dropped, so
 compressed back into existence. For targeted quarantine recovery, pass `observationIds` instead
 of bulk options. Every ID must be unique and name a still-present quarantined Observation with
 matching pending raw input. The entire selection is checked before any retries, and `dryRun`
-reports the eligible count without invoking compression. Malformed JSON returns HTTP 400;
-a bodyless request still runs the default sweep.
+reports the eligible count without invoking compression. A supplied body must be a JSON object
+(malformed or non-object JSON returns HTTP 400); a bodyless request still runs the default sweep.
 
 ### Hook Scripts
 Hook scripts in `src/hooks/` are standalone Node.js scripts (no Engine import). They read JSON from stdin, make HTTP calls to the REST API, and exit. There are two patterns depending on whether Claude Code consumes the script's stdout:

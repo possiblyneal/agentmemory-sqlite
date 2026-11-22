@@ -39,6 +39,8 @@ export type ApiRequest<TBody = unknown> = {
   path_params: Record<string, string>;
   query_params: Record<string, string | string[]>;
   body: TBody;
+  /** The HTTP request carried bytes, even if `body` is null. */
+  bodyPresent?: boolean;
   bodyParseFailed?: boolean;
   headers: Record<string, string | string[]>;
   method: string;

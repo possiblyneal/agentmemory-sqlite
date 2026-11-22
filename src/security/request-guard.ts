@@ -53,7 +53,7 @@ function hostAllowed(hostHeader: HeaderValue, bindHost?: string): boolean {
   return matchesAllowedEntry(hostHeader, readAllowedViewerHosts());
 }
 
-function isJson(contentType: HeaderValue): boolean {
+export function isJsonMediaType(contentType: HeaderValue): boolean {
   if (typeof contentType !== "string") return false;
   return contentType.split(";")[0].trim().toLowerCase() === "application/json";
 }
@@ -75,7 +75,7 @@ export function guardRequest(input: GuardInput): GuardRejection | null {
   if (origin !== undefined && !(typeof origin === "string" && originAllowed(origin))) {
     return { status: 403, error: "forbidden origin" };
   }
-  if (!isJson(headers["content-type"])) {
+  if (!isJsonMediaType(headers["content-type"])) {
     return { status: 415, error: "Content-Type must be application/json" };
   }
   return null;
