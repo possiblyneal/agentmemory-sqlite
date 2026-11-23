@@ -27,12 +27,14 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     resetHandleForTests();
     delete process.env["AGENTMEMORY_URL"];
     delete process.env["AGENTMEMORY_SECRET"];
+    vi.stubEnv("FALLBACK_PROVIDERS", "");
   });
 
   afterEach(() => {
     resetHandleForTests();
     globalThis.fetch = originalFetch;
     delete process.env["AGENTMEMORY_URL"];
+    vi.unstubAllEnvs();
   });
 
   it("proxies memory_sessions to GET /agentmemory/sessions when server is up", async () => {
@@ -179,7 +181,6 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       expect(timeout).toHaveBeenLastCalledWith(expected);
     } finally {
       timeout.mockRestore();
-      vi.unstubAllEnvs();
     }
   });
 
