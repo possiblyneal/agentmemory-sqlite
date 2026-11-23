@@ -7,6 +7,7 @@ import { SqliteState, stateFunctions } from "../src/engine/inproc/state.js";
 import { StateKV } from "../src/state/kv.js";
 import { KV } from "../src/state/schema.js";
 import { recallSemanticFacts } from "../src/functions/semantic-recall.js";
+import { parseDateRange } from "../src/functions/date-range.js";
 import { registerConsolidationPipelineFunction } from "../src/functions/consolidation-pipeline.js";
 import type { SemanticMemory, SessionSummary } from "../src/types.js";
 
@@ -69,6 +70,20 @@ describe("Semantic Fact recall index", () => {
     vi.unstubAllEnvs();
     store.state.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("filters indexed facts at sub-millisecond precision", async () => {
+    await store.kv.set(KV.semantic, "sem_tabs", fact("sem_tabs", "indents", { createdAt: "2026-01-01T00:00:00.0002Z" }));
+    const range = parseDateRange({ after: "2026-01-01T00:00:00.0001Z", before: "2026-01-01T00:00:00.0003Z" });
+    expect((await recallSemanticFacts(store.kv, 10, { query: "indents", range })).map(r => r.fact.id)).toEqual(["sem_tabs"]);
+  });
+
+  it("rechecks a fact whose timestamp changes after indexing", async () => {
+    const previous = fact("race", "quartz", { createdAt: "2026-01-01T00:00:00Z" });
+    const current = { ...previous, createdAt: "2026-02-01T00:00:00Z" };
+    const kv = { writeGeneration: async () => 0, listPage: async () => [{ key: previous.id, value: previous }], get: async () => current };
+    const range = parseDateRange({ before: current.createdAt });
+    expect(await recallSemanticFacts(kv as never, 10, { query: "quartz", range })).toEqual([]);
   });
 
   it("reads no fact rows on a repeat recall, only the ones it returns", async () => {

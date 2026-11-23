@@ -63,6 +63,20 @@ describe("stop hook — the turn-ending reply", () => {
     });
   });
 
+  it.each(["post-tool-use", "post-tool-failure"])("forwards execution identity from the %s hook", async (hook) => {
+    seen = [];
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(process.execPath, [join(import.meta.dirname, "..", "plugin", "scripts", `${hook}.mjs`)], {
+        env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"], AGENTMEMORY_URL: url },
+        stdio: ["pipe", "ignore", "ignore"],
+      });
+      child.on("error", reject);
+      child.on("close", () => resolve());
+      child.stdin.end(JSON.stringify({ session_id: "s1", tool_name: "Read", tool_input: {}, agent_id: "agent-one", agent_type: "Explore" }));
+    });
+    expect(seen[0].body.data).toMatchObject({ agent_id: "agent-one", agent_type: "Explore" });
+  });
+
   it("posts no Observation when the turn ended without a reply", async () => {
     await runStop({ session_id: "ses_stop", cwd: "/tmp/fake-project" });
     expect(seen.map((s) => s.url)).toEqual(["/agentmemory/session/end"]);

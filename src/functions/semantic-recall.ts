@@ -66,7 +66,7 @@ export async function recallSemanticFacts(
   }
   if (options.range) {
     const range = options.range;
-    scored = scored.filter(({ fact }) => withinDateRange(fact.createdAt, range));
+    scored = scored.filter(({ fact }) => withinDateRange(fact.createdAtRaw, range));
   }
   scored.sort((a, b) => b.score - a.score);
 
@@ -80,7 +80,7 @@ export async function recallSemanticFacts(
       score,
     })),
   );
-  return rows.filter((r): r is RecalledFact => r.fact !== null && r.fact.isLatest !== false);
+  return rows.filter((r): r is RecalledFact => r.fact !== null && r.fact.isLatest !== false && (!options.range || withinDateRange(r.fact.createdAt, options.range)));
 }
 
 async function inProject(

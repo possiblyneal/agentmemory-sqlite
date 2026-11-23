@@ -115,6 +115,11 @@ describe("date bounds", () => {
     expect(withinDateRange("2026-01-01t00:00:00.000100001000Z", range)).toBe(true);
     expect(withinDateRange("2026-01-01 00:00:00.000100002000Z", range)).toBe(false);
   });
+  it("compares a stored one-digit hour without accepting it as a bound", () => {
+    const timestamp = "2026-01-01 0:00:00.0009Z";
+    expect(withinDateRange(timestamp, parseDateRange({ after: "2026-01-01T00:00:00.0009Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: timestamp })).toThrow();
+  });
   it("accepts leap days in years below 100 without applying the 1900 offset", () => {
     expect(parseDateRange({ after: "0000-02-29T00:00:00Z" }).after).toBe(Date.parse("0000-02-29T00:00:00Z"));
     expect(() => parseDateRange({ after: "0001-02-29T00:00:00Z" })).toThrow();
@@ -144,6 +149,13 @@ describe("GET /agentmemory/sessions paging", () => {
     expect(res.body.offset).toBe(10);
   });
 
+  it("orders bounded Sessions by exact instant before paging", async () => {
+    await kv.set(KV.sessions, "offset", { ...makeSession(1), id: "offset", startedAt: "2026-01-01T02:00:00+02:00" });
+    await kv.set(KV.sessions, "newer", { ...makeSession(2), id: "newer", startedAt: "2026-01-01T01:00:00.0002Z" });
+    await kv.set(KV.sessions, "newest", { ...makeSession(3), id: "newest", startedAt: "2026-01-01T01:00:00.0009Z" });
+    const res = await get("api::sessions", { after: "2026-01-01T00:00:00Z", before: "2026-01-01T02:00:00Z", limit: "1" });
+    expect((res.body.sessions as Session[]).map(s => s.id)).toEqual(["newest"]);
+  });
   it("filters Session start instants before applying the absolute offset", async () => {
     await seedSessions(25);
     const res = await get("api::sessions", {

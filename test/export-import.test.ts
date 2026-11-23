@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { registerSnapshotFunction } from "../src/functions/snapshot.js";
+import { registerEvictFunction } from "../src/functions/evict.js";
 import { pagedReads } from "./helpers/mocks.js";
 
 vi.mock("../src/logger.js", () => ({
@@ -14,7 +15,8 @@ import { registerMeshFunction } from "../src/functions/mesh.js";
 import { SqliteState, stateFunctions } from "../src/engine/inproc/state.js";
 import { StateKV } from "../src/state/kv.js";
 import { VERSION } from "../src/version.js";
-import { getSearchIndex } from "../src/functions/search.js";
+import { getSearchIndex, rebuildIndex, registerSearchFunction } from "../src/functions/search.js";
+import { registerEventTriggers } from "../src/triggers/events.js";
 import type {
   Session,
   CompressedObservation,
@@ -133,6 +135,14 @@ describe("Export/Import Functions", () => {
     await kv.set("mem:obs:ses_1", "obs_1", testObs);
     await kv.set("mem:memories", "mem_1", testMemory);
     await kv.set("mem:summaries", "ses_1", testSummary);
+  });
+
+  it("preserves execution attribution through export and replace import", async () => {
+    await kv.set("mem:obs:ses_1", "obs_1", { ...testObs, executionAgentId: "worker-1", executionAgentType: "Explore" });
+    const exportData = await sdk.trigger("mem::export", {}) as ExportData;
+    await sdk.trigger("mem::import", { exportData, strategy: "replace" });
+    const restored = await sdk.trigger("mem::export", {}) as ExportData;
+    expect(restored.observations["ses_1"][0]).toMatchObject({ executionAgentId: "worker-1", executionAgentType: "Explore" });
   });
 
   it("export produces valid ExportData structure", async () => {
@@ -437,13 +447,58 @@ describe("Export/Import Functions", () => {
       registerSnapshotFunction(sdk as never, kv as never, dir);
       const relation = { sourceId: "mem_1", targetId: "mem_2", type: "related", createdAt: "2026-01-01" };
       await kv.set("mem:relations", "rel_legacy", relation);
+      await kv.set("mem:obs:ses_1", "obs_1", { ...testObs, executionAgentId: "worker-1", executionAgentType: "Explore" });
       const created = await sdk.trigger("mem::snapshot-create", {});
       expect(created.success).toBe(true);
       await kv.delete("mem:relations", "rel_legacy");
+      await kv.set("mem:obs:ses_1", "obs_1", testObs);
       await kv.set("mem:relations", "rel_stale", { ...relation, targetId: "stale" });
       expect(await sdk.trigger("mem::snapshot-restore", { commitHash: created.snapshot.commitHash })).toMatchObject({ success: true });
       expect(await kv.list("mem:relations")).toEqual([relation]);
       expect(await kv.get("mem:relations", "rel_legacy")).toEqual(relation);
+      const restored = await sdk.trigger("mem::export", {}) as ExportData;
+      expect(restored.observations["ses_1"][0]).toMatchObject({ executionAgentId: "worker-1", executionAgentType: "Explore" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["export", "snapshot"] as const)("preserves a recovered Session and its Observation in a fresh %s restore", async (kind) => {
+    await kv.delete("mem:summaries", testSession.id);
+    registerEvictFunction(sdk as never, kv as never);
+    registerEventTriggers(sdk as never, kv as never);
+    sdk.registerFunction("mem::summarize", async () => {
+      await kv.set("mem:summaries", testSession.id, testSummary);
+      return { success: true, summary: testSummary };
+    });
+    await sdk.trigger("mem::evict", {});
+    const exported = await sdk.trigger("mem::export", {}) as ExportData;
+    expect.soft(exported.sessions).toContainEqual(testSession);
+    expect.soft(exported.observations[testSession.id] ?? []).toContainEqual(testObs);
+
+    mkdirSync("tmp", { recursive: true });
+    const dir = mkdtempSync(join(process.cwd(), "tmp", "snapshot-recovered-"));
+    try {
+      registerSnapshotFunction(sdk as never, kv as never, dir);
+      const created = await sdk.trigger("mem::snapshot-create", {});
+      expect(created.success).toBe(true);
+        const freshKv = mockKV();
+        const freshSdk = mockSdk();
+        registerExportImportFunction(freshSdk as never, freshKv as never);
+        registerSnapshotFunction(freshSdk as never, freshKv as never, dir);
+        registerSearchFunction(freshSdk as never, freshKv as never);
+        const result = kind === "export"
+          ? await freshSdk.trigger("mem::import", { exportData: structuredClone(exported), strategy: "replace" })
+          : await freshSdk.trigger("mem::snapshot-restore", { commitHash: created.snapshot.commitHash });
+        expect(result.success).toBe(true);
+        expect.soft(await freshKv.get("mem:sessions", testSession.id)).toEqual(testSession);
+        expect.soft(await freshKv.get("mem:obs:ses_1", testObs.id)).toMatchObject({ id: "obs_1", sessionId: "ses_1", title: "Edit auth" });
+        getSearchIndex().clear();
+        await rebuildIndex(freshKv as never);
+        const own = await freshSdk.trigger("mem::search", { query: "auth", project: "my-project" });
+        const other = await freshSdk.trigger("mem::search", { query: "auth", project: "other-project" });
+        expect.soft(own.results.map((r: { observation: CompressedObservation }) => r.observation.id)).toContain(testObs.id);
+        expect.soft(other.results.map((r: { observation: CompressedObservation }) => r.observation.id)).not.toContain(testObs.id);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

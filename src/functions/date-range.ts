@@ -1,7 +1,7 @@
 export type DateRange = { after?: number; before?: number; afterFraction?: string; beforeFraction?: string };
 
 function fraction(value: string): string {
-  const digits = /[Tt ]\d{2}:\d{2}:\d{2}\.(\d+)/.exec(value)?.[1] ?? "";
+  const digits = /[Tt ]\d{1,2}:\d{2}:\d{2}\.(\d+)/.exec(value)?.[1] ?? "";
   let end = digits.length;
   while (end > 3 && digits[end - 1] === "0") end--;
   return digits.slice(3, end);
@@ -10,7 +10,7 @@ function fraction(value: string): string {
 function parseTimestamp(value: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return parsed;
-  return Date.parse(value.replace(/([Tt ]\d{2}:\d{2}:\d{2}\.\d{3})\d+/, "$1"));
+  return Date.parse(value.replace(/([Tt ]\d{1,2}:\d{2}:\d{2}\.\d{3})\d+/, "$1"));
 }
 
 function instant(value: unknown): number | undefined {
@@ -33,6 +33,10 @@ function instant(value: unknown): number | undefined {
 
 function compare(a: number, af: string, b: number, bf: string): number {
   return a === b ? (af < bf ? -1 : af > bf ? 1 : 0) : a < b ? -1 : 1;
+}
+
+export function compareTimestamps(a: string, b: string): number {
+  return compare(parseTimestamp(a), fraction(a), parseTimestamp(b), fraction(b));
 }
 
 export function parseDateRange(input: { after?: unknown; before?: unknown }): DateRange {

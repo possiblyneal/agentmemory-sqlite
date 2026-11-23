@@ -1,4 +1,4 @@
-import { withinDateRange, type DateRange } from "./date-range.js";
+import { compareTimestamps, withinDateRange, type DateRange } from "./date-range.js";
 import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import type { Session, SessionSummary } from "../types.js";
@@ -39,7 +39,9 @@ export async function listSessionsPage(
   const sessions = await kv.list<Session>(KV.sessions);
   const filtered = sessions.filter((s) =>
     (!agentId || s.agentId === agentId) && withinDateRange(s.startedAt, range),
-  ).sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  ).sort((a, b) => range.after !== undefined || range.before !== undefined
+    ? compareTimestamps(b.startedAt, a.startedAt)
+    : (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
   const paged = takePage(filtered, page);
   // Bounded fan-out: each kv.get is a full engine invocation, so
   // Promise.all over hundreds of sessions saturates the invocation

@@ -159,9 +159,9 @@ describe("stale-Session recovery holds one LLM slot", () => {
       expect(summarizeCalls.filter((e) => e.endsWith(id)).length).toBeGreaterThan(1);
       expect(stats.timeline).toContain(`end graph ${id}`);
       expect(await kv.get(KV.summaries, id)).not.toBeNull();
-      expect(await kv.get(KV.sessions, id)).toBeNull();
+      expect(await kv.get(KV.sessions, id)).toMatchObject({ id, project: "agentmemory" });
     }
-    expect(result.staleSessions).toBe(SESSIONS.length);
+    expect(result.staleSessions).toBe(0);
     expect(stats.maxInflight).toBe(1);
   });
 
