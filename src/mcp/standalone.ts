@@ -3,7 +3,8 @@
 import { InMemoryKV } from "./in-memory-kv.js";
 import { createStdioTransport } from "./transport.js";
 import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
-import { getStandalonePersistPath, resolveAgentSdkTimeoutMs } from "../config.js";
+import { getStandalonePersistPath, loadFallbackConfig, resolveAgentSdkTimeoutMs } from "../config.js";
+import { resolveLlmTimeoutMs } from "../providers/_fetch.js";
 import { parsePositiveIntEnv } from "../utils/parse-number.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
@@ -431,8 +432,9 @@ function reflectTimeoutMs(): number {
   const sdkTimeout = process.env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true"
     ? resolveAgentSdkTimeoutMs((key) => process.env[key])
     : 0;
-  const perCall = Math.max(15_000, sharedTimeout, openaiTimeout, sdkTimeout);
-  return Math.min(MAX_TIMER_MS, perCall * REFLECT_MAX_CLUSTERS + REFLECT_OVERHEAD_MS);
+  const perCall = Math.max(15_000, sharedTimeout, resolveLlmTimeoutMs(), openaiTimeout, sdkTimeout);
+  const providerAttempts = 1 + loadFallbackConfig().providers.length;
+  return Math.min(MAX_TIMER_MS, perCall * providerAttempts * REFLECT_MAX_CLUSTERS + REFLECT_OVERHEAD_MS);
 }
 
 async function handleProxyGeneric(

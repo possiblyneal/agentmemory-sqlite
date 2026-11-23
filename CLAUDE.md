@@ -321,10 +321,11 @@ Measurements and rationale are in `docs/research/record-kind-counts.md`.
 reinforced only in its own scope. `mem::reflect` counts only attempted clusters in
 `clustersProcessed`, reports `clustersFailed`, and reports failure when all attempts fail.
 Scheduled consolidation retries a project on any cluster failure; unchanged clusters stay cached.
-The standalone MCP shim bounds `memory_reflect` at 20 times the largest local provider
-budget, plus 15 s for other work, capped at 2,147,483,647 ms. It considers the regular LLM
-budget (default 60 s, minimum 15 s), a valid `OPENAI_TIMEOUT_MS`, and, when the Agent SDK
-is enabled, its resolved budget (default 180 s). Reflect uses the deadline-only dispatcher
+For each of up to 20 clusters, the standalone MCP shim budgets the largest locally resolved
+provider deadline for the primary and each configured fallback. It adds 15 s for other work
+and caps the total at 2,147,483,647 ms. The budget considers the regular LLM deadline
+(default 60 s, minimum 15 s), including the shared setting's provider-specific parsing, a valid
+`OPENAI_TIMEOUT_MS`, and the enabled Agent SDK's deadline (default 180 s). Reflect uses the deadline-only dispatcher
 so Node's independent header timer cannot cut the request short. Streaming idle deadlines
 and a remote daemon's different configuration can still outlast this outer deadline. The
 health probe and `memory_consolidate` deadlines are unchanged.

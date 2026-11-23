@@ -161,7 +161,8 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
   });
 
   it.each([
-    ["fractional shared timeout", "0.5", undefined, undefined, undefined, 1_215_000],
+    ["fractional shared timeout below one", "0.5", undefined, undefined, undefined, 1_215_000],
+    ["fractional shared timeout accepted by Anthropic", "120000.5", undefined, undefined, undefined, 2_415_000],
     ["shared timeout integer", "20000", undefined, undefined, undefined, 415_000],
     ["fractional OpenAI override", undefined, "60000.01", undefined, undefined, 1_215_000],
     ["opted-in SDK default", undefined, undefined, "true", undefined, 3_615_000],
