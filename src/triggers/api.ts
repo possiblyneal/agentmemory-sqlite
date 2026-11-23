@@ -1475,6 +1475,9 @@ export function registerApiTriggers(
           body: { error: "query or expandIds is required" },
         };
       }
+      if (req.body?.limit !== undefined && !Number.isInteger(req.body.limit)) {
+        return { status_code: 400, body: { error: "limit must be an integer" } };
+      }
       // #771: route the X-Agentmemory-Source header into the payload so
       // the followup-rate diagnostic can skip viewer-originated calls.
       // Body wins if both are set (advanced callers explicitly override).
