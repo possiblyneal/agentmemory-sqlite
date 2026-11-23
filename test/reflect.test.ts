@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import { handleToolCall } from "../src/mcp/standalone.js";
+import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -205,6 +208,64 @@ describe("Reflect", () => {
 
       expect(provider.summarize).not.toHaveBeenCalled();
       expect(result.clustersProcessed).toBe(0);
+    });
+
+    it("completes sequential clusters through MCP after a single-call deadline", async () => {
+      for (const name of ["auth", "token", "session", "deploy", "docker", "helm"]) {
+        await seedNode(kv, makeConceptNode(name));
+      }
+      for (const [src, dst] of [["auth", "token"], ["auth", "session"], ["deploy", "docker"], ["deploy", "helm"]]) {
+        await seedEdge(kv, makeEdge(src!, dst!));
+      }
+      for (const name of ["auth", "deploy"]) {
+        for (let i = 0; i < 3; i++) {
+          await kv.set("mem:semantic", `${name}_${i}`, makeSemantic(`${name} fact ${i}`, `${name}_${i}`));
+        }
+      }
+      provider.summarize.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return XML_RESPONSE;
+      });
+      const server = createServer((req, res) => {
+        if (req.url === "/agentmemory/livez") {
+          res.end("ok");
+          return;
+        }
+        void sdk.trigger("mem::reflect", {}).then((result) => {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(result) }] }));
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No server address");
+      const originalUrl = process.env["AGENTMEMORY_URL"];
+      const originalTimeout = process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
+      const originalOpenaiTimeout = process.env["OPENAI_TIMEOUT_MS"];
+      process.env["AGENTMEMORY_URL"] = `http://127.0.0.1:${address.port}`;
+      delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
+      delete process.env["OPENAI_TIMEOUT_MS"];
+      resetHandleForTests();
+      const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+        realTimeout(ms >= 60_000 ? Math.ceil(ms / 500) : ms),
+      );
+      try {
+        const result = await handleToolCall("memory_reflect", {});
+        expect(JSON.parse(result.content[0].text).clustersProcessed).toBe(2);
+        expect(provider.summarize).toHaveBeenCalledTimes(2);
+      } finally {
+        timeout.mockRestore();
+        resetHandleForTests();
+        if (originalUrl === undefined) delete process.env["AGENTMEMORY_URL"];
+        else process.env["AGENTMEMORY_URL"] = originalUrl;
+        if (originalTimeout === undefined) delete process.env["AGENTMEMORY_LLM_TIMEOUT_MS"];
+        else process.env["AGENTMEMORY_LLM_TIMEOUT_MS"] = originalTimeout;
+        if (originalOpenaiTimeout === undefined) delete process.env["OPENAI_TIMEOUT_MS"];
+        else process.env["OPENAI_TIMEOUT_MS"] = originalOpenaiTimeout;
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
 
     it("returns empty when no graph nodes or memories exist", async () => {

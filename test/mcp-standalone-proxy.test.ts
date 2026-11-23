@@ -115,10 +115,28 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       const consolidate = timeouts.at(-1)!;
       await handleToolCall("memory_sessions", {});
       const sessions = timeouts.at(-1)!;
-      expect(reflect).toBeGreaterThan(15_000);
-      expect(consolidate).toBeGreaterThan(15_000);
+      expect(reflect).toBe(1_215_000);
+      expect(consolidate).toBe(60_000);
       expect(sessions).toBe(15_000);
     } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("allows for an OpenAI provider timeout longer than the shared timeout", async () => {
+    const timeouts: number[] = [];
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return realTimeout(ms);
+    });
+    process.env["OPENAI_TIMEOUT_MS"] = "120000";
+    try {
+      installFetch(() => new Response(JSON.stringify({ content: [] }), { status: 200 }));
+      await handleToolCall("memory_reflect", {});
+      expect(timeouts.at(-1)).toBe(2_415_000);
+    } finally {
+      delete process.env["OPENAI_TIMEOUT_MS"];
       spy.mockRestore();
     }
   });
@@ -654,6 +672,23 @@ describe("@agentmemory/mcp standalone — explicit daemon must not fall back (ro
       handleToolCall("memory_save", { content: "keep me" }, kv),
     ).rejects.toThrow("agentmemory daemon unreachable at http://daemon.invalid:3111");
     expect((await kv.list("mem:memories")).length).toBe(0);
+  });
+
+  it("fails Reflect promptly when the daemon does not answer its health probe", async () => {
+    resetHandleForTests();
+    process.env["AGENTMEMORY_URL"] = "http://127.0.0.1:3111";
+    process.env["AGENTMEMORY_PROBE_TIMEOUT_MS"] = "50";
+    const started = Date.now();
+    (globalThis as { fetch: typeof fetch }).fetch = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      })) as typeof fetch;
+    try {
+      await expect(handleToolCall("memory_reflect", {})).rejects.toThrow(/daemon unreachable/);
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      delete process.env["AGENTMEMORY_PROBE_TIMEOUT_MS"];
+    }
   });
 
   it("errors under AGENTMEMORY_FORCE_PROXY when the call cannot reach the daemon", async () => {

@@ -321,6 +321,11 @@ Measurements and rationale are in `docs/research/record-kind-counts.md`.
 reinforced only in its own scope. `mem::reflect` counts only attempted clusters in
 `clustersProcessed`, reports `clustersFailed`, and reports failure when all attempts fail.
 Scheduled consolidation retries a project on any cluster failure; unchanged clusters stay cached.
+The standalone MCP shim bounds `memory_reflect` at 20 times the larger of its configured
+`AGENTMEMORY_LLM_TIMEOUT_MS` and `OPENAI_TIMEOUT_MS` (default 60 s, minimum 15 s), plus
+15 s for other work, capped at 2,147,483,647 ms. This is an outer deadline, not a provider
+call timeout: streaming idle deadlines and a remote daemon's different configuration can
+outlast it. The health probe and `memory_consolidate` deadlines are unchanged.
 
 ### MCP Tool Handler
 ```typescript
