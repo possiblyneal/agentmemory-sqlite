@@ -600,7 +600,7 @@ export function registerReflectFunctions(
 
       try {
         await recordAudit(kv, "insight_search", "mem::insight-search", [], {
-          query: data.query,
+          query: data.query.slice(0, 200),
           resultCount: scored.length,
         });
       } catch {}

@@ -649,6 +649,16 @@ Layered protection for security means input validation, safe APIs and deny-lists
       });
     });
 
+    it.each(["security layered protection", `${"unmatched ".repeat(30)}security`])(
+      "audits a bounded excerpt without losing matches for %s", async (query) => {
+        const result = await sdk.trigger("mem::insight-search", { query });
+        expect(result.insights.map((insight: Insight) => insight.title)).toContain("Defense in Depth");
+        const rows = await kv.list<{ operation: string; details: { query: string; resultCount: number } }>("mem:audit");
+        const audit = rows.find((row) => row.operation === "insight_search");
+        expect(audit?.details).toEqual({ query: query.slice(0, 200), resultCount: result.insights.length });
+      },
+    );
+
     it("finds insights matching query", async () => {
       const result = (await sdk.trigger("mem::insight-search", {
         query: "security layered protection",
