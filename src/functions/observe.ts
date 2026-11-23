@@ -343,6 +343,10 @@ function reportsError(output: unknown): boolean {
   return (typeof o["stderr"] === "string" && o["stderr"].trim() !== "") || o["interrupted"] === true || o["is_error"] === true;
 }
 
+function validExecutionField(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= 256 ? value : undefined;
+}
+
 export function isReadOnlyObservation(raw: RawObservation): boolean {
   if (raw.hookType !== "post_tool_use" || !raw.toolName) return false;
   if (reportsError(raw.toolOutput)) return false;
@@ -412,7 +416,7 @@ export function registerObserveFunction(
           payload.sessionId,
           payload.hookType,
           toolName,
-          dedupInput,
+          [dedupInput, validExecutionField(d["agent_id"]), validExecutionField(d["agent_type"])],
           d["tool_output"] ?? d["tool_response"] ?? d["error"],
         );
         if (dedupMap.isDuplicate(dedupHash)) {
@@ -445,6 +449,11 @@ export function registerObserveFunction(
           payload.hookType === "post_tool_use" ||
           payload.hookType === "post_tool_failure"
         ) {
+          const original = typeof payload.data === "object" && payload.data !== null
+            ? payload.data as Record<string, unknown>
+            : {};
+          if (original["agent_id"] === d["agent_id"]) raw.executionAgentId = validExecutionField(original["agent_id"]);
+          if (original["agent_type"] === d["agent_type"]) raw.executionAgentType = validExecutionField(original["agent_type"]);
           raw.toolName = d["tool_name"] as string | undefined;
           raw.toolInput = d["tool_input"];
           raw.toolOutput = d["tool_output"] || d["error"];

@@ -151,7 +151,7 @@ function storeForObservedSession(sessionId: string): Store {
 }
 
 describe("mem::evict stale sessions", () => {
-  it("runs session recovery before deleting a stale observed session", async () => {
+  it("retains a recovered stale session that owns observations", async () => {
     const sessionId = "ses_stale";
     const store = storeForObservedSession(sessionId);
     const kv = mockKV(store);
@@ -176,14 +176,9 @@ describe("mem::evict stale sessions", () => {
       payload: {},
     })) as { staleSessions: number };
 
-    expect(result.staleSessions).toBe(1);
-    expect(await kv.get(KV.sessions, sessionId)).toBeNull();
-    const audits = await kv.list<{
-      details: { reason: string };
-    }>(KV.audit);
-    expect(audits[0].details.reason).toBe(
-      "stale_session_recovered_then_evicted",
-    );
+    expect(result.staleSessions).toBe(0);
+    expect(await kv.get(KV.sessions, sessionId)).toMatchObject({ id: sessionId, project: "agentmemory" });
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
     expect(calls.map((call) => call.function_id)).toContain(
       "event::session::stopped",
     );
@@ -269,7 +264,7 @@ describe("mem::evict stale sessions", () => {
     };
 
     expect(events).toEqual(["start ses_a", "end ses_a", "start ses_b", "end ses_b"]);
-    expect(result.staleSessions).toBe(2);
+    expect(result.staleSessions).toBe(0);
   });
 
   it("runs at most one recovery at a time when two sweeps overlap", async () => {
@@ -284,6 +279,7 @@ describe("mem::evict stale sessions", () => {
       recoveries++;
       peak = Math.max(peak, ++running);
       await new Promise((r) => setTimeout(r, 5));
+      await kv.set(KV.summaries, sessionId, summaryFor(sessionId));
       running--;
       return { success: true };
     });
@@ -379,7 +375,7 @@ describe("mem::evict stale sessions", () => {
     );
   });
 
-  it("compresses a stale session's raw observations, then recovers and evicts it", async () => {
+  it("compresses a stale session's raw observations and retains the recovered session", async () => {
     const sessionId = "ses_raw_only";
     const store = storeForObservations(sessionId, [
       makeRawObservation(sessionId),
@@ -400,8 +396,8 @@ describe("mem::evict stale sessions", () => {
       payload: {},
     })) as { staleSessions: number };
 
-    expect(result.staleSessions).toBe(1);
-    expect(await kv.get(KV.sessions, sessionId)).toBeNull();
+    expect(result.staleSessions).toBe(0);
+    expect(await kv.get(KV.sessions, sessionId)).toMatchObject({ id: sessionId });
   });
 });
 
@@ -950,23 +946,46 @@ describe("mem::evict spares Observations their Session's stop has not finished w
       number
     >;
 
-    expect(stats).toMatchObject({ staleSessions: 1, lowImportanceObs: 1 });
+    expect(stats).toMatchObject({ staleSessions: 0, lowImportanceObs: 1 });
     expect(await kv.list(KV.observations(sessionId))).toEqual([]);
   });
 
-  it("previews a stale Session's old low-importance Observations as evicted on a dry run", async () => {
-    const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
-    const kv = mockKV(store);
+  it("previews empty Session deletion and recovered Observation eviction like a real sweep", async () => {
+    async function sweep(dryRun: boolean) {
+      const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
+      const empty = makeSession("empty");
+      store.get(KV.sessions)!.set(empty.id, empty);
+      const kv = mockKV(store);
+      const { sdk } = mockSdk();
+      registerEvictFunction(sdk as never, kv as never);
+      sdk.registerFunction("event::session::stopped", () => ({ success: true }));
+      sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+      const stats = await sdk.trigger({ function_id: "mem::evict", payload: { dryRun } });
+      return { stats, kv };
+    }
+
+    const preview = await sweep(true);
+    const actual = await sweep(false);
+    expect(preview.stats).toMatchObject({ staleSessions: 1, lowImportanceObs: 1 });
+    expect(actual.stats).toMatchObject({ staleSessions: 1, lowImportanceObs: 1 });
+    expect(await preview.kv.get(KV.sessions, "empty")).toBeDefined();
+    expect(await preview.kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await actual.kv.get(KV.sessions, "empty")).toBeNull();
+    expect(await actual.kv.get(KV.sessions, sessionId)).toBeDefined();
+    expect(await actual.kv.list(KV.observations(sessionId))).toHaveLength(0);
+  });
+
+  it("does not preview deletion when the stale Session's Observation scan fails", async () => {
+    const store = storeForObservations(sessionId, []);
+    const kv = mockKV(store, new Set([KV.observations(sessionId)]));
     const { sdk } = mockSdk();
     registerEvictFunction(sdk as never, kv as never);
 
-    const stats = (await sdk.trigger({
-      function_id: "mem::evict",
-      payload: { dryRun: true },
-    })) as Record<string, number>;
-
-    expect(stats).toMatchObject({ staleSessions: 1, lowImportanceObs: 1 });
-    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: true } }))
+      .toMatchObject({ staleSessions: 0 });
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: {} }))
+      .toMatchObject({ staleSessions: 0 });
+    expect(await kv.get(KV.sessions, sessionId)).toBeDefined();
   });
 
   it("reports the same count on a dry run without deleting", async () => {

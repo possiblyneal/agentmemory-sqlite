@@ -185,7 +185,9 @@ stream groups.
 `DedupMap` (`src/functions/dedup.ts`) hashes the complete input and output with the Session,
 hook type and tool name; its five-minute in-memory window retains hashes, not payloads.
 Distinct long Observations sharing a prefix are stored; exact repeats within the window deduplicate.
-Dedup runs before the existing privacy sanitization and does not change what gets stored.
+Tool execution attribution (`agent_id`, `agent_type`) distinguishes otherwise identical calls. Dedup runs before the existing privacy sanitization and does not change what gets stored.
+
+Tool success and failure hooks retain optional `agent_id` and `agent_type` as `executionAgentId` and `executionAgentType` on Observations, separately from the isolation `agentId`; each original is a nonempty string of at most 256 characters and is omitted if privacy sanitization changes it. Synthetic and LLM Compression preserve them. Full export/import and snapshots carry stored Observation fields; transcript JSONL import and replay do not reconstruct this attribution, and identity discarded before capture cannot be recovered.
 
 ### Observation redaction
 `mem::observe` scrubs structured payload values before capture, preserving their shape and
@@ -250,6 +252,14 @@ skipping bookkeeping.
 `ResilientProvider` admits one half-open probe per operation after acquiring a provider slot.
 The reservation lasts until the call settles; busy and content-filter responses release it,
 and probe generations discard stale completions. An open circuit rejects before waiting for a slot.
+
+### Stale Session recovery
+`mem::evict` keeps a successfully recovered Session that had Observations, so backups can
+still enumerate its Observation bucket and preserve its project. Empty stale Sessions are
+still evicted; existing orphaned buckets are not repaired. The same sweep still applies its
+Observation eviction rules after recovery. A dry run counts only stale Sessions whose
+Observation bucket was read successfully and found empty; it still projects Observation
+eviction separately.
 
 ### Replace import
 `mem::import` validates section shapes, size limits and keyed fields used by import indexing

@@ -112,6 +112,61 @@ describe("observe dedup for hooks without tool_input (#1173)", () => {
     expect(second.observationId).toBeTruthy();
   });
 
+  it("retains tool execution attribution in the captured observation", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const { registerTimelineFunction } = await import("../src/functions/timeline.js");
+    const sdk = mockSdk({ looseTrigger: true });
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+    registerTimelineFunction(sdk as never, kv as never);
+    const payload = observePayload("post_tool_use", { tool_name: "Read", tool_input: { file_path: "a" }, agent_id: "one", agent_type: "Explore" });
+    await sdk.trigger("mem::observe", payload);
+    const result = await sdk.trigger("mem::timeline", { anchor: payload.timestamp }) as { entries: Array<{ observation: unknown }> };
+    expect(result.entries[0].observation).toMatchObject({ executionAgentId: "one", executionAgentType: "Explore" });
+    expect(result.entries[0].observation).not.toHaveProperty("agentId");
+  });
+
+  it.each([
+    ["agent_id", "executionAgentId", "worker <private>secret</private>"],
+    ["agent_type", "executionAgentType", `<private>${"x".repeat(263)}</private>`],
+  ])("omits %s when sanitization changes its identity", async (field, storedField, value) => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const { registerTimelineFunction } = await import("../src/functions/timeline.js");
+    const sdk = mockSdk({ looseTrigger: true });
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+    registerTimelineFunction(sdk as never, kv as never);
+    const payload = observePayload("post_tool_use", { tool_name: "Read", tool_input: {}, [field]: value });
+    await sdk.trigger("mem::observe", payload);
+    const result = await sdk.trigger("mem::timeline", { anchor: payload.timestamp }) as { entries: Array<{ observation: unknown }> };
+    expect(result.entries[0].observation).not.toHaveProperty(storedField);
+  });
+
+  it("omits missing or invalid execution attribution", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const { registerTimelineFunction } = await import("../src/functions/timeline.js");
+    const sdk = mockSdk({ looseTrigger: true });
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+    registerTimelineFunction(sdk as never, kv as never);
+    const payload = observePayload("post_tool_failure", { tool_name: "Read", tool_input: {}, agent_id: "x".repeat(257), agent_type: 42 });
+    await sdk.trigger("mem::observe", payload);
+    const result = await sdk.trigger("mem::timeline", { anchor: payload.timestamp }) as { entries: Array<{ observation: unknown }> };
+    expect(result.entries[0].observation).not.toHaveProperty("executionAgentId");
+    expect(result.entries[0].observation).not.toHaveProperty("executionAgentType");
+  });
+
+  it.each(["post_tool_use", "post_tool_failure"])("keeps interleaved identical %s calls from distinct subagents", async (hook) => {
+    const observe = await setup();
+    const data = { tool_name: "Bash", tool_input: { command: "ls" }, tool_output: "a.txt", agent_type: "Explore" };
+    const first = await observe(hook, { ...data, agent_id: "one" });
+    const second = await observe(hook, { ...data, agent_id: "two" });
+    const repeated = await observe(hook, { ...data, agent_id: "one" });
+    expect(first.observationId).toBeTruthy();
+    expect(second.observationId).toBeTruthy();
+    expect(repeated.deduplicated).toBe(true);
+  });
+
   it("dedups a rerun with the same input and the same output", async () => {
     const observe = await setup();
     const data = {

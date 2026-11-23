@@ -62,6 +62,8 @@ export interface RawObservation {
   modality?: "text" | "image" | "mixed";
   imageData?: string;
   agentId?: string;
+  executionAgentId?: string;
+  executionAgentType?: string;
   origin?: Origin;
 }
 
@@ -84,6 +86,8 @@ export interface CompressedObservation {
   imageDescription?: string;
   modality?: "text" | "image" | "mixed";
   agentId?: string;
+  executionAgentId?: string;
+  executionAgentType?: string;
   origin?: Origin;
   // Carried over from RawObservation. Compression used to drop it, so the
   // stored record had no way to say which tool produced it — which made
