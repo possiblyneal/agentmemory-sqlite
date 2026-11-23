@@ -154,6 +154,35 @@ function storeForObservedSession(sessionId: string): Store {
 }
 
 describe("mem::evict stale sessions", () => {
+  it.each(["malformed", "late"])("does not inflate cap preview for %s raw rows", async (scenario) => {
+    const sessionId = `preview_${scenario}`;
+    const raw = makeRawObservation(sessionId);
+    const covered = makeObservation(sessionId);
+    const malformed = { ...raw, toolName: 123 } as unknown as RawObservation;
+    const store = storeForObservations(sessionId, scenario === "malformed" ? [covered, malformed] : [covered]);
+    store.get(KV.summaries)!.set(sessionId, { ...summaryFor(sessionId), coveredThrough: daysAgo(1) });
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    const kv = mockKV(store);
+    const list = kv.list;
+    let scans = 0;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      if (scope === KV.observations(sessionId) && ++scans === 2 && scenario === "late") {
+        store.get(scope)!.set(raw.id, raw);
+      }
+      return list<T>(scope);
+    };
+    const set = vi.spyOn(kv, "set");
+    const del = vi.spyOn(kv, "delete");
+    const { sdk, calls } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: true } }))
+      .toMatchObject({ capEvictions: 0 });
+    expect(set).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.function_id)).toEqual(["mem::evict"]);
+  });
+
   it("includes recoverable raw Observations in project cap previews", async () => {
     const sessionId = "ses_cap_raw";
     const raw = makeRawObservation(sessionId);

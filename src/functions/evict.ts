@@ -129,6 +129,7 @@ async function recoverOrEvictStaleSession(
   prior: SessionSummary | undefined,
   dryRun: boolean,
   scannedSessions: Set<string>,
+  projectedRaw: Map<string, Map<string, CompressedObservation>>,
 ): Promise<{ recovered: boolean; evicted: boolean; summary?: SessionSummary }> {
   const kept = { recovered: false, evicted: false };
   const observations = await kv
@@ -145,7 +146,23 @@ async function recoverOrEvictStaleSession(
   if (prior && !observations.some((o) =>
     !isCompressedObservation(o) || isAwaitingCompression(o) || !summaryCovers(prior, o.timestamp)
   )) return kept;
-  if (dryRun) return { recovered: false, evicted: observations.length === 0 };
+  if (dryRun) {
+    const projected = new Map<string, CompressedObservation>();
+    projectedRaw.set(sessionId, projected);
+    try {
+      for (const o of observations) {
+        if (!isCompressedObservation(o)) {
+          projected.set(o.id, buildSyntheticCompression({ ...o, sessionId }));
+        }
+      }
+    } catch (err) {
+      logger.warn("Stale session compression failed", {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return { recovered: false, evicted: observations.length === 0 };
+  }
 
   // A raw row this old is a compression that never ran, so it is
   // compressed synthetically here; otherwise the Session could
@@ -232,6 +249,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       const staleMs = cfg.staleSessionDays * MS_PER_DAY;
       const scannedSessions = new Set<string>();
       const scannedStaleCandidates = new Set<string>();
+      const projectedRaw = new Map<string, Map<string, CompressedObservation>>();
       let recoveredStaleSessions = 0;
       for (const session of sessions) {
         if (!(now - new Date(session.startedAt).getTime() > staleMs)) continue;
@@ -239,7 +257,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         if (prior && !prior.coveredThrough) continue;
         scannedStaleCandidates.add(session.id);
         const { recovered, evicted, summary } = await recoverOrEvictStaleSession(
-          sdk, kv, session.id, prior, dryRun, scannedSessions,
+          sdk, kv, session.id, prior, dryRun, scannedSessions, projectedRaw,
         );
         if (summary) {
           summaryBySession.set(session.id, summary);
@@ -284,10 +302,8 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           .catch(() => []);
         const compressed = obs.flatMap((o) => {
           if (isCompressedObservation(o)) return [o];
-          if (dryRun && scannedStaleCandidates.has(session.id) && scannedSessions.has(session.id)) {
-            return [buildSyntheticCompression({ ...o, sessionId: session.id })];
-          }
-          return [];
+          const projected = projectedRaw.get(session.id)?.get(o.id);
+          return projected ? [projected] : [];
         });
         const lowImportanceIds = new Set<string>();
 

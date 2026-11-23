@@ -290,9 +290,9 @@ Observation eviction rules after recovery, using the Session's refreshed graph w
 candidate selection and the locked deletion check. A dry run counts only stale Sessions whose
 Observation bucket was read successfully and found empty. A failed stale-Session scan protects
 its Observations for that sweep; a dry run does not assume a recovery would cover them. It
-projects synthetic Compression of raw Observations from successfully scanned stale Sessions for
-project-cap counting, without storing them or calling providers; existing coverage still governs
-the preview's deletion candidates.
+projects synthetic Compression of raw Observations seen in the stale-Session recovery scan for
+project-cap counting, without storing them or calling providers. A compression failure stops that
+Session's projection, as in apply; existing coverage still governs preview deletion candidates.
 
 ### Replace import
 `mem::import` validates section shapes, size limits and keyed fields used by import indexing
