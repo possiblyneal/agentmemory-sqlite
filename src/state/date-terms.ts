@@ -52,9 +52,10 @@ function isRealDay(year: number, month: number, day: number): boolean {
 
 // Local calendar fields: the daemon runs on the Operator's machine, and the
 // Operator names days by their own clock.
-export function dateTermsForTimestamp(timestamp: string | undefined): string[] {
-  const time = timestamp ? new Date(timestamp) : null;
-  if (!time || Number.isNaN(time.getTime())) return [];
+export function dateTermsForTimestamp(timestamp: string | number | undefined): string[] {
+  if (!timestamp && timestamp !== 0) return [];
+  const time = new Date(timestamp);
+  if (Number.isNaN(time.getTime())) return [];
   const [year, month, day] = [time.getFullYear(), time.getMonth() + 1, time.getDate()];
   if (year < 1000 || year > 9999) return [];
   return [term.date(year, month, day), term.month(year, month), term.monthDay(month, day)];

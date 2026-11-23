@@ -1,5 +1,5 @@
 import type { CompressedObservation } from "../types.js";
-import { withinDateRange, type DateRange } from "../functions/date-range.js";
+import { parseTimestamp, withinDateRange, type DateRange } from "../functions/date-range.js";
 import { stem } from "./stemmer.js";
 import { getSynonyms } from "./synonyms.js";
 import { STOP_WORDS } from "./stopwords.js";
@@ -46,6 +46,9 @@ export class SearchIndex {
   private entries: Map<string, IndexEntry> = new Map();
   private invertedIndex: Map<string, Set<string>> = new Map();
   private docTermCounts: Map<string, Map<string, number>> = new Map();
+  // Most date postings agree with the bounded parser; keep only the differences
+  // so unbounded queries retain their original postings and scoring order.
+  private boundedDateDeltas = new Map<string, { added: Set<string>; omitted: Set<string> }>();
   private totalDocLength = 0;
   private termsByLead: Map<string, Set<string>> = new Map();
 
@@ -70,7 +73,9 @@ export class SearchIndex {
       }
     }
 
-    for (const term of dateTermsForTimestamp(obs.timestamp)) termFreq.set(term, 1);
+    const localDates = dateTermsForTimestamp(obs.timestamp);
+    for (const term of localDates) termFreq.set(term, 1);
+    this.updateBoundedDates(obs.id, obs.timestamp, localDates, true);
 
     this.entries.set(obs.id, {
       obsId: obs.id,
@@ -115,13 +120,39 @@ export class SearchIndex {
     return out;
   }
 
+  private updateBoundedDates(id: string, timestamp: string, localDates: string[], adding: boolean): void {
+    const boundedDates = timestamp ? dateTermsForTimestamp(parseTimestamp(timestamp)) : [];
+    for (const term of localDates) {
+      if (!boundedDates.includes(term)) this.updateDateDelta(term, id, "omitted", adding);
+    }
+    for (const term of boundedDates) {
+      if (!localDates.includes(term)) this.updateDateDelta(term, id, "added", adding);
+    }
+  }
+
+  private updateDateDelta(term: string, id: string, side: "added" | "omitted", adding: boolean): void {
+    let delta = this.boundedDateDeltas.get(term);
+    if (adding) {
+      if (!delta) {
+        delta = { added: new Set(), omitted: new Set() };
+        this.boundedDateDeltas.set(term, delta);
+      }
+      delta[side].add(id);
+    } else if (delta) {
+      delta[side].delete(id);
+      if (!delta.added.size && !delta.omitted.size) this.boundedDateDeltas.delete(term);
+    }
+  }
+
   remove(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
 
     const termFreq = this.docTermCounts.get(id);
     if (termFreq) {
+      const localDates = [];
       for (const term of termFreq.keys()) {
+        if (term.startsWith("@")) localDates.push(term);
         const postingList = this.invertedIndex.get(term);
         if (postingList) {
           postingList.delete(id);
@@ -131,6 +162,7 @@ export class SearchIndex {
           }
         }
       }
+      this.updateBoundedDates(id, entry.timestamp, localDates, false);
       this.docTermCounts.delete(id);
     }
 
@@ -164,7 +196,8 @@ export class SearchIndex {
     sliceMs = SEARCH_SLICE_MS,
     range?: DateRange,
   ): Promise<SearchHit[]> {
-    const steps = this.scoreTerms(query);
+    const bounded = range?.after !== undefined || range?.before !== undefined;
+    const steps = this.scoreTerms(query, bounded);
     let sliceStart = performance.now();
     let step = steps.next();
     while (!step.done) {
@@ -196,7 +229,7 @@ export class SearchIndex {
   }
 
   // Yields every POSTINGS_PER_STEP documents scored and after each query term.
-  private *scoreTerms(query: string): Generator<void, Map<string, number>> {
+  private *scoreTerms(query: string, bounded = false): Generator<void, Map<string, number>> {
     const scores = new Map<string, number>();
     const rawTerms = this.tokenize(query.toLowerCase(), STOP_WORDS);
     const dateTerms = dateTermsForQuery(query).slice(0, MAX_QUERY_DATE_TERMS);
@@ -225,16 +258,26 @@ export class SearchIndex {
 
     for (const { term, weight } of queryTerms) {
       const matchingDocs = this.invertedIndex.get(term);
-      if (matchingDocs) {
-        const df = matchingDocs.size;
+      const boundedDate = bounded && term.startsWith("@");
+      const delta = boundedDate ? this.boundedDateDeltas.get(term) : undefined;
+      const df = (matchingDocs?.size ?? 0) + (delta?.added.size ?? 0) - (delta?.omitted.size ?? 0);
+      if (df > 0) {
         const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
+        function* postings() {
+          if (matchingDocs) yield* matchingDocs;
+          if (delta) yield* delta.added;
+        }
 
         let scored = 0;
-        for (const obsId of matchingDocs) {
+        for (const obsId of delta ? postings() : matchingDocs!) {
           if (++scored % POSTINGS_PER_STEP === 0) yield;
-          const entry = this.entries.get(obsId)!;
+          const entry = this.entries.get(obsId);
+          if (!entry) continue;
           const docTerms = this.docTermCounts.get(obsId);
-          const tf = docTerms?.get(term) || 0;
+          const liveDelta = boundedDate ? this.boundedDateDeltas.get(term) : undefined;
+          if (liveDelta?.omitted.has(obsId)) continue;
+          const tf = liveDelta?.added.has(obsId) ? 1 : docTerms?.get(term);
+          if (!tf) continue;
           const docLen = entry.termCount;
 
           const numerator = tf * (this.k1 + 1);
@@ -270,9 +313,9 @@ export class SearchIndex {
           Math.log((N - prefixDf + 0.5) / (prefixDf + 0.5) + 1) * 0.5;
         for (const obsId of obsIds) {
           if (++prefixScored % POSTINGS_PER_STEP === 0) yield;
-          const entry = this.entries.get(obsId)!;
-          const docTerms = this.docTermCounts.get(obsId);
-          const tf = docTerms?.get(indexTerm) || 0;
+          const entry = this.entries.get(obsId);
+          const tf = this.docTermCounts.get(obsId)?.get(indexTerm);
+          if (!entry || !tf) continue;
           const docLen = entry.termCount;
           const numerator = tf * (this.k1 + 1);
           const denominator =
@@ -304,6 +347,7 @@ export class SearchIndex {
     this.entries.clear();
     this.invertedIndex.clear();
     this.docTermCounts.clear();
+    this.boundedDateDeltas.clear();
     this.totalDocLength = 0;
     this.termsByLead.clear();
   }
@@ -322,6 +366,11 @@ export class SearchIndex {
       Array.from(other.docTermCounts.entries()).map(([k, v]) => [
         k,
         new Map(v),
+      ]),
+    );
+    this.boundedDateDeltas = new Map(
+      Array.from(other.boundedDateDeltas, ([term, { added, omitted }]) => [
+        term, { added: new Set(added), omitted: new Set(omitted) },
       ]),
     );
     this.totalDocLength = other.totalDocLength;
@@ -361,7 +410,10 @@ export class SearchIndex {
         idx.addToLead(term);
       }
       for (const [id, counts] of data.docTerms) {
-        idx.docTermCounts.set(id, new Map(counts));
+        const termFreq = new Map<string, number>(counts);
+        idx.docTermCounts.set(id, termFreq);
+        const entry = idx.entries.get(id);
+        if (entry) idx.updateBoundedDates(id, entry.timestamp, [...termFreq.keys()].filter((term) => term.startsWith("@")), true);
       }
       const rawLen = Number(data.totalDocLength);
       idx.totalDocLength =

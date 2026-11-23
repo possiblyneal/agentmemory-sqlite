@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { parseDateRange } from "../src/functions/date-range.js";
 import { SearchIndex } from "../src/state/search-index.js";
 import { dateTermsForQuery } from "../src/state/date-terms.js";
 import type { CompressedObservation } from "../src/types.js";
@@ -52,6 +53,79 @@ describe("SearchIndex record dates", () => {
 
   it("finds a record by a date-only query", () => {
     expect(ids(dated(), "2026-04-08")).toEqual(["same_day"]);
+  });
+
+  it("matches a zoned date query to both spellings of a bounded stored instant", async () => {
+    const index = new SearchIndex();
+    const query = "2026-01-01T00:30:00Z";
+    index.add(shipped("explicit", query));
+    index.add(shipped("legacy", "2026-01-01T00:30:00"));
+    const range = parseDateRange({ after: "2026-01-01T00:00:00Z", before: "2026-01-01T01:00:00Z" });
+    const hits = await index.searchCooperatively(query, 20, undefined, 0, range);
+    expect(hits.map((hit) => hit.obsId).sort()).toEqual(["explicit", "legacy"]);
+    expect(hits[0].score).toBe(hits[1].score);
+  });
+
+  it("uses normalized date postings and corpus-wide frequencies only with bounds", async () => {
+    const index = new SearchIndex();
+    const control = new SearchIndex();
+    const legacy = "2026-01-01T00:30:00";
+    const explicit = `${legacy}Z`;
+    const outOfRange = "2026-01-01T00:29:00Z";
+    const formerDay = new Date(2026, 0, 1, 12).toISOString();
+    const range = parseDateRange({ after: "2026-01-01T00:30:00.0001Z", before: "2026-01-02T00:30:00Z" });
+    for (const idx of [index, control]) {
+      idx.add(shipped("legacy", `${legacy}.0002${idx === control ? "Z" : ""}`));
+      idx.add(shipped("out-of-range", outOfRange));
+      idx.add(shipped("former-day", formerDay));
+    }
+    for (const query of [explicit, "2026-01-01", "December 2025", "December 31st", `shipp ${explicit}`]) {
+      const unbounded = index.search(query);
+      expect(await index.searchCooperatively(query, 20, undefined, 0)).toEqual(unbounded);
+      expect(await index.searchCooperatively(query, 20, undefined, 0, parseDateRange({}))).toEqual(unbounded);
+      const expected = control.search(query).filter((hit) => hit.obsId !== "out-of-range");
+      expect(await index.searchCooperatively(query, 20, undefined, 0, range)).toEqual(expected);
+    }
+    expect(ids(index, "2026-01-01")).toContain("legacy");
+  });
+
+  it("maintains bounded date postings through copy, deserialization, removal and replacement", async () => {
+    const source = new SearchIndex();
+    const query = "2026-01-01T00:30:00Z";
+    const range = parseDateRange({ after: "2026-01-01T00:00:00Z", before: "2026-01-02T00:00:00Z" });
+    const stored = "2026-01-01t0:30:00.0001Z";
+    source.add(shipped("legacy", stored));
+    expect(source.search(query)).toEqual([]);
+    const copy = new SearchIndex();
+    copy.restoreFrom(source);
+    const roundTrip = SearchIndex.deserialize(source.serialize());
+    const boundedIds = async (index: SearchIndex) =>
+      (await index.searchCooperatively(query, 20, undefined, 0, range)).map((hit) => hit.obsId);
+    for (const index of [source, copy, roundTrip]) {
+      expect(await boundedIds(index)).toEqual(["legacy"]);
+      index.remove("legacy");
+      index.add(shipped("elsewhere", "2026-01-03T12:00:00Z"));
+      expect(await boundedIds(index)).toEqual([]);
+      index.add(shipped("legacy", stored));
+      index.add(shipped("legacy", query));
+      expect(await index.searchCooperatively(query, 20, undefined, 0, range)).toEqual(index.search(query));
+      index.clear();
+      index.add(shipped("elsewhere", "2026-01-03T12:00:00Z"));
+      expect(await boundedIds(index)).toEqual([]);
+    }
+  });
+
+  it("survives removal at a yield inside the bounded date postings", async () => {
+    const index = new SearchIndex();
+    const [day] = dateTermsForQuery("2026-01-01T00:30:00Z");
+    const range = parseDateRange({ after: "2026-01-01T00:00:00Z" });
+    for (let i = 0; i < 2048; i++) index.add(shipped(`obs_${i}`, "2026-01-01t0:30:00Z"));
+    const pending = index.searchCooperatively(day.slice("@date:".length), 2048, undefined, 0, range);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    index.remove("obs_2047");
+    const hits = await pending;
+    expect(hits).toHaveLength(2047);
+    expect(hits.some(({ obsId }) => obsId === "obs_2047")).toBe(false);
   });
 
   it("does not treat a bare month word or number as a date", () => {

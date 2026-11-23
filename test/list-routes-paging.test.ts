@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -91,6 +91,9 @@ beforeEach(() => {
 });
 
 describe("date bounds", () => {
+  beforeEach(() => vi.stubEnv("TZ", "America/Los_Angeles"));
+  afterEach(() => vi.unstubAllEnvs());
+
   it.each(["2026-01-01T00:30:00", "2026-01-01T00:30:00.0009000", "2026-01-01t00:30:00.0009", "+002026-01-01T00:30:00.0009"])("interprets offset-free stored ISO date-times as UTC: %s", (stored) => {
     const fraction = stored.includes(".") ? ".0009" : "";
     const instant = `2026-01-01T00:30:00${fraction}Z`;
