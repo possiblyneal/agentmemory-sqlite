@@ -988,6 +988,31 @@ describe("mem::evict spares Observations their Session's stop has not finished w
     expect(await kv.get(KV.sessions, sessionId)).toBeDefined();
   });
 
+  it("does not preview Observation eviction after a transient stale Session scan failure", async () => {
+    async function sweep(dryRun: boolean) {
+      const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
+      const scope = KV.observations(sessionId);
+      const kv = mockKV(store);
+      const list = kv.list;
+      let observationScans = 0;
+      kv.list = async <T>(requestedScope: string) => {
+        if (requestedScope === scope && ++observationScans === 1) {
+          throw new Error("transient Observation scan failure");
+        }
+        return list<T>(requestedScope);
+      };
+      const { sdk } = mockSdk();
+      registerEvictFunction(sdk as never, kv as never);
+
+      const stats = await sdk.trigger({ function_id: "mem::evict", payload: { dryRun } });
+      expect(await kv.list(scope)).toHaveLength(1);
+      return stats;
+    }
+
+    expect(await sweep(false)).toMatchObject({ staleSessions: 0, lowImportanceObs: 0 });
+    expect(await sweep(true)).toMatchObject({ staleSessions: 0, lowImportanceObs: 0 });
+  });
+
   it("reports the same count on a dry run without deleting", async () => {
     const t = setup({
       observations: [obs("before", daysAgo(5)), obs("after", daysAgo(3))],

@@ -220,11 +220,12 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       const processedStaleSessionIds = new Set<string>();
       if (dryRun) {
         for (const session of staleSessions) {
-          processedStaleSessionIds.add(session.id);
           const observations = await kv
             .list<CompressedObservation | RawObservation>(KV.observations(session.id))
             .catch(() => null);
-          if (observations?.length === 0) stats.staleSessions++;
+          if (!observations) continue;
+          processedStaleSessionIds.add(session.id);
+          if (observations.length === 0) stats.staleSessions++;
         }
       } else {
         let recoveredStaleSessions = 0;
