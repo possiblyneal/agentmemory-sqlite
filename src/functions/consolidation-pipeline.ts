@@ -3,7 +3,6 @@ import type {
   SemanticMemory,
   ProceduralMemory,
   SessionSummary,
-  Memory,
   MemoryProvider,
 } from "../types.js";
 import { KV, generateId } from "../state/schema.js";
@@ -11,8 +10,6 @@ import type { StateKV } from "../state/kv.js";
 import {
   SEMANTIC_MERGE_SYSTEM,
   buildSemanticMergePrompt,
-  PROCEDURAL_EXTRACTION_SYSTEM,
-  buildProceduralExtractionPrompt,
 } from "../prompts/consolidation.js";
 import { recordAudit } from "./audit.js";
 import {
@@ -21,7 +18,6 @@ import {
   isConsolidationEnabled,
 } from "../config.js";
 import { logger } from "../logger.js";
-import { CONSOLIDATION_PROMPT_CHARS } from "../prompts/budget.js";
 import { capSourceIds, MAX_SOURCE_LIST_IDS } from "./graph-provenance.js";
 import { createSessionLoader } from "./search.js";
 
@@ -357,105 +353,7 @@ export function registerConsolidationPipelineFunction(
     }
 
     if (tier === "all" || tier === "procedural") {
-      const memories = await kv.list<Memory>(KV.memories);
-      const patterns = memories
-        .filter((m) => m.isLatest && m.type === "pattern")
-        .map((m) => ({
-          content: m.content,
-          frequency: m.sessionIds.length || 1,
-        }))
-        .filter((p) => p.frequency >= 2)
-        .sort((a, b) => b.frequency - a.frequency);
-
-      const fitting: typeof patterns = [];
-      for (const pattern of patterns) {
-        const candidate = buildProceduralExtractionPrompt([...fitting, pattern]);
-        if (
-          PROCEDURAL_EXTRACTION_SYSTEM.length + candidate.length <=
-          CONSOLIDATION_PROMPT_CHARS
-        ) {
-          fitting.push(pattern);
-        }
-      }
-      if (fitting.length < patterns.length) {
-        logger.info("Procedural extraction trimmed to its prompt budget", {
-          keptPatterns: fitting.length,
-          droppedPatterns: patterns.length - fitting.length,
-        });
-      }
-
-      if (fitting.length >= 2) {
-        const prompt = buildProceduralExtractionPrompt(fitting);
-
-        try {
-          const response = await provider.summarize(
-            PROCEDURAL_EXTRACTION_SYSTEM,
-            prompt,
-          );
-
-          const procRegex =
-            /<procedure\s+name="([^"]+)"\s+trigger="([^"]+)">([\s\S]*?)<\/procedure>/g;
-          let match;
-          let newProcs = 0;
-          const now = new Date().toISOString();
-          const existingProcs = await kv.list<ProceduralMemory>(
-            KV.procedural,
-          );
-
-          while ((match = procRegex.exec(response)) !== null) {
-            const name = match[1];
-            const trigger = match[2];
-            const stepsBlock = match[3];
-            const steps: string[] = [];
-
-            const stepRegex = /<step>([^<]+)<\/step>/g;
-            let stepMatch;
-            while ((stepMatch = stepRegex.exec(stepsBlock)) !== null) {
-              steps.push(stepMatch[1].trim());
-            }
-
-            const existing = existingProcs.find(
-              (p) => p.name.toLowerCase() === name.toLowerCase(),
-            );
-            if (existing) {
-              existing.frequency++;
-              existing.updatedAt = now;
-              existing.strength = Math.min(1, existing.strength + 0.1);
-              await kv.set(KV.procedural, existing.id, existing);
-            } else {
-              const proc: ProceduralMemory = {
-                id: generateId("proc"),
-                name,
-                steps,
-                triggerCondition: trigger,
-                frequency: 1,
-                sourceSessionIds: [],
-                strength: 0.5,
-                createdAt: now,
-                updatedAt: now,
-              };
-              await kv.set(KV.procedural, proc.id, proc);
-              newProcs++;
-            }
-          }
-          results.procedural = {
-            newProcedures: newProcs,
-            patternsAnalyzed: fitting.length,
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.error("Procedural extraction failed", { error: msg });
-          results.procedural = { error: msg };
-        }
-      } else {
-        results.procedural = {
-          skipped: true,
-          reason:
-            patterns.length >= 2
-              ? "fewer than 2 recurring patterns fit the prompt budget"
-              : "fewer than 2 recurring patterns",
-        };
-      }
+      results.procedural = { newProcedures: 0, patternsAnalyzed: 0 };
     }
 
     if (tier === "all" || tier === "decay") {

@@ -23,27 +23,3 @@ export function buildSemanticMergePrompt(
     .join("\n\n");
   return `Consolidate these episodic memories into stable facts:\n\n${items}`;
 }
-
-export const PROCEDURAL_EXTRACTION_SYSTEM = `You are a procedural memory extractor. Given repeated patterns and workflows observed across sessions, extract reusable procedures.
-
-Output format (XML):
-<procedures>
-  <procedure name="short descriptive name" trigger="when to use this procedure">
-    <step>Step 1 description</step>
-    <step>Step 2 description</step>
-  </procedure>
-</procedures>
-
-Rules:
-- Only extract procedures observed 2+ times
-- Steps should be concrete and actionable
-- Trigger condition should be specific enough to match automatically`;
-
-export function buildProceduralExtractionPrompt(
-  patterns: Array<{ content: string; frequency: number }>,
-): string {
-  const items = patterns
-    .map((p, i) => `[Pattern ${i + 1}] (seen ${p.frequency}x)\n${p.content}`)
-    .join("\n\n");
-  return `Extract reusable procedures from these recurring patterns:\n\n${items}`;
-}
