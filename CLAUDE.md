@@ -256,7 +256,9 @@ and probe generations discard stale completions. An open circuit rejects before 
 ### Stale Session recovery
 `mem::evict` keeps a successfully recovered Session that had Observations, so backups can
 still enumerate its Observation bucket and preserve its project. Empty stale Sessions are
-still evicted; existing orphaned buckets are not repaired. The same sweep still applies its
+still evicted only after rechecking their Observation bucket under capture's `obs:<sessionId>`
+lock, held through Session deletion; recovery and model work stay outside that lock. Existing
+orphaned buckets are not repaired. The same sweep still applies its
 Observation eviction rules after recovery. A dry run counts only stale Sessions whose
 Observation bucket was read successfully and found empty; it still projects Observation
 eviction separately.

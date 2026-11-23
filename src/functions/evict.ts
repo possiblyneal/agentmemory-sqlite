@@ -163,7 +163,13 @@ async function recoverOrEvictStaleSession(
   }
 
   try {
-    await kv.delete(KV.sessions, sessionId);
+    const deleted = await withKeyedLock(`obs:${sessionId}`, async () => {
+      const current = await kv.list<CompressedObservation | RawObservation>(KV.observations(sessionId));
+      if (current.length > 0) return false;
+      await kv.delete(KV.sessions, sessionId);
+      return true;
+    });
+    if (!deleted) return kept;
   } catch (err) {
     logger.warn("Eviction delete failed", {
       resource: "session",

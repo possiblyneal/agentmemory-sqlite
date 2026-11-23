@@ -151,6 +151,27 @@ function storeForObservedSession(sessionId: string): Store {
 }
 
 describe("mem::evict stale sessions", () => {
+  it("keeps an empty stale Session if the locked recheck fails", async () => {
+    const sessionId = "recheck-fails";
+    const store = storeForObservations(sessionId, []);
+    const kv = mockKV(store);
+    const list = kv.list;
+    let scans = 0;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      if (scope === KV.observations(sessionId) && ++scans === 2) {
+        throw new Error("recheck failed");
+      }
+      return list<T>(scope);
+    };
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+
+    const result = await sdk.trigger({ function_id: "mem::evict", payload: {} });
+
+    expect(result).toMatchObject({ staleSessions: 0 });
+    expect(await kv.get(KV.sessions, sessionId)).toMatchObject({ id: sessionId });
+  });
+
   it("retains a recovered stale session that owns observations", async () => {
     const sessionId = "ses_stale";
     const store = storeForObservedSession(sessionId);
