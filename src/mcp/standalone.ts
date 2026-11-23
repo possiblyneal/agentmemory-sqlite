@@ -179,14 +179,10 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
       } else if (!v.expandIds?.length) {
         throw new Error("query is required");
       }
-      if (toolName === "memory_smart_search") {
-        if (args["limit"] !== undefined && !Number.isInteger(args["limit"])) {
-          throw new Error("limit must be an integer");
-        }
-        v.limit = Math.max(1, Math.min(MAX_LIMIT, (args["limit"] as number | undefined) ?? DEFAULT_LIMIT));
-      } else {
-        v.limit = parseLimit(args["limit"]);
+      if (toolName === "memory_smart_search" && args["limit"] !== undefined && !Number.isInteger(args["limit"])) {
+        throw new Error("limit must be an integer");
       }
+      v.limit = parseLimit(args["limit"]);
       const fmt = args["format"];
       if (typeof fmt === "string" && fmt.trim()) {
         v.format = fmt.trim().toLowerCase();

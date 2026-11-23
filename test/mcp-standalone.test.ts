@@ -387,8 +387,10 @@ describe("handleToolCall", () => {
       await expect(handleToolCall("memory_smart_search", { query: "mem", limit: bogus }, kv))
         .rejects.toThrow("limit must be an integer");
     }
-    const low = await handleToolCall("memory_smart_search", { query: "mem", limit: -1 }, kv);
-    expect(JSON.parse(low.content[0].text).results).toHaveLength(1);
+    for (const limit of [-1, 0]) {
+      const low = await handleToolCall("memory_smart_search", { query: "mem", limit }, kv);
+      expect(JSON.parse(low.content[0].text).results).toHaveLength(10);
+    }
 
     // An absurdly large limit gets clamped to MAX_LIMIT (100).
     const huge = await handleToolCall(

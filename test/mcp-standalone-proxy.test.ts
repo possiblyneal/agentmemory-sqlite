@@ -62,8 +62,8 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       .rejects.toThrow("limit must be an integer");
   });
 
-  it.each([[undefined, 10], [-1, 1], [0, 1], [15, 15], [101, 100]])(
-    "forwards clamped smart-search limit %s", async (limit, expected) => {
+  it.each([[undefined, 10], [-1, 10], [0, 10], [15, 15], [101, 100]])(
+    "forwards normalized smart-search limit %s", async (limit, expected) => {
       let received: unknown;
       installFetch((url, init) => {
         if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
