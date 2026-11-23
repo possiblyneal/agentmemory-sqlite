@@ -5,7 +5,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerFacetsFunction } from "../src/functions/facets.js";
-import { registerLessonsFunctions, resetLessonIndex } from "../src/functions/lessons.js";
+import { registerLessonsFunctions, resetLessonIndex, searchLessons } from "../src/functions/lessons.js";
 import { recordProjectActivity } from "../src/state/project-time.js";
 import type { Lesson } from "../src/types.js";
 
@@ -93,6 +93,48 @@ describe("Lessons", () => {
     registerFacetsFunction(sdk as never, kv as never);
     for (const project of ["/test", "/app", "/other"]) {
       await kv.set("mem:sessions", `ses${project}`, { id: `ses${project}`, project });
+    }
+  });
+
+  it("finds a project Lesson behind 200 higher-scoring foreign Lessons on both recall paths", async () => {
+    const now = new Date().toISOString();
+    const lesson: Lesson = {
+      id: "target", content: "quartz deployment with additional details for our project", context: "",
+      confidence: 0.9, reinforcements: 0, source: "manual", sourceIds: [], project: "/app",
+      tags: [], createdAt: now, updatedAt: now, decayRate: 0.01,
+    };
+    await kv.set("mem:lessons", lesson.id, lesson);
+    for (let i = 0; i < 200; i++) {
+      await kv.set("mem:lessons", `foreign-${i}`, { ...lesson, id: `foreign-${i}`, project: "/other", content: "quartz deployment" });
+    }
+    const results = await Promise.all([
+      searchLessons(kv as never, "quartz deployment", "/app", 1),
+      sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app", limit: 1 }),
+    ]);
+    expect(results[0].map((l: Lesson) => l.id)).toEqual(["target"]);
+    expect(results[1].lessons.map((l: Lesson) => l.id)).toEqual(["target"]);
+  });
+
+  it.each(["deleted", "confidence"])("does not let %s Lessons exhaust recall candidates", async (excluded) => {
+    const now = new Date().toISOString();
+    const lesson: Lesson = {
+      id: "target", content: "quartz deployment with additional details for our project", context: "",
+      confidence: 0.9, reinforcements: 0, source: "manual", sourceIds: [], project: "/app",
+      tags: [], createdAt: now, updatedAt: now, decayRate: 0.01,
+    };
+    await kv.set("mem:lessons", lesson.id, lesson);
+    for (let i = 0; i < 200; i++) {
+      await kv.set("mem:lessons", `excluded-${i}`, {
+        ...lesson, id: `excluded-${i}`, content: "quartz deployment",
+        ...(excluded === "deleted" ? { deleted: true } : { confidence: 0.1 }),
+      });
+    }
+    const result = await sdk.trigger("mem::lesson-recall", {
+      query: "quartz deployment", project: "/app", minConfidence: 0.5, limit: 1,
+    });
+    expect(result.lessons.map((l: Lesson) => l.id)).toEqual(["target"]);
+    if (excluded === "deleted") {
+      expect((await searchLessons(kv as never, "quartz deployment", "/app", 1)).map((l) => l.id)).toEqual(["target"]);
     }
   });
 
