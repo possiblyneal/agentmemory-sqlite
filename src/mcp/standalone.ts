@@ -426,11 +426,12 @@ const REFLECT_OVERHEAD_MS = 15_000;
 const MAX_TIMER_MS = 2_147_483_647;
 
 function reflectTimeoutMs(): number {
+  const sharedTimeout = parsePositiveIntEnv(process.env["AGENTMEMORY_LLM_TIMEOUT_MS"]) ?? 60_000;
   const openaiTimeout = parsePositiveIntEnv(process.env["OPENAI_TIMEOUT_MS"]) ?? 0;
   const sdkTimeout = process.env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true"
     ? resolveAgentSdkTimeoutMs((key) => process.env[key])
     : 0;
-  const perCall = Math.max(llmCallTimeoutMs(), openaiTimeout, sdkTimeout);
+  const perCall = Math.max(15_000, sharedTimeout, openaiTimeout, sdkTimeout);
   return Math.min(MAX_TIMER_MS, perCall * REFLECT_MAX_CLUSTERS + REFLECT_OVERHEAD_MS);
 }
 

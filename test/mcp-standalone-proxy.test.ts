@@ -161,11 +161,13 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
   });
 
   it.each([
-    ["fractional OpenAI override", "60000.01", undefined, undefined, 1_215_000],
-    ["opted-in SDK default", undefined, "true", undefined, 3_615_000],
-    ["opted-in SDK override", undefined, "true", "220000", 4_415_000],
-  ])("uses the Reflect budget for %s", async (_label, openai, allowSdk, sdk, expected) => {
-    vi.stubEnv("AGENTMEMORY_LLM_TIMEOUT_MS", undefined);
+    ["fractional shared timeout", "0.5", undefined, undefined, undefined, 1_215_000],
+    ["shared timeout integer", "20000", undefined, undefined, undefined, 415_000],
+    ["fractional OpenAI override", undefined, "60000.01", undefined, undefined, 1_215_000],
+    ["opted-in SDK default", undefined, undefined, "true", undefined, 3_615_000],
+    ["opted-in SDK override", undefined, undefined, "true", "220000", 4_415_000],
+  ])("uses the Reflect budget for %s", async (_label, shared, openai, allowSdk, sdk, expected) => {
+    vi.stubEnv("AGENTMEMORY_LLM_TIMEOUT_MS", shared);
     vi.stubEnv("OPENAI_TIMEOUT_MS", openai);
     vi.stubEnv("AGENTMEMORY_ALLOW_AGENT_SDK", allowSdk);
     vi.stubEnv("AGENTMEMORY_AGENT_SDK_TIMEOUT_MS", sdk);
