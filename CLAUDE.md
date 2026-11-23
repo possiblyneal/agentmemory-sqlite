@@ -418,6 +418,14 @@ closest one instead of writing a row, as an exact re-save does: it takes the new
 context and the union of tags, keeps its id, and is audited `lesson_strengthen` with
 `reason: "re-discovery"` and `match: "restated" | "exact"` (#378).
 
+### Lesson recall candidates
+`searchLessons` and `mem::lesson-recall` score against the full Lesson index, then rank only
+eligible hits within their candidate budgets; deleted, foreign-project and (for recall)
+below-confidence records cannot consume that budget. Recall scores BM25 once, normalizes against
+the highest corpus-wide score, and retains its confidence/recency reranking. A fractional Recall
+candidate budget admits its ceiling before the final page's normal `slice` truncation.
+`searchLessons` still caps near-twins within its requested limit.
+
 ### Lesson retention
 `mem::lesson-decay-sweep` lowers a Lesson's confidence by its `decayRate` per active week of
 Project Time down to a floor of 0.05, reinforced or not, and never deletes a live Lesson for

@@ -142,6 +142,15 @@ export class SearchIndex {
     return this.ranked(step.value, limit, layer);
   }
 
+  searchEligible(query: string, limit: number, eligible: (id: string) => boolean): { hits: SearchHit[]; maxScore: number } {
+    const steps = this.scoreTerms(query);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    let maxScore = 0;
+    for (const score of step.value.values()) maxScore = Math.max(maxScore, score);
+    return { hits: this.ranked(step.value, limit, undefined, eligible), maxScore };
+  }
+
   // Ranks as search() does, but hands the event loop back between query terms
   // once `sliceMs` of scoring has run, so a search over a large store does not
   // hold /livez and the hooks behind it (#371).
@@ -168,10 +177,10 @@ export class SearchIndex {
   // the head is kept: sorting every scored document held the event loop for
   // up to 200 ms on a 99k-document index, to throw all but `limit` away. Ties
   // rank in scoring order, as a stable sort of the full list would.
-  private ranked(scores: Map<string, number>, limit: number, layer?: IndexLayer): SearchHit[] {
+  private ranked(scores: Map<string, number>, limit: number, layer?: IndexLayer, eligible?: (id: string) => boolean): SearchHit[] {
     const head: SearchHit[] = [];
     for (const [obsId, score] of scores) {
-      if (limit <= 0 || (head.length === limit && !(score > head[limit - 1].score))) continue;
+      if (limit <= 0 || (eligible && !eligible(obsId)) || (head.length === limit && !(score > head[limit - 1].score))) continue;
       const entry = this.entries.get(obsId);
       if (!entry || (layer && (entry.layer ?? "observation") !== layer)) continue;
       let at = head.length;
