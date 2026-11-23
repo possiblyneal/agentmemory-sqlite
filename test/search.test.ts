@@ -137,7 +137,8 @@ describe("mem::search", () => {
     getSearchIndex().clear();
     await rebuildIndex(kv as never);
     const result = await sdk.trigger("mem::search", { query: "auth middleware decision", after: "2026-01-01T00:00:00Z", before: "2026-01-02T00:00:00Z" }) as { results: Array<{ observation: CompressedObservation }> };
-    expect(result.results.map((r) => r.observation.id).indexOf("newer")).toBeLessThan(result.results.map((r) => r.observation.id).indexOf("older"));
+    const twins = result.results.map((r) => r.observation.id).filter((id) => id === older.id || id === newer.id);
+    expect(twins).toEqual([newer.id, older.id]);
   });
 
   it("rechecks the loaded Observation against date bounds", async () => {
