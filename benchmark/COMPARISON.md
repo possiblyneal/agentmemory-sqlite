@@ -39,7 +39,7 @@ Full agentmemory methodology: [`LONGMEMEVAL.md`](LONGMEMEVAL.md)
 | **Self-hostable** | ✅ default | Optional | Optional | ✅ | ❌ Cloud-only | ✅ | ✅ (needs Oracle DB) | ✅ |
 | **Knowledge graph** | ✅ Entity extraction + BFS | ✅ Mem0g variant | ❌ | Doc links | ❌ | ❌ | ❌ | ❌ |
 | **Memory decay** | ✅ Ebbinghaus + tiered | ❌ | ❌ | ❌ | ✅ Auto-forget | ❌ | ❌ | ✅ Half-lives |
-| **4-tier consolidation** | ✅ Working → episodic → semantic → procedural | ❌ | OS-inspired tiers | ❌ | ❌ | ❌ | ❌ | Episodic + semantic |
+| **Memory consolidation** | ✅ Session summaries → semantic facts | ❌ | OS-inspired tiers | ❌ | ❌ | ❌ | ❌ | Episodic + semantic |
 | **Version / supersession** | ✅ Jaccard-based | Passive | ❌ | ❌ | ✅ Auto-resolve | ❌ | ❌ | ❌ |
 | **Real-time viewer** | ✅ Port 3113 | Cloud dashboard | Cloud dashboard | Web UI | Cloud dashboard | ❌ | ❌ | ❌ |
 | **Privacy filtering** | ✅ Strips secrets pre-store | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |

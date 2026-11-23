@@ -13,7 +13,6 @@ vi.mock("../src/config.js", () => ({
 import { registerConsolidationPipelineFunction } from "../src/functions/consolidation-pipeline.js";
 import { isConsolidationEnabled } from "../src/config.js";
 import { logger } from "../src/logger.js";
-import { CONSOLIDATION_PROMPT_CHARS } from "../src/prompts/budget.js";
 import type { SessionSummary, Memory, SemanticMemory, ProceduralMemory } from "../src/types.js";
 
 function mockKV() {
@@ -142,96 +141,23 @@ describe("Consolidation Pipeline", () => {
     expect(provider.summarize).not.toHaveBeenCalled();
   });
 
-  it("pipeline skips procedural when fewer than 2 patterns", async () => {
-    const provider = {
-      name: "test",
-      compress: vi.fn(),
-      summarize: vi.fn(),
-    };
+  it.each(["all", "procedural"])("does not extract procedures for %s", async (tier) => {
+    const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
     registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
-
-    const mem: Memory = {
-      ...makePattern(1),
-      sessionIds: ["ses_1", "ses_2"],
-    };
-    await kv.set("mem:memories", "mem_1", mem);
-
-    const result = (await sdk.trigger("mem::consolidate-pipeline", {
-      tier: "procedural",
-    })) as { success: boolean; results: Record<string, unknown> };
-
+    for (let i = 0; i < 3; i++) await kv.set("mem:memories", `mem_${i}`, makePattern(i));
+    const now = new Date().toISOString();
+    const existing: ProceduralMemory = { id: "proc", name: "Existing", steps: ["Keep"], triggerCondition: "test", frequency: 2, sourceSessionIds: [], strength: 0.5, createdAt: now, updatedAt: now };
+    await kv.set("mem:procedural", existing.id, structuredClone(existing));
+    const result = await sdk.trigger("mem::consolidate-pipeline", { tier }) as { success: boolean; results: Record<string, unknown> };
     expect(result.success).toBe(true);
-    const procedural = result.results.procedural as { skipped: boolean; reason: string };
-    expect(procedural.skipped).toBe(true);
-    expect(procedural.reason).toContain("fewer than 2");
-  });
-
-  describe("procedural prompt budget", () => {
-    function bigPattern(i: number, sessions: number, size: number): Memory {
-      return {
-        ...makePattern(i),
-        content: `p${i} ` + "x".repeat(size),
-        sessionIds: Array.from({ length: sessions }, (_, s) => `ses_${s}`),
-      };
-    }
-
-    async function runProcedural(patterns: Memory[]) {
-      const provider = { name: "test", compress: vi.fn(), summarize: vi.fn().mockResolvedValue("") };
-      registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
-      for (const m of patterns) await kv.set("mem:memories", m.id, m);
-      const result = (await sdk.trigger("mem::consolidate-pipeline", {
-        tier: "procedural",
-      })) as { results: { procedural: { skipped?: boolean; reason?: string } } };
-      return { provider, procedural: result.results.procedural };
-    }
-
-    it("keeps the most-seen patterns that fit and logs the trim", async () => {
-      vi.mocked(logger.info).mockClear();
-      const { provider } = await runProcedural([
-        bigPattern(1, 2, 10_000),
-        bigPattern(2, 5, 10_000),
-        bigPattern(3, 3, 10_000),
-        bigPattern(4, 4, 10_000),
-      ]);
-
-      expect(provider.summarize).toHaveBeenCalledTimes(1);
-      const prompt = String(provider.summarize.mock.calls[0][1]);
-      expect(prompt.length).toBeLessThanOrEqual(CONSOLIDATION_PROMPT_CHARS);
-      expect(prompt).toContain("p2 ");
-      expect(prompt).toContain("p4 ");
-      expect(prompt).not.toContain("p3 ");
-      expect(prompt).not.toContain("p1 ");
-      expect(logger.info).toHaveBeenCalledWith(
-        "Procedural extraction trimmed to its prompt budget",
-        expect.objectContaining({ keptPatterns: 2, droppedPatterns: 2 }),
-      );
+    expect(result.results.procedural).toEqual({
+      skipped: true,
+      reason: "procedural extraction retired",
+      newProcedures: 0,
+      patternsAnalyzed: 0,
     });
-
-    it("skips a pattern that does not fit and lets smaller ones keep filling", async () => {
-      const { provider } = await runProcedural([
-        bigPattern(1, 9, 5_000),
-        bigPattern(2, 8, 30_000),
-        bigPattern(3, 3, 5_000),
-      ]);
-
-      const prompt = String(provider.summarize.mock.calls[0][1]);
-      expect(prompt.length).toBeLessThanOrEqual(CONSOLIDATION_PROMPT_CHARS);
-      expect(prompt).toContain("p1 ");
-      expect(prompt).toContain("p3 ");
-      expect(prompt).not.toContain("p2 ");
-    });
-
-    it("makes no LLM call when fewer than 2 patterns fit", async () => {
-      const { provider, procedural } = await runProcedural([
-        bigPattern(1, 3, 30_000),
-        bigPattern(2, 2, 30_000),
-      ]);
-
-      expect(provider.summarize).not.toHaveBeenCalled();
-      expect(procedural.skipped).toBe(true);
-      expect(procedural.reason).toContain("fewer than 2");
-      expect(procedural.reason).toContain("fit");
-    });
+    expect(provider.summarize).not.toHaveBeenCalled();
+    expect(await kv.list("mem:procedural")).toEqual([existing]);
   });
 
   it("with enough summaries, creates semantic memories from provider response", async () => {
@@ -260,35 +186,6 @@ describe("Consolidation Pipeline", () => {
     expect(stored.length).toBe(1);
     expect(stored[0].fact).toBe("TypeScript is the primary language");
     expect(stored[0].confidence).toBe(0.9);
-  });
-
-  it("with enough patterns, creates procedural memories from provider response", async () => {
-    const provider = {
-      name: "test",
-      compress: vi.fn(),
-      summarize: vi.fn().mockResolvedValue(
-        `<procedures><procedure name="Test Workflow" trigger="when writing tests"><step>Create test file</step><step>Write assertions</step></procedure></procedures>`,
-      ),
-    };
-    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never);
-
-    for (let i = 0; i < 3; i++) {
-      await kv.set("mem:memories", `mem_${i}`, makePattern(i));
-    }
-
-    const result = (await sdk.trigger("mem::consolidate-pipeline", {
-      tier: "procedural",
-    })) as { success: boolean; results: Record<string, unknown> };
-
-    expect(result.success).toBe(true);
-    const procedural = result.results.procedural as { newProcedures: number };
-    expect(procedural.newProcedures).toBe(1);
-
-    const stored = await kv.list<ProceduralMemory>("mem:procedural");
-    expect(stored.length).toBe(1);
-    expect(stored[0].name).toBe("Test Workflow");
-    expect(stored[0].steps.length).toBe(2);
-    expect(stored[0].triggerCondition).toBe("when writing tests");
   });
 
   it("consolidation records an audit entry", async () => {

@@ -3,7 +3,7 @@
 #
 # The import path only persists Session + Observation rows (via synthetic,
 # zero-LLM compression) and the deterministic crystal/lesson derivation.
-# It does NOT call mem::summarize, so the semantic/procedural/reflect tiers
+# It does NOT call mem::summarize, so the semantic and reflect tiers
 # of the consolidation pipeline have nothing to roll up.
 #
 # This script walks every session tagged `jsonl-import` and:

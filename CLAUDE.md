@@ -513,6 +513,8 @@ short forms count only beside an ordinal, a year, or after "on". The in-process 
 BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
+`mem::consolidate-pipeline` no longer extracts Procedural Memories; its `procedural` selector remains accepted and reports zero new procedures. Existing procedures remain available to skill extraction, reads, backups and mesh, and still undergo Decay and retention.
+
 `memoryToObservation()` carries the saved Memory type as optional `memoryType` on full, compact and narrative `mem::search` results and smart-search results; `memory_recall` rendering is unchanged. Graph retrieval keeps an Observation's best score among paths returned from different start nodes. `mem::consolidate` serializes its own runs, counts failed model calls toward its ten-call budget, writes a successor before demoting its predecessor, and updates the index before the predecessor audit. A failed demotion can leave two latest versions; the write lock does not make both writes transactional.
 
 ### Search on the event loop
