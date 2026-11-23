@@ -17,7 +17,7 @@ import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
-import { isAwaitingCompression } from "./compress-synthetic.js";
+import { buildSyntheticCompression, isAwaitingCompression } from "./compress-synthetic.js";
 import { summaryCovers } from "./summarize.js";
 import { logger } from "../logger.js";
 
@@ -280,9 +280,15 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
       for (const originalSession of sessions) {
         const session = sessionById.get(originalSession.id)!;
         const obs = await kv
-          .list<CompressedObservation>(KV.observations(session.id))
+          .list<CompressedObservation | RawObservation>(KV.observations(session.id))
           .catch(() => []);
-        const compressed = obs.filter((o) => o.title);
+        const compressed = obs.flatMap((o) => {
+          if (isCompressedObservation(o)) return [o];
+          if (dryRun && scannedStaleCandidates.has(session.id) && scannedSessions.has(session.id)) {
+            return [buildSyntheticCompression({ ...o, sessionId: session.id })];
+          }
+          return [];
+        });
         const lowImportanceIds = new Set<string>();
 
         const summary = summaryBySession.get(session.id);

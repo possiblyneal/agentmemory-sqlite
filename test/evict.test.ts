@@ -154,6 +154,27 @@ function storeForObservedSession(sessionId: string): Store {
 }
 
 describe("mem::evict stale sessions", () => {
+  it("includes recoverable raw Observations in project cap previews", async () => {
+    const sessionId = "ses_cap_raw";
+    const raw = makeRawObservation(sessionId);
+    const covered = makeObservation(sessionId);
+    const store = storeForObservations(sessionId, [raw, covered]);
+    store.get(KV.summaries)!.set(sessionId, { ...summaryFor(sessionId), coveredThrough: daysAgo(1) });
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    const kv = mockKV(store);
+    const { sdk, calls } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    sdk.registerFunction("event::session::stopped", async () => ({ success: true }));
+    sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: true } }))
+      .toMatchObject({ capEvictions: 1 });
+    expect(await kv.list(KV.observations(sessionId))).toEqual([raw, covered]);
+    expect(calls.map((call) => call.function_id)).toEqual(["mem::evict"]);
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: {} }))
+      .toMatchObject({ capEvictions: 1 });
+  });
+
   it("keeps an empty stale Session if the locked recheck fails", async () => {
     const sessionId = "recheck-fails";
     const store = storeForObservations(sessionId, []);
@@ -1164,7 +1185,8 @@ describe("mem::evict spares Observations their Session's stop has not finished w
   });
 
   it("does not assume that dry-run recovery would cover an Observation", async () => {
-    const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
+    const store = storeForObservations(sessionId, [obs("a", daysAgo(5)), makeRawObservation(sessionId)]);
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 0 });
     const kv = mockKV(store);
     const { sdk } = mockSdk();
     registerEvictFunction(sdk as never, kv as never);
@@ -1174,8 +1196,8 @@ describe("mem::evict spares Observations their Session's stop has not finished w
       payload: { dryRun: true },
     })) as Record<string, number>;
 
-    expect(stats).toMatchObject({ staleSessions: 0, lowImportanceObs: 0 });
-    expect(await kv.list(KV.observations(sessionId))).toHaveLength(1);
+    expect(stats).toMatchObject({ staleSessions: 0, lowImportanceObs: 0, capEvictions: 0 });
+    expect(await kv.list(KV.observations(sessionId))).toHaveLength(2);
   });
 
   it("reports the same count on a dry run without deleting", async () => {
