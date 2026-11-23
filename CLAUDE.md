@@ -203,8 +203,11 @@ when the whole string has valid Base64 syntax and, for a data URI, an image MIME
 without extra metadata. Other image-like strings are treated as text and are not saved as images.
 When rules are configured, attachment selection validates values before literal redaction and
 skips unsaveable paths so they do not mask a valid encoded attachment.
-Canonical hook fields and synthetic descriptions read the original keys, but only redacted
-values reach storage and Compression. Read-only tool classification uses the fields before
+Canonical hook fields and synthetic descriptions read the original keys from the privacy-scrubbed
+payload, then literal-redact their values. `RawObservation.syntheticDescription` carries only the
+resulting `{ title, narrative }` through parked Compression jobs, including restart and degraded
+fallback; it is not sent to the LLM. Older jobs without it use the sanitized raw payload instead.
+Read-only tool classification uses the fields before
 literal redaction so matching a key or value does not change the classification. The tool error still supplies output when scrubbing
 leaves no tool output. Colliding redacted keys retain all values, and redaction never joins
 surviving text into a configured literal.

@@ -18,7 +18,7 @@ const testHome = mkdtempSync(join(tmpdir(), "agentmemory-test-home-"));
 const FRESH_MODULES = new Set([
   "cli-connect", "consolidation-default", "eval-sandbox-env", "fetch-lazy-undici", "hook-env", "hook-project",
   "live-stream", "local-embedding-provider", "mcp-lesson-queue", "mcp-save-fallback", "mcp-standalone-proxy",
-  "observation-redaction-correctness", "observe-rules-api", "openai-reply", "preferences", "slots-flag-gate", "viewer-proxy-prefix", "viewer-security",
+  "observation-redaction-correctness", "openai-reply", "preferences", "slots-flag-gate", "viewer-proxy-prefix", "viewer-security",
 ].map((name) => `test/${name}.test.ts`));
 const sharesModules = (file: string) =>
   !FRESH_MODULES.has(file) && !/\bvi\.(do)?[mM]ock\(/.test(readFileSync(file, "utf8"));

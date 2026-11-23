@@ -56,10 +56,10 @@ function extractImageWithValidation(d: unknown, validate: boolean): string | und
 export async function storeSyntheticCompression(
   kv: StateKV,
   raw: RawObservation,
-  { awaitingCompression = false, hook }: { awaitingCompression?: boolean; hook?: ReturnType<typeof describeHook> } = {},
+  { awaitingCompression = false }: { awaitingCompression?: boolean } = {},
 ): Promise<CompressedObservation> {
   const synthetic: CompressedObservation = {
-    ...buildSyntheticCompression(raw, hook),
+    ...buildSyntheticCompression(raw),
     ...(awaitingCompression ? { awaitingCompression: true } : {}),
   };
   await kv.set(KV.observations(raw.sessionId), raw.id, synthetic);
@@ -435,7 +435,7 @@ export function registerObserveFunction(
 
       const privateRaw = stripPrivateDataDeep(payload.data);
       const sanitizedRaw = redactObservationLiterals(privateRaw, rules);
-      const hook = rules.length ? describeHook(payload.hookType, privateRaw, rules) : undefined;
+      const hook = describeHook(payload.hookType, privateRaw, rules);
       const autoCompress = isAutoCompressEnabled();
 
       let originChannel: Origin["channel"] = "agent";
@@ -447,6 +447,7 @@ export function registerObserveFunction(
         timestamp: payload.timestamp,
         hookType: payload.hookType,
         raw: sanitizedRaw,
+        ...(hook ? { syntheticDescription: hook } : {}),
         origin: {
           channel: originChannel,
           capturedAt: payload.timestamp,
@@ -729,7 +730,6 @@ export function registerObserveFunction(
           if (path === "llm-batch") await parkForCompression(kv, raw);
           const synthetic = await storeSyntheticCompression(kv, raw, {
             awaitingCompression: path === "llm-batch",
-            hook,
           });
           await sdk.trigger({
             function_id: "stream::set",

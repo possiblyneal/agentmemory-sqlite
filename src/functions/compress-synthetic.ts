@@ -172,7 +172,7 @@ export function describeHook(
 
 export function buildSyntheticCompression(
   raw: RawObservation,
-  hook = describeHook(raw.hookType, raw.raw),
+  hook = raw.syntheticDescription ?? describeHook(raw.hookType, raw.raw),
 ): CompressedObservation {
   const toolName = raw.toolName ?? raw.hookType;
   const inputStr = stringifyForNarrative(raw.toolInput);

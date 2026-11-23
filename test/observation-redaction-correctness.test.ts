@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile, unlink } from "node:fs/promise
 import { resolve, join } from "node:path";
 import { redactObservationLiterals } from "../src/functions/privacy.js";
 import { registerObserveFunction } from "../src/functions/observe.js";
+import { storeDegradedCompression, compressionPromptArgs } from "../src/functions/compress.js";
 import { KV } from "../src/state/schema.js";
 import { mockKV, mockSdk } from "./helpers/mocks.js";
 
@@ -90,7 +91,7 @@ describe("observation literal redaction correctness", () => {
       const cases = [
         ["subagent_start", { agent_type: "reader", agent_id: "worker" }, "Subagent started: reader", "type reader | id worker"],
         ["subagent_stop", { agent_type: "reader", agent_id: "worker", last_message: "finished PRIVATE-LITERAL read" }, "Subagent finished: reader", "finished  read | id worker"],
-        ["stop", { last_message: "all done PRIVATE-LITERAL" }, "Agent replied: all done", "all done"],
+        ["stop", { last_message: "all done PRIVATE-LITERAL <private>HIDDEN-PRIVATE</private>" }, "Agent replied: all done", "all done"],
         ["task_completed", { task_subject: "review", task_description: "checked", teammate_name: "reader", team_name: "reviewers" }, "Task completed: review", "review | checked | teammate reader | team reviewers"],
         ["notification", { title: "ready", message: "new PRIVATE-LITERAL result" }, "ready", "ready | new  result"],
       ] as const;
@@ -112,6 +113,15 @@ describe("observation literal redaction correctness", () => {
         expect(JSON.stringify(row)).not.toContain("PRIVATE-LITERAL");
       }
       expect(JSON.stringify([...kv.store.get(KV.compressPending)!.values()])).not.toContain("PRIVATE-LITERAL");
+      const [id, pending] = [...kv.store.get(KV.compressPending)!.entries()].find(([, value]) => (value as { sessionId: string }).sessionId === "stop")!;
+      const raw = JSON.parse(JSON.stringify((pending as { raw: import("../src/types.js").RawObservation }).raw)) as import("../src/types.js").RawObservation;
+      expect(raw.syntheticDescription).toEqual({ title: "Agent replied: all done", narrative: "all done" });
+      expect(JSON.stringify(raw)).not.toContain("PRIVATE-LITERAL");
+      expect(JSON.stringify(raw)).not.toContain("HIDDEN-PRIVATE");
+      expect(JSON.stringify(compressionPromptArgs({ ...raw, syntheticDescription: { title: "INTERNAL ONLY", narrative: "INTERNAL ONLY" } }))).not.toContain("INTERNAL ONLY");
+      await kv.delete(KV.observations("stop"), id);
+      await storeDegradedCompression(kv as never, { sessionId: "stop", observationId: id, raw }, "compression_failed");
+      expect(await kv.get(KV.observations("stop"), id)).toMatchObject({ title: "Agent replied: all done", narrative: "all done" });
     } finally {
       vi.unstubAllEnvs();
       await rm(home, { recursive: true, force: true });

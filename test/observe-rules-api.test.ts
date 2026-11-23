@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { OBSERVATION_RULES_ERROR } from "../src/functions/privacy.js";
-import { captureTimes, resetCaptureForTests } from "../src/telemetry/capture.js";
+import { captureTimes, markCaptureStored, resetCaptureForTests } from "../src/telemetry/capture.js";
 import { mockKV, mockSdk } from "./helpers/mocks.js";
 
 const body = { hookType: "prompt_submit", sessionId: "s", project: "synthetic", cwd: "/synthetic", timestamp: "2026-11-22T10:00:00Z" };
+
+markCaptureStored();
+
+beforeEach(resetCaptureForTests);
 
 afterEach(() => {
   vi.unstubAllEnvs();
