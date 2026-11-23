@@ -47,6 +47,13 @@ export class StateKV {
     )
   }
 
+  async replaceIfEqual<T>(scope: string, key: string, expected: T, value: T): Promise<boolean> {
+    return trackWrite(scope, () => this.sdk.trigger<{ scope: string; key: string; expected: T; value: T }, boolean>({
+      function_id: 'state::replace-if-equal',
+      payload: { scope, key, expected, value },
+    }))
+  }
+
   async update<T = unknown>(
     scope: string,
     key: string,

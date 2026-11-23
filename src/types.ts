@@ -659,6 +659,7 @@ export interface SemanticMemory {
   subject?: string;
   relation?: string;
   object?: string;
+  aliases?: Array<{ subject: string; relation: string; object: string; fact: string }>;
   isLatest?: boolean;
   supersededBy?: string;
 }

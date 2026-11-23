@@ -1,4 +1,5 @@
 import { withFacetLock } from "./facets.js";
+import { validFactAliases } from "./semantic-fact-aliases.js";
 import type { ISdk } from "../engine/types.js";
 import type {
   Session,
@@ -210,6 +211,9 @@ function dropUnkeyedRows(importData: ExportData): number {
 }
 
 function invalidImportRow(data: ExportData): string | null {
+  if (data.semanticMemories?.some(row => isKeyedRow(row, "id") && !validFactAliases(row.aliases))) {
+    return "semanticMemories contain invalid aliases";
+  }
   const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
   const optionalString = (value: unknown) => value == null || typeof value === "string";
   const checkIndexFields = (row: Record<string, unknown>, fields: string[]): boolean =>

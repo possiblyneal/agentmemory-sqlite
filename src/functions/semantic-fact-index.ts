@@ -1,5 +1,6 @@
 import type { SemanticMemory } from "../types.js";
 import { KV } from "../state/schema.js";
+import { factAliases } from "./semantic-fact-aliases.js";
 import type { StateKV } from "../state/kv.js";
 
 // What recall reads of a live Semantic Fact. The full row is fetched only for
@@ -8,6 +9,7 @@ export interface IndexedFact {
   id: string;
   text: string;
   lowerText: string;
+  aliasTexts?: string[];
   confidence: number;
   createdAt: number;
   createdAtRaw: string;
@@ -64,7 +66,8 @@ async function readIndex(kv: StateKV): Promise<SemanticFactIndex> {
     const page = await kv.listPage<SemanticMemory>(KV.semantic, after, PAGE);
     for (const { value: fact } of page) {
       if (fact.isLatest === false) continue;
-      const lowerText = fact.fact.toLowerCase();
+      const aliasTexts = factAliases(fact.aliases).map(alias => alias.fact);
+      const lowerText = [fact.fact, ...aliasTexts].join(" ").toLowerCase();
       for (const word of new Set(lowerText.match(WORD))) {
         const list = postings.get(word);
         if (list) list.push(facts.length);
@@ -74,6 +77,7 @@ async function readIndex(kv: StateKV): Promise<SemanticFactIndex> {
         id: fact.id,
         text: fact.fact,
         lowerText,
+        ...(aliasTexts.length ? { aliasTexts } : {}),
         confidence: fact.confidence,
         createdAt: new Date(fact.createdAt).getTime(),
         createdAtRaw: fact.createdAt,

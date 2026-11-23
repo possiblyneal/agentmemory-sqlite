@@ -1,4 +1,5 @@
 import { withFacetLock } from "./facets.js";
+import { validFactAliases } from "./semantic-fact-aliases.js";
 import type { ISdk } from "../engine/types.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -330,6 +331,9 @@ export function registerSnapshotFunction(
         const state = JSON.parse(content) as SnapshotState;
         if (!validRelationEntries(state.relations)) {
           throw new Error("relations must contain keyed relation rows");
+        }
+        if (Array.isArray(state.semanticMemories) && state.semanticMemories.some(row => row && !validFactAliases(row.aliases))) {
+          throw new Error("semanticMemories contain invalid aliases");
         }
 
         const counts: Record<string, StoreCounts> = {};

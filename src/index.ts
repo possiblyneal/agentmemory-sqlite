@@ -82,6 +82,7 @@ import { registerPromptContextFunction } from "./functions/prompt-context.js";
 import { registerClaudeBridgeFunction } from "./functions/claude-bridge.js";
 import { registerGraphFunction, graphWritesOffReason } from "./functions/graph.js";
 import { isNoopProvider } from "./providers/noop.js";
+import { createFactEntailmentVerifier } from "./providers/fact-entailment.js";
 import { registerGraphImportFunction } from "./functions/graph-import.js";
 import { registerConsolidationPipelineFunction } from "./functions/consolidation-pipeline.js";
 import { registerTeamFunction } from "./functions/team.js";
@@ -290,7 +291,9 @@ async function main() {
       : `Knowledge graph: writes on (LLM relations ${isNoopProvider(provider) ? "off, no LLM provider" : "on"})`,
   );
 
-  registerConsolidationPipelineFunction(sdk, kv, provider);
+  registerConsolidationPipelineFunction(
+    sdk, kv, provider, createFactEntailmentVerifier(getEnvVar("AGENTMEMORY_FACT_ENTAILMENT_MODEL_DIR")),
+  );
   bootLog(`Consolidation pipeline: ${isConsolidationEnabled() ? "enabled" : "disabled"}`);
 
   if (isAutoCompressEnabled()) {

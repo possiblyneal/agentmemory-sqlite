@@ -471,10 +471,15 @@ describe("Mesh Functions", () => {
   });
 
   describe("mesh-receive expanded scopes", () => {
-    it("accepts semantic memories", async () => {
-      const sem: SemanticMemory = {
+    it("accepts Semantic Facts with their alternate keys", async () => {
+      const sem = {
         id: "sem_1",
         fact: "React uses JSX",
+        project: "frontend",
+        subject: "react",
+        relation: "syntax",
+        object: "jsx",
+        aliases: [{ subject: "react", relation: "markup", object: "jsx", fact: "JSX is used by React" }],
         confidence: 0.9,
         sourceSessionIds: ["ses_1"],
         sourceMemoryIds: ["mem_1"],
@@ -493,7 +498,7 @@ describe("Mesh Functions", () => {
       expect(result.accepted).toBe(1);
       const stored = await kv.get<SemanticMemory>("mem:semantic", "sem_1");
       expect(stored).toBeDefined();
-      expect(stored!.fact).toBe("React uses JSX");
+      expect(stored).toEqual(sem);
     });
 
     it("accepts procedural memories", async () => {

@@ -5,7 +5,9 @@ import type {
   SessionSummary,
   MemoryProvider,
 } from "../types.js";
-import { KV, generateId } from "../state/schema.js";
+import { KV, generateId, jaccardSimilarity } from "../state/schema.js";
+import { RESTATEMENT_OVERLAP } from "./recency-cap.js";
+import { factAliases } from "./semantic-fact-aliases.js";
 import type { StateKV } from "../state/kv.js";
 import {
   SEMANTIC_MERGE_SYSTEM,
@@ -27,6 +29,8 @@ const DAY_MS = 1000 * 60 * 60 * 24;
 export function decayedStrength(base: number, periods: number): number {
   return Math.max(DECAY_FLOOR, base * Math.pow(0.9, periods));
 }
+
+const MAX_FACT_VERIFICATIONS = 20;
 
 function normalizeKeyPart(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -114,6 +118,7 @@ export function registerConsolidationPipelineFunction(
   sdk: ISdk,
   kv: StateKV,
   provider: MemoryProvider,
+  verifyFact?: (left: string, right: string) => Promise<boolean>,
 ): void {
   // The 5 min session-end cooldown and the 120 min timer are schedules, not a
   // lock: a run that outlived them was joined by a second one over the same
@@ -193,6 +198,7 @@ export function registerConsolidationPipelineFunction(
       let match;
       let newFacts = 0;
       let superseded = 0;
+      let verificationCalls = 0;
       const now = new Date().toISOString();
       const sessionIds = recentSummaries.map((s) => s.sessionId);
 
@@ -204,37 +210,64 @@ export function registerConsolidationPipelineFunction(
         const key = factKey(attrs);
 
         const live = existingSemantic.filter((s) => s.isLatest !== false);
-        const sameKey = key
-          ? live.filter(
-              (s) =>
-                s.project === project &&
-                s.subject === key.subject &&
-                s.relation === key.relation,
-            )
-          : [];
-        let textMatch = live.find(
-          (s) =>
-            s.fact.toLowerCase() === fact.toLowerCase() &&
-            (s.project === undefined || s.project === project),
+        const matchesKey = (member: Pick<SemanticMemory, "subject" | "relation">) =>
+          key !== null && member.subject === key.subject && member.relation === key.relation;
+        const members = (row: SemanticMemory) => [row, ...factAliases(row.aliases)];
+        const sameKey = key ? live.filter(row => row.project === project && members(row).some(matchesKey)) : [];
+        const sameValue = (row: SemanticMemory) =>
+          members(row).some(member => matchesKey(member) && member.object === key?.object);
+        const lowerFact = fact.toLowerCase();
+        let textMatch = live.find(row =>
+          (row.project === undefined || row.project === project) &&
+          (sameKey.length === 0 || (sameKey.includes(row) && sameValue(row))) &&
+          (!key || !row.subject || sameValue(row)) &&
+          members(row).some(member => member.fact.toLowerCase() === lowerFact),
         );
         if (textMatch && key && !textMatch.subject && !(await citesOnlyProject(textMatch, project))) {
           textMatch = undefined;
         }
-        const existing = textMatch ?? sameKey.find((s) => s.object === key!.object);
-        let target: SemanticMemory;
+        const reinforce = (row: SemanticMemory): SemanticMemory => ({
+          ...row,
+          accessCount: row.accessCount + 1,
+          lastAccessedAt: now,
+          updatedAt: now,
+          confidence: Math.max(row.confidence, confidence),
+          sourceSessionIds: capSourceIds([...row.sourceSessionIds, ...sessionIds], MAX_SOURCE_LIST_IDS),
+          ...(key && !row.subject ? { project, ...key } : {}),
+        });
+        const existing = textMatch ?? sameKey.find(sameValue);
+        let target: SemanticMemory | undefined;
+        if (!existing && key && sameKey.length === 0 && verifyFact && verificationCalls < MAX_FACT_VERIFICATIONS) {
+          const object = key.object.normalize("NFC").trim();
+          let candidate: SemanticMemory | undefined;
+          for (const row of live) {
+            if (row.project !== project || !row.subject || !row.relation ||
+                typeof row.object !== "string" || row.object.normalize("NFC").trim() !== object ||
+                jaccardSimilarity(row.fact, fact) < RESTATEMENT_OVERLAP) continue;
+            if (candidate) {
+              candidate = undefined;
+              break;
+            }
+            candidate = row;
+          }
+          if (candidate) {
+            verificationCalls++;
+            if (await verifyFact(candidate.fact, fact).catch(() => false) === true) {
+              const at = existingSemantic.indexOf(candidate);
+              const value = { ...reinforce(candidate), aliases: [...factAliases(candidate.aliases), { ...key, fact }] };
+              if (await kv.replaceIfEqual(KV.semantic, candidate.id, candidate, value)) target = value;
+              const latest = target ?? await kv.get<SemanticMemory>(KV.semantic, candidate.id);
+              if (latest) existingSemantic[at] = latest;
+              else existingSemantic.splice(at, 1);
+            }
+          }
+        }
         if (existing) {
-          existing.accessCount++;
-          existing.lastAccessedAt = now;
-          existing.updatedAt = now;
-          existing.confidence = Math.max(existing.confidence, confidence);
-          existing.sourceSessionIds = capSourceIds(
-            [...existing.sourceSessionIds, ...sessionIds],
-            MAX_SOURCE_LIST_IDS,
-          );
-          if (key && !existing.subject) Object.assign(existing, { project, ...key });
-          await kv.set(KV.semantic, existing.id, existing);
+          const value = reinforce(existing);
+          await kv.set(KV.semantic, value.id, value);
+          Object.assign(existing, value);
           target = existing;
-        } else {
+        } else if (!target) {
           target = {
             id: generateId("sem"),
             fact,
@@ -253,11 +286,21 @@ export function registerConsolidationPipelineFunction(
           newFacts++;
         }
         const closed = key
-          ? sameKey.filter((s) => s !== target && s.object !== key.object)
+          ? sameKey.filter(row => row !== target && members(row).some(member =>
+              matchesKey(member) && member.object !== key.object))
           : [];
         for (const old of closed) {
-          old.isLatest = false;
-          old.supersededBy = target.id;
+          const primaryMatches = old.subject === key!.subject && old.relation === key!.relation;
+          const aliases = factAliases(old.aliases).filter((member) => member.subject !== key!.subject || member.relation !== key!.relation);
+          if (primaryMatches && aliases.length > 0) {
+            const [{ subject, relation, object, fact }, ...remaining] = aliases;
+            Object.assign(old, { subject, relation, object, fact, aliases: remaining });
+          } else if (!primaryMatches) {
+            old.aliases = aliases;
+          } else {
+            old.isLatest = false;
+            old.supersededBy = target.id;
+          }
           old.updatedAt = now;
           await kv.set(KV.semantic, old.id, old);
           superseded++;
