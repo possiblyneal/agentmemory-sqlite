@@ -5,7 +5,7 @@ import type { CompressedObservation, RawObservation, HookPayload, Origin, Sessio
 const TOOL_HOOKS = new Set(["pre_tool_use", "post_tool_use", "post_tool_failure"]);
 import { KV, STREAM, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
-import { observationLiterals, redactObservationLiterals, stripPrivateDataDeep } from "./privacy.js";
+import { isEncodedImage, observationLiterals, redactObservationLiterals, stripPrivateDataDeep } from "./privacy.js";
 import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
@@ -24,22 +24,29 @@ import { retryableWriteCause, unstored, unstoredOnFullDisk } from "./observe-ret
 import { markCaptureStored } from "../telemetry/capture.js";
 
 export function extractImage(d: unknown): string | undefined {
+  return extractImageWithValidation(d, false);
+}
+
+function extractImageWithValidation(d: unknown, validate: boolean): string | undefined {
   if (!d) return undefined;
   if (typeof d === "string") {
     if (d.startsWith("data:image/") || d.startsWith("iVBORw0KGgo") || d.startsWith("/9j/")) {
-      return d;
+      return !validate || isEncodedImage(d) ? d : undefined;
     }
     return undefined;
   }
   if (typeof d === "object" && d !== null) {
     const obj = d as Record<string, unknown>;
-    if (typeof obj["image_data"] === "string") return obj["image_data"];
-    if (typeof obj["image_path"] === "string") return obj["image_path"];
-    if (typeof obj["imageBase64"] === "string") return obj["imageBase64"];
-    if (typeof obj["imagePath"] === "string") return obj["imagePath"];
+    for (const key of ["image_data", "image_path", "imageBase64", "imagePath"]) {
+      const value = obj[key];
+      if (typeof value !== "string") continue;
+      if (!validate) return value;
+      const match = extractImageWithValidation(value, validate);
+      if (match) return match;
+    }
 
     for (const key of Object.keys(obj)) {
-      const match = extractImage(obj[key]);
+      const match = extractImageWithValidation(obj[key], validate);
       if (match) return match;
     }
   }
@@ -422,7 +429,8 @@ export function registerObserveFunction(
         }
       }
 
-      const sanitizedRaw = redactObservationLiterals(stripPrivateDataDeep(payload.data), rules);
+      const privateRaw = stripPrivateDataDeep(payload.data);
+      const sanitizedRaw = redactObservationLiterals(privateRaw, rules);
 
       let originChannel: Origin["channel"] = "agent";
       if (payload.hookType === "prompt_submit") originChannel = "user";
@@ -439,32 +447,31 @@ export function registerObserveFunction(
         },
       };
 
-      let extractedImage: string | undefined;
+      const validateImages = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE !== undefined;
+      const extractedImage = extractImageWithValidation(privateRaw, validateImages);
 
-      if (typeof sanitizedRaw === "object" && sanitizedRaw !== null) {
-        const d = sanitizedRaw as Record<string, unknown>;
+      if (typeof privateRaw === "object" && privateRaw !== null) {
+        const d = privateRaw as Record<string, unknown>;
         if (
           payload.hookType === "post_tool_use" ||
           payload.hookType === "post_tool_failure"
         ) {
-          raw.toolName = d["tool_name"] as string | undefined;
-          raw.toolInput = d["tool_input"];
-          raw.toolOutput = d["tool_output"] || d["error"];
+          raw.toolName = redactObservationLiterals(d["tool_name"], rules) as string | undefined;
+          raw.toolInput = redactObservationLiterals(d["tool_input"], rules);
+          raw.toolOutput = redactObservationLiterals(d["tool_output"], rules) || redactObservationLiterals(d["error"], rules);
           if (raw.origin && raw.toolName) raw.origin.detail = raw.toolName;
         }
         if (payload.hookType === "prompt_submit") {
-          raw.userPrompt = d["prompt"] as string | undefined;
+          raw.userPrompt = redactObservationLiterals(d["prompt"], rules) as string | undefined;
         }
         if ((payload.hookType === "subagent_stop" || payload.hookType === "stop") && typeof d["last_message"] === "string") {
-          raw.assistantResponse = d["last_message"];
+          raw.assistantResponse = redactObservationLiterals(d["last_message"], rules) as string;
         }
 
-        extractedImage = extractImage(sanitizedRaw);
         if (extractedImage) {
           raw.modality = (raw.toolInput || raw.toolOutput || raw.userPrompt) ? "mixed" : "image";
         }
       } else if (typeof sanitizedRaw === "string") {
-        extractedImage = extractImage(sanitizedRaw);
         if (extractedImage) {
           raw.modality = "image";
         }

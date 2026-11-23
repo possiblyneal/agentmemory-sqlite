@@ -248,7 +248,7 @@ describe("mem::observe literal redaction", () => {
     const dir = mkdtempSync(join(process.cwd(), "tmp", "redaction-test-"));
     const path = join(dir, "rules.json");
     const previous = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;
-    const padded = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z/C/HgAGgwJ/lK3Q6wAAAABJRU5ErkJggg==";
+    const padded = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgaGD/DwACkgGHuW0i8gAAAABJRU5ErkJggg==";
     const image = encoding === "unpadded" ? padded.replace(/=+$/, "")
       : encoding === "raw-unpadded" ? padded.slice(padded.indexOf(",") + 1).replace(/=+$/, "")
       : encoding === "apng" ? "data:image/apng;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAABAAAAAQAAAAAAAAAAAAEACgAAWn8w0AAAAA1JREFUeJxj+M/A8B8ABQAB/4mZPR0AAAAaZmNUTAAAAAEAAAABAAAAAQAAAAAAAAAAAAEACgAAwQzaBAAAABFmZEFUAAAAAnicY/jPwPAfAAUAAf+alZNkAAAAAElFTkSuQmCC"

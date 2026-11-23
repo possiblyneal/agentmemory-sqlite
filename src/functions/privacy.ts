@@ -36,7 +36,7 @@ async function loadObservationLiterals(path: string, openRules: typeof open): Pr
   }
 }
 
-function isEncodedImage(value: string): boolean {
+export function isEncodedImage(value: string): boolean {
   const match = value.startsWith("data:image/")
     ? /^data:image\/(?:png|apng|jpeg|jpg|gif|webp);base64,([\s\S]*)$/i.exec(value)
     : null;
@@ -51,6 +51,17 @@ function isEncodedImage(value: string): boolean {
     (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9) ||
     (bytes.length >= 14 && /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString()) && bytes.at(-1) === 0x3b) ||
     (bytes.length >= 12 && bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP" && bytes.readUInt32LE(4) + 8 === bytes.length);
+}
+
+function ruleFreeAlphabet(rules: string[]): string[] {
+  const used = new Set(rules.join(""));
+  const alphabet: string[] = [];
+  for (let code = 0xe000; alphabet.length < 16; code = (code + 1) & 0xffff) {
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const char = String.fromCharCode(code);
+    if (!used.has(char)) alphabet.push(char);
+  }
+  return alphabet;
 }
 
 export function redactObservationLiterals(value: unknown, rules: string[]): unknown {
@@ -68,28 +79,35 @@ export function redactObservationLiterals(value: unknown, rules: string[]): unkn
         index = value.indexOf(rule, index + 1);
       }
     }
-    const replacement = rules.some((rule) => "[REDACTED]".includes(rule)) ? "" : "[REDACTED]";
-    let result = "";
+    const marker = rules.some((rule) => "[REDACTED]".includes(rule)) ? "" : "[REDACTED]";
+    const parts: string[] = [];
     let start = 0;
     for (let i = 0; i < masked.length; i++) {
       if (masked[i] && (i === 0 || !masked[i - 1])) {
-        result += value.slice(start, i) + replacement;
+        parts.push(value.slice(start, i));
       } else if (!masked[i] && i > 0 && masked[i - 1]) {
         start = i;
       }
     }
-    return masked.at(-1) ? result : result + value.slice(start);
+    parts.push(masked.at(-1) ? "" : value.slice(start));
+    const result = parts.join(marker);
+    if (!rules.some((rule) => result.includes(rule))) return result;
+    const separator = ruleFreeAlphabet(rules)[0];
+    return parts.join(separator + marker + separator);
   }
   if (Array.isArray(value)) return value.map((item) => redactObservationLiterals(item, rules));
   if (value !== null && typeof value === "object") {
     const entries: Array<[string, unknown]> = [];
     const used = new Set<string>();
-    let code = 0xe000;
-    while (rules.some((rule) => rule.includes(String.fromCharCode(code)))) code++;
-    const suffix = String.fromCharCode(code);
+    const alphabet = ruleFreeAlphabet(rules);
+    let counter = 0;
     for (const [key, item] of Object.entries(value)) {
-      let redactedKey = redactObservationLiterals(key, rules) as string;
-      while (used.has(redactedKey)) redactedKey += suffix;
+      const base = redactObservationLiterals(key, rules) as string;
+      let redactedKey = base;
+      while (used.has(redactedKey)) {
+        const suffix = (counter++).toString(16).split("").map((digit) => alphabet[parseInt(digit, 16)]).join("");
+        redactedKey = base + suffix;
+      }
       used.add(redactedKey);
       entries.push([redactedKey, redactObservationLiterals(item, rules)]);
     }

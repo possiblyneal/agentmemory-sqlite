@@ -198,7 +198,13 @@ array of up to 128 nonempty, case-sensitive literal strings, at most 64 KiB in t
 new automatic Observation's `data` text and object keys are redacted before storage and
 Compression; encoded image strings with valid format signatures and endings are not altered only
 when the whole string has valid Base64 syntax and, for a data URI, an image MIME and Base64 header
-without extra metadata. Other image-like strings are treated as text.
+without extra metadata. Other image-like strings are treated as text and are not saved as images.
+When rules are configured, attachment selection validates values before literal redaction and
+skips unsaveable paths so they do not mask a valid encoded attachment.
+Canonical hook fields are extracted independently of redacted raw keys, then their values are
+scrubbed before storage and Compression. The tool error still supplies output when scrubbing
+leaves no tool output. Colliding redacted keys retain all values, and redaction never joins
+surviving text into a configured literal.
 An unset variable leaves capture unchanged; an invalid or unreadable file rejects capture without
 blocking Recall. REST returns a generic 503 diagnostic; a validated request records its arrival
 before this check and settles on rejection. REST checks before queueing and the registrar checks
