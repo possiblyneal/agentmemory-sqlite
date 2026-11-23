@@ -1,5 +1,5 @@
 import { SearchIndex } from "./search-index.js";
-import { withinDateRange, type DateRange } from "../functions/date-range.js";
+import { parseTimestamp, withinDateRange, type DateRange } from "../functions/date-range.js";
 import { embedQuery } from "../providers/embedding/index.js";
 import { VectorIndex } from "./vector-index.js";
 import type {
@@ -59,8 +59,8 @@ export function isDurableRecord(obsId: string, sessionId: string): boolean {
   );
 }
 
-export function recencyFactor(timestamp: string, now: number): number {
-  const ageMs = now - Date.parse(timestamp);
+export function recencyFactor(timestamp: string, now: number, bounded = false): number {
+  const ageMs = now - (bounded ? parseTimestamp(timestamp) : Date.parse(timestamp));
   if (!Number.isFinite(ageMs) || ageMs <= 0) return 1;
   const ageDays = Math.floor(ageMs / DAY_MS);
   return (
@@ -77,11 +77,13 @@ export function recencyFactor(timestamp: string, now: number): number {
 export async function capOlderNearTwins(
   kv: StateKV,
   hits: Array<{ observation: CompressedObservation; sessionId: string; score: number }>,
+  bounded = false,
 ): Promise<void> {
+  const parse = bounded ? parseTimestamp : Date.parse;
   const observations = hits.filter(
     (h) =>
       !isDurableRecord(h.observation.id, h.sessionId) &&
-      Number.isFinite(Date.parse(h.observation.timestamp)),
+      Number.isFinite(parse(h.observation.timestamp)),
   );
   const projects = await sessionProjects(
     kv,
@@ -96,7 +98,7 @@ export async function capOlderNearTwins(
     capBehindNewer(
       group,
       (h) => `${h.observation.title} ${h.observation.narrative}`,
-      (h) => Date.parse(h.observation.timestamp),
+      (h) => parse(h.observation.timestamp),
     );
   }
 }
@@ -179,7 +181,7 @@ export class HybridSearch {
     let expansion: Promise<QueryExpansion> | undefined;
     return async (limit: number): Promise<HybridSearchResult[]> =>
       expand
-        ? this.searchExpanded(query, limit, await (expansion ??= expand()), search)
+        ? this.searchExpanded(query, limit, await (expansion ??= expand()), search, !!range)
         : search(query, limit);
   }
 
@@ -188,6 +190,7 @@ export class HybridSearch {
     limit: number,
     expansion: QueryExpansion,
     search: (query: string, limit: number, entityHints?: string[]) => Promise<HybridSearchResult[]>,
+    bounded: boolean,
   ): Promise<HybridSearchResult[]> {
     const allQueries = [
       query,
@@ -225,7 +228,7 @@ export class HybridSearch {
 
     // Each sub-query capped its own pool, so a stale twin's uncapped score
     // from a pool that lacked the newer one can win the merge.
-    const ranked = await this.capNearTwins(Array.from(merged.values()));
+    const ranked = await this.capNearTwins(Array.from(merged.values()), bounded);
 
     // Probe 0 capture, expansion arm. The two capture points inside
     // `tripleStreamSearch` fire once per sub-query and describe individual
@@ -503,7 +506,9 @@ export class HybridSearch {
     const enriched = await this.capNearTwins(
       this.applyRecency(
         await this.enrichResults(diversified, retrievalDepth, filterNonLatest, range),
+        !!range,
       ),
+      !!range,
     );
 
     // Probe 0 capture point 2: what a reranker would actually receive. Taken
@@ -530,7 +535,7 @@ export class HybridSearch {
     return enriched.slice(0, limit);
   }
 
-  private applyRecency(rows: HybridSearchResult[]): HybridSearchResult[] {
+  private applyRecency(rows: HybridSearchResult[], bounded: boolean): HybridSearchResult[] {
     const now = Date.now();
     const decayed = rows.map((r) =>
       isDurableRecord(r.observation.id, r.sessionId)
@@ -538,7 +543,7 @@ export class HybridSearch {
         : {
             ...r,
             combinedScore:
-              r.combinedScore * recencyFactor(r.observation.timestamp, now),
+              r.combinedScore * recencyFactor(r.observation.timestamp, now, bounded),
           },
     );
     return decayed.sort((a, b) => b.combinedScore - a.combinedScore);
@@ -546,6 +551,7 @@ export class HybridSearch {
 
   private async capNearTwins(
     rows: HybridSearchResult[],
+    bounded: boolean,
   ): Promise<HybridSearchResult[]> {
     const scored = rows.map((row) => ({
       row,
@@ -553,7 +559,7 @@ export class HybridSearch {
       sessionId: row.sessionId,
       score: row.combinedScore,
     }));
-    await capOlderNearTwins(this.kv, scored);
+    await capOlderNearTwins(this.kv, scored, bounded);
     return scored
       .map(({ row, score }) => ({ ...row, combinedScore: score }))
       .sort((a, b) => b.combinedScore - a.combinedScore);

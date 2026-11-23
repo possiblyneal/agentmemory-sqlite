@@ -122,6 +122,40 @@ describe("mem::search", () => {
     expect(result.results.map((r) => r.observation.id)).toEqual(["obs_a"]);
   });
 
+  it("uses UTC for bounded Observation recency", async ({ onTestFinished }) => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-02T02:00:00Z"));
+    onTestFinished(() => { clock.mockRestore(); vi.unstubAllEnvs(); });
+    const original = (await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a"))!;
+    await kv.set(KV.observations("ses_1"), original.id, { ...original, timestamp: "2026-01-01T01:00:00" });
+    getSearchIndex().clear();
+    await rebuildIndex(kv as never);
+    const search = async (after?: string) => {
+      const result = await sdk.trigger("mem::search", { query: "auth middleware", after }) as {
+        results: Array<{ observation: CompressedObservation; score: number }>;
+      };
+      expect(result.results.map((r) => r.observation.id)).toEqual([original.id]);
+      return result.results[0].score;
+    };
+    // Only the UTC interpretation puts this hit past the first whole day of decay.
+    expect(await search("2026-01-01T00:00:00Z")).toBeLessThan(await search());
+  });
+
+  it("ranks bounded offset-free Observations by UTC near-twin time", async ({ onTestFinished }) => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    onTestFinished(() => vi.unstubAllEnvs());
+    const original = (await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a"))!;
+    const older = { ...original, id: "older", timestamp: "2026-01-01T01:00:00", title: "auth middleware decision", narrative: "auth middleware decision" };
+    const newer = { ...older, id: "newer", timestamp: "2026-01-01T04:00:00Z" };
+    await kv.set(KV.observations("ses_1"), older.id, older);
+    await kv.set(KV.observations("ses_1"), newer.id, newer);
+    getSearchIndex().clear();
+    await rebuildIndex(kv as never);
+    const result = await sdk.trigger("mem::search", { query: "auth middleware decision", after: "2026-01-01T00:00:00Z", before: "2026-01-02T00:00:00Z" }) as { results: Array<{ observation: CompressedObservation }> };
+    const twins = result.results.map((r) => r.observation.id).filter((id) => id === older.id || id === newer.id);
+    expect(twins).toEqual([newer.id, older.id]);
+  });
+
   it("rechecks the loaded Observation against date bounds", async () => {
     const obs = (await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a"))!;
     await kv.set(KV.observations("ses_1"), obs.id, { ...obs, timestamp: "2026-02-01T00:00:00Z" });

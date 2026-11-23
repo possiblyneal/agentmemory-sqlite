@@ -581,13 +581,20 @@ terms from its timestamp's local calendar day (`src/state/date-terms.ts`), in `t
 not `termCount`, so a query with no date scores as before. `search()` appends at most 5 of the
 query's dates at weight 1.0: ISO dates (not inside a path or dated filename), month-day and
 day-month with an optional year, and month-year. A bare month is not matched; `may` and the
-short forms count only beside an ordinal, a year, or after "on". The in-process Engine rebuilds
+short forms count only beside an ordinal, a year, or after "on". Bounded BM25 resolves the
+stored instant with the date-range parser before taking its local calendar day; the index stores
+only the date postings that differ from unbounded search. It merges base and added postings in
+insertion order for ties. Each bounded date term skips postings removed or published after that
+term started; previously scored contributions are not recomputed. The in-process Engine rebuilds
 BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
 Recall and Session listing accept `after` and `before` as explicit-offset ISO-8601 instants;
-`after` is inclusive and `before` exclusive. Explicit-offset ISO stored timestamps retain exact
-fractional precision; other Node-parseable legacy timestamps use Node's millisecond result.
+`after` is inclusive and `before` exclusive. Valid stored ISO date-times with a `T` or `t` separator
+and no offset are interpreted as UTC for bounded Recall and Session ordering, retaining exact fractional
+precision like explicit-offset ISO timestamps, including valid `24:00` end of day. Bounded Observation
+recency and near-twin ranking use that same interpretation at millisecond precision; unbounded ranking
+is unchanged. Other Node-parseable legacy timestamps use Node's millisecond result; stored records are not rewritten.
 Invalid or reversed bounds are rejected. Recall uses the Observation timestamp or the record's
 creation time; Session listing uses `startedAt`. Eligibility precedes candidate truncation and
 Session paging, bounded Session pages sort by exact instant, and search rechecks loaded rows against

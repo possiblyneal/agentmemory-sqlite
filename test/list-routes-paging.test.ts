@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -91,6 +91,35 @@ beforeEach(() => {
 });
 
 describe("date bounds", () => {
+  beforeEach(() => vi.stubEnv("TZ", "America/Los_Angeles"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(["2026-01-01T00:30:00", "2026-01-01T00:30:00.0009000", "2026-01-01t00:30:00.0009", "+002026-01-01T00:30:00.0009"])("interprets offset-free stored ISO date-times as UTC: %s", (stored) => {
+    const fraction = stored.includes(".") ? ".0009" : "";
+    const instant = `2026-01-01T00:30:00${fraction}Z`;
+    expect(compareTimestamps(stored, instant)).toBe(0);
+    expect(withinDateRange(stored, parseDateRange({ after: instant }))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ before: instant }))).toBe(false);
+    expect(() => parseDateRange({ after: stored })).toThrow();
+  });
+  it.each(["2026-01-01T24:00", "2026-01-01T24:00:00", "2026-01-01T24:00:00.0000"])("interprets stored end of day as UTC: %s", (stored) => {
+    expect(compareTimestamps(stored, "2026-01-02T00:00:00Z")).toBe(0);
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-02T00:00:00Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: `${stored}Z` })).toThrow();
+  });
+  it("interprets an offset-free ISO date-time with minute precision as UTC", () => {
+    expect(compareTimestamps("2026-01-01T00:30", "2026-01-01T00:30:00Z")).toBe(0);
+    expect(() => parseDateRange({ after: "2026-01-01T00:30" })).toThrow();
+  });
+  it("preserves Node parsing for non-ISO offset-free legacy strings", () => {
+    const stored = "Jan 01 2026 00:30:00";
+    expect(compareTimestamps(stored, Date.parse(stored))).toBe(0);
+  });
+  it("preserves sub-millisecond precision in offset-free stored ISO date-times", () => {
+    const stored = "2026-01-01T00:30:00.000100002";
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-01T00:30:00.000100001Z", before: "2026-01-01T00:30:00.000100003Z" }))).toBe(true);
+    expect(compareTimestamps(stored, "2026-01-01T00:30:00.000100001Z")).toBeGreaterThan(0);
+  });
   it("compares sub-millisecond fractions exactly, including offsets and reversed bounds", () => {
     const range = parseDateRange({ after: "2026-01-01T01:00:00.0000000000000002+01:00", before: "2026-01-01T00:00:00.0000000000000009Z" });
     expect(withinDateRange("2026-01-01T00:00:00.000Z", range)).toBe(false);

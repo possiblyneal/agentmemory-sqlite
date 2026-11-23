@@ -805,11 +805,12 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
         })
       }
       const now = Date.now()
+      const bounded = range.after !== undefined || range.before !== undefined
       for (const r of enriched) {
         if (isDurableRecord(r.observation.id, r.sessionId)) continue
-        r.score *= recencyFactor(r.observation.timestamp, now)
+        r.score *= recencyFactor(r.observation.timestamp, now, bounded)
       }
-      await capOlderNearTwins(kv, enriched)
+      await capOlderNearTwins(kv, enriched, bounded)
       await yieldToEventLoop()
       enriched.sort((a, b) => b.score - a.score)
       enriched.length = Math.min(enriched.length, effectiveLimit)

@@ -10,6 +10,7 @@ import { registerReflectFunctions } from "../src/functions/reflect.js";
 import { setEmbeddingProvider } from "../src/functions/search.js";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
+import { KV } from "../src/state/schema.js";
 import type {
   CompressedObservation,
   HybridSearchResult,
@@ -122,6 +123,63 @@ describe("Smart Search Function", () => {
 
     const searchFn = () => async () => searchResults;
     registerSmartSearchFunction(sdk as never, kv as never, searchFn);
+  });
+
+  function rankingIndex() {
+    const bm25 = new SearchIndex();
+    // Unrelated documents keep fixture matches above smart-search's absolute BM25 floor.
+    for (let i = 0; i < 64; i++) {
+      bm25.add(makeObs({ id: `filler${i}`, title: "paint bicycle", narrative: "remove rust", concepts: [], files: [] }));
+    }
+    return bm25;
+  }
+
+  it("uses UTC for bounded hybrid Observation recency", async ({ onTestFinished }) => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-02T02:00:00Z"));
+    onTestFinished(() => { clock.mockRestore(); vi.unstubAllEnvs(); });
+    const obs = makeObs({ timestamp: "2026-01-01T01:00:00" });
+    const bm25 = rankingIndex();
+    bm25.add(obs);
+    await kv.set(KV.observations(obs.sessionId), obs.id, obs);
+    const hybrid = new HybridSearch(bm25, null, null, kv as never, 0.4, 0.6, 0, false);
+    registerSmartSearchFunction(sdk as never, kv as never, (query, range) =>
+      hybrid.prepareSearch(query, undefined, range),
+    );
+    const search = async (after?: string) => {
+      const result = await sdk.trigger("mem::smart-search", { query: "auth", after }) as {
+        results: CompactSearchResult[];
+      };
+      expect(result.results.map((r) => r.obsId)).toEqual([obs.id]);
+      return result.results[0].score;
+    };
+    expect(await search("2026-01-01T00:00:00Z")).toBeLessThan(await search());
+  });
+
+  it.for(["hybrid", "expanded"])("ranks bounded %s near-twins by UTC", async (mode, { onTestFinished }) => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T12:00:00Z"));
+    onTestFinished(() => { clock.mockRestore(); vi.unstubAllEnvs(); });
+    const older = makeObs({ id: "older", timestamp: "2026-01-01T01:00:00", concepts: ["quartz", "granite"] });
+    const newer = { ...older, id: "newer", timestamp: "2026-01-01T04:00:00Z", concepts: ["sapphire", "emerald"] };
+    const bm25 = rankingIndex();
+    for (const obs of [older, newer]) {
+      bm25.add(obs);
+      await kv.set(KV.observations(obs.sessionId), obs.id, obs);
+    }
+    const hybrid = new HybridSearch(bm25, null, null, kv as never, 0.4, 0.6, 0, false);
+    // Give each expansion leg just one twin, so only the merge can cap the pair.
+    const expand = mode === "expanded" ? async () => ({
+      original: "quartz granite", reformulations: ["sapphire emerald"], temporalConcretizations: [], entityExtractions: [],
+    }) : undefined;
+    registerSmartSearchFunction(sdk as never, kv as never, (query, range) =>
+      hybrid.prepareSearch(query, expand, range),
+    );
+    const result = await sdk.trigger("mem::smart-search", {
+      query: expand ? "quartz granite" : "auth", after: "2026-01-01T00:00:00Z",
+    }) as { results: CompactSearchResult[] };
+    expect(result.results.map((r) => r.obsId)).toEqual([newer.id, older.id]);
+    expect(result.results[1].score).toBeCloseTo(result.results[0].score * 0.99, 6);
   });
 
   it("returns bounded Lessons, Insights and Semantic Facts behind out-of-range candidates", async () => {
@@ -476,19 +534,25 @@ describe("Smart Search Function", () => {
       expect(result.results.map((r) => r.obsId)).toEqual(["target0", "target1", "target2", "target3"]);
     });
 
-    it("ranks a newer restatement above a carried hit", async () => {
+    it.for([false, true])("ranks a newer restatement above a carried hit (bounded=%s)", async (bounded, { onTestFinished }) => {
+      if (bounded) {
+        vi.stubEnv("TZ", "America/Los_Angeles");
+        onTestFinished(() => vi.unstubAllEnvs());
+      }
       await kv.set("mem:sessions", "foreign", { id: "foreign", project: "other-project" });
       const foreign = Array.from({ length: 99 }, (_, i) => hit(`foreign${i}`, "foreign", 12));
       const older = hit("old", "ses_1", 10);
       const newer = hit("new", "ses_1", 8);
       older.observation.title = newer.observation.title = "auth handler needs token validation";
-      newer.observation.timestamp = "2026-02-02T10:00:00Z";
+      older.observation.timestamp = bounded ? "2026-02-01T01:00:00" : "2026-02-01T01:00:00Z";
+      newer.observation.timestamp = "2026-02-01T04:00:00Z";
       registerSmartSearchFunction(sdk as never, kv as never, () => async (limit) =>
         limit === 100 ? [older, ...foreign] : [newer, ...foreign],
       );
 
       const result = (await sdk.trigger("mem::smart-search", {
         query: "auth handler token validation", project: "my-project", agentId: "*", limit: 2,
+        after: bounded ? "2026-02-01T00:00:00Z" : undefined,
         includeLessons: false, includeInsights: false,
       })) as { results: CompactSearchResult[] };
 

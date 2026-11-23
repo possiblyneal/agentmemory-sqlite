@@ -311,7 +311,7 @@ export function registerSmartSearchFunction(
           inScope = wider;
         } else {
           const scored = [...wider, ...carry].map((hit) => ({ ...hit, score: hit.combinedScore }));
-          await capOlderNearTwins(kv, scored);
+          await capOlderNearTwins(kv, scored, !!range);
           inScope = scored.sort((a, b) => b.score - a.score).map(({ score, ...hit }) => ({
             ...hit, combinedScore: score,
           }));
