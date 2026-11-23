@@ -424,7 +424,15 @@ async function handleLocal(
   }
 }
 
-const LLM_BOUND_TOOLS = new Set(["memory_reflect", "memory_consolidate"]);
+const REFLECT_MAX_CLUSTERS = 20;
+const REFLECT_OVERHEAD_MS = 15_000;
+const MAX_TIMER_MS = 2_147_483_647;
+
+function reflectTimeoutMs(): number {
+  const openaiTimeout = Number(process.env["OPENAI_TIMEOUT_MS"]);
+  const perCall = Math.max(llmCallTimeoutMs(), Number.isFinite(openaiTimeout) ? openaiTimeout : 0);
+  return Math.min(MAX_TIMER_MS, perCall * REFLECT_MAX_CLUSTERS + REFLECT_OVERHEAD_MS);
+}
 
 async function handleProxyGeneric(
   toolName: string,
@@ -441,7 +449,9 @@ async function handleProxyGeneric(
       method: "POST",
       body: JSON.stringify({ name: toolName, arguments: args }),
     },
-    LLM_BOUND_TOOLS.has(toolName) ? llmCallTimeoutMs() : undefined,
+    toolName === "memory_reflect"
+      ? reflectTimeoutMs()
+      : toolName === "memory_consolidate" ? llmCallTimeoutMs() : undefined,
   )) as { content?: Array<{ type: string; text: string }> } | null;
   if (result && Array.isArray(result.content)) {
     return { content: result.content };
