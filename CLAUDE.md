@@ -418,6 +418,9 @@ closest one instead of writing a row, as an exact re-save does: it takes the new
 context and the union of tags, keeps its id, and is audited `lesson_strengthen` with
 `reason: "re-discovery"` and `match: "restated" | "exact"` (#378).
 
+### Recall audit excerpts
+`mem::lesson-recall` and `mem::insight-search` store only the first 200 characters of a query in new audit rows; both search the full query. Existing audit rows are unchanged.
+
 ### Lesson recall candidates
 `searchLessons` and `mem::lesson-recall` score against the full Lesson index, then rank only
 eligible hits within their candidate budgets; deleted, foreign-project and (for recall)
