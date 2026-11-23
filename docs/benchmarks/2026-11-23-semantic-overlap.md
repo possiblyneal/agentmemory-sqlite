@@ -22,4 +22,8 @@ The probe checked the response length against its reported total, grouped eligib
 | 14 | 34 | 4 |
 | 15 | 15 | 0 |
 
+## Fact keys
+
+A second read-only scan retrieved 42,924 rows and reproduced the 8,916 eligible Facts and 4,530 Facts with a match. All eligible Facts had nonempty subject, relation, and object fields. All 4,530 matched across different subject/relation keys; none matched within the same key. Seven Facts had identical NFC-normalized text to a Fact with a different key. These counts identify where to sample for labeling, not which keys should be merged.
+
 This measures overlap, not semantic equivalence. The input snapshot was not retained, so a later read may yield different counts. The rejected synthetic candidate lost distinct claims in the condition, value, negation and time fixtures; this measurement does not justify reusing it. No Recall evaluation or production change was made for this measurement.
