@@ -99,6 +99,22 @@ describe("date bounds", () => {
     expect(withinDateRange("2026-01-01T00:00:00.000Z", parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
     expect(() => parseDateRange({ after: "2026-01-01T00:00:00.0009Z", before: "2026-01-01T00:00:00.0001Z" })).toThrow();
   });
+  it.each(["t", " "])("compares stored timestamps with a %s separator without relaxing bound syntax", (separator) => {
+    const stored = `2026-01-01${separator}00:00:00.0009000Z`;
+    expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0009Z" }))).toBe(false);
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-01T00:00:00.0009Z" }))).toBe(true);
+    expect(() => parseDateRange({ before: stored })).toThrow();
+  });
+  it("compares interior and trailing zeros in fractional remainders", () => {
+    const range = parseDateRange({ after: "2026-01-01T00:00:00.000100010Z", before: "2026-01-01T00:00:00.000100020Z" });
+    expect(withinDateRange("2026-01-01T00:00:00.00010001Z", range)).toBe(true);
+    expect(withinDateRange("2026-01-01T00:00:00.00010002Z", range)).toBe(false);
+  });
+  it("preserves milliseconds when Date.parse overflows a long fraction", () => {
+    const range = parseDateRange({ after: "2026-01-01T00:00:00.000100001000Z", before: "2026-01-01T00:00:00.000100002Z" });
+    expect(withinDateRange("2026-01-01t00:00:00.000100001000Z", range)).toBe(true);
+    expect(withinDateRange("2026-01-01 00:00:00.000100002000Z", range)).toBe(false);
+  });
   it("accepts leap days in years below 100 without applying the 1900 offset", () => {
     expect(parseDateRange({ after: "0000-02-29T00:00:00Z" }).after).toBe(Date.parse("0000-02-29T00:00:00Z"));
     expect(() => parseDateRange({ after: "0001-02-29T00:00:00Z" })).toThrow();

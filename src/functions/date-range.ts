@@ -1,7 +1,16 @@
 export type DateRange = { after?: number; before?: number; afterFraction?: string; beforeFraction?: string };
 
 function fraction(value: string): string {
-  return /T\d{2}:\d{2}:\d{2}\.(\d+)/.exec(value)?.[1]?.slice(3).replace(/0+$/, "") ?? "";
+  const digits = /[Tt ]\d{2}:\d{2}:\d{2}\.(\d+)/.exec(value)?.[1] ?? "";
+  let end = digits.length;
+  while (end > 3 && digits[end - 1] === "0") end--;
+  return digits.slice(3, end);
+}
+
+function parseTimestamp(value: string): number {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return parsed;
+  return Date.parse(value.replace(/([Tt ]\d{2}:\d{2}:\d{2}\.\d{3})\d+/, "$1"));
 }
 
 function instant(value: unknown): number | undefined {
@@ -17,7 +26,7 @@ function instant(value: unknown): number | undefined {
   if (m < 1 || m > 12 || d < 1 || d > days || Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59 || Number(offsetHour ?? 0) > 23 || Number(offsetMinute ?? 0) > 59) {
     throw new Error("Invalid date bound");
   }
-  const parsed = Date.parse(value);
+  const parsed = parseTimestamp(value);
   if (!Number.isFinite(parsed)) throw new Error("Invalid date bound");
   return parsed;
 }
@@ -37,7 +46,7 @@ export function parseDateRange(input: { after?: unknown; before?: unknown }): Da
 
 export function withinDateRange(timestamp: unknown, range: DateRange): boolean {
   if (range.after === undefined && range.before === undefined) return true;
-  const time = typeof timestamp === "string" ? Date.parse(timestamp) : typeof timestamp === "number" ? timestamp : NaN;
+  const time = typeof timestamp === "string" ? parseTimestamp(timestamp) : typeof timestamp === "number" ? timestamp : NaN;
   const remainder = typeof timestamp === "string" ? fraction(timestamp) : "";
   return Number.isFinite(time) && (range.after === undefined || compare(time, remainder, range.after, range.afterFraction ?? "") >= 0) && (range.before === undefined || compare(time, remainder, range.before, range.beforeFraction ?? "") < 0);
 }

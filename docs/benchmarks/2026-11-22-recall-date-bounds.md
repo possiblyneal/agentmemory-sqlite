@@ -6,4 +6,6 @@
 
 **Unbounded control:** The omitted-bounds `npm run eval:gate` passed. This regression check does not measure the new bounded paths.
 
+**Coding-life unbounded control:** The dev split compared baseline `3262da407645dbada448a984c915da310b5b3e39` with candidate `e9dfaf025117b749bd81e5bbe73f707e5f628db3`, each in a separate throwaway daemon with local `Xenova/all-MiniLM-L6-v2` embeddings. All 23 paired query results matched apart from latency. Search recall/precision were 1.000/0.708 in both arms (12 queries); session-start 0.625/1.000 (2); prompt-submit 0.861/1.000 (9). A separate post-scoring diagnostic in each arm reported 67 vector rows, a 384-dimensional query embedding and 5 vector hits; it witnesses that diagnostic query, not every scored query. These runs omit date bounds, and the later fractional-timestamp correction was not measured. Single runs under uncontrolled load do not establish a latency difference.
+
 **Verdict:** Eligibility before truncation prevents starvation in the synthetic vector fixture. The fixture does not estimate bounded Recall quality on the Operator's workload.
