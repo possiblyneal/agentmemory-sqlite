@@ -9,7 +9,7 @@ import { isEncodedImage, observationLiterals, redactObservationLiterals, stripPr
 import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
-import { buildSyntheticCompression } from "./compress-synthetic.js";
+import { buildSyntheticCompression, describeHook } from "./compress-synthetic.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { parkForCompression } from "./compress-batch.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
@@ -56,10 +56,10 @@ function extractImageWithValidation(d: unknown, validate: boolean): string | und
 export async function storeSyntheticCompression(
   kv: StateKV,
   raw: RawObservation,
-  { awaitingCompression = false } = {},
+  { awaitingCompression = false, hook }: { awaitingCompression?: boolean; hook?: ReturnType<typeof describeHook> } = {},
 ): Promise<CompressedObservation> {
   const synthetic: CompressedObservation = {
-    ...buildSyntheticCompression(raw),
+    ...buildSyntheticCompression(raw, hook),
     ...(awaitingCompression ? { awaitingCompression: true } : {}),
   };
   await kv.set(KV.observations(raw.sessionId), raw.id, synthetic);
@@ -354,7 +354,7 @@ function validExecutionField(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= 256 ? value : undefined;
 }
 
-export function isReadOnlyObservation(raw: RawObservation): boolean {
+export function isReadOnlyObservation(raw: Pick<RawObservation, "hookType" | "toolName" | "toolInput" | "toolOutput">): boolean {
   if (raw.hookType !== "post_tool_use" || !raw.toolName) return false;
   if (reportsError(raw.toolOutput)) return false;
   if (READ_ONLY_TOOLS.has(raw.toolName)) return true;
@@ -435,6 +435,8 @@ export function registerObserveFunction(
 
       const privateRaw = stripPrivateDataDeep(payload.data);
       const sanitizedRaw = redactObservationLiterals(privateRaw, rules);
+      const hook = rules.length ? describeHook(payload.hookType, privateRaw, rules) : undefined;
+      const autoCompress = isAutoCompressEnabled();
 
       let originChannel: Origin["channel"] = "agent";
       if (payload.hookType === "prompt_submit") originChannel = "user";
@@ -453,6 +455,7 @@ export function registerObserveFunction(
 
       const validateImages = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE !== undefined;
       let extractedImage: string | undefined;
+      let readOnlyTool = false;
 
       if (typeof privateRaw === "object" && privateRaw !== null) {
         const d = privateRaw as Record<string, unknown>;
@@ -465,6 +468,14 @@ export function registerObserveFunction(
           const agentType = validExecutionField(original["agent_type"]);
           if (agentId && agentId === d["agent_id"] && !rules.some((rule) => agentId.includes(rule))) raw.executionAgentId = agentId;
           if (agentType && agentType === d["agent_type"] && !rules.some((rule) => agentType.includes(rule))) raw.executionAgentType = agentType;
+          if (autoCompress) {
+            readOnlyTool = isReadOnlyObservation({
+              hookType: raw.hookType,
+              toolName: d["tool_name"] as string | undefined,
+              toolInput: d["tool_input"],
+              toolOutput: d["tool_output"] || d["error"],
+            });
+          }
           raw.toolName = redactObservationLiterals(d["tool_name"], rules) as string | undefined;
           raw.toolInput = redactObservationLiterals(d["tool_input"], rules);
           raw.toolOutput = redactObservationLiterals(d["tool_output"], rules) || redactObservationLiterals(d["error"], rules);
@@ -695,8 +706,8 @@ export function registerObserveFunction(
         // and BM25 search still work without burning the user's Claude
         // token allocation on every tool invocation. With auto-compress on, a
         // read-only call stays synthetic too.
-        const compressible = isAutoCompressEnabled() && hasCompressibleContent(raw);
-        const readOnly = compressible && isReadOnlyObservation(raw);
+        const compressible = autoCompress && hasCompressibleContent(raw);
+        const readOnly = compressible && readOnlyTool;
         const llmCompress = compressible && !readOnly;
         // An image needs mem::compress's vision step, so it goes alone. Any
         // other LLM-worthy Observation is searchable at once as a synthetic
@@ -718,6 +729,7 @@ export function registerObserveFunction(
           if (path === "llm-batch") await parkForCompression(kv, raw);
           const synthetic = await storeSyntheticCompression(kv, raw, {
             awaitingCompression: path === "llm-batch",
+            hook,
           });
           await sdk.trigger({
             function_id: "stream::set",

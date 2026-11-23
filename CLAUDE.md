@@ -203,8 +203,9 @@ when the whole string has valid Base64 syntax and, for a data URI, an image MIME
 without extra metadata. Other image-like strings are treated as text and are not saved as images.
 When rules are configured, attachment selection validates values before literal redaction and
 skips unsaveable paths so they do not mask a valid encoded attachment.
-Canonical hook fields are extracted independently of redacted raw keys, then their values are
-scrubbed before storage and Compression. The tool error still supplies output when scrubbing
+Canonical hook fields and synthetic descriptions read the original keys, but only redacted
+values reach storage and Compression. Read-only tool classification uses the fields before
+literal redaction so matching a key or value does not change the classification. The tool error still supplies output when scrubbing
 leaves no tool output. Colliding redacted keys retain all values, and redaction never joins
 surviving text into a configured literal.
 An unset variable leaves capture unchanged; an invalid or unreadable file rejects capture without

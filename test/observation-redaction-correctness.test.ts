@@ -73,11 +73,56 @@ describe("observation literal redaction correctness", () => {
     }
   });
 
+  it("keeps hook descriptions and Bash routing when rules match structural keys", async () => {
+    await mkdir("tmp", { recursive: true });
+    const home = await mkdtemp(resolve("tmp/redaction-hooks-"));
+    const file = join(home, "rules.json");
+    await writeFile(file, JSON.stringify([
+      "agent_type", "agent_id", "last_message", "task_subject", "task_description",
+      "teammate_name", "team_name", "title", "message", "command", "stderr", "PRIVATE-LITERAL", "[REDACTED]",
+    ]));
+    vi.stubEnv("AGENTMEMORY_OBSERVATION_REDACTION_FILE", file);
+    vi.stubEnv("AGENTMEMORY_AUTO_COMPRESS", "true");
+    try {
+      const kv = mockKV();
+      const sdk = mockSdk({ looseTrigger: true });
+      registerObserveFunction(sdk as never, kv as never);
+      const cases = [
+        ["subagent_start", { agent_type: "reader", agent_id: "worker" }, "Subagent started: reader", "type reader | id worker"],
+        ["subagent_stop", { agent_type: "reader", agent_id: "worker", last_message: "finished PRIVATE-LITERAL read" }, "Subagent finished: reader", "finished  read | id worker"],
+        ["stop", { last_message: "all done PRIVATE-LITERAL" }, "Agent replied: all done", "all done"],
+        ["task_completed", { task_subject: "review", task_description: "checked", teammate_name: "reader", team_name: "reviewers" }, "Task completed: review", "review | checked | teammate reader | team reviewers"],
+        ["notification", { title: "ready", message: "new PRIVATE-LITERAL result" }, "ready", "ready | new  result"],
+      ] as const;
+      for (const [hookType, data, title, narrative] of cases) {
+        await sdk.trigger("mem::observe", { sessionId: hookType, hookType, timestamp: "2026-11-22T10:00:00Z", data });
+        const [row] = [...kv.store.get(KV.observations(hookType))!.values()];
+        expect.soft(row, hookType).toMatchObject({ title, narrative });
+      }
+      for (const [sessionId, tool_output, awaitingCompression] of [
+        ["read-only", { stdout: "clean" }, undefined],
+        ["with-stderr", { stderr: "PRIVATE-LITERAL" }, true],
+      ] as const) {
+        await sdk.trigger("mem::observe", {
+          sessionId, hookType: "post_tool_use", timestamp: "2026-11-22T10:00:00Z",
+          data: { tool_name: "Bash", tool_input: { command: "ls PRIVATE-LITERAL" }, tool_output },
+        });
+        const [row] = [...kv.store.get(KV.observations(sessionId))!.values()] as Array<{ awaitingCompression?: boolean }>;
+        expect(row.awaitingCompression, sessionId).toBe(awaitingCompression);
+        expect(JSON.stringify(row)).not.toContain("PRIVATE-LITERAL");
+      }
+      expect(JSON.stringify([...kv.store.get(KV.compressPending)!.values()])).not.toContain("PRIVATE-LITERAL");
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("chooses the error after redaction empties tool output", async () => {
     await mkdir("tmp", { recursive: true });
     const home = await mkdtemp(resolve("tmp/redaction-home-"));
     const file = join(home, "rules.json");
-    await writeFile(file, JSON.stringify(["E"]));
+    await writeFile(file, JSON.stringify(["E", "error"]));
     vi.stubEnv("HOME", home);
     vi.stubEnv("AGENTMEMORY_OBSERVATION_REDACTION_FILE", file);
     vi.stubEnv("AGENTMEMORY_AUTO_COMPRESS", "false");
