@@ -187,7 +187,7 @@ hook type and tool name; its five-minute in-memory window retains hashes, not pa
 Distinct long Observations sharing a prefix are stored; exact repeats within the window deduplicate.
 Tool execution attribution (`agent_id`, `agent_type`) distinguishes otherwise identical calls. Dedup runs before the existing privacy sanitization and does not change what gets stored.
 
-Tool success and failure hooks retain optional `agent_id` and `agent_type` as `executionAgentId` and `executionAgentType` on Observations, separately from the isolation `agentId`; each original is a nonempty string of at most 256 characters and is omitted if privacy sanitization changes it. Synthetic and LLM Compression preserve them. Full export/import and snapshots carry stored Observation fields; transcript JSONL import and replay do not reconstruct this attribution, and identity discarded before capture cannot be recovered.
+Tool success and failure hooks retain optional `agent_id` and `agent_type` as `executionAgentId` and `executionAgentType` on Observations, separately from the isolation `agentId`; each original is a nonempty string of at most 256 characters and is omitted if privacy sanitization changes it. These top-level metadata fields are excluded from image extraction, not from the sanitized payload. Synthetic and LLM Compression preserve them. Full export/import and snapshots carry stored Observation fields; transcript JSONL import and replay do not reconstruct this attribution, and identity discarded before capture cannot be recovered.
 
 ### Observation redaction
 `mem::observe` scrubs structured payload values before capture, preserving their shape and

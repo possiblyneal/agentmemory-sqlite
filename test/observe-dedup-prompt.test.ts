@@ -112,6 +112,39 @@ describe("observe dedup for hooks without tool_input (#1173)", () => {
     expect(second.observationId).toBeTruthy();
   });
 
+  it.each(["post_tool_use", "post_tool_failure"])("keeps image-like execution metadata out of image capture for %s", async (hook) => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const { KV } = await import("../src/state/schema.js");
+    const sdk = mockSdk({ looseTrigger: true });
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+    for (const field of ["agent_id", "agent_type"]) {
+      const value = "iVBORw0KGgo-reader";
+      const result = await sdk.trigger("mem::observe", observePayload(hook, {
+        tool_name: "Read", tool_input: { file_path: "a" }, tool_output: "plain text", [field]: value,
+      })) as { observationId: string };
+      const observation = await kv.get<Record<string, unknown>>(KV.observations("ses_dedup_test"), result.observationId);
+      expect(observation?.[field === "agent_id" ? "executionAgentId" : "executionAgentType"]).toBe(value);
+      expect(observation?.imageData).toBeUndefined();
+      expect(observation?.modality).not.toBe("image");
+      expect(observation?.modality).not.toBe("mixed");
+    }
+  });
+
+  it("still detects explicit images alongside execution metadata", async () => {
+    const { registerObserveFunction } = await import("../src/functions/observe.js");
+    const { KV } = await import("../src/state/schema.js");
+    const sdk = mockSdk({ looseTrigger: true });
+    const kv = mockKV();
+    registerObserveFunction(sdk as never, kv as never);
+    const result = await sdk.trigger("mem::observe", observePayload("post_tool_use", {
+      tool_name: "Read", tool_input: {}, tool_output: { image_path: "/synthetic/image.png" },
+      agent_id: "iVBORw0KGgo-agent", agent_type: "iVBORw0KGgo-reader",
+    })) as { observationId: string };
+    const observation = await kv.get<Record<string, unknown>>(KV.observations("ses_dedup_test"), result.observationId);
+    expect(observation).toMatchObject({ modality: "mixed", executionAgentId: "iVBORw0KGgo-agent", executionAgentType: "iVBORw0KGgo-reader" });
+  });
+
   it("retains tool execution attribution in the captured observation", async () => {
     const { registerObserveFunction } = await import("../src/functions/observe.js");
     const { registerTimelineFunction } = await import("../src/functions/timeline.js");

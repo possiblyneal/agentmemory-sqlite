@@ -466,7 +466,12 @@ export function registerObserveFunction(
           raw.assistantResponse = d["last_message"];
         }
 
-        extractedImage = extractImage(sanitizedRaw);
+        const { agent_id: _agentId, agent_type: _agentType, ...imagePayload } = d;
+        extractedImage = extractImage(
+          payload.hookType === "post_tool_use" || payload.hookType === "post_tool_failure"
+            ? imagePayload
+            : sanitizedRaw,
+        );
         if (extractedImage) {
           raw.modality = (raw.toolInput || raw.toolOutput || raw.userPrompt) ? "mixed" : "image";
         }
