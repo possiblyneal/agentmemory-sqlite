@@ -246,7 +246,7 @@ describe("mem::observe literal redaction", () => {
     }
   });
 
-  it.each(["padded", "unpadded", "raw-unpadded", "whitespace", "url-safe"])("redacts image-prefixed text while retaining an encoded image (%s)", async (encoding) => {
+  it.each(["padded", "unpadded", "raw-unpadded", "whitespace", "url-safe", "apng"])("redacts image-prefixed text while retaining an encoded image (%s)", async (encoding) => {
     mkdirSync("tmp", { recursive: true });
     const dir = mkdtempSync(join(process.cwd(), "tmp", "redaction-test-"));
     const path = join(dir, "rules.json");
@@ -254,6 +254,7 @@ describe("mem::observe literal redaction", () => {
     const padded = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z/C/HgAGgwJ/lK3Q6wAAAABJRU5ErkJggg==";
     const image = encoding === "unpadded" ? padded.replace(/=+$/, "")
       : encoding === "raw-unpadded" ? padded.slice(padded.indexOf(",") + 1).replace(/=+$/, "")
+      : encoding === "apng" ? "data:image/apng;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAABAAAAAQAAAAAAAAAAAAEACgAAWn8w0AAAAA1JREFUeJxj+M/A8B8ABQAB/4mZPR0AAAAaZmNUTAAAAAEAAAABAAAAAQAAAAAAAAAAAAEACgAAwQzaBAAAABFmZEFUAAAAAnicY/jPwPAfAAUAAf+alZNkAAAAAElFTkSuQmCC"
       : encoding === "whitespace" ? padded.replace("AAAANSUh", "AAAA \nNSUh")
       : encoding === "url-safe" ? padded.replaceAll("/", "_").replace("data:image_png", "data:image/png")
       : padded;
@@ -271,7 +272,7 @@ describe("mem::observe literal redaction", () => {
         tool_name: "Edit", tool_input: {
           text: "data:image/png;base64,SYNTHETIC-IDENTIFIER text", screenshot: image,
           trailing: padded + "SYNTHETIC-IDENTIFIER",
-          metadata: padded.replace(";base64,", ";SYNTHETIC-IDENTIFIER;base64,"),
+          metadata: (encoding === "apng" ? image : padded).replace(";base64,", ";SYNTHETIC-IDENTIFIER;base64,"),
         },
         image_path: join(dir, "image.png"),
       }).body });

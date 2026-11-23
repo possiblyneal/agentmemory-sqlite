@@ -38,7 +38,7 @@ async function loadObservationLiterals(path: string): Promise<string[]> {
 
 function isEncodedImage(value: string): boolean {
   const match = value.startsWith("data:image/")
-    ? /^data:image\/(?:png|jpeg|jpg|gif|webp);base64,([\s\S]*)$/i.exec(value)
+    ? /^data:image\/(?:png|apng|jpeg|jpg|gif|webp);base64,([\s\S]*)$/i.exec(value)
     : null;
   if (value.startsWith("data:image/") && !match) return false;
   const encoded = (match ? match[1] : value).replace(/\s/g, "");
