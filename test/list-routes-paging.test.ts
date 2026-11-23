@@ -111,6 +111,22 @@ describe("date bounds", () => {
     expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
   });
   it("uses Node's millisecond result for non-ISO fractions", () => {
+    const stored = "Jan 01 2026 00:00:00.0009 GMT";
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
+  });
+  it.each([
+    "2026-01-01T00:00:00.0009z",
+    "2026-01-01T00:00:00.0009+0000",
+    "+002026-01-01T00:00:00.0009Z",
+    "+002026-01-01t00:00:00.0009z",
+    "+002026-01-01 0:00:00.0009+0000",
+  ])("preserves exact fractions in unambiguous stored ISO variants: %s", (stored) => {
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-01T00:00:00.0008Z", before: "2026-01-01T00:00:00.001Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: stored })).toThrow();
+  });
+  it("uses Node's millisecond result when a long legacy fraction rounds", () => {
     const stored = "Jan 01 2026 00:00:00.999999999999999999999999999999999999 GMT";
     const parsed = Date.parse(stored);
     expect(Number.isFinite(parsed)).toBe(true);
