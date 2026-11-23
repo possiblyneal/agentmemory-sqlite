@@ -8,7 +8,7 @@ import {
   TOOL_INPUT_MAX,
   TOOL_OUTPUT_MAX,
 } from "../prompts/compression.js";
-import { stripPrivateData } from "./privacy.js";
+import { redactObservationLiterals, stripPrivateData } from "./privacy.js";
 
 // Zero-LLM compression path. Converts a RawObservation into a
 // CompressedObservation using only heuristics — no Claude call, no token
@@ -100,83 +100,79 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
 }
 
-function str(v: unknown): string {
-  return typeof v === "string" ? v.trim() : "";
-}
-
 function oneLine(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-// Titles and narrative for hooks whose payload carries no tool fields. The
-// payload shapes are what src/hooks/{stop,subagent-start,subagent-stop,
+// The payload shapes are what src/hooks/{stop,subagent-start,subagent-stop,
 // task-completed,notification}.ts send.
-function describeHook(
-  raw: RawObservation,
-): { title: string; narrative: string } | undefined {
-  const d =
-    raw.raw && typeof raw.raw === "object"
-      ? (raw.raw as Record<string, unknown>)
-      : {};
+export function describeHook(
+  hookType: string,
+  data: unknown,
+  literals: string[] = [],
+): { title: string; narrative: string } | null {
+  const d = data && typeof data === "object" ? data as Record<string, unknown> : {};
+  const text = (key: string) => {
+    const value = d[key];
+    return typeof value === "string" ? (redactObservationLiterals(value, literals) as string).trim() : "";
+  };
   const join = (parts: string[]) => parts.filter(Boolean).join(" | ");
-  switch (raw.hookType) {
+  switch (hookType) {
     case "subagent_start": {
-      const kind = str(d["agent_type"]);
-      const id = str(d["agent_id"]);
-      if (!kind && !id) return undefined;
+      const kind = text("agent_type");
+      const id = text("agent_id");
+      if (!kind && !id) return null;
       return {
         title: `Subagent started: ${kind || id}`,
         narrative: join([kind && `type ${kind}`, id && `id ${id}`]),
       };
     }
     case "subagent_stop": {
-      const kind = str(d["agent_type"]);
-      const id = str(d["agent_id"]);
-      const last = str(d["last_message"]);
-      if (!kind && !id && !last) return undefined;
+      const kind = text("agent_type");
+      const id = text("agent_id");
+      const last = text("last_message");
+      if (!kind && !id && !last) return null;
       return {
         title: `Subagent finished: ${kind || id || oneLine(last)}`,
         narrative: join([last, id && `id ${id}`]),
       };
     }
     case "stop": {
-      const reply = str(d["last_message"]);
-      if (!reply) return undefined;
+      const reply = text("last_message");
+      if (!reply) return null;
       return {
         title: `Agent replied: ${oneLine(reply)}`,
         narrative: reply,
       };
     }
     case "task_completed": {
-      const subject = str(d["task_subject"]);
-      const description = str(d["task_description"]);
-      if (!subject && !description) return undefined;
+      const subject = text("task_subject");
+      const description = text("task_description");
+      if (!subject && !description) return null;
+      const teammate = text("teammate_name");
+      const team = text("team_name");
       return {
         title: `Task completed: ${subject || oneLine(description)}`,
-        narrative: join([
-          subject,
-          description,
-          str(d["teammate_name"]) && `teammate ${str(d["teammate_name"])}`,
-          str(d["team_name"]) && `team ${str(d["team_name"])}`,
-        ]),
+        narrative: join([subject, description, teammate && `teammate ${teammate}`, team && `team ${team}`]),
       };
     }
     case "notification": {
-      const title = str(d["title"]);
-      const message = str(d["message"]);
-      if (!title && !message) return undefined;
+      const title = text("title");
+      const message = text("message");
+      if (!title && !message) return null;
       return {
         title: oneLine(title || message),
         narrative: join([title, message]),
       };
     }
     default:
-      return undefined;
+      return null;
   }
 }
 
 export function buildSyntheticCompression(
   raw: RawObservation,
+  hook = raw.syntheticDescription === undefined ? describeHook(raw.hookType, raw.raw) : raw.syntheticDescription,
 ): CompressedObservation {
   const toolName = raw.toolName ?? raw.hookType;
   const inputStr = stringifyForNarrative(raw.toolInput);
@@ -187,7 +183,6 @@ export function buildSyntheticCompression(
     (s) => s.length > 0,
   );
 
-  const hook = describeHook(raw);
   let title = toolName || "observation";
   if (hook) title = hook.title;
   else if (raw.hookType === "prompt_submit" && oneLine(promptStr))
