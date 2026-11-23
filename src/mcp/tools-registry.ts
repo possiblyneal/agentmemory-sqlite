@@ -37,6 +37,11 @@ export type McpToolDef = {
   };
 };
 
+const DATE_BOUNDS = {
+  after: { type: "string", description: "Inclusive lower bound, ISO-8601 instant with explicit offset. Legacy stored timestamps outside the exact ISO form use Node's millisecond result." },
+  before: { type: "string", description: "Exclusive upper bound, ISO-8601 instant with explicit offset. Legacy stored timestamps outside the exact ISO form use Node's millisecond result." },
+};
+
 export const CORE_TOOLS: McpToolDef[] = [
   {
     name: "memory_recall",
@@ -66,6 +71,7 @@ export const CORE_TOOLS: McpToolDef[] = [
           type: "string",
           description: "Layer to search: memory (default), observation, or all",
         },
+        ...DATE_BOUNDS,
       },
       required: ["query"],
     },
@@ -198,6 +204,7 @@ export const CORE_TOOLS: McpToolDef[] = [
       properties: {
         limit: { type: "number", description: "Max sessions to return (default 100)" },
         offset: { type: "number", description: "Sessions to skip from the newest (default 0)" },
+        ...DATE_BOUNDS,
       },
     },
   },
@@ -214,6 +221,7 @@ export const CORE_TOOLS: McpToolDef[] = [
         },
         limit: { type: "number", description: "Max results (default 10)" },
         project: { type: "string", description: PROJECT_FILTER_DESCRIPTION },
+        ...DATE_BOUNDS,
       },
     },
   },

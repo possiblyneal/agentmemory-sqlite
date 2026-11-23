@@ -9,6 +9,7 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
 }));
 
 import { registerApiTriggers } from "../src/triggers/api.js";
+import { compareTimestamps, parseDateRange, withinDateRange } from "../src/functions/date-range.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
 
@@ -89,6 +90,82 @@ beforeEach(() => {
   registerApiTriggers(sdk as never, kv as never, SECRET);
 });
 
+describe("date bounds", () => {
+  it("compares sub-millisecond fractions exactly, including offsets and reversed bounds", () => {
+    const range = parseDateRange({ after: "2026-01-01T01:00:00.0000000000000002+01:00", before: "2026-01-01T00:00:00.0000000000000009Z" });
+    expect(withinDateRange("2026-01-01T00:00:00.000Z", range)).toBe(false);
+    expect(withinDateRange("2026-01-01T00:00:00.0000000000000002Z", range)).toBe(true);
+    expect(withinDateRange("2026-01-01T00:00:00.0000000000000009Z", range)).toBe(false);
+    expect(withinDateRange("2026-01-01T00:00:00.000Z", parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: "2026-01-01T00:00:00.0009Z", before: "2026-01-01T00:00:00.0001Z" })).toThrow();
+  });
+  it.each(["t", " "])("compares stored timestamps with a %s separator without relaxing bound syntax", (separator) => {
+    const stored = `2026-01-01${separator}00:00:00.0009000Z`;
+    expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0009Z" }))).toBe(false);
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-01T00:00:00.0009Z" }))).toBe(true);
+    expect(() => parseDateRange({ before: stored })).toThrow();
+  });
+  it("uses Node's millisecond result for legacy strings with a decoy fraction in a comment", () => {
+    const stored = "Jan 01 2026 00:00:00 GMT (T00:00:00.0009)";
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
+  });
+  it("uses Node's millisecond result for non-ISO fractions", () => {
+    const stored = "Jan 01 2026 00:00:00.0009 GMT";
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
+  });
+  it.each([
+    "2026-01-01T00:00:00.0009z",
+    "2026-01-01T00:00:00.0009+0000",
+    "+002026-01-01T00:00:00.0009Z",
+    "+002026-01-01t00:00:00.0009z",
+    "+002026-01-01 0:00:00.0009+0000",
+  ])("preserves exact fractions in unambiguous stored ISO variants: %s", (stored) => {
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-01T00:00:00.0008Z", before: "2026-01-01T00:00:00.001Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: stored })).toThrow();
+  });
+  it("uses Node's millisecond result when a long legacy fraction rounds", () => {
+    const stored = "Jan 01 2026 00:00:00.999999999999999999999999999999999999 GMT";
+    const parsed = Date.parse(stored);
+    expect(Number.isFinite(parsed)).toBe(true);
+    expect(withinDateRange(stored, { after: parsed, before: parsed + 1 })).toBe(true);
+  });
+  it.each(["2026-02-30T00:00:00.0009Z", "-000000-01-01 00:00:00.0009Z"])("uses Node milliseconds for invalid recognized components: %s", (stored) => {
+    const parsed = Date.parse(stored);
+    expect(Number.isFinite(parsed)).toBe(true);
+    expect(withinDateRange(stored, { before: parsed + 0.5 })).toBe(true);
+    expect(withinDateRange(stored, { before: parsed, beforeFraction: "1" })).toBe(true);
+  });
+  it.each(["0099", "0026"])("compares expanded year %s using canonical components", (year) => {
+    const stored = `+00${year}-01-01 0:00:00.0009+0000`;
+    expect(withinDateRange(stored, parseDateRange({ after: `${year}-01-01T00:00:00.0008Z`, before: `${year}-01-01T00:00:00.001Z` }))).toBe(true);
+  });
+  it("compares equivalent expanded timestamps with and without a zero fraction", () => {
+    expect(compareTimestamps("+000099-01-01 0:00:00+0000", "+000099-01-01 0:00:00.000+0000")).toBe(0);
+  });
+  it("compares interior and trailing zeros in fractional remainders", () => {
+    const range = parseDateRange({ after: "2026-01-01T00:00:00.000100010Z", before: "2026-01-01T00:00:00.000100020Z" });
+    expect(withinDateRange("2026-01-01T00:00:00.00010001Z", range)).toBe(true);
+    expect(withinDateRange("2026-01-01T00:00:00.00010002Z", range)).toBe(false);
+  });
+  it("preserves milliseconds when Date.parse overflows a long fraction", () => {
+    const range = parseDateRange({ after: "2026-01-01T00:00:00.000100001000Z", before: "2026-01-01T00:00:00.000100002Z" });
+    expect(withinDateRange("2026-01-01t00:00:00.000100001000Z", range)).toBe(true);
+    expect(withinDateRange("2026-01-01 00:00:00.000100002000Z", range)).toBe(false);
+  });
+  it("compares a stored one-digit hour without accepting it as a bound", () => {
+    const timestamp = "2026-01-01 0:00:00.0009Z";
+    expect(withinDateRange(timestamp, parseDateRange({ after: "2026-01-01T00:00:00.0009Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: timestamp })).toThrow();
+  });
+  it("accepts leap days in years below 100 without applying the 1900 offset", () => {
+    expect(parseDateRange({ after: "0000-02-29T00:00:00Z" }).after).toBe(Date.parse("0000-02-29T00:00:00Z"));
+    expect(() => parseDateRange({ after: "0001-02-29T00:00:00Z" })).toThrow();
+  });
+});
+
 describe("GET /agentmemory/sessions paging", () => {
   it("returns the newest 100 by default with the full total", async () => {
     await seedSessions(130);
@@ -110,6 +187,40 @@ describe("GET /agentmemory/sessions paging", () => {
     expect(res.body.total).toBe(25);
     expect(res.body.limit).toBe(10);
     expect(res.body.offset).toBe(10);
+  });
+
+  it("orders bounded Sessions by exact instant before paging", async () => {
+    await kv.set(KV.sessions, "offset", { ...makeSession(1), id: "offset", startedAt: "2026-01-01T02:00:00+02:00" });
+    await kv.set(KV.sessions, "newer", { ...makeSession(2), id: "newer", startedAt: "2026-01-01T01:00:00.0002Z" });
+    await kv.set(KV.sessions, "newest", { ...makeSession(3), id: "newest", startedAt: "2026-01-01T01:00:00.0009Z" });
+    const res = await get("api::sessions", { after: "2026-01-01T00:00:00Z", before: "2026-01-01T02:00:00Z", limit: "1" });
+    expect((res.body.sessions as Session[]).map(s => s.id)).toEqual(["newest"]);
+  });
+  it("orders numeric and string Session starts together before bounded paging", async () => {
+    await kv.set(KV.sessions, "older", { ...makeSession(1), id: "older", startedAt: Date.parse("2026-01-05T00:00:00Z") });
+    await kv.set(KV.sessions, "middle", { ...makeSession(2), id: "middle", startedAt: "2026-01-07T00:00:00Z" });
+    await kv.set(KV.sessions, "newer", { ...makeSession(3), id: "newer", startedAt: Date.parse("2026-01-10T00:00:00Z") });
+    const res = await get("api::sessions", { after: "2026-01-01T00:00:00Z", limit: "2", offset: "0" });
+    expect((res.body.sessions as Session[]).map(s => s.id)).toEqual(["newer", "middle"]);
+  });
+  it("filters Session start instants before applying the absolute offset", async () => {
+    await seedSessions(25);
+    const res = await get("api::sessions", {
+      after: "2026-01-01T00:05:00Z",
+      before: "2026-01-01T01:15:00+01:00",
+      limit: "2",
+      offset: "3",
+    });
+    expect((res.body.sessions as Session[]).map((s) => s.id)).toEqual(["ses_11", "ses_10"]);
+    expect(res.body.total).toBe(10);
+  });
+
+  it.each([
+    { after: "2026-01-01" },
+    { after: "2026-02-30T00:00:00Z" },
+    { after: "2026-01-02T00:00:00Z", before: "2026-01-01T00:00:00Z" },
+  ])("rejects an invalid range %j", async (query) => {
+    expect((await get("api::sessions", query)).status_code).toBe(400);
   });
 
   it("returns every Session for limit=all", async () => {

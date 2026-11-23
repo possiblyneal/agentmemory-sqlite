@@ -100,6 +100,14 @@ describe("GraphRetrieval", () => {
     expect(results[0].obsId).toBe("obs_1");
   });
 
+  it("checks eligibility before limiting graph candidates", async () => {
+    const nodes = [makeNode("n1", "React", "library", ["outside", "inside"])];
+    const kv = await mockKV(nodes, []);
+    const retrieval = new GraphRetrieval(kv as never);
+    const results = await retrieval.searchByEntities(["React"], 2, 1, async (id) => id === "inside");
+    expect(results.map((result) => result.obsId)).toEqual(["inside"]);
+  });
+
   it("finds entities by partial name match", async () => {
     const nodes = [makeNode("n1", "auth-middleware", "function", ["obs_1"])];
     const kv = await mockKV(nodes, []);
@@ -386,6 +394,31 @@ describe("GraphRetrieval — sessionId resolution (#656)", () => {
     listCalls.clear(); // count only reads issued by the resolver
     return kv;
   }
+
+  it("stops resolving ranked candidates when the eligible page is full", async () => {
+    const node = {
+      ...makeNode("n1", "React", "library", ["outside", "inside", "stale"]),
+      sessionId: "hint",
+    };
+    const kv = await mockKVWithSessions([node], [], [{ id: "owner" }], {
+      owner: ["outside", "inside"],
+    });
+    const get = kv.get;
+    const reads: string[] = [];
+    kv.get = async <T>(scope: string, key: string): Promise<T | null> => {
+      if (scope.startsWith("mem:obs:")) reads.push(key);
+      return get<T>(scope, key);
+    };
+    const retrieval = new GraphRetrieval(kv as never);
+    const results = await retrieval.searchByEntities(
+      ["React"], 2, 1, async (id, sessionId) => id === "inside" && sessionId === "owner",
+    );
+    expect(results.map(({ obsId, sessionId }) => [obsId, sessionId])).toEqual([
+      ["inside", "owner"],
+    ]);
+    expect(reads).toEqual(["outside", "outside", "inside", "inside"]);
+    expect(kv.listCallCount("mem:sessions")).toBe(1);
+  });
 
   it("resolves a node's sessionId when the hint is verified in KV (start-node path)", async () => {
     const node: GraphNode = {

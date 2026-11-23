@@ -16,6 +16,7 @@ import type { MetricsStore } from "../eval/metrics-store.js";
 import { getAgentId, isAgentScopeIsolated } from "../config.js";
 import { isOversizedPayload } from "../state/payload-bound.js";
 import { DEFAULT_PAGE_LIMIT, listSessionsPage } from "../functions/sessions-page.js";
+import { parseDateRange } from "../functions/date-range.js";
 import { logger } from "../logger.js";
 import { isSlotsEnabled } from "../functions/slots.js";
 import { graphReadable, GRAPH_INDEX_NOT_READY } from "../state/graph-indexes.js";
@@ -123,6 +124,13 @@ export function registerMcpEndpoints(
         };
       }
 
+      if (["memory_recall", "memory_smart_search", "memory_sessions"].includes(name)) {
+        try {
+          parseDateRange(args);
+        } catch (error) {
+          return { status_code: 400, body: { error: (error as Error).message } };
+        }
+      }
       try {
         switch (name) {
           case "memory_recall": {
@@ -169,6 +177,8 @@ export function registerMcpEndpoints(
                 : undefined;
             const result = await sdk.trigger({ function_id: "mem::search", payload: {
               query: args.query,
+              after: args.after,
+              before: args.before,
               limit: typeof args.limit === "number" ? args.limit : 10,
               format,
               token_budget: tokenBudget,
@@ -369,10 +379,17 @@ export function registerMcpEndpoints(
             if (!Number.isInteger(offset) || (offset as number) < 0) {
               return { status_code: 400, body: { error: "offset must be a non-negative integer" } };
             }
+            let range;
+            try {
+              range = parseDateRange(args);
+            } catch (error) {
+              return { status_code: 400, body: { error: (error as Error).message } };
+            }
             const page = await listSessionsPage(
               kv,
               { limit: limit as number, offset: offset as number },
               isAgentScopeIsolated() ? getAgentId() : undefined,
+              range,
             );
             return {
               status_code: 200,
@@ -404,6 +421,8 @@ export function registerMcpEndpoints(
               payload: {
                 query: args.query,
                 expandIds,
+                after: args.after,
+                before: args.before,
                 limit,
                 project: asNonEmptyString(args.project),
               },

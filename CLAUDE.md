@@ -585,6 +585,16 @@ short forms count only beside an ordinal, a year, or after "on". The in-process 
 BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
+Recall and Session listing accept `after` and `before` as explicit-offset ISO-8601 instants;
+`after` is inclusive and `before` exclusive. Explicit-offset ISO stored timestamps retain exact
+fractional precision; other Node-parseable legacy timestamps use Node's millisecond result.
+Invalid or reversed bounds are rejected. Recall uses the Observation timestamp or the record's
+creation time; Session listing uses `startedAt`. Eligibility precedes candidate truncation and
+Session paging, bounded Session pages sort by exact instant, and search rechecks loaded rows against
+the bounds. Graph retrieval resolves ranked
+candidates with one shared Session cache and stops when the eligible page is full. Omitted bounds
+preserve the unbounded paths; explicit `expandIds` retrieval is not date-filtered.
+
 `api::smart-search` and both MCP smart-search entry points reject a supplied `limit` that is not an integer; valid integers retain their existing clamping and omitted limits retain their defaults.
 
 `mem::consolidate-pipeline` no longer extracts Procedural Memories; its `procedural` selector remains accepted and reports zero new procedures. Existing procedures remain available to skill extraction, reads, backups and mesh, and still undergo Decay and retention.

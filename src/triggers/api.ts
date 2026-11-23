@@ -1,5 +1,6 @@
 import { TriggerAction, type ISdk, type ApiRequest } from "../engine/types.js";
 import { parsePage, takePage, listSessionsPage } from "../functions/sessions-page.js";
+import { parseDateRange } from "../functions/date-range.js";
 import type { Session, CompressedObservation, HookPayload, CommitLink, InjectedRef, InjectionSource } from "../types.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { KV } from "../state/schema.js";
@@ -583,7 +584,14 @@ export function registerApiTriggers(
         typeof body.agentId === "string" && body.agentId.trim().length > 0
           ? (body.agentId as string).trim()
           : undefined;
+      try {
+        parseDateRange({ after: body.after, before: body.before });
+      } catch (error) {
+        return { status_code: 400, body: { error: (error as Error).message } };
+      }
       const payload = {
+        after: body.after,
+        before: body.before,
         query: body.query.trim(),
         limit: body.limit as number | undefined,
         project: body.project as string | undefined,
@@ -1098,10 +1106,17 @@ export function registerApiTriggers(
         ? undefined
         : explicitAgentId ??
           (isAgentScopeIsolated() ? getAgentId() : undefined);
+      let range;
+      try {
+        range = parseDateRange({ after: req.query_params?.["after"], before: req.query_params?.["before"] });
+      } catch (error) {
+        return { status_code: 400, body: { error: (error as Error).message } };
+      }
       const body = await listSessionsPage(
         kv,
         parsePage(req.query_params),
         filterAgentId,
+        range,
       );
       return { status_code: 200, body };
     },
@@ -1471,6 +1486,8 @@ export function registerApiTriggers(
         project?: string;
         includeLessons?: boolean;
         includeInsights?: boolean;
+        after?: string;
+        before?: string;
         agentId?: string;
         sessionId?: string;
         source?: string;
@@ -1490,6 +1507,11 @@ export function registerApiTriggers(
       if (req.body?.limit !== undefined && !Number.isInteger(req.body.limit)) {
         return { status_code: 400, body: { error: "limit must be an integer" } };
       }
+      try {
+        parseDateRange({ after: req.body?.after, before: req.body?.before });
+      } catch (error) {
+        return { status_code: 400, body: { error: (error as Error).message } };
+      }
       // #771: route the X-Agentmemory-Source header into the payload so
       // the followup-rate diagnostic can skip viewer-originated calls.
       // Body wins if both are set (advanced callers explicitly override).
@@ -1503,6 +1525,8 @@ export function registerApiTriggers(
       const payload = {
         query: req.body?.query,
         expandIds: req.body?.expandIds,
+        after: req.body?.after,
+        before: req.body?.before,
         limit: req.body?.limit,
         project: req.body?.project,
         includeLessons: req.body?.includeLessons,

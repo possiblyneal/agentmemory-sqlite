@@ -1,4 +1,5 @@
 import type { ISdk } from '../engine/types.js'
+import { parseDateRange, withinDateRange } from './date-range.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
@@ -608,6 +609,8 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       token_budget?: number
       agentId?: string
       targetLayer?: string
+      after?: string
+      before?: string
     }) => {
       const idx = getSearchIndex()
 
@@ -719,7 +722,8 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(effectiveLimit * 10, 100)
         : Math.max(effectiveLimit * 3, 30)
-      const results = await idx.searchCooperatively(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
+      const range = parseDateRange(data)
+      const results = await idx.searchCooperatively(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer, undefined, range)
       await yieldToEventLoop()
 
       const loadSession = createSessionLoader(kv)
@@ -788,7 +792,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const enriched: SearchResult[] = []
       for (let i = 0; i < candidates.length; i++) {
         const obs = obsResults[i]
-        if (!obs) continue
+        if (!obs || !withinDateRange(obs.timestamp, range)) continue
         // #817: enforce agent-scope after the observation/memory is
         // loaded. The BM25 index doesn't carry agentId so the filter
         // happens post-lookup. Wildcard ("*") and no-isolation paths

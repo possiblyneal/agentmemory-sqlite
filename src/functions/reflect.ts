@@ -1,4 +1,5 @@
 import type { ISdk } from "../engine/types.js";
+import { withinDateRange, type DateRange } from "./date-range.js";
 import type { StateKV } from "../state/kv.js";
 import { KV, fingerprintId } from "../state/schema.js";
 import type {
@@ -550,12 +551,13 @@ export function registerReflectFunctions(
     },
   );
 
-  sdk.registerFunction("mem::insight-search", 
+  sdk.registerFunction("mem::insight-search",
     async (data: {
       query: string;
       project?: string;
       minConfidence?: number;
       limit?: number;
+      range?: DateRange;
     }) => {
       if (!data?.query?.trim()) {
         return { success: false, error: "query is required" };
@@ -567,7 +569,7 @@ export function registerReflectFunctions(
 
       let items = await kv.list<Insight>(KV.insights);
       items = items.filter(
-        (i) => !i.deleted && i.confidence >= minConfidence,
+        (i) => !i.deleted && i.confidence >= minConfidence && (!data.range || withinDateRange(i.createdAt, data.range)),
       );
 
       if (data.project) {

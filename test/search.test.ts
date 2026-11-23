@@ -107,6 +107,30 @@ describe("mem::search", () => {
     await rebuildIndex(kv as never);
   });
 
+  it("finds an in-range Observation behind a crowded out-of-range candidate pool", async () => {
+    const original = await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a");
+    for (let i = 0; i < 40; i++) {
+      const obs = { ...original!, id: `crowd_${i}`, timestamp: "2026-01-02T00:00:00Z" };
+      await kv.set(KV.observations("ses_1"), obs.id, obs);
+    }
+    getSearchIndex().clear();
+    await rebuildIndex(kv as never);
+    const result = await sdk.trigger("mem::search", {
+      query: "auth middleware", limit: 1,
+      after: "2025-12-31T19:00:00-05:00", before: "2026-01-02T00:00:00Z",
+    }) as { results: Array<{ observation: CompressedObservation }> };
+    expect(result.results.map((r) => r.observation.id)).toEqual(["obs_a"]);
+  });
+
+  it("rechecks the loaded Observation against date bounds", async () => {
+    const obs = (await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a"))!;
+    await kv.set(KV.observations("ses_1"), obs.id, { ...obs, timestamp: "2026-02-01T00:00:00Z" });
+    const bounded = await sdk.trigger("mem::search", { query: "auth middleware", before: "2026-02-01T00:00:00Z" }) as { results: unknown[] };
+    expect(bounded.results).toEqual([]);
+    const unbounded = await sdk.trigger("mem::search", { query: "auth middleware" }) as { results: unknown[] };
+    expect(unbounded.results).toHaveLength(1);
+  });
+
   it("returns full format by default", async () => {
     const result = (await sdk.trigger("mem::search", {
       query: "auth middleware",

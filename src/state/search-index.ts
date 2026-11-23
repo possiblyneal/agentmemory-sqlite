@@ -1,4 +1,5 @@
 import type { CompressedObservation } from "../types.js";
+import { withinDateRange, type DateRange } from "../functions/date-range.js";
 import { stem } from "./stemmer.js";
 import { getSynonyms } from "./synonyms.js";
 import { STOP_WORDS } from "./stopwords.js";
@@ -10,6 +11,7 @@ interface IndexEntry {
   obsId: string;
   sessionId: string;
   termCount: number;
+  timestamp: string;
   files: string[];
   layer?: IndexLayer;
 }
@@ -74,6 +76,7 @@ export class SearchIndex {
       obsId: obs.id,
       sessionId: obs.sessionId,
       termCount,
+      timestamp: obs.timestamp,
       files: obs.files ?? [],
       layer,
     });
@@ -159,6 +162,7 @@ export class SearchIndex {
     limit = 20,
     layer?: IndexLayer,
     sliceMs = SEARCH_SLICE_MS,
+    range?: DateRange,
   ): Promise<SearchHit[]> {
     const steps = this.scoreTerms(query);
     let sliceStart = performance.now();
@@ -170,7 +174,7 @@ export class SearchIndex {
       }
       step = steps.next();
     }
-    return this.ranked(step.value, limit, layer);
+    return this.ranked(step.value, limit, layer, range ? (id) => withinDateRange(this.entries.get(id)?.timestamp, range) : undefined);
   }
 
   // A document removed while a cooperative search yielded is left out. Only

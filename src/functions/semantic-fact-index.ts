@@ -10,6 +10,7 @@ export interface IndexedFact {
   lowerText: string;
   confidence: number;
   createdAt: number;
+  createdAtRaw: string;
   updatedAt: number;
   sourceSessionIds: string[];
 }
@@ -75,6 +76,7 @@ async function readIndex(kv: StateKV): Promise<SemanticFactIndex> {
         lowerText,
         confidence: fact.confidence,
         createdAt: new Date(fact.createdAt).getTime(),
+        createdAtRaw: fact.createdAt,
         updatedAt: new Date(fact.updatedAt).getTime(),
         sourceSessionIds: fact.sourceSessionIds.map(intern),
       });

@@ -62,6 +62,26 @@ const ROUTES: Array<[string, string, string[]]> = [
   ["api::lesson-search", "mem::lesson-recall", ["query", "project", "minConfidence", "limit"]],
 ];
 
+describe.each([["api::search", "mem::search"], ["api::smart-search", "mem::smart-search"]])("%s date bounds", (route, target) => {
+  it("forwards explicit-offset bounds", async () => {
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+    let received: unknown;
+    sdk._fns.set(target, (data: unknown) => { received = data; return { success: true }; });
+    const bounds = { after: "2025-12-31T19:00:00-05:00", before: "2026-02-01T01:00:00+01:00" };
+    const result = await sdk._fns.get(route)!({ headers: { authorization: `Bearer ${SECRET}` }, body: { query: "auth", ...bounds } });
+    expect(result.status_code).toBe(200);
+    expect(received).toMatchObject(bounds);
+  });
+
+  it.each([{ after: "2026-01-01" }, { before: "2026-02-30T00:00:00Z" }, { after: "2026-02-01T00:00:00Z", before: "2026-01-01T00:00:00Z" }])("rejects invalid bounds %j", async (bounds) => {
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+    const result = await sdk._fns.get(route)!({ headers: { authorization: `Bearer ${SECRET}` }, body: { query: "auth", ...bounds } });
+    expect(result.status_code).toBe(400);
+  });
+});
+
 describe("smart-search limit", () => {
   it.each([[undefined], [-1], [0], [10], [101]])("forwards integer limit %s unchanged", async (limit) => {
     const sdk = mockSdk();

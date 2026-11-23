@@ -1,4 +1,5 @@
 import type { ISdk } from "../engine/types.js";
+import { parseDateRange, type DateRange } from "./date-range.js";
 import type {
   CompactInsightResult,
   CompactLessonResult,
@@ -120,7 +121,7 @@ function preview(content: string): string {
 export function registerSmartSearchFunction(
   sdk: ISdk,
   kv: StateKV,
-  prepareSearch: (query: string) => (limit: number) => Promise<HybridSearchResult[]>,
+  prepareSearch: (query: string, range?: DateRange) => (limit: number) => Promise<HybridSearchResult[]>,
 ): void {
   sdk.registerFunction("mem::smart-search",
     async (data: {
@@ -128,6 +129,8 @@ export function registerSmartSearchFunction(
       expandIds?: Array<string | { obsId: string; sessionId: string }>;
       limit?: number;
       project?: string;
+      after?: string;
+      before?: string;
       includeLessons?: boolean;
       includeInsights?: boolean;
       // optional per-call agent filter for runtimes routing many
@@ -258,16 +261,18 @@ export function registerSmartSearchFunction(
         ? Math.max(limit * 10, 100)
         : limit;
 
-      const search = prepareSearch(data.query);
+      const parsedRange = parseDateRange(data);
+      const range = data.after !== undefined || data.before !== undefined ? parsedRange : undefined;
+      const search = prepareSearch(data.query, range);
       const [firstHybrid, lessons, insights, semanticFacts] = await Promise.all([
         search(overFetchLimit),
         includeLessons
-          ? recallLessons(sdk, data.query, recallLimit, project)
+          ? recallLessons(sdk, data.query, recallLimit, project, range)
           : Promise.resolve([]),
         includeInsights
-          ? recallInsights(sdk, data.query, recallLimit, project)
+          ? recallInsights(sdk, data.query, recallLimit, project, range)
           : Promise.resolve([]),
-        recallSemantic(kv, data.query, recallLimit, project),
+        recallSemantic(kv, data.query, recallLimit, project, range),
       ]);
 
       // Scope every hit before the floor and the limit, so the floor's best
@@ -415,11 +420,12 @@ async function recallLessons(
   query: string,
   limit: number,
   project?: string,
+  range?: DateRange,
 ): Promise<CompactLessonResult[]> {
   try {
     const result = (await sdk.trigger({
       function_id: "mem::lesson-recall",
-      payload: { query, limit, project },
+      payload: { query, limit, project, ...(range && { range }) },
     })) as { success?: boolean; lessons?: Array<Lesson & { score?: number }> };
     if (!result?.success || !Array.isArray(result.lessons)) return [];
     return result.lessons.map((l) => ({
@@ -444,11 +450,12 @@ async function recallInsights(
   query: string,
   limit: number,
   project?: string,
+  range?: DateRange,
 ): Promise<CompactInsightResult[]> {
   try {
     const result = (await sdk.trigger({
       function_id: "mem::insight-search",
-      payload: { query, limit, project },
+      payload: { query, limit, project, ...(range && { range }) },
     })) as { success?: boolean; insights?: Array<Insight & { score: number }> };
     if (!result?.success || !Array.isArray(result.insights)) return [];
     return result.insights.map((i) => ({
@@ -474,9 +481,10 @@ async function recallSemantic(
   query: string,
   limit: number,
   project?: string,
+  range?: DateRange,
 ): Promise<CompactSemanticResult[]> {
   try {
-    const recalled = await recallSemanticFacts(kv, limit, { query, project });
+    const recalled = await recallSemanticFacts(kv, limit, { query, project, range });
     return recalled.map(({ fact, score }) => ({
       factId: fact.id,
       fact: preview(fact.fact),

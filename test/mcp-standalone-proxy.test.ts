@@ -253,6 +253,40 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(calls.find((c) => c.url.endsWith("/agentmemory/smart-search"))).toBeUndefined();
   });
 
+  it("forwards date bounds on Recall and smart search", async () => {
+    const bodies = new Map<string, Record<string, unknown>>();
+    installFetch((url, init) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      bodies.set(new URL(url).pathname, JSON.parse((init?.body as string) || "{}"));
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    });
+    const bounds = { after: "2026-01-01T00:00:00Z", before: "2026-02-01T00:00:00Z" };
+    await handleToolCall("memory_recall", { query: "x", ...bounds });
+    await handleToolCall("memory_smart_search", { query: "x", ...bounds });
+    expect(bodies.get("/agentmemory/search")).toMatchObject(bounds);
+    expect(bodies.get("/agentmemory/smart-search")).toMatchObject(bounds);
+  });
+
+  it("forwards Session bounds and absolute offset through the proxy", async () => {
+    let requested: URL | undefined;
+    installFetch((url) => {
+      if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+      requested = new URL(url);
+      return new Response(JSON.stringify({ sessions: [], total: 0 }), { status: 200 });
+    });
+    await handleToolCall("memory_sessions", { after: "2026-01-01T01:00:00+01:00", before: "2026-02-01T00:00:00Z", limit: 2, offset: 3 });
+    expect(requested?.searchParams.get("after")).toBe("2026-01-01T01:00:00+01:00");
+    expect(requested?.searchParams.get("before")).toBe("2026-02-01T00:00:00Z");
+    expect(requested?.searchParams.get("offset")).toBe("3");
+    expect(requested?.searchParams.get("limit")).toBe("2");
+  });
+
+  it.each(["memory_sessions", "memory_recall", "memory_smart_search"])("rejects invalid bounds before proxy or local fallback for %s", async (name) => {
+    for (const bounds of [{ after: "2026-01-01" }, { before: "2026-02-30T00:00:00Z" }, { after: "2026-02-01T00:00:00Z", before: "2026-01-01T00:00:00Z" }]) {
+      await expect(handleToolCall(name, { query: "auth", ...bounds })).rejects.toThrow();
+    }
+  });
+
   it("forwards project on memory_recall and memory_smart_search (#787)", async () => {
     const bodies = new Map<string, Record<string, unknown>>();
     installFetch((url, init) => {
@@ -380,6 +414,44 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     await handleToolCall("memory_sessions", {});
     expect(authByPath.get("/agentmemory/livez")).toBe("Bearer s3cret");
     expect(authByPath.get("/agentmemory/sessions")).toBe("Bearer s3cret");
+  });
+
+  it("orders numeric and string local Session starts together before bounded paging", async () => {
+    installFetch(() => { throw new Error("ECONNREFUSED"); });
+    const localKv = new InMemoryKV(undefined);
+    await localKv.set("mem:sessions", "older", { id: "older", startedAt: Date.parse("2026-01-05T00:00:00Z") });
+    await localKv.set("mem:sessions", "middle", { id: "middle", startedAt: "2026-01-07T00:00:00Z" });
+    await localKv.set("mem:sessions", "newer", { id: "newer", startedAt: Date.parse("2026-01-10T00:00:00Z") });
+    const result = await handleToolCall("memory_sessions", { after: "2026-01-01T00:00:00Z", limit: 2, offset: 0 }, localKv);
+    expect(JSON.parse(result.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["newer", "middle"]);
+  });
+  it("orders bounded local Sessions by exact instant before paging, without changing unbounded order", async () => {
+    installFetch(() => { throw new Error("ECONNREFUSED"); });
+    const localKv = new InMemoryKV(undefined);
+    await localKv.set("mem:sessions", "old", { id: "old", startedAt: "2026-01-01T01:00:00+01:00" });
+    await localKv.set("mem:sessions", "new", { id: "new", startedAt: "2026-01-01T00:00:00.0009Z" });
+    await localKv.set("mem:sessions", "middle", { id: "middle", startedAt: "2026-01-01T00:00:00.0002Z" });
+    const bounded = await handleToolCall("memory_sessions", { after: "2026-01-01T00:00:00Z", limit: 1, offset: 1 }, localKv);
+    const unbounded = await handleToolCall("memory_sessions", { limit: 3 }, localKv);
+    expect(JSON.parse(bounded.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["middle"]);
+    expect(JSON.parse(unbounded.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["old", "new", "middle"]);
+  });
+
+  it("filters local Memories and Sessions before pagination", async () => {
+    installFetch(() => { throw new Error("ECONNREFUSED"); });
+    const localKv = new InMemoryKV(undefined);
+    await localKv.set("mem:memories", "old", { id: "old", content: "local", createdAt: "2026-01-01T00:00:00Z" });
+    await localKv.set("mem:memories", "new", { id: "new", content: "local", createdAt: "2026-02-01T00:00:00Z" });
+    await localKv.set("mem:sessions", "old", { id: "old", startedAt: "2026-01-01T00:00:00Z" });
+    await localKv.set("mem:sessions", "new", { id: "new", startedAt: "2026-02-01T00:00:00Z" });
+    await localKv.set("mem:sessions", "middle", { id: "middle", startedAt: "2026-01-15T00:00:00Z" });
+    const args = { after: "2026-01-01T00:00:00Z", before: "2026-02-01T00:00:00Z" };
+    const recall = await handleToolCall("memory_recall", { query: "local", ...args }, localKv);
+    const sessions = await handleToolCall("memory_sessions", { ...args, limit: 1, offset: 1 }, localKv);
+    const expanded = await handleToolCall("memory_smart_search", { expandIds: "new", ...args }, localKv);
+    expect(JSON.parse(recall.content[0].text).results.map((r: { id: string }) => r.id)).toEqual(["old"]);
+    expect(JSON.parse(sessions.content[0].text).sessions.map((r: { id: string }) => r.id)).toEqual(["old"]);
+    expect(JSON.parse(expanded.content[0].text).results.map((r: { id: string }) => r.id)).toEqual(["new"]);
   });
 
   it("falls back to local InMemoryKV when server is unreachable", async () => {

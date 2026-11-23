@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
+import { VectorIndex } from "../src/state/vector-index.js";
+import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
+import { backfillGraphIndexes } from "../src/state/graph-indexes.js";
+import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, EmbeddingProvider } from "../src/types.js";
 
 function makeObs(
@@ -74,6 +78,77 @@ describe("HybridSearch", () => {
     await hybrid.prepareSearch("query", expand)(100);
     expect(expand).toHaveBeenCalledTimes(2);
     expect(embed).toHaveBeenCalledTimes(4);
+  });
+
+  it("retrieves an eligible vector behind a crowded out-of-range pool", async () => {
+    const vector = new VectorIndex();
+    const provider: EmbeddingProvider = { name: "test", dimensions: 2, embed: async () => new Float32Array([1, 0]), embedBatch: async () => [] };
+    for (let i = 0; i < 101; i++) {
+      const obs = makeObs({ id: `outside_${i}`, timestamp: "2026-02-01T00:00:00Z" });
+      bm25.add(obs);
+      vector.add(obs.id, obs.sessionId, new Float32Array([1, 0]));
+      await kv.set("mem:obs:ses_1", obs.id, obs);
+    }
+    const inside = makeObs({ id: "inside", timestamp: "2026-01-01T00:00:00Z" });
+    bm25.add(inside);
+    vector.add(inside.id, inside.sessionId, new Float32Array([0.8, 0.2]));
+    await kv.set("mem:obs:ses_1", inside.id, inside);
+    const hybrid = new HybridSearch(bm25, vector, provider, kv as never, 0.4, 0.6, 0, false);
+    const results = await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z"), before: Date.parse("2026-02-01T00:00:00Z") })(1);
+    expect(results.map((r) => r.observation.id)).toEqual(["inside"]);
+    expect(results[0].vectorScore).toBeGreaterThan(0);
+  });
+
+  it("does not let a stale vector Session exclude a valid bounded graph hit", async () => {
+    const store = new InMemoryKV();
+    const obs = makeObs({ id: "obs_graph", sessionId: "right", timestamp: "2026-01-15T00:00:00Z" });
+    await store.set(KV.observations(obs.sessionId), obs.id, obs);
+    const node = { id: "n1", name: "src/file.ts", type: "file" as const, properties: {}, sourceObservationIds: [obs.id], sessionId: obs.sessionId, createdAt: "2026-01-01T00:00:00Z" };
+    await store.set(KV.graphNodes, node.id, node);
+    await backfillGraphIndexes(store as never, [node], []);
+    const vector = new VectorIndex();
+    vector.add(obs.id, "stale", new Float32Array([1]));
+    const provider: EmbeddingProvider = { name: "test", dimensions: 1, embed: async () => new Float32Array([1]), embedBatch: async () => [] };
+    const hybrid = new HybridSearch(bm25, vector, provider, store as never);
+    const expand = async () => ({ original: "query", reformulations: [], temporalConcretizations: [], entityExtractions: [node.name] });
+    const search = hybrid.prepareSearch("query", expand, { after: Date.parse("2026-01-01T00:00:00Z") });
+    expect((await search(1)).map(r => r.observation.id)).toEqual([obs.id]);
+  });
+
+  it("keeps an in-range vector hit when its Observation is absent from BM25", async () => {
+    const obs = makeObs({ timestamp: "2026-01-15T00:00:00Z" });
+    await kv.set("mem:obs:ses_1", obs.id, obs);
+    const vector = new VectorIndex();
+    vector.add(obs.id, obs.sessionId, new Float32Array([1, 0]));
+    const provider: EmbeddingProvider = { name: "test", dimensions: 2, embed: async () => new Float32Array([1, 0]), embedBatch: async () => [] };
+    const hybrid = new HybridSearch(bm25, vector, provider, kv as never, 0.4, 0.6, 0, false);
+    const results = await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z"), before: Date.parse("2026-02-01T00:00:00Z") })(1);
+    expect(results.map((r) => r.observation.id)).toEqual([obs.id]);
+  });
+
+  it("keeps healthy bounded vector hits when another candidate cannot be read", async () => {
+    const obs = makeObs({ timestamp: "2026-01-15T00:00:00Z" });
+    await kv.set("mem:obs:ses_1", obs.id, obs);
+    const get = kv.get;
+    kv.get = async (scope, id) => {
+      if (id === "broken") throw new Error("bad row");
+      return get(scope, id);
+    };
+    const vector = new VectorIndex();
+    vector.add("broken", obs.sessionId, new Float32Array([1, 0]));
+    vector.add(obs.id, obs.sessionId, new Float32Array([1, 0]));
+    const provider: EmbeddingProvider = { name: "test", dimensions: 2, embed: async () => new Float32Array([1, 0]), embedBatch: async () => [] };
+    const hybrid = new HybridSearch(bm25, vector, provider, kv as never, 0.4, 0.6, 0, false);
+    expect((await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z") })(1)).map(r => r.observation.id)).toEqual([obs.id]);
+  });
+
+  it("rechecks the reloaded row after bounded candidate selection", async () => {
+    const obs = makeObs({ timestamp: "2026-01-15T00:00:00Z" });
+    bm25.add(obs);
+    await kv.set("mem:obs:ses_1", obs.id, { ...obs, timestamp: "2026-02-01T00:00:00Z" });
+    const hybrid = new HybridSearch(bm25, null, null, kv as never);
+    expect(await hybrid.prepareSearch("auth", undefined, { before: Date.parse("2026-02-01T00:00:00Z") })(1)).toEqual([]);
+    expect((await hybrid.prepareSearch("auth")(1)).map(r => r.observation.id)).toEqual([obs.id]);
   });
 
   it("returns BM25-only results when no vector index is provided", async () => {
