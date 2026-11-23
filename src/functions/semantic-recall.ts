@@ -5,7 +5,7 @@ import type { StateKV } from "../state/kv.js";
 import { STOP_WORDS } from "../state/stopwords.js";
 import { capBehindNewer } from "./recency-cap.js";
 import { createSessionLoader } from "./search.js";
-import { semanticFactIndex, type IndexedFact } from "./semantic-fact-index.js";
+import { semanticFactIndex, startsAWord, type IndexedFact } from "./semantic-fact-index.js";
 
 export interface RecalledFact {
   fact: SemanticMemory;
@@ -21,6 +21,7 @@ const CAP_POOL = 50;
 interface Scored {
   fact: IndexedFact;
   score: number;
+  matchedText?: string;
 }
 
 const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
@@ -55,7 +56,21 @@ export async function recallSemanticFacts(
     }
     for (const [at, count] of [...matched].sort(([a], [b]) => a - b)) {
       const fact = index.facts[at];
-      scored.push({ fact, score: (fact.confidence * count) / terms.length });
+      if (!fact.aliasTexts) {
+        scored.push({ fact, score: (fact.confidence * count) / terms.length });
+        continue;
+      }
+      let bestCount = 0;
+      let matchedText = fact.text;
+      for (const text of [fact.text, ...fact.aliasTexts]) {
+        const lower = text.toLowerCase();
+        const matches = terms.filter(term => startsAWord(lower, term)).length;
+        if (matches > bestCount) {
+          bestCount = matches;
+          matchedText = text;
+        }
+      }
+      scored.push({ fact, score: (fact.confidence * bestCount) / terms.length, matchedText });
     }
   } else {
     const now = Date.now();
@@ -72,7 +87,7 @@ export async function recallSemanticFacts(
 
   const poolSize = Math.max(limit, CAP_POOL);
   const pool = options.project ? await inProject(kv, scored, options.project, poolSize) : scored.slice(0, poolSize);
-  capBehindNewer(pool, (s) => s.fact.text, (s) => s.fact.createdAt);
+  capBehindNewer(pool, (s) => s.matchedText ?? s.fact.text, (s) => s.fact.createdAt);
   pool.sort((a, b) => b.score - a.score);
   const rows = await Promise.all(
     pool.slice(0, limit).map(async ({ fact, score }) => ({

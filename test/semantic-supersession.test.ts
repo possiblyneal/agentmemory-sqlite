@@ -110,7 +110,11 @@ describe("Semantic Fact keyed supersession", () => {
     expect(live.find(f => f.object === "60 seconds")?.relation).toBe(changed);
   });
 
-  it.each(["timeout", "deadline"])("retains both keys after reopening SQLite, then updates %s", async (changed) => {
+  it.each([
+    ["timeout", "The service deadline timeout is 30 seconds"],
+    ["deadline", "The service deadline timeout is 30 seconds"],
+    ["timeout", "The service timeout is 30 seconds"],
+  ])("retains both keys after reopening SQLite, then updates %s (%s)", async (changed, alternateText) => {
     mkdirSync("tmp", { recursive: true });
     const dir = mkdtempSync(join("tmp", "semantic-keys-"));
     const path = join(dir, "state.sqlite");
@@ -134,7 +138,7 @@ describe("Semantic Fact keyed supersession", () => {
         await db.set(KV.sessions, session.sessionId, { project: session.project });
       }
       await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
-      await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+      await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, alternateText));
       const [merged] = await db.list<SemanticMemory>(KV.semantic);
       expect(await db.list(KV.semantic)).toHaveLength(1);
       store!.close();
@@ -146,13 +150,31 @@ describe("Semantic Fact keyed supersession", () => {
       expect(live).toHaveLength(2);
       expect(live.find(fact => fact.id === merged.id)).toMatchObject({
         relation: retained, object: "30 seconds",
-        fact: retained === "deadline" ? "The service deadline timeout is 30 seconds" : "The service timeout is 30 seconds",
+        fact: retained === "deadline" ? alternateText : "The service timeout is 30 seconds",
       });
       expect(live.find(fact => fact.id !== merged.id)).toMatchObject({ relation: changed, object: "60 seconds" });
     } finally {
       store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("ranks a newer correction ahead of a matching stale alias", async () => {
+    const base = { confidence: 0.9, updatedAt: "2026-01-01T00:00:00Z", sourceSessionIds: [], sourceMemoryIds: [], accessCount: 1, lastAccessedAt: "2026-01-01T00:00:00Z", strength: 0.9 };
+    await kv.set(KV.semantic, "old", { ...base, id: "old", fact: "Gateway timeout retry response window thirty seconds", createdAt: "2026-01-01T00:00:00Z", aliases: [{ subject: "gateway", relation: "deadline", object: "thirty seconds", fact: "Gateway timeout retry response deadline thirty seconds" }] });
+    await kv.set(KV.semantic, "new", { ...base, id: "new", fact: "Gateway retry deadline sixty seconds", confidence: 0.8, createdAt: "2026-01-03T00:00:00Z" });
+    await kv.set(KV.semantic, "invalid", { ...base, id: "invalid", fact: "Backups run nightly", createdAt: "2026-01-01T00:00:00Z", aliases: { fact: "malformed" } });
+    expect((await recallSemanticFacts(kv as never, 10, { query: "gateway deadline" })).map(hit => hit.fact.id)).toEqual(["new", "old"]);
+  });
+
+  it("verifies identical text on distinct keys before grouping", async () => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    const verify = vi.fn(async () => false);
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, verify);
+    await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service timeout is 30 seconds"));
+    expect(verify).toHaveBeenCalledOnce();
+    expect(await facts()).toHaveLength(2);
   });
 
   it.each(["declines", "throws", "unavailable"])("keeps candidates separate when verification %s", async (mode) => {

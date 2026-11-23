@@ -7,6 +7,7 @@ import type {
 } from "../types.js";
 import { KV, generateId, jaccardSimilarity } from "../state/schema.js";
 import { RESTATEMENT_OVERLAP } from "./recency-cap.js";
+import { factAliases } from "./semantic-fact-aliases.js";
 import type { StateKV } from "../state/kv.js";
 import {
   SEMANTIC_MERGE_SYSTEM,
@@ -211,7 +212,7 @@ export function registerConsolidationPipelineFunction(
         const live = existingSemantic.filter((s) => s.isLatest !== false);
         const matchesKey = (member: Pick<SemanticMemory, "subject" | "relation">) =>
           key !== null && member.subject === key.subject && member.relation === key.relation;
-        const members = (row: SemanticMemory) => [row, ...(row.aliases ?? [])];
+        const members = (row: SemanticMemory) => [row, ...factAliases(row.aliases)];
         const sameKey = key ? live.filter(row => row.project === project && members(row).some(matchesKey)) : [];
         const sameValue = (row: SemanticMemory) =>
           members(row).some(member => matchesKey(member) && member.object === key?.object);
@@ -219,6 +220,7 @@ export function registerConsolidationPipelineFunction(
         let textMatch = live.find(row =>
           (row.project === undefined || row.project === project) &&
           (sameKey.length === 0 || (sameKey.includes(row) && sameValue(row))) &&
+          (!key || !row.subject || sameValue(row) || (!verifyFact && !(row.aliases?.length))) &&
           members(row).some(member => member.fact.toLowerCase() === lowerFact),
         );
         if (textMatch && key && !textMatch.subject && !(await citesOnlyProject(textMatch, project))) {
@@ -242,7 +244,7 @@ export function registerConsolidationPipelineFunction(
             verificationCalls++;
             if (await verifyFact(candidate.fact, fact).catch(() => false) === true) {
               existing = candidate;
-              existing.aliases = [...(existing.aliases ?? []), { ...key, fact }];
+              existing.aliases = [...factAliases(existing.aliases), { ...key, fact }];
             }
           }
         }
@@ -283,7 +285,7 @@ export function registerConsolidationPipelineFunction(
           : [];
         for (const old of closed) {
           const primaryMatches = old.subject === key!.subject && old.relation === key!.relation;
-          const aliases = (old.aliases ?? []).filter((member) => member.subject !== key!.subject || member.relation !== key!.relation);
+          const aliases = factAliases(old.aliases).filter((member) => member.subject !== key!.subject || member.relation !== key!.relation);
           if (primaryMatches && aliases.length > 0) {
             const [primary, ...remaining] = aliases;
             Object.assign(old, primary, { aliases: remaining });

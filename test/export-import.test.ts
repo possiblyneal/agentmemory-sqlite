@@ -450,6 +450,10 @@ describe("Export/Import Functions", () => {
     };
     await kv.set("mem:semantic", fact.id, fact);
     const exportData = JSON.parse(JSON.stringify(await sdk.trigger("mem::export", {})));
+    const malformed = structuredClone(exportData);
+    malformed.semanticMemories[0].aliases = { fact: "invalid" };
+    expect(await sdk.trigger("mem::import", { exportData: malformed, strategy: "replace" })).toMatchObject({ success: false });
+    expect(await kv.get("mem:semantic", fact.id)).toEqual(fact);
     await kv.delete("mem:semantic", fact.id);
     expect(await sdk.trigger("mem::import", { exportData, strategy: "replace" })).toMatchObject({ success: true });
     expect(await kv.get("mem:semantic", fact.id)).toEqual(fact);
