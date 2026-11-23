@@ -33,3 +33,9 @@ This measures overlap, not semantic equivalence. The input snapshot was not reta
 The Operator labeled 24 disjoint, same-project pairs with different subject/relation keys. The sample included eight pairs in each Jaccard band: `[0.35, 0.5)`, `[0.5, 0.75)`, and `[0.75, 1]`. Scores and keys were hidden during labeling. The Operator labeled three pairs as restatements and 21 as distinct claims.
 
 At `RESTATEMENT_OVERLAP` (0.5), overlap alone would merge all three restatements and 13 of the 21 distinct pairs. The lowest-scoring restatement scored 0.5, while the highest-scoring distinct pair scored approximately 0.905. No single minimum-overlap threshold can retain all three restatements without also merging distinct claims in this sample. This is a pair-level check, not a production error-rate estimate or a Consolidation and Recall replay. The Fact text and labels remain local.
+
+## Offline equivalence screen
+
+Quantized `Xenova/nli-deberta-v3-small` (revision `6bc2a55c7c0f7e2bc68de60bb248e523e2612abb`) ran on the local CPU with remote model loading disabled. The checker called a pair equivalent only when entailment was the top class in both directions. It caught two of the three restatements and preserved 19 of the 21 distinct pairs. It would falsely merge pairs 3 and 21 and missed restatement 24. The LAN model attempt timed out on the first pair and returned no verdicts.
+
+Reject this offline checker for automatic merging. Before retrying, require a distinct candidate to preserve the known counterexamples and test it on fresh labeled pairs before running Consolidation and Recall. No production logic changed.
