@@ -9,6 +9,7 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
 }));
 
 import { registerApiTriggers } from "../src/triggers/api.js";
+import { parseDateRange } from "../src/functions/date-range.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
 
@@ -89,6 +90,13 @@ beforeEach(() => {
   registerApiTriggers(sdk as never, kv as never, SECRET);
 });
 
+describe("date bounds", () => {
+  it("accepts leap days in years below 100 without applying the 1900 offset", () => {
+    expect(parseDateRange({ after: "0000-02-29T00:00:00Z" }).after).toBe(Date.parse("0000-02-29T00:00:00Z"));
+    expect(() => parseDateRange({ after: "0001-02-29T00:00:00Z" })).toThrow();
+  });
+});
+
 describe("GET /agentmemory/sessions paging", () => {
   it("returns the newest 100 by default with the full total", async () => {
     await seedSessions(130);
@@ -110,6 +118,26 @@ describe("GET /agentmemory/sessions paging", () => {
     expect(res.body.total).toBe(25);
     expect(res.body.limit).toBe(10);
     expect(res.body.offset).toBe(10);
+  });
+
+  it("filters Session start instants before applying the absolute offset", async () => {
+    await seedSessions(25);
+    const res = await get("api::sessions", {
+      after: "2026-01-01T00:05:00Z",
+      before: "2026-01-01T01:15:00+01:00",
+      limit: "2",
+      offset: "3",
+    });
+    expect((res.body.sessions as Session[]).map((s) => s.id)).toEqual(["ses_11", "ses_10"]);
+    expect(res.body.total).toBe(10);
+  });
+
+  it.each([
+    { after: "2026-01-01" },
+    { after: "2026-02-30T00:00:00Z" },
+    { after: "2026-01-02T00:00:00Z", before: "2026-01-01T00:00:00Z" },
+  ])("rejects an invalid range %j", async (query) => {
+    expect((await get("api::sessions", query)).status_code).toBe(400);
   });
 
   it("returns every Session for limit=all", async () => {

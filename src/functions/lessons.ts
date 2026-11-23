@@ -1,4 +1,5 @@
 import { deleteWithFacets } from "./facets.js";
+import { withinDateRange, type DateRange } from "./date-range.js";
 import type { ISdk } from "../engine/types.js";
 import { SET_MANY_CHUNK, type StateKV } from "../state/kv.js";
 import { KV, fingerprintId, jaccardOverlap, jaccardText } from "../state/schema.js";
@@ -227,6 +228,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       project?: string;
       minConfidence?: number;
       limit?: number;
+      range?: DateRange;
     }) => {
       if (!data.query?.trim()) {
         return { success: false, error: "query is required" };
@@ -245,6 +247,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const { hits, maxScore: maxHit } = idx.searchEligible(data.query, Math.ceil(fetchLimit), (id) => {
         const lesson = lessonRecords.get(id);
         return !!lesson && !lesson.deleted && !(lesson.confidence < minConfidence) &&
+          (!data.range || withinDateRange(lesson.createdAt, data.range)) &&
           (!data.project || !lesson.project || lesson.project === data.project);
       });
 

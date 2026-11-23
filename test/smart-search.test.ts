@@ -5,6 +5,8 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerSmartSearchFunction } from "../src/functions/smart-search.js";
+import { registerLessonsFunctions, resetLessonIndex } from "../src/functions/lessons.js";
+import { registerReflectFunctions } from "../src/functions/reflect.js";
 import { setEmbeddingProvider } from "../src/functions/search.js";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
@@ -120,6 +122,23 @@ describe("Smart Search Function", () => {
 
     const searchFn = () => async () => searchResults;
     registerSmartSearchFunction(sdk as never, kv as never, searchFn);
+  });
+
+  it("returns bounded Lessons, Insights and Semantic Facts behind out-of-range candidates", async () => {
+    resetLessonIndex();
+    registerLessonsFunctions(sdk as never, kv as never);
+    registerReflectFunctions(sdk as never, kv as never, {} as never);
+    for (let i = 0; i < 61; i++) {
+      const id = i === 60 ? "inside" : `outside_${i}`;
+      const createdAt = i === 60 ? "2026-01-15T00:00:00Z" : "2026-02-15T00:00:00Z";
+      await kv.set("mem:lessons", id, { id, content: "quartz deployment", context: "", confidence: 0.9, reinforcements: 0, source: "manual", sourceIds: [], tags: [], createdAt, updatedAt: createdAt, decayRate: 0.01 });
+      await kv.set("mem:insights", id, { id, title: "quartz deployment", content: "quartz deployment", confidence: 0.9, reinforcements: 0, sourceConceptCluster: [], sourceMemoryIds: [], sourceLessonIds: [], tags: [], createdAt, updatedAt: createdAt, decayRate: 0.01 });
+      await kv.set("mem:semantic", id, { id, fact: "quartz deployment", confidence: 0.9, sourceSessionIds: [], sourceMemoryIds: [], accessCount: 0, lastAccessedAt: createdAt, strength: 1, createdAt, updatedAt: createdAt });
+    }
+    const result = await sdk.trigger("mem::smart-search", { query: "quartz deployment", limit: 1, after: "2026-01-01T00:00:00Z", before: "2026-02-01T00:00:00Z" });
+    expect(result.lessons.map((row: { lessonId: string }) => row.lessonId)).toEqual(["inside"]);
+    expect(result.insights.map((row: { insightId: string }) => row.insightId)).toEqual(["inside"]);
+    expect(result.semanticFacts.map((row: { factId: string }) => row.factId)).toEqual(["inside"]);
   });
 
   it("compact mode returns CompactSearchResult array", async () => {

@@ -1,4 +1,5 @@
 import type { SemanticMemory } from "../types.js";
+import { withinDateRange, type DateRange } from "./date-range.js";
 import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { STOP_WORDS } from "../state/stopwords.js";
@@ -39,14 +40,14 @@ function queryTerms(query: string): string[] {
 export async function recallSemanticFacts(
   kv: StateKV,
   limit: number,
-  options: { query?: string; project?: string } = {},
+  options: { query?: string; project?: string; range?: DateRange } = {},
 ): Promise<RecalledFact[]> {
   const hasQuery = (options.query ?? "").trim().length > 0;
   const terms = queryTerms(options.query ?? "");
   if (hasQuery && terms.length === 0) return [];
   const index = await semanticFactIndex(kv);
 
-  const scored: Scored[] = [];
+  let scored: Scored[] = [];
   if (terms.length > 0) {
     const matched = new Map<number, number>();
     for (const term of terms) {
@@ -62,6 +63,10 @@ export async function recallSemanticFacts(
       const days = (now - fact.updatedAt) / 86_400_000;
       scored.push({ fact, score: fact.confidence / (1 + days * DAILY_RECENCY_DECAY) });
     }
+  }
+  if (options.range) {
+    const range = options.range;
+    scored = scored.filter(({ fact }) => withinDateRange(fact.createdAt, range));
   }
   scored.sort((a, b) => b.score - a.score);
 

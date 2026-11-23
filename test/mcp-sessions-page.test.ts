@@ -23,6 +23,7 @@ function mockKV(sessions: Array<Record<string, unknown>>) {
 async function callSessions(
   sessions: Array<Record<string, unknown>>,
   args: Record<string, unknown> = {},
+  name = "memory_sessions",
 ) {
   const fns = new Map<string, Function>();
   const sdk = {
@@ -33,7 +34,7 @@ async function callSessions(
   registerMcpEndpoints(sdk as never, mockKV(sessions) as never, SECRET);
   const res = await fns.get("mcp::tools::call")!({
     headers: { authorization: `Bearer ${SECRET}` },
-    body: { name: "memory_sessions", arguments: args },
+    body: { name, arguments: args },
   });
   return res;
 }
@@ -64,6 +65,31 @@ describe("memory_sessions", () => {
     const out = await listSessions(rows, { limit: 2 });
     expect(out.sessions.map((s: { id: string }) => s.id)).toEqual(["new", "mid"]);
     expect(out.total).toBe(4);
+  });
+
+  it("applies date bounds before Session pagination", async () => {
+    const out = await listSessions(rows, { after: "2026-01-01T00:00:00Z", before: "2026-03-01T00:00:00Z", limit: 1, offset: 1 });
+    expect(out.sessions.map((s: { id: string }) => s.id)).toEqual(["old"]);
+    expect(out.total).toBe(2);
+  });
+
+  it.each([["memory_recall", "mem::search"], ["memory_smart_search", "mem::smart-search"]])("forwards bounds through daemon MCP %s", async (name, target) => {
+    const fns = new Map<string, Function>();
+    let forwarded: { function_id: string; payload: unknown } | undefined;
+    const sdk = { registerFunction: (id: string, handler: Function) => void fns.set(id, handler), registerTrigger: () => {}, trigger: async (input: { function_id: string; payload: unknown }) => { forwarded = input; return {}; } };
+    registerMcpEndpoints(sdk as never, mockKV(rows) as never, SECRET);
+    const bounds = { after: "2025-12-31T19:00:00-05:00", before: "2026-03-01T01:00:00+01:00" };
+    const res = await fns.get("mcp::tools::call")!({ headers: { authorization: `Bearer ${SECRET}` }, body: { name, arguments: { query: "auth", ...bounds } } });
+    expect(res.status_code).toBe(200);
+    expect(forwarded?.function_id).toBe(target);
+    expect(forwarded?.payload).toMatchObject(bounds);
+  });
+
+  it.each(["memory_sessions", "memory_recall", "memory_smart_search"])("rejects malformed and reversed date bounds for %s", async (name) => {
+    for (const bounds of [{ after: "2026-01-01" }, { before: "2026-02-30T00:00:00Z" }, { after: "2026-02-01T00:00:00Z", before: "2026-01-01T00:00:00Z" }]) {
+      const res = await callSessions(rows, { query: "auth", ...bounds }, name);
+      expect(res.status_code).toBe(400);
+    }
   });
 
   it("skips offset Sessions from the newest", async () => {

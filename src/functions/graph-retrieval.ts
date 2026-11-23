@@ -136,6 +136,7 @@ export class GraphRetrieval {
     entityNames: string[],
     maxDepth = 2,
     maxResults = 20,
+    eligible?: (id: string, sessionId: string) => Promise<boolean>,
   ): Promise<GraphRetrievalResult[]> {
     if (await graphReadable(this.kv)) {
       const { reader, loadCatalog } = await openGraphReadView(this.kv);
@@ -156,6 +157,7 @@ export class GraphRetrieval {
         (id) => reader.getNeighbors(id),
         maxDepth,
         maxResults,
+        eligible,
       );
     }
 
@@ -170,6 +172,7 @@ export class GraphRetrieval {
     getNeighbors: NeighborProvider,
     maxDepth: number,
     maxResults: number,
+    eligible?: (id: string, sessionId: string) => Promise<boolean>,
   ): Promise<GraphRetrievalResult[]> {
     if (matchingNodes.length === 0) return [];
 
@@ -224,19 +227,14 @@ export class GraphRetrieval {
       }
     }
 
-    const top = [...best.values()]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, maxResults);
-    // Resolve sessions only for the surviving top-K so verification/scan
-    // work never runs for results that get trimmed away.
-    await this.resolveSessionIds(top);
-    return top;
+    return this.topEligible(best, maxResults, eligible);
   }
 
   async expandFromChunks(
     obsIds: string[],
     maxDepth = 1,
     maxResults = 10,
+    eligible?: (id: string, sessionId: string) => Promise<boolean>,
   ): Promise<GraphRetrievalResult[]> {
     if (await graphReadable(this.kv)) {
       const { reader } = await openGraphReadView(this.kv);
@@ -259,6 +257,7 @@ export class GraphRetrieval {
         obsIds,
         maxDepth,
         maxResults,
+        eligible,
       );
     }
 
@@ -272,6 +271,7 @@ export class GraphRetrieval {
     obsIds: string[],
     maxDepth: number,
     maxResults: number,
+    eligible?: (id: string, sessionId: string) => Promise<boolean>,
   ): Promise<GraphRetrievalResult[]> {
     const orderedLinked = [...linkedNodes].sort((a, b) =>
       a.id.localeCompare(b.id),
@@ -303,10 +303,27 @@ export class GraphRetrieval {
       }
     }
 
-    const top = [...best.values()]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, maxResults);
-    await this.resolveSessionIds(top);
+    return this.topEligible(best, maxResults, eligible);
+  }
+
+  private async topEligible(
+    best: Map<string, GraphRetrievalResult>,
+    limit: number,
+    eligible?: (id: string, sessionId: string) => Promise<boolean>,
+  ): Promise<GraphRetrievalResult[]> {
+    const ranked = [...best.values()].sort((a, b) => b.score - a.score);
+    if (limit <= 0) return [];
+    if (!eligible) {
+      const top = ranked.slice(0, limit);
+      await this.resolveSessionIds(top);
+      return top;
+    }
+    await this.resolveSessionIds(ranked);
+    const top: GraphRetrievalResult[] = [];
+    for (const result of ranked) {
+      if (await eligible(result.obsId, result.sessionId)) top.push(result);
+      if (top.length >= limit) break;
+    }
     return top;
   }
 

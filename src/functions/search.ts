@@ -1,4 +1,5 @@
 import type { ISdk } from '../engine/types.js'
+import { parseDateRange } from './date-range.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
@@ -608,6 +609,8 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       token_budget?: number
       agentId?: string
       targetLayer?: string
+      after?: string
+      before?: string
     }) => {
       const idx = getSearchIndex()
 
@@ -719,7 +722,8 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(effectiveLimit * 10, 100)
         : Math.max(effectiveLimit * 3, 30)
-      const results = await idx.searchCooperatively(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer)
+      const range = parseDateRange(data)
+      const results = await idx.searchCooperatively(query, fetchLimit, targetLayer === 'all' ? undefined : targetLayer, undefined, range)
       await yieldToEventLoop()
 
       const loadSession = createSessionLoader(kv)

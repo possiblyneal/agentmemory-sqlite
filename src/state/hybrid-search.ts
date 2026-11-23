@@ -1,4 +1,5 @@
 import { SearchIndex } from "./search-index.js";
+import { withinDateRange, type DateRange } from "../functions/date-range.js";
 import { embedQuery } from "../providers/embedding/index.js";
 import { VectorIndex } from "./vector-index.js";
 import type {
@@ -164,7 +165,7 @@ export class HybridSearch {
     return this.prepareSearch(query, async () => expansion)(limit);
   }
 
-  prepareSearch(query: string, expand?: () => Promise<QueryExpansion>) {
+  prepareSearch(query: string, expand?: () => Promise<QueryExpansion>, range?: DateRange) {
     const embeddings = new Map<string, Promise<Float32Array>>();
     const search = (text: string, limit: number, entities?: string[]) =>
       this.tripleStreamSearch(text, limit, entities, (provider) => {
@@ -174,7 +175,7 @@ export class HybridSearch {
           embeddings.set(text, embedding);
         }
         return embedding;
-      });
+      }, range);
     let expansion: Promise<QueryExpansion> | undefined;
     return async (limit: number): Promise<HybridSearchResult[]> =>
       expand
@@ -252,6 +253,7 @@ export class HybridSearch {
     limit: number,
     entityHints: string[] | undefined,
     getEmbedding: (provider: EmbeddingProvider) => Promise<Float32Array>,
+    range?: DateRange,
   ): Promise<HybridSearchResult[]> {
     // Each leg must be fetched to a DEPTH FLOOR, not to a multiple of the
     // caller's page size. With `limit * 2`, a document that is rank ~10 in
@@ -278,7 +280,17 @@ export class HybridSearch {
     const depthFloor =
       Number.isFinite(parsedDepth) && parsedDepth >= 0 ? parsedDepth : 100;
     const depth = Math.max(limit * 2, depthFloor);
-    const bm25Results = await this.bm25.searchCooperatively(query, depth);
+    const dates = new Map<string, boolean>();
+    const eligible = range ? async (id: string, sessionId: string): Promise<boolean> => {
+      const cached = dates.get(id);
+      if (cached !== undefined) return cached;
+      const obs = await this.kv.get<CompressedObservation>(KV.observations(sessionId), id);
+      const memory = obs ? null : await this.kv.get<Memory>(KV.memories, id);
+      const matches = withinDateRange(obs?.timestamp ?? memory?.createdAt, range);
+      dates.set(id, matches);
+      return matches;
+    } : undefined;
+    const bm25Results = await this.bm25.searchCooperatively(query, depth, undefined, undefined, range);
 
     let vectorResults: Array<{
       obsId: string;
@@ -289,7 +301,7 @@ export class HybridSearch {
     if (this.vector && this.embeddingProvider && this.vector.size > 0) {
       try {
         const queryEmbedding = await getEmbedding(this.embeddingProvider);
-        vectorResults = await this.vector.search(queryEmbedding, depth);
+        vectorResults = await this.vector.search(queryEmbedding, depth, eligible);
       } catch {
         // fall through to BM25-only
       }
@@ -306,6 +318,7 @@ export class HybridSearch {
           entities,
           2,
           limit,
+          eligible,
         );
       } catch {
         // graph search is best-effort
@@ -316,7 +329,7 @@ export class HybridSearch {
     if (this.graphWeight > 0 && topVectorObs.length > 0) {
       try {
         const expansionResults =
-          await this.graphRetrieval.expandFromChunks(topVectorObs, 1, 5);
+          await this.graphRetrieval.expandFromChunks(topVectorObs, 1, 5, eligible);
         graphResults = [...graphResults, ...expansionResults];
       } catch {
         // expansion is best-effort

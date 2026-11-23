@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { InMemoryKV } from "./in-memory-kv.js";
+import { parseDateRange, withinDateRange } from "../functions/date-range.js";
 import { createStdioTransport } from "./transport.js";
 import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath, loadFallbackConfig, resolveAgentSdkTimeoutMs } from "../config.js";
@@ -129,6 +130,8 @@ interface Validated {
   format?: string;
   tokenBudget?: number;
   targetLayer?: SearchLayer;
+  after?: string;
+  before?: string;
   memoryIds?: string[];
   expandIds?: string[];
   reason?: string;
@@ -139,6 +142,11 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
     throw new Error(`Unknown tool: ${toolName}`);
   }
   const v: Validated = { tool: toolName };
+  if (["memory_recall", "memory_smart_search", "memory_sessions"].includes(toolName)) {
+    parseDateRange(args);
+    v.after = args.after as string | undefined;
+    v.before = args.before as string | undefined;
+  }
   switch (toolName) {
     case "memory_save": {
       const content = args["content"];
@@ -258,6 +266,8 @@ async function handleProxy(
         limit: v.limit,
         format: v.format ?? "full",
         targetLayer: v.targetLayer,
+        after: v.after,
+        before: v.before,
       };
       if (v.tokenBudget != null) body["token_budget"] = v.tokenBudget;
       if (v.project != null) body["project"] = v.project;
@@ -268,7 +278,7 @@ async function handleProxy(
       return textResponse(result, true);
     }
     case "memory_smart_search": {
-      const body: Record<string, unknown> = { limit: v.limit };
+      const body: Record<string, unknown> = { limit: v.limit, after: v.after, before: v.before };
       if (v.query != null) body["query"] = v.query;
       if (v.expandIds?.length) body["expandIds"] = v.expandIds;
       if (v.format != null) body["format"] = v.format;
@@ -281,8 +291,11 @@ async function handleProxy(
       return textResponse(result, true);
     }
     case "memory_sessions": {
+      const params = new URLSearchParams({ limit: String(v.limit), offset: String(v.offset) });
+      if (v.after !== undefined) params.set("after", v.after);
+      if (v.before !== undefined) params.set("before", v.before);
       const result = await handle.call(
-        `/agentmemory/sessions?limit=${v.limit}&offset=${v.offset}`,
+        `/agentmemory/sessions?${params}`,
         { method: "GET" },
       );
       return textResponse(result, true);
@@ -353,6 +366,7 @@ async function handleLocal(
       const results = all
         .filter((m) => {
           if (v.expandIds?.length) return v.expandIds.includes(m["id"] as string);
+          if (!withinDateRange(m["createdAt"], parseDateRange(v))) return false;
           const text = [
             typeof m["title"] === "string" ? m["title"] : "",
             typeof m["content"] === "string" ? m["content"] : "",
@@ -376,7 +390,8 @@ async function handleLocal(
         await kvInstance.list<Record<string, unknown>>("mem:sessions");
       const limit = v.limit ?? 20;
       const offset = v.offset ?? 0;
-      return textResponse({ sessions: sessions.slice(offset, offset + limit) }, true);
+      const filtered = sessions.filter((s) => withinDateRange(s["startedAt"], parseDateRange(v)));
+      return textResponse({ sessions: filtered.slice(offset, offset + limit) }, true);
     }
 
     case "memory_governance_delete": {

@@ -169,6 +169,7 @@ export class VectorIndex {
   async search(
     query: Float32Array,
     limit = 20,
+    eligible?: (id: string, sessionId: string) => Promise<boolean>,
   ): Promise<Array<{ obsId: string; sessionId: string; score: number }>> {
     // UNGATED collapse, on purpose. This is the rollback contract: the
     // WRITING of chunks is flag-gated, the READING of them never is. If
@@ -189,6 +190,7 @@ export class VectorIndex {
     let scanned = 0;
     for (const [obsId, entry] of this.vectors) {
       if (++scanned % SEARCH_SLICE === 0) await yieldToEventLoop();
+      if (eligible && !(await eligible(parentIdOf(obsId), entry.sessionId))) continue;
       const score = cosineSimilarity(query, entry.embedding);
       if (results.length < scanLimit) {
         results.push({ obsId, sessionId: entry.sessionId, score });

@@ -100,6 +100,14 @@ describe("GraphRetrieval", () => {
     expect(results[0].obsId).toBe("obs_1");
   });
 
+  it("checks eligibility before limiting graph candidates", async () => {
+    const nodes = [makeNode("n1", "React", "library", ["outside", "inside"])];
+    const kv = await mockKV(nodes, []);
+    const retrieval = new GraphRetrieval(kv as never);
+    const results = await retrieval.searchByEntities(["React"], 2, 1, async (id) => id === "inside");
+    expect(results.map((result) => result.obsId)).toEqual(["inside"]);
+  });
+
   it("finds entities by partial name match", async () => {
     const nodes = [makeNode("n1", "auth-middleware", "function", ["obs_1"])];
     const kv = await mockKV(nodes, []);

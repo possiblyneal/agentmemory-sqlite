@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
+import { VectorIndex } from "../src/state/vector-index.js";
 import type { CompressedObservation, EmbeddingProvider } from "../src/types.js";
 
 function makeObs(
@@ -74,6 +75,36 @@ describe("HybridSearch", () => {
     await hybrid.prepareSearch("query", expand)(100);
     expect(expand).toHaveBeenCalledTimes(2);
     expect(embed).toHaveBeenCalledTimes(4);
+  });
+
+  it("retrieves an eligible vector behind a crowded out-of-range pool", async () => {
+    const vector = new VectorIndex();
+    const provider: EmbeddingProvider = { name: "test", dimensions: 2, embed: async () => new Float32Array([1, 0]), embedBatch: async () => [] };
+    for (let i = 0; i < 101; i++) {
+      const obs = makeObs({ id: `outside_${i}`, timestamp: "2026-02-01T00:00:00Z" });
+      bm25.add(obs);
+      vector.add(obs.id, obs.sessionId, new Float32Array([1, 0]));
+      await kv.set("mem:obs:ses_1", obs.id, obs);
+    }
+    const inside = makeObs({ id: "inside", timestamp: "2026-01-01T00:00:00Z" });
+    bm25.add(inside);
+    vector.add(inside.id, inside.sessionId, new Float32Array([0.8, 0.2]));
+    await kv.set("mem:obs:ses_1", inside.id, inside);
+    const hybrid = new HybridSearch(bm25, vector, provider, kv as never, 0.4, 0.6, 0, false);
+    const results = await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z"), before: Date.parse("2026-02-01T00:00:00Z") })(1);
+    expect(results.map((r) => r.observation.id)).toEqual(["inside"]);
+    expect(results[0].vectorScore).toBeGreaterThan(0);
+  });
+
+  it("keeps an in-range vector hit when its Observation is absent from BM25", async () => {
+    const obs = makeObs({ timestamp: "2026-01-15T00:00:00Z" });
+    await kv.set("mem:obs:ses_1", obs.id, obs);
+    const vector = new VectorIndex();
+    vector.add(obs.id, obs.sessionId, new Float32Array([1, 0]));
+    const provider: EmbeddingProvider = { name: "test", dimensions: 2, embed: async () => new Float32Array([1, 0]), embedBatch: async () => [] };
+    const hybrid = new HybridSearch(bm25, vector, provider, kv as never, 0.4, 0.6, 0, false);
+    const results = await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z"), before: Date.parse("2026-02-01T00:00:00Z") })(1);
+    expect(results.map((r) => r.observation.id)).toEqual([obs.id]);
   });
 
   it("returns BM25-only results when no vector index is provided", async () => {
