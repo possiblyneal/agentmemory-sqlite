@@ -416,6 +416,18 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(authByPath.get("/agentmemory/sessions")).toBe("Bearer s3cret");
   });
 
+  it("orders bounded local Sessions by exact instant before paging, without changing unbounded order", async () => {
+    installFetch(() => { throw new Error("ECONNREFUSED"); });
+    const localKv = new InMemoryKV(undefined);
+    await localKv.set("mem:sessions", "old", { id: "old", startedAt: "2026-01-01T01:00:00+01:00" });
+    await localKv.set("mem:sessions", "new", { id: "new", startedAt: "2026-01-01T00:00:00.0009Z" });
+    await localKv.set("mem:sessions", "middle", { id: "middle", startedAt: "2026-01-01T00:00:00.0002Z" });
+    const bounded = await handleToolCall("memory_sessions", { after: "2026-01-01T00:00:00Z", limit: 1, offset: 1 }, localKv);
+    const unbounded = await handleToolCall("memory_sessions", { limit: 3 }, localKv);
+    expect(JSON.parse(bounded.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["middle"]);
+    expect(JSON.parse(unbounded.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["old", "new", "middle"]);
+  });
+
   it("filters local Memories and Sessions before pagination", async () => {
     installFetch(() => { throw new Error("ECONNREFUSED"); });
     const localKv = new InMemoryKV(undefined);
@@ -429,7 +441,7 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     const sessions = await handleToolCall("memory_sessions", { ...args, limit: 1, offset: 1 }, localKv);
     const expanded = await handleToolCall("memory_smart_search", { expandIds: "new", ...args }, localKv);
     expect(JSON.parse(recall.content[0].text).results.map((r: { id: string }) => r.id)).toEqual(["old"]);
-    expect(JSON.parse(sessions.content[0].text).sessions.map((r: { id: string }) => r.id)).toEqual(["middle"]);
+    expect(JSON.parse(sessions.content[0].text).sessions.map((r: { id: string }) => r.id)).toEqual(["old"]);
     expect(JSON.parse(expanded.content[0].text).results.map((r: { id: string }) => r.id)).toEqual(["new"]);
   });
 

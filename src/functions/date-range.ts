@@ -38,8 +38,8 @@ function compare(a: number, af: string, b: number, bf: string): number {
   return a === b ? (af < bf ? -1 : af > bf ? 1 : 0) : a < b ? -1 : 1;
 }
 
-export function compareTimestamps(a: string, b: string): number {
-  return compare(parseTimestamp(a), fraction(a), parseTimestamp(b), fraction(b));
+export function compareTimestamps(a: string | number, b: string | number): number {
+  return compare(typeof a === "string" ? parseTimestamp(a) : a, typeof a === "string" ? fraction(a) : "", typeof b === "string" ? parseTimestamp(b) : b, typeof b === "string" ? fraction(b) : "");
 }
 
 export function parseDateRange(input: { after?: unknown; before?: unknown }): DateRange {

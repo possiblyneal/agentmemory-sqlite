@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { InMemoryKV } from "./in-memory-kv.js";
-import { parseDateRange, withinDateRange } from "../functions/date-range.js";
+import { compareTimestamps, parseDateRange, withinDateRange } from "../functions/date-range.js";
 import { createStdioTransport } from "./transport.js";
 import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
 import { getStandalonePersistPath, loadFallbackConfig, resolveAgentSdkTimeoutMs } from "../config.js";
@@ -390,7 +390,11 @@ async function handleLocal(
         await kvInstance.list<Record<string, unknown>>("mem:sessions");
       const limit = v.limit ?? 20;
       const offset = v.offset ?? 0;
-      const filtered = sessions.filter((s) => withinDateRange(s["startedAt"], parseDateRange(v)));
+      const range = parseDateRange(v);
+      const filtered = sessions.filter((s) => withinDateRange(s["startedAt"], range));
+      if (range.after !== undefined || range.before !== undefined) {
+        filtered.sort((a, b) => compareTimestamps(b["startedAt"] as string | number, a["startedAt"] as string | number));
+      }
       return textResponse({ sessions: filtered.slice(offset, offset + limit) }, true);
     }
 
