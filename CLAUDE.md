@@ -537,7 +537,8 @@ BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
 Recall and Session listing accept `after` and `before` as explicit-offset ISO-8601 instants;
-`after` is inclusive and `before` exclusive, including fractional precision beyond milliseconds.
+`after` is inclusive and `before` exclusive. Explicit-offset ISO stored timestamps retain exact
+fractional precision; other Node-parseable legacy timestamps use Node's millisecond result.
 Invalid or reversed bounds are rejected. Recall uses the Observation timestamp or the record's
 creation time; Session listing uses `startedAt`. Eligibility precedes candidate truncation and
 Session paging, bounded Session pages sort by exact instant, and search rechecks loaded rows against

@@ -1,7 +1,9 @@
 export type DateRange = { after?: number; before?: number; afterFraction?: string; beforeFraction?: string };
 
+const EXACT_FRACTION = /^(\d{4}-\d{2}-\d{2}[Tt ]\d{1,2}:\d{2}:\d{2}\.)(\d+)(Z|[+-]\d{2}:\d{2})(?![\s\S])/;
+
 function fraction(value: string): string {
-  const digits = /[Tt ]\d{1,2}:\d{2}:\d{2}\.(\d+)/.exec(value)?.[1] ?? "";
+  const digits = EXACT_FRACTION.exec(value)?.[2] ?? "";
   let end = digits.length;
   while (end > 3 && digits[end - 1] === "0") end--;
   return digits.slice(3, end);
@@ -10,7 +12,8 @@ function fraction(value: string): string {
 function parseTimestamp(value: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return parsed;
-  return Date.parse(value.replace(/([Tt ]\d{1,2}:\d{2}:\d{2}\.\d{3})\d+/, "$1"));
+  const match = EXACT_FRACTION.exec(value);
+  return match ? Date.parse(`${match[1]}${match[2]!.slice(0, 3)}${match[3]}`) : parsed;
 }
 
 function instant(value: unknown): number | undefined {

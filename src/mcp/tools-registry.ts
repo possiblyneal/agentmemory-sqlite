@@ -38,8 +38,8 @@ export type McpToolDef = {
 };
 
 const DATE_BOUNDS = {
-  after: { type: "string", description: "Inclusive lower bound, ISO-8601 instant with explicit offset" },
-  before: { type: "string", description: "Exclusive upper bound, ISO-8601 instant with explicit offset" },
+  after: { type: "string", description: "Inclusive lower bound, ISO-8601 instant with explicit offset. Legacy stored timestamps outside the exact ISO form use Node's millisecond result." },
+  before: { type: "string", description: "Exclusive upper bound, ISO-8601 instant with explicit offset. Legacy stored timestamps outside the exact ISO form use Node's millisecond result." },
 };
 
 export const CORE_TOOLS: McpToolDef[] = [

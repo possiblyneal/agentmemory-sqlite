@@ -105,6 +105,17 @@ describe("date bounds", () => {
     expect(withinDateRange(stored, parseDateRange({ after: "2026-01-01T00:00:00.0009Z" }))).toBe(true);
     expect(() => parseDateRange({ before: stored })).toThrow();
   });
+  it("uses Node's millisecond result for legacy strings with a decoy fraction in a comment", () => {
+    const stored = "Jan 01 2026 00:00:00 GMT (T00:00:00.0009)";
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
+  });
+  it("uses Node's millisecond result for non-ISO fractions", () => {
+    const stored = "Jan 01 2026 00:00:00.999999999999999999999999999999999999 GMT";
+    const parsed = Date.parse(stored);
+    expect(Number.isFinite(parsed)).toBe(true);
+    expect(withinDateRange(stored, { after: parsed, before: parsed + 1 })).toBe(true);
+  });
   it("compares interior and trailing zeros in fractional remainders", () => {
     const range = parseDateRange({ after: "2026-01-01T00:00:00.000100010Z", before: "2026-01-01T00:00:00.000100020Z" });
     expect(withinDateRange("2026-01-01T00:00:00.00010001Z", range)).toBe(true);
