@@ -1,9 +1,9 @@
 export type DateRange = { after?: number; before?: number; afterFraction?: string; beforeFraction?: string };
 
-const EXACT_FRACTION = /^(\d{4}|[+-]\d{6})-(\d{2})-(\d{2})[Tt ](\d{1,2}):(\d{2}):(\d{2})\.(\d+)([Zz]|[+-]\d{2}:?\d{2})(?![\s\S])/;
+const EXACT_TIMESTAMP = /^(\d{4}|[+-]\d{6})-(\d{2})-(\d{2})[Tt ](\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:?\d{2})(?![\s\S])/;
 
 function exactComponents(value: string): RegExpExecArray | null {
-  const match = EXACT_FRACTION.exec(value);
+  const match = EXACT_TIMESTAMP.exec(value);
   if (!match || match[1] === "-000000") return null;
   const [, year, month, day, hour, minute, second, , offset] = match;
   const calendar = new Date(0);
@@ -21,11 +21,9 @@ function fraction(value: string): string {
 }
 
 function parseTimestamp(value: string): number {
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return parsed;
   const match = exactComponents(value);
-  if (!match) return parsed;
-  const [, year, month, day, hour, minute, second, digits, offset] = match;
+  if (!match) return Date.parse(value);
+  const [, year, month, day, hour, minute, second, digits = "", offset] = match;
   const zone = offset!.toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, "$1:$2");
   return Date.parse(`${year}-${month}-${day}T${hour!.padStart(2, "0")}:${minute}:${second}.${digits!.slice(0, 3).padEnd(3, "0")}${zone}`);
 }

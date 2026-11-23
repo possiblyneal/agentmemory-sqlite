@@ -422,8 +422,8 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     await localKv.set("mem:sessions", "older", { id: "older", startedAt: Date.parse("2026-01-05T00:00:00Z") });
     await localKv.set("mem:sessions", "middle", { id: "middle", startedAt: "2026-01-07T00:00:00Z" });
     await localKv.set("mem:sessions", "newer", { id: "newer", startedAt: Date.parse("2026-01-10T00:00:00Z") });
-    const result = await handleToolCall("memory_sessions", { after: "2026-01-01T00:00:00Z", limit: 1, offset: 1 }, localKv);
-    expect(JSON.parse(result.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["middle"]);
+    const result = await handleToolCall("memory_sessions", { after: "2026-01-01T00:00:00Z", limit: 2, offset: 0 }, localKv);
+    expect(JSON.parse(result.content[0].text).sessions.map((s: { id: string }) => s.id)).toEqual(["newer", "middle"]);
   });
   it("orders bounded local Sessions by exact instant before paging, without changing unbounded order", async () => {
     installFetch(() => { throw new Error("ECONNREFUSED"); });
