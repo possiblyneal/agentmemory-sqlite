@@ -262,16 +262,22 @@ describe("mem::observe literal redaction", () => {
     try {
       const kv = mockKV();
       const sdk = mockSdk({ looseTrigger: true });
-      let captured: { raw: { tool_input: { text: string; screenshot: string } } } | undefined;
+      let captured: { raw: { tool_input: { text: string; screenshot: string; trailing: string; metadata: string } } } | undefined;
       sdk.registerFunction("stream::send", async (payload) => {
         captured = (payload as { data: { observation: typeof captured } }).data.observation;
       });
       registerObserveFunction(sdk as never, kv as never);
       await sdk.trigger({ function_id: "mem::observe", payload: observeRequest(1, {
-        tool_name: "Edit", tool_input: { text: "data:image/png;base64,SYNTHETIC-IDENTIFIER text", screenshot: image },
+        tool_name: "Edit", tool_input: {
+          text: "data:image/png;base64,SYNTHETIC-IDENTIFIER text", screenshot: image,
+          trailing: padded + "SYNTHETIC-IDENTIFIER",
+          metadata: padded.replace(";base64,", ";SYNTHETIC-IDENTIFIER;base64,"),
+        },
         image_path: join(dir, "image.png"),
       }).body });
       expect(captured?.raw.tool_input.text).not.toContain("SYNTHETIC-IDENTIFIER");
+      expect(captured?.raw.tool_input.trailing).not.toContain("SYNTHETIC-IDENTIFIER");
+      expect(captured?.raw.tool_input.metadata).not.toContain("SYNTHETIC-IDENTIFIER");
       expect(captured?.raw.tool_input.screenshot).toBe(image);
     } finally {
       if (previous === undefined) delete process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;

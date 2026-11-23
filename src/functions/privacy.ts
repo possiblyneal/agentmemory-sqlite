@@ -37,9 +37,15 @@ async function loadObservationLiterals(path: string): Promise<string[]> {
 }
 
 function isEncodedImage(value: string): boolean {
-  const comma = value.startsWith("data:image/") ? value.indexOf(",") : -1;
-  const encoded = comma === -1 ? value : value.slice(comma + 1);
-  if (!encoded) return false;
+  const match = value.startsWith("data:image/")
+    ? /^data:image\/(?:png|jpeg|jpg|gif|webp);base64,([\s\S]*)$/i.exec(value)
+    : null;
+  if (value.startsWith("data:image/") && !match) return false;
+  const encoded = (match ? match[1] : value).replace(/\s/g, "");
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(encoded)) return false;
+  const unpadded = encoded.replace(/=+$/, "");
+  if (unpadded.length % 4 === 1 || (encoded.length !== unpadded.length &&
+      (encoded.length % 4 !== 0 || encoded.length - unpadded.length !== (4 - unpadded.length % 4) % 4))) return false;
   const bytes = Buffer.from(encoded, "base64");
   return (bytes.length >= 20 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && bytes.subarray(-8, -4).toString() === "IEND") ||
     (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9) ||
