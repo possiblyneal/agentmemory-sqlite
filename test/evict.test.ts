@@ -100,6 +100,8 @@ function mockKV(store: Store, listFailures: Set<string> = new Set()) {
       for (const op of ops) if (op.type === "set") row[op.path] = op.value;
       return row;
     },
+    listPage: async <T>(scope: string, _after: string | undefined, limit: number): Promise<Array<{ key: string; value: T }>> =>
+      Array.from(store.get(scope)?.entries() ?? []).slice(0, limit).map(([key, value]) => ({ key, value: value as T })),
     list: async <T>(scope: string): Promise<T[]> => {
       if (listFailures.has(scope)) {
         throw new Error(`list failed for ${scope}`);
@@ -155,13 +157,10 @@ describe("mem::evict stale sessions", () => {
     const sessionId = "recheck-fails";
     const store = storeForObservations(sessionId, []);
     const kv = mockKV(store);
-    const list = kv.list;
-    let scans = 0;
-    kv.list = async <T>(scope: string): Promise<T[]> => {
-      if (scope === KV.observations(sessionId) && ++scans === 2) {
-        throw new Error("recheck failed");
-      }
-      return list<T>(scope);
+    const listPage = kv.listPage;
+    kv.listPage = async <T>(scope: string, after: string | undefined, limit: number) => {
+      if (scope === KV.observations(sessionId)) throw new Error("recheck failed");
+      return listPage<T>(scope, after, limit);
     };
     const { sdk } = mockSdk();
     registerEvictFunction(sdk as never, kv as never);

@@ -164,7 +164,7 @@ async function recoverOrEvictStaleSession(
 
   try {
     const deleted = await withKeyedLock(`obs:${sessionId}`, async () => {
-      const current = await kv.list<CompressedObservation | RawObservation>(KV.observations(sessionId));
+      const current = await kv.listPage(KV.observations(sessionId), undefined, 1);
       if (current.length > 0) return false;
       await kv.delete(KV.sessions, sessionId);
       return true;
