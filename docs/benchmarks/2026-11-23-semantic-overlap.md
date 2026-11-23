@@ -62,6 +62,21 @@ A scratch-only variant kept the alternate key and its wording in the same Fact r
 
 That scratch fixture used a stubbed verdict and an in-memory store. The implementation's separate regression opens a file-backed SQLite store, merges with a stubbed verdict, closes the store, and reopens it with no verifier. Updating either key leaves two live rows and retains the untouched key's wording and original row ID. Export/replace import and snapshot/restore round-trip the alias; the mesh fixture checks inbound receipt only.
 
+### Classifier-backed preservation replay
+
+A synthetic replay used the Consolidation registrar from `c212777e` for the baseline and the candidate registrar with the local q8 DeBERTa worker for the other arm. The model extracted no Facts in this test: a stubbed Summary provider returned fixed XML, while the real entailment worker decided candidate merges. Both arms started each case fresh with a `backups / schedule / nightly` Fact, “The service runs backups every night,” then added a `backups / frequency` Fact. Recall queried `backups` in each affected project.
+
+| Case | Incoming wording | Verifier | Stored rows, baseline → candidate |
+|---|---|---|---:|
+| Restatement | The service runs its backups every night | Entailed both ways | 2 → 1 |
+| Condition | The service runs backups every night only when idle | Declined | 2 → 2 |
+| Value | The service runs backups every week | Not called (`weekly` object) | 2 → 2 |
+| Negation | The service never runs backups every night | Declined | 2 → 2 |
+| Time | The service runs backups every night after midnight | Declined | 2 → 2 |
+| Project | The service runs its backups every night | Not called (different project) | 2 → 2 |
+
+The five preservation cases recalled identical text sets in both arms, including one claim per project in the project case. This covers these fixtures only and does not estimate production error rates.
+
 ### Coding-life regression check
 
 The default dev split on sandbox instance 37 compared base `c212777e` with the candidate. After restoring the existing embedding worker's expected bundle path, both arms produced the same Recall, precision and no-answer-clean scores:
