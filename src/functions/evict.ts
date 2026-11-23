@@ -227,6 +227,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         .list<SessionSummary>(KV.summaries)
         .catch(() => []);
       const summaryBySession = new Map(summaries.map((s) => [s.sessionId, s]));
+      const sessionById = new Map(sessions.map((session) => [session.id, session]));
 
       const staleMs = cfg.staleSessionDays * MS_PER_DAY;
       const scannedSessions = new Set<string>();
@@ -240,7 +241,11 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         const { recovered, evicted, summary } = await recoverOrEvictStaleSession(
           sdk, kv, session.id, prior, dryRun, scannedSessions,
         );
-        if (summary) summaryBySession.set(session.id, summary);
+        if (summary) {
+          summaryBySession.set(session.id, summary);
+          const currentSession = await kv.get<Session>(KV.sessions, session.id).catch(() => null);
+          if (currentSession) sessionById.set(session.id, currentSession);
+        }
         if (recovered) recoveredStaleSessions++;
         if (evicted) stats.staleSessions++;
       }
@@ -252,7 +257,6 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         removedBySession.set(sessionId, (removedBySession.get(sessionId) ?? 0) + 1);
       const projectObs = new Map<string, CompressedObservation[]>();
       const awaitingStop = new Set<string>();
-      const sessionById = new Map(sessions.map((session) => [session.id, session]));
       const deleteCoveredObservation = (o: CompressedObservation) =>
         withKeyedLock(`summary:${o.sessionId}`, async () => {
           const session = sessionById.get(o.sessionId)!;
@@ -273,7 +277,8 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           });
           return deleted;
         });
-      for (const session of sessions) {
+      for (const originalSession of sessions) {
+        const session = sessionById.get(originalSession.id)!;
         const obs = await kv
           .list<CompressedObservation>(KV.observations(session.id))
           .catch(() => []);

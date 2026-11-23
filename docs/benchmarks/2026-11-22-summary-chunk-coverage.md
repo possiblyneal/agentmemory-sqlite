@@ -36,6 +36,9 @@ barrier test also holds Eviction between its coverage reread and deletion: Summa
 waits, and removing only its publication lock makes the test fail. A concurrent-writer fixture
 also verifies that a result generated against a replaced Summary is rejected, whether or not a
 prior Summary existed, and that a later attempt succeeds. Both cases failed before that guard.
+A graph-enabled stale-recovery fixture checks both low-importance and project-cap Eviction: the
+recovered graph watermark permits covered rows in the same sweep while uncovered rows remain.
+Both paths failed before refreshing the Session snapshot.
 
 An oversized fallback fixture with ten prior decisions verifies that the fresh decision comes
 first, with the distinct prior decisions retained behind it. Fold-drift fixtures verify both the

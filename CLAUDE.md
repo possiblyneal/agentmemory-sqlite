@@ -259,7 +259,8 @@ still enumerate its Observation bucket and preserve its project. Empty stale Ses
 still evicted only after rechecking their Observation bucket under capture's `obs:<sessionId>`
 lock, held through Session deletion; recovery and model work stay outside that lock. Existing
 orphaned buckets are not repaired. The same sweep still applies its
-Observation eviction rules after recovery. A dry run counts only stale Sessions whose
+Observation eviction rules after recovery, using the Session's refreshed graph watermark for both
+candidate selection and the locked deletion check. A dry run counts only stale Sessions whose
 Observation bucket was read successfully and found empty. A failed stale-Session scan protects
 its Observations for that sweep; a dry run does not assume a recovery would cover them.
 

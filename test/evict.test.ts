@@ -1075,6 +1075,31 @@ describe("mem::evict spares Observations their Session's stop has not finished w
     });
   });
 
+  it.each(["low", "cap"])("uses the graph watermark written by recovery for %s eviction", async (path) => {
+    await withEnv({ GRAPH_EXTRACTION_ENABLED: "true", AGENTMEMORY_GRAPH_LEG: undefined }, async () => {
+      const covered = obs("covered", daysAgo(5), path === "low" ? 1 : 8);
+      const uncovered = obs("uncovered", daysAgo(3), 1);
+      const store = storeForObservations(sessionId, [covered, uncovered]);
+      const kv = mockKV(store);
+      await kv.set(KV.config, "eviction", path === "cap"
+        ? { lowImportanceMaxDays: 100, maxObservationsPerProject: 0 }
+        : {});
+      const { sdk } = mockSdk();
+      registerEvictFunction(sdk as never, kv as never);
+      sdk.registerFunction("event::session::stopped", async () => {
+        await kv.set(KV.summaries, sessionId, { ...summaryFor(sessionId), coveredThrough: uncovered.timestamp });
+        const session = await kv.get<Session>(KV.sessions, sessionId);
+        await kv.set(KV.sessions, sessionId, { ...session!, graphExtractedThrough: uncovered.timestamp });
+        return { success: true };
+      });
+      sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+
+      const result = await sdk.trigger({ function_id: "mem::evict", payload: {} });
+      expect(result).toMatchObject(path === "low" ? { lowImportanceObs: 1 } : { capEvictions: 1 });
+      expect(await kv.list(KV.observations(sessionId))).toEqual([uncovered]);
+    });
+  });
+
   it("evicts a recovered stale Session's old low-importance Observations in the same sweep", async () => {
     const store = storeForObservations(sessionId, [obs("a", daysAgo(5))]);
     const kv = mockKV(store);
