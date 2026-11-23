@@ -22,4 +22,20 @@ The probe checked the response length against its reported total, grouped eligib
 | 14 | 34 | 4 |
 | 15 | 15 | 0 |
 
+## Fact keys
+
+A second read-only scan retrieved 42,924 rows and reproduced the 8,916 eligible Facts and 4,530 Facts with a match. All eligible Facts had nonempty subject, relation, and object fields. All 4,530 matched across different subject/relation keys; none matched within the same key. Seven Facts had identical NFC-normalized text to a Fact with a different key. These counts identify where to sample for labeling, not which keys should be merged.
+
 This measures overlap, not semantic equivalence. The input snapshot was not retained, so a later read may yield different counts. The rejected synthetic candidate lost distinct claims in the condition, value, negation and time fixtures; this measurement does not justify reusing it. No Recall evaluation or production change was made for this measurement.
+
+## Operator labels
+
+The Operator labeled 24 disjoint, same-project pairs with different subject/relation keys. The sample included eight pairs in each Jaccard band: `[0.35, 0.5)`, `[0.5, 0.75)`, and `[0.75, 1]`. Scores and keys were hidden during labeling. The Operator labeled three pairs as restatements and 21 as distinct claims.
+
+At `RESTATEMENT_OVERLAP` (0.5), overlap alone would merge all three restatements and 13 of the 21 distinct pairs. The lowest-scoring restatement scored 0.5, while the highest-scoring distinct pair scored approximately 0.905. No single minimum-overlap threshold can retain all three restatements without also merging distinct claims in this sample. This is a pair-level check, not a production error-rate estimate or a Consolidation and Recall replay. The Fact text and labels remain local.
+
+## Offline equivalence screen
+
+Quantized `Xenova/nli-deberta-v3-small` (revision `6bc2a55c7c0f7e2bc68de60bb248e523e2612abb`) ran on the local CPU with remote model loading disabled. The checker called a pair equivalent only when entailment was the top class in both directions. It caught two of the three restatements and preserved 19 of the 21 distinct pairs. The LAN model attempt timed out on the first pair and returned no verdicts.
+
+Reject this offline checker for automatic merging. Before retrying, require a distinct candidate to preserve the known counterexamples and test it on fresh labeled pairs before running Consolidation and Recall. No production logic changed.
