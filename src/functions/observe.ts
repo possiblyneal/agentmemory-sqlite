@@ -5,11 +5,11 @@ import type { CompressedObservation, RawObservation, HookPayload, Origin, Sessio
 const TOOL_HOOKS = new Set(["pre_tool_use", "post_tool_use", "post_tool_failure"]);
 import { KV, STREAM, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
-import { stripPrivateDataDeep } from "./privacy.js";
+import { isEncodedImage, observationLiterals, redactObservationLiterals, stripPrivateDataDeep } from "./privacy.js";
 import { DedupMap } from "./dedup.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { isAutoCompressEnabled } from "../config.js";
-import { buildSyntheticCompression } from "./compress-synthetic.js";
+import { buildSyntheticCompression, describeHook } from "./compress-synthetic.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { parkForCompression } from "./compress-batch.js";
 import { getSearchIndex, vectorIndexAddGuarded, isIndexExcluded, deleteIndexed } from "./search.js";
@@ -24,22 +24,29 @@ import { retryableWriteCause, unstored, unstoredOnFullDisk } from "./observe-ret
 import { markCaptureStored } from "../telemetry/capture.js";
 
 export function extractImage(d: unknown): string | undefined {
+  return extractImageWithValidation(d, false);
+}
+
+function extractImageWithValidation(d: unknown, validate: boolean): string | undefined {
   if (!d) return undefined;
   if (typeof d === "string") {
     if (d.startsWith("data:image/") || d.startsWith("iVBORw0KGgo") || d.startsWith("/9j/")) {
-      return d;
+      return !validate || isEncodedImage(d) ? d : undefined;
     }
     return undefined;
   }
   if (typeof d === "object" && d !== null) {
     const obj = d as Record<string, unknown>;
-    if (typeof obj["image_data"] === "string") return obj["image_data"];
-    if (typeof obj["image_path"] === "string") return obj["image_path"];
-    if (typeof obj["imageBase64"] === "string") return obj["imageBase64"];
-    if (typeof obj["imagePath"] === "string") return obj["imagePath"];
+    for (const key of ["image_data", "image_path", "imageBase64", "imagePath"]) {
+      const value = obj[key];
+      if (typeof value !== "string") continue;
+      if (!validate) return value;
+      const match = extractImageWithValidation(value, validate);
+      if (match) return match;
+    }
 
     for (const key of Object.keys(obj)) {
-      const match = extractImage(obj[key]);
+      const match = extractImageWithValidation(obj[key], validate);
       if (match) return match;
     }
   }
@@ -49,7 +56,7 @@ export function extractImage(d: unknown): string | undefined {
 export async function storeSyntheticCompression(
   kv: StateKV,
   raw: RawObservation,
-  { awaitingCompression = false } = {},
+  { awaitingCompression = false }: { awaitingCompression?: boolean } = {},
 ): Promise<CompressedObservation> {
   const synthetic: CompressedObservation = {
     ...buildSyntheticCompression(raw),
@@ -347,7 +354,7 @@ function validExecutionField(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= 256 ? value : undefined;
 }
 
-export function isReadOnlyObservation(raw: RawObservation): boolean {
+export function isReadOnlyObservation(raw: Pick<RawObservation, "hookType" | "toolName" | "toolInput" | "toolOutput">): boolean {
   if (raw.hookType !== "post_tool_use" || !raw.toolName) return false;
   if (reportsError(raw.toolOutput)) return false;
   if (READ_ONLY_TOOLS.has(raw.toolName)) return true;
@@ -390,6 +397,8 @@ export function registerObserveFunction(
         };
       }
 
+      const rules = await observationLiterals();
+
       if (payload.hookType === "prompt_submit" && isHarnessMessage(promptOf(payload.data))) {
         return { skipped: true, reason: "harness-message", sessionId: payload.sessionId };
       }
@@ -424,7 +433,10 @@ export function registerObserveFunction(
         }
       }
 
-      const sanitizedRaw = stripPrivateDataDeep(payload.data);
+      const privateRaw = stripPrivateDataDeep(payload.data);
+      const sanitizedRaw = redactObservationLiterals(privateRaw, rules);
+      const hook = describeHook(payload.hookType, privateRaw, rules);
+      const autoCompress = isAutoCompressEnabled();
 
       let originChannel: Origin["channel"] = "agent";
       if (payload.hookType === "prompt_submit") originChannel = "user";
@@ -435,48 +447,60 @@ export function registerObserveFunction(
         timestamp: payload.timestamp,
         hookType: payload.hookType,
         raw: sanitizedRaw,
+        ...(hook || rules.length ? { syntheticDescription: hook } : {}),
         origin: {
           channel: originChannel,
           capturedAt: payload.timestamp,
         },
       };
 
+      const validateImages = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE !== undefined;
       let extractedImage: string | undefined;
+      let readOnlyTool = false;
 
-      if (typeof sanitizedRaw === "object" && sanitizedRaw !== null) {
-        const d = sanitizedRaw as Record<string, unknown>;
+      if (typeof privateRaw === "object" && privateRaw !== null) {
+        const d = privateRaw as Record<string, unknown>;
         if (
           payload.hookType === "post_tool_use" ||
           payload.hookType === "post_tool_failure"
         ) {
-          const original = typeof payload.data === "object" && payload.data !== null
-            ? payload.data as Record<string, unknown>
-            : {};
-          if (original["agent_id"] === d["agent_id"]) raw.executionAgentId = validExecutionField(original["agent_id"]);
-          if (original["agent_type"] === d["agent_type"]) raw.executionAgentType = validExecutionField(original["agent_type"]);
-          raw.toolName = d["tool_name"] as string | undefined;
-          raw.toolInput = d["tool_input"];
-          raw.toolOutput = d["tool_output"] || d["error"];
+          const original = payload.data as Record<string, unknown>;
+          const agentId = validExecutionField(original["agent_id"]);
+          const agentType = validExecutionField(original["agent_type"]);
+          if (agentId && agentId === d["agent_id"] && !rules.some((rule) => agentId.includes(rule))) raw.executionAgentId = agentId;
+          if (agentType && agentType === d["agent_type"] && !rules.some((rule) => agentType.includes(rule))) raw.executionAgentType = agentType;
+          if (autoCompress) {
+            readOnlyTool = isReadOnlyObservation({
+              hookType: raw.hookType,
+              toolName: d["tool_name"] as string | undefined,
+              toolInput: d["tool_input"],
+              toolOutput: d["tool_output"] || d["error"],
+            });
+          }
+          raw.toolName = redactObservationLiterals(d["tool_name"], rules) as string | undefined;
+          raw.toolInput = redactObservationLiterals(d["tool_input"], rules);
+          raw.toolOutput = redactObservationLiterals(d["tool_output"], rules) || redactObservationLiterals(d["error"], rules);
           if (raw.origin && raw.toolName) raw.origin.detail = raw.toolName;
         }
         if (payload.hookType === "prompt_submit") {
-          raw.userPrompt = d["prompt"] as string | undefined;
+          raw.userPrompt = redactObservationLiterals(d["prompt"], rules) as string | undefined;
         }
         if ((payload.hookType === "subagent_stop" || payload.hookType === "stop") && typeof d["last_message"] === "string") {
-          raw.assistantResponse = d["last_message"];
+          raw.assistantResponse = redactObservationLiterals(d["last_message"], rules) as string;
         }
 
         const { agent_id: _agentId, agent_type: _agentType, ...imagePayload } = d;
-        extractedImage = extractImage(
+        extractedImage = extractImageWithValidation(
           payload.hookType === "post_tool_use" || payload.hookType === "post_tool_failure"
             ? imagePayload
-            : sanitizedRaw,
+            : d,
+          validateImages,
         );
         if (extractedImage) {
           raw.modality = (raw.toolInput || raw.toolOutput || raw.userPrompt) ? "mixed" : "image";
         }
-      } else if (typeof sanitizedRaw === "string") {
-        extractedImage = extractImage(sanitizedRaw);
+      } else if (typeof privateRaw === "string") {
+        extractedImage = extractImageWithValidation(privateRaw, validateImages);
         if (extractedImage) {
           raw.modality = "image";
         }
@@ -683,8 +707,8 @@ export function registerObserveFunction(
         // and BM25 search still work without burning the user's Claude
         // token allocation on every tool invocation. With auto-compress on, a
         // read-only call stays synthetic too.
-        const compressible = isAutoCompressEnabled() && hasCompressibleContent(raw);
-        const readOnly = compressible && isReadOnlyObservation(raw);
+        const compressible = autoCompress && hasCompressibleContent(raw);
+        const readOnly = compressible && readOnlyTool;
         const llmCompress = compressible && !readOnly;
         // An image needs mem::compress's vision step, so it goes alone. Any
         // other LLM-worthy Observation is searchable at once as a synthetic

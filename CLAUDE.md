@@ -195,6 +195,33 @@ redacting strings under secret-named keys. `stripPrivateData()` also scrubs JSON
 assignments and an unclosed `<private>` block through the end of the text. This is defensive
 redaction, not a guarantee that every possible secret format is detected.
 
+`AGENTMEMORY_OBSERVATION_REDACTION_FILE` optionally names an Operator-controlled UTF-8 JSON
+array of up to 128 nonempty, case-sensitive literal strings, at most 64 KiB in total. Each
+new automatic Observation's `data` text and object keys are redacted before storage and
+Compression; encoded image strings with valid format signatures and endings are not altered only
+when the whole string has valid Base64 syntax and, for a data URI, an image MIME and Base64 header
+without extra metadata. Other image-like strings are treated as text and are not saved as images.
+When rules are configured, attachment selection validates values before literal redaction and
+skips unsaveable paths so they do not mask a valid encoded attachment.
+Canonical hook fields and synthetic descriptions read the original keys from the privacy-scrubbed
+payload, then literal-redact their values. `RawObservation.syntheticDescription` carries only the
+resulting `{ title, narrative }` through parked Compression jobs, including restart and degraded
+fallback; it is not sent to the LLM. With rules active, `null` records that no description was
+found, preventing a redacted key from becoming a hook field. Older jobs without the field use the
+sanitized raw payload instead.
+Read-only tool classification uses the fields before
+literal redaction so matching a key or value does not change the classification. The tool error still supplies output when scrubbing
+leaves no tool output. Colliding redacted keys retain all values, and redaction never joins
+surviving text into a configured literal.
+An unset variable leaves capture unchanged; an invalid or unreadable file rejects capture without
+blocking Recall. REST returns a generic 503 diagnostic; a validated request records its arrival
+before this check and settles on rejection. REST checks before queueing and the registrar checks
+again when processing, including retries. Concurrent reads of the same rules file share only the
+in-flight read, preserving queue admission order; later reads reload it so repairs take effect.
+An acknowledged queued Observation waits for valid rules instead of being dropped. The in-memory retry queue may hold unsanitized payloads. Rules do not rewrite stored data, redact image content, cover Observation
+metadata outside `data`, imports, or explicit Memory and Lesson saves; exact matching is not a
+general personal-data filter.
+
 ### Observations on a full disk or a locked database
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
 hits a full disk or `database is locked` (another connection holds the write lock; the store
@@ -259,9 +286,13 @@ still enumerate its Observation bucket and preserve its project. Empty stale Ses
 still evicted only after rechecking their Observation bucket under capture's `obs:<sessionId>`
 lock, held through Session deletion; recovery and model work stay outside that lock. Existing
 orphaned buckets are not repaired. The same sweep still applies its
-Observation eviction rules after recovery. A dry run counts only stale Sessions whose
-Observation bucket was read successfully and found empty; it still projects Observation
-eviction separately.
+Observation eviction rules after recovery, using the Session's refreshed graph watermark for both
+candidate selection and the locked deletion check. A dry run counts only stale Sessions whose
+Observation bucket was read successfully and found empty. A failed stale-Session scan protects
+its Observations for that sweep; a dry run does not assume a recovery would cover them. It
+projects synthetic Compression of raw Observations seen in the stale-Session recovery scan for
+project-cap counting, without storing them or calling providers. A compression failure stops that
+Session's projection, as in apply; existing coverage still governs preview deletion candidates.
 
 ### Replace import
 `mem::import` validates section shapes, size limits and keyed fields used by import indexing
@@ -384,6 +415,24 @@ with the wrong tag. It drops the trailing mismatched close from that item and pr
 markup in correctly closed items. This applies to new replies; it does not rewrite stored records.
 
 ### Session Summaries in Injection
+A partially successful chunked Summary keeps its useful merged content but caps `coveredThrough`
+at the earliest failed chunk's earliest Observation, or the oldest Observation awaiting Compression
+if earlier. A failed chunk remains retryable on unchanged input. When pending Compression was
+verified to be the sole blocker, unchanged Stops reuse the stored Summary without moving the
+watermark; this reuse cache is process-local. Before reuse, Summarize re-reads the current Summary
+and checks that row against the listed input. When an incremental fold fails or is oversized,
+its full-scan fallback puts decisions from retained input first and appends exact-distinct prior
+decisions, even if all input remains; a later successful fold can supersede them. Forced
+rebuilds do not retain them this way. Summary publication and each Observation eviction share a
+per-Session lock; eviction rechecks coverage inside it, while provider calls stay outside. Before
+publication, Summarize rejects a result with `summary_changed_during_generation` if its predecessor
+changed after the initial read, and reports `observations_evicted_during_summary` if a newly uncovered
+Observation from its input has since been deleted. Either failure preserves the current Summary for a
+later attempt. Retained Observations do not
+block a partial Summary. Stale Session recovery uses the Summary written in the sweep for Eviction, retries uncovered rows on a
+later sweep, and keeps the recovered Session with its retained Observations. An
+explicit `coveredThrough` protects uncovered rows even past the stale-Session age cutoff.
+
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a

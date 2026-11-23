@@ -18,7 +18,7 @@ import { isSlotsEnabled, isReflectEnabled } from "../functions/slots.js";
 import { renderViewerDocument } from "../viewer/document.js";
 import { getBoundViewerPort, getViewerSkipped } from "../viewer/server.js";
 import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
-import { stripPrivateData } from "../functions/privacy.js";
+import { observationLiterals, OBSERVATION_RULES_ERROR, stripPrivateData } from "../functions/privacy.js";
 import { logger } from "../logger.js";
 import { getCounters, getCounterTotals } from "../telemetry/setup.js";
 import { captureTimes, markCaptureArrival, markCaptureSettled } from "../telemetry/capture.js";
@@ -30,7 +30,7 @@ import { recordInjection } from "../functions/injections.js";
 import { MAX_REPLY_QUERY_CHARS } from "../utils/terse-prompt.js";
 import { isHarnessMessage } from "../utils/harness-message.js";
 import { isBelowWordFloor } from "../functions/prompt-context.js";
-import { isUnstored, ObserveRetryQueue } from "../functions/observe-retry.js";
+import { isObservationRulesError, isUnstored, ObserveRetryQueue } from "../functions/observe-retry.js";
 import { ShedQueue } from "../functions/shed-queue.js";
 import { INJECT_TIMEOUT_MS } from "../hooks/_missed-injection.js";
 import {
@@ -216,6 +216,7 @@ export function registerApiTriggers(
   secret?: string,
   metricsStore?: MetricsStore,
   provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown; usage?: () => unknown },
+  readObservationLiterals: () => Promise<string[]> = observationLiterals,
 ): void {
   const providerUsage = () => (provider && "usage" in provider ? provider.usage?.() ?? [] : []);
 
@@ -385,7 +386,7 @@ export function registerApiTriggers(
     try {
       return await sdk.trigger({ function_id: "mem::observe", payload });
     } catch (err) {
-      unstored = isUnstored(err);
+      unstored = isUnstored(err) || isObservationRulesError(err);
       throw err;
     } finally {
       if (!unstored) markCaptureSettled(payload);
@@ -417,13 +418,24 @@ export function registerApiTriggers(
         data: body.data,
       };
       markCaptureArrival(payload);
-      const outcome = await observeRetry.submit(payload).catch((err: unknown) => {
+      try {
+        await readObservationLiterals();
+      } catch {
         markCaptureSettled(payload);
+        return { status_code: 503, body: { error: OBSERVATION_RULES_ERROR } };
+      }
+      try {
+        const outcome = await observeRetry.submit(payload);
+        return outcome.queued
+          ? { status_code: 202, body: { queued: true } }
+          : { status_code: 201, body: outcome.result };
+      } catch (err) {
+        markCaptureSettled(payload);
+        if (isObservationRulesError(err)) {
+          return { status_code: 503, body: { error: OBSERVATION_RULES_ERROR } };
+        }
         throw err;
-      });
-      return outcome.queued
-        ? { status_code: 202, body: { queued: true } }
-        : { status_code: 201, body: outcome.result };
+      }
     },
   );
   sdk.registerTrigger({
