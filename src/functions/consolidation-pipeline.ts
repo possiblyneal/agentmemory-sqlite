@@ -353,7 +353,12 @@ export function registerConsolidationPipelineFunction(
     }
 
     if (tier === "all" || tier === "procedural") {
-      results.procedural = { newProcedures: 0, patternsAnalyzed: 0 };
+      results.procedural = {
+        skipped: true,
+        reason: "procedural extraction retired",
+        newProcedures: 0,
+        patternsAnalyzed: 0,
+      };
     }
 
     if (tier === "all" || tier === "decay") {

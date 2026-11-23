@@ -148,9 +148,14 @@ describe("Consolidation Pipeline", () => {
     const now = new Date().toISOString();
     const existing: ProceduralMemory = { id: "proc", name: "Existing", steps: ["Keep"], triggerCondition: "test", frequency: 2, sourceSessionIds: [], strength: 0.5, createdAt: now, updatedAt: now };
     await kv.set("mem:procedural", existing.id, structuredClone(existing));
-    const result = await sdk.trigger("mem::consolidate-pipeline", { tier }) as { success: boolean; results: { procedural: { newProcedures: number; patternsAnalyzed: number } } };
+    const result = await sdk.trigger("mem::consolidate-pipeline", { tier }) as { success: boolean; results: Record<string, unknown> };
     expect(result.success).toBe(true);
-    expect(result.results.procedural).toEqual({ newProcedures: 0, patternsAnalyzed: 0 });
+    expect(result.results.procedural).toEqual({
+      skipped: true,
+      reason: "procedural extraction retired",
+      newProcedures: 0,
+      patternsAnalyzed: 0,
+    });
     expect(provider.summarize).not.toHaveBeenCalled();
     expect(await kv.list("mem:procedural")).toEqual([existing]);
   });
