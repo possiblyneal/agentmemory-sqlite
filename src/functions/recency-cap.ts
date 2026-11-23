@@ -34,11 +34,12 @@ export function capBehindNewer<T extends { score: number }>(
   textOf: (item: T) => string | string[],
   activeAt: (item: T) => number,
 ): void {
-  const byRecency: Entry<T>[] = [...scored]
-    .sort((a, b) => activeAt(b) - activeAt(a))
-    .flatMap((item) => {
+  const byRecency: Entry<T>[] = scored
+    .map(item => ({ item, at: activeAt(item) }))
+    .filter(({ at }) => Number.isFinite(at))
+    .sort((a, b) => b.at - a.at)
+    .flatMap(({ item, at }) => {
       const texts = textOf(item);
-      const at = activeAt(item);
       return (typeof texts === "string" ? [texts] : texts).map(text => ({ item, at, text: jaccardText(text) }));
     });
   const frequency = new Map<string, number>();

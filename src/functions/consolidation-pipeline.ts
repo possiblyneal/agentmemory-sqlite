@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import type { ISdk } from "../engine/types.js";
 import type {
   SemanticMemory,
@@ -255,12 +254,8 @@ export function registerConsolidationPipelineFunction(
             verificationCalls++;
             if (await verifyFact(candidate.fact, fact).catch(() => false) === true) {
               const at = existingSemantic.indexOf(candidate);
-              const current = await kv.get<SemanticMemory>(KV.semantic, candidate.id);
-              if (current && isDeepStrictEqual(current, candidate)) {
-                const value = { ...reinforce(current), aliases: [...factAliases(current.aliases), { ...key, fact }] };
-                const written = await kv.setManyIfUnchanged(KV.semantic, [{ key: current.id, value, updatedAt: current.updatedAt }]);
-                if (written.length) target = value;
-              }
+              const value = { ...reinforce(candidate), aliases: [...factAliases(candidate.aliases), { ...key, fact }] };
+              if (await kv.replaceIfEqual(KV.semantic, candidate.id, candidate, value)) target = value;
               const latest = target ?? await kv.get<SemanticMemory>(KV.semantic, candidate.id);
               if (latest) existingSemantic[at] = latest;
               else existingSemantic.splice(at, 1);

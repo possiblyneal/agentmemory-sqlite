@@ -19,6 +19,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 
 export type NewestMatchingOpts = {
   equals: Record<string, string>;
@@ -541,6 +542,15 @@ export class SqliteState {
     });
   }
 
+  replaceIfEqual(scope: string, key: string, expected: unknown, value: unknown): boolean {
+    return this.transaction(() => {
+      const current = this.read(scope, key);
+      if (!current.found || !isDeepStrictEqual(current.value, expected)) return false;
+      this.set(scope, key, value);
+      return true;
+    });
+  }
+
   update(scope: string, key: string, ops: UpdateOp[]): {
     old_value: unknown;
     new_value: unknown;
@@ -624,6 +634,7 @@ export function stateFunctions(
   return {
     "state::get": async (p) => cooperate(store.get(p.scope, p.key)),
     "state::set": async (p) => cooperate(store.set(p.scope, p.key, p.value)),
+    "state::replace-if-equal": async (p) => cooperate(store.replaceIfEqual(p.scope, p.key, p.expected, p.value)),
     "state::update": async (p) => cooperate(store.update(p.scope, p.key, p.ops ?? [])),
     "state::delete": async (p) => cooperate(store.delete(p.scope, p.key)),
     "state::list": async (p) => cooperate(store.list(p.scope)),

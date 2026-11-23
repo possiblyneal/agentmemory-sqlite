@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
+import { isDeepStrictEqual } from "node:util";
 import { createFactEntailmentVerifier } from "../src/providers/fact-entailment.js";
 import { SqliteState, stateFunctions } from "../src/engine/inproc/state.js";
 import { StateKV } from "../src/state/kv.js";
@@ -32,12 +33,11 @@ function mockKV() {
     get: async <T>(s: string, k: string) => (scope(s).get(k) as T) ?? null,
     set: async <T>(s: string, k: string, v: T) => (scope(s).set(k, v), v),
     setMany: async () => 0,
-    setManyIfUnchanged: async <T>(s: string, entries: Array<{ key: string; value: T; updatedAt: string }>) =>
-      entries.filter(({ key, value, updatedAt }) => {
-        if ((scope(s).get(key) as { updatedAt?: string } | undefined)?.updatedAt !== updatedAt) return false;
-        scope(s).set(key, value);
-        return true;
-      }).map(({ key }) => key),
+    replaceIfEqual: async <T>(s: string, k: string, expected: T, value: T) => {
+      if (!isDeepStrictEqual(scope(s).get(k), expected)) return false;
+      scope(s).set(k, value);
+      return true;
+    },
     delete: async (s: string, k: string) => void scope(s).delete(k),
     deleteManyIfUnchanged: async () => [] as string[],
     list: async <T>(s: string) => Array.from(scope(s).values()) as T[],
@@ -131,6 +131,30 @@ describe("Semantic Fact keyed supersession", () => {
     });
     await consolidate(deadlineFact);
     expect(await facts()).toEqual([closed, expect.objectContaining({ relation: "deadline", project: "proj" })]);
+  });
+
+  it("preserves a same-timestamp replacement that arrives just before the SQLite alias write", async () => {
+    const store = new SqliteState(":memory:");
+    try {
+      const handlers = stateFunctions(store);
+      let replacement: SemanticMemory | undefined;
+      const db = new StateKV({ trigger: async ({ function_id, payload }: { function_id: string; payload: unknown }) => {
+        if (replacement && (function_id === "state::replace-if-equal" || function_id === "state::set-many-if-unchanged")) {
+          await handlers["state::set"]({ scope: KV.semantic, key: replacement.id, value: replacement });
+        }
+        return handlers[function_id](payload);
+      } } as never);
+      for (let i = 0; i < 5; i++) await db.set(KV.summaries, `ses_${i}`, summary(i));
+      registerConsolidationPipelineFunction(sdk as never, db, { name: "t", compress: vi.fn(), summarize: async () => reply }, async () => true);
+      await consolidate(timeoutFact);
+      const [row] = await db.list<SemanticMemory>(KV.semantic);
+      replacement = { ...row, isLatest: false, supersededBy: "replacement" };
+      await consolidate(deadlineFact);
+      expect(await db.get(KV.semantic, row.id)).toEqual(replacement);
+      expect(await db.list(KV.semantic)).toHaveLength(2);
+    } finally {
+      store.close();
+    }
   });
 
   it("stores a separate Fact when the verifier worker never replies", async () => {
@@ -245,6 +269,15 @@ describe("Semantic Fact keyed supersession", () => {
       store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps the score of a Fact with tied wordings and an invalid creation date", async () => {
+    await consolidate(timeoutFact);
+    const [row] = await facts();
+    await kv.set(KV.semantic, row.id, { ...row, createdAt: "invalid", aliases: [deadlineAlias] });
+    expect(await recallSemanticFacts(kv as never, 10, { query: "timeout" })).toEqual([
+      expect.objectContaining({ score: row.confidence }),
+    ]);
   });
 
   it("ranks a newer correction ahead of a matching stale alias", async () => {
