@@ -183,6 +183,33 @@ describe("mem::evict stale sessions", () => {
     expect(calls.map((call) => call.function_id)).toEqual(["mem::evict"]);
   });
 
+  it("excludes empty-title projections without stopping later raw projections", async () => {
+    const sessionId = "preview_empty_title";
+    const empty = {
+      ...makeRawObservation(sessionId),
+      id: "empty",
+      syntheticDescription: { title: "", narrative: "Notification text" },
+    };
+    const raw = makeRawObservation(sessionId);
+    const covered = makeObservation(sessionId);
+    const store = storeForObservations(sessionId, [empty, raw, covered]);
+    store.get(KV.summaries)!.set(sessionId, { ...summaryFor(sessionId), coveredThrough: daysAgo(1) });
+    store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 1 });
+    const kv = mockKV(store);
+    const set = vi.spyOn(kv, "set");
+    const { sdk, calls } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    sdk.registerFunction("event::session::stopped", () => ({ success: true }));
+    sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
+
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: { dryRun: true } }))
+      .toMatchObject({ capEvictions: 1 });
+    expect(set).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.function_id)).toEqual(["mem::evict"]);
+    expect(await sdk.trigger({ function_id: "mem::evict", payload: {} }))
+      .toMatchObject({ capEvictions: 1 });
+  });
+
   it("includes recoverable raw Observations in project cap previews", async () => {
     const sessionId = "ses_cap_raw";
     const raw = makeRawObservation(sessionId);

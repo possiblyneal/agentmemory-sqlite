@@ -303,7 +303,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         const compressed = obs.flatMap((o) => {
           if (isCompressedObservation(o)) return [o];
           const projected = projectedRaw.get(session.id)?.get(o.id);
-          return projected ? [projected] : [];
+          return projected && isCompressedObservation(projected) ? [projected] : [];
         });
         const lowImportanceIds = new Set<string>();
 
