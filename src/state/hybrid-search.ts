@@ -280,14 +280,16 @@ export class HybridSearch {
     const depthFloor =
       Number.isFinite(parsedDepth) && parsedDepth >= 0 ? parsedDepth : 100;
     const depth = Math.max(limit * 2, depthFloor);
-    const dates = new Map<string, boolean>();
+    const dates = new Map<string, Map<string, boolean>>();
     const eligible = range ? async (id: string, sessionId: string): Promise<boolean> => {
-      const cached = dates.get(id);
+      const cached = dates.get(sessionId)?.get(id);
       if (cached !== undefined) return cached;
       const obs = await this.kv.get<CompressedObservation>(KV.observations(sessionId), id).catch(() => null);
       const memory = obs ? null : await this.kv.get<Memory>(KV.memories, id).catch(() => null);
       const matches = withinDateRange(obs?.timestamp ?? memory?.createdAt, range);
-      dates.set(id, matches);
+      let sessionDates = dates.get(sessionId);
+      if (!sessionDates) dates.set(sessionId, sessionDates = new Map());
+      sessionDates.set(id, matches);
       return matches;
     } : undefined;
     const bm25Results = await this.bm25.searchCooperatively(query, depth, undefined, undefined, range);

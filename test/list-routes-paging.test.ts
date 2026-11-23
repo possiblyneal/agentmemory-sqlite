@@ -132,6 +132,17 @@ describe("date bounds", () => {
     expect(Number.isFinite(parsed)).toBe(true);
     expect(withinDateRange(stored, { after: parsed, before: parsed + 1 })).toBe(true);
   });
+  it.each(["2026-02-30T00:00:00.0009Z", "-000000-01-01 00:00:00.0009Z"])("uses Node milliseconds for invalid recognized components: %s", (stored) => {
+    const parsed = Date.parse(stored);
+    expect(Number.isFinite(parsed)).toBe(true);
+    expect(withinDateRange(stored, { before: parsed + 0.5 })).toBe(true);
+    expect(withinDateRange(stored, { before: parsed, beforeFraction: "1" })).toBe(true);
+  });
+  it("compares a valid expanded year using canonical components", () => {
+    const stored = "+000099-01-01 0:00:00.0009+0000";
+    expect(Number.isFinite(Date.parse(stored))).toBe(true);
+    expect(withinDateRange(stored, parseDateRange({ after: "0099-01-01T00:00:00.0008Z", before: "0099-01-01T00:00:00.001Z" }))).toBe(true);
+  });
   it("compares interior and trailing zeros in fractional remainders", () => {
     const range = parseDateRange({ after: "2026-01-01T00:00:00.000100010Z", before: "2026-01-01T00:00:00.000100020Z" });
     expect(withinDateRange("2026-01-01T00:00:00.00010001Z", range)).toBe(true);
@@ -182,6 +193,13 @@ describe("GET /agentmemory/sessions paging", () => {
     await kv.set(KV.sessions, "newest", { ...makeSession(3), id: "newest", startedAt: "2026-01-01T01:00:00.0009Z" });
     const res = await get("api::sessions", { after: "2026-01-01T00:00:00Z", before: "2026-01-01T02:00:00Z", limit: "1" });
     expect((res.body.sessions as Session[]).map(s => s.id)).toEqual(["newest"]);
+  });
+  it("orders numeric and string Session starts together before bounded paging", async () => {
+    await kv.set(KV.sessions, "older", { ...makeSession(1), id: "older", startedAt: Date.parse("2026-01-05T00:00:00Z") });
+    await kv.set(KV.sessions, "middle", { ...makeSession(2), id: "middle", startedAt: "2026-01-07T00:00:00Z" });
+    await kv.set(KV.sessions, "newer", { ...makeSession(3), id: "newer", startedAt: Date.parse("2026-01-10T00:00:00Z") });
+    const res = await get("api::sessions", { after: "2026-01-01T00:00:00Z", limit: "1", offset: "1" });
+    expect((res.body.sessions as Session[]).map(s => s.id)).toEqual(["middle"]);
   });
   it("filters Session start instants before applying the absolute offset", async () => {
     await seedSessions(25);

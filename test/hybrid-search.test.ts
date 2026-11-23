@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HybridSearch } from "../src/state/hybrid-search.js";
 import { SearchIndex } from "../src/state/search-index.js";
 import { VectorIndex } from "../src/state/vector-index.js";
+import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
+import { backfillGraphIndexes } from "../src/state/graph-indexes.js";
+import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, EmbeddingProvider } from "../src/types.js";
 
 function makeObs(
@@ -94,6 +97,22 @@ describe("HybridSearch", () => {
     const results = await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z"), before: Date.parse("2026-02-01T00:00:00Z") })(1);
     expect(results.map((r) => r.observation.id)).toEqual(["inside"]);
     expect(results[0].vectorScore).toBeGreaterThan(0);
+  });
+
+  it("does not let a stale vector Session exclude a valid bounded graph hit", async () => {
+    const store = new InMemoryKV();
+    const obs = makeObs({ id: "obs_graph", sessionId: "right", timestamp: "2026-01-15T00:00:00Z" });
+    await store.set(KV.observations(obs.sessionId), obs.id, obs);
+    const node = { id: "n1", name: "src/file.ts", type: "file" as const, properties: {}, sourceObservationIds: [obs.id], sessionId: obs.sessionId, createdAt: "2026-01-01T00:00:00Z" };
+    await store.set(KV.graphNodes, node.id, node);
+    await backfillGraphIndexes(store as never, [node], []);
+    const vector = new VectorIndex();
+    vector.add(obs.id, "stale", new Float32Array([1]));
+    const provider: EmbeddingProvider = { name: "test", dimensions: 1, embed: async () => new Float32Array([1]), embedBatch: async () => [] };
+    const hybrid = new HybridSearch(bm25, vector, provider, store as never);
+    const expand = async () => ({ original: "query", reformulations: [], temporalConcretizations: [], entityExtractions: [node.name] });
+    const search = hybrid.prepareSearch("query", expand, { after: Date.parse("2026-01-01T00:00:00Z") });
+    expect((await search(1)).map(r => r.observation.id)).toEqual([obs.id]);
   });
 
   it("keeps an in-range vector hit when its Observation is absent from BM25", async () => {
