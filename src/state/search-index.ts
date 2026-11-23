@@ -135,11 +135,20 @@ export class SearchIndex {
     this.entries.delete(id);
   }
 
-  search(query: string, limit = 20, layer?: IndexLayer, eligible?: (id: string) => boolean): SearchHit[] {
+  search(query: string, limit = 20, layer?: IndexLayer): SearchHit[] {
     const steps = this.scoreTerms(query);
     let step = steps.next();
     while (!step.done) step = steps.next();
-    return this.ranked(step.value, limit, layer, eligible);
+    return this.ranked(step.value, limit, layer);
+  }
+
+  searchEligible(query: string, limit: number, eligible: (id: string) => boolean): { hits: SearchHit[]; maxScore: number } {
+    const steps = this.scoreTerms(query);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    let maxScore = 0;
+    for (const score of step.value.values()) maxScore = Math.max(maxScore, score);
+    return { hits: this.ranked(step.value, limit, undefined, eligible), maxScore };
   }
 
   // Ranks as search() does, but hands the event loop back between query terms

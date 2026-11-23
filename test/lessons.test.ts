@@ -115,6 +115,32 @@ describe("Lessons", () => {
     expect(results.map((l: Lesson) => l.id)).toEqual(["target"]);
   });
 
+  it("admits the fractional candidate ceiling while slicing the final recall page", async () => {
+    const now = new Date().toISOString();
+    for (let i = 0; i < 101; i++) {
+      const id = `fraction-${String(i).padStart(3, "0")}`;
+      await kv.set("mem:lessons", id, {
+        id, content: "quartz deployment", context: "", confidence: i === 100 ? 1 : 0.5,
+        reinforcements: 0, source: "manual", sourceIds: [], project: "/app", tags: [],
+        createdAt: now, updatedAt: now, decayRate: 0.01,
+      });
+    }
+    const result = await sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app", limit: 10.025 });
+    expect(result.lessons).toHaveLength(10);
+    expect(result.lessons[0].id).toBe("fraction-100");
+  });
+
+  it("scores BM25 only once per Lesson recall", async () => {
+    const index = SearchIndex.prototype as unknown as { scoreTerms: (query: string) => unknown };
+    const spy = vi.spyOn(index, "scoreTerms");
+    try {
+      await sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app" });
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("normalizes recall against the strongest hit even when it belongs to another project", async () => {
     const now = new Date().toISOString();
     const target: Lesson = {

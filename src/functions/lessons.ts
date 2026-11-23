@@ -58,12 +58,11 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
 // capped behind a newer near-twin as Lesson recall does.
 export async function searchLessons(kv: StateKV, query: string, project: string | undefined, limit: number): Promise<Lesson[]> {
   const idx = await ensureLessonIndex(kv);
-  const scored = idx
-    .search(query, limit, undefined, (id) => {
-      const lesson = lessonRecords.get(id);
-      return !!lesson && !lesson.deleted && (!project || !lesson.project || lesson.project === project);
-    })
-    .map((h) => ({ lesson: lessonRecords.get(h.obsId)!, score: h.score }));
+  const { hits } = idx.searchEligible(query, limit, (id) => {
+    const lesson = lessonRecords.get(id);
+    return !!lesson && !lesson.deleted && (!project || !lesson.project || lesson.project === project);
+  });
+  const scored = hits.map((h) => ({ lesson: lessonRecords.get(h.obsId)!, score: h.score }));
   capBehindNewer(scored, (s) => s.lesson.content, (s) => lastActiveAt(s.lesson));
   return scored.sort((a, b) => b.score - a.score).map((s) => s.lesson);
 }
@@ -243,8 +242,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(limit * 10, 100)
         : Math.max(limit * 5, 50);
-      const maxHit = idx.search(data.query, 1)[0]?.score ?? 0;
-      const hits = idx.search(data.query, fetchLimit, undefined, (id) => {
+      const { hits, maxScore: maxHit } = idx.searchEligible(data.query, Math.ceil(fetchLimit), (id) => {
         const lesson = lessonRecords.get(id);
         return !!lesson && !lesson.deleted && !(lesson.confidence < minConfidence) &&
           (!data.project || !lesson.project || lesson.project === data.project);
