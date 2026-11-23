@@ -388,10 +388,13 @@ A partially successful chunked Summary keeps its useful merged content but caps 
 at the earliest failed chunk's earliest Observation, or the oldest Observation awaiting Compression
 if earlier. A failed chunk remains retryable on unchanged input. When pending Compression was
 verified to be the sole blocker, unchanged Stops reuse the stored Summary without moving the
-watermark; this reuse cache is process-local. If an incremental fold falls back and prior input
-may be missing, keep prior decisions and append exact-distinct decisions from retained input.
-Stale Session recovery uses the Summary written in the sweep for Eviction, retries uncovered
-rows on a later sweep, and keeps the recovered Session with its retained Observations. An
+watermark; this reuse cache is process-local. When an incremental fold fails or is oversized,
+its full-scan fallback keeps prior decisions and appends exact-distinct decisions from retained
+input, even if all input remains; a later successful fold can supersede those decisions. Forced
+rebuilds do not retain them this way. Summary publication and each Observation eviction share a
+per-Session lock; eviction rechecks coverage inside it, while provider calls stay outside. Stale
+Session recovery uses the Summary written in the sweep for Eviction, retries uncovered rows on a
+later sweep, and keeps the recovered Session with its retained Observations. An
 explicit `coveredThrough` protects uncovered rows even past the stale-Session age cutoff.
 
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an

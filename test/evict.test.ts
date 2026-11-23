@@ -339,7 +339,6 @@ describe("mem::evict stale sessions", () => {
       await new Promise((r) => setTimeout(r, 5));
       await kv.set(KV.summaries, sessionId, summaryFor(sessionId));
       running--;
-      await kv.set(KV.summaries, sessionId, summaryFor(sessionId));
       return { success: true };
     });
     sdk.registerFunction("mem::consolidate-pipeline", () => ({ success: true }));
@@ -944,6 +943,28 @@ describe("mem::evict spares Observations their Session's stop has not finished w
       }
     }
   }
+
+  it.each(["low importance", "project cap"])("rechecks a lowered Summary watermark before %s deletion", async (path) => {
+    const observation = obs("raced", daysAgo(5), path === "low importance" ? 1 : 8);
+    const store = storeForObservations(sessionId, [observation]);
+    store.get(KV.sessions)!.set(sessionId, { ...makeSession(sessionId), startedAt: daysAgo(1) });
+    const initial = { ...summaryFor(sessionId), coveredThrough: daysAgo(1) };
+    await mockKV(store).set(KV.summaries, sessionId, initial);
+    if (path === "project cap") store.get(KV.config)!.set("eviction", { maxObservationsPerProject: 0 });
+    const kv = mockKV(store);
+    const list = kv.list;
+    kv.list = async <T>(scope: string): Promise<T[]> => {
+      const result = await list<T>(scope);
+      if (scope === KV.summaries) {
+        await kv.set(KV.summaries, sessionId, { ...initial, coveredThrough: daysAgo(6) });
+      }
+      return result;
+    };
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    await sdk.trigger({ function_id: "mem::evict", payload: {} });
+    expect(await kv.get(KV.observations(sessionId), observation.id)).not.toBeNull();
+  });
 
   it("keeps an old low-importance Observation whose Session has no Summary", async () => {
     const t = setup({ observations: [obs("a", daysAgo(5))] });

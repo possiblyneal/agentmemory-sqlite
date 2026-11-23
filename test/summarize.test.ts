@@ -1300,6 +1300,47 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls[0].user).not.toContain("prior decision");
   });
 
+  it("retains evicted-prefix decisions across repeated oversized fallbacks", async () => {
+    const sessionId = "ses_repeated_evicted_prefix";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(5);
+    const { handler, kv, provider } = await withPriorSummary(sessionId, 6, 6, "obs_5", [
+      summaryXml({ title: "first", decisions: ["first tail"] }),
+      summaryXml({ title: "second", decisions: ["second tail"] }),
+    ]);
+    const prior = await kv.get<object>("summaries", sessionId);
+    await kv.set("summaries", sessionId, { ...prior, coveredThrough: obsAt(3) });
+    provider.countTokens = async (text) => text.includes("prior decision") ? 10_000 : TOKENS_PER_OBS;
+    for (let i = 0; i < 3; i++) await kv.delete(`obs:${sessionId}`, `obs_${i}`);
+    await handler({ sessionId });
+    const last: any = await kv.get(`obs:${sessionId}`, "obs_5");
+    await kv.set(`obs:${sessionId}`, "obs_6", { ...last, id: "obs_6", timestamp: new Date().toISOString() });
+
+    const result: any = await handler({ sessionId });
+    expect(result.summary.keyDecisions).toContain("prior decision");
+    expect(result.summary.keyDecisions).toContain("second tail");
+  });
+
+  it("retains evicted-prefix decisions when a later fitting fold fails", async () => {
+    const sessionId = "ses_fold_failure_after_eviction";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(5);
+    const { handler, kv, provider } = await withPriorSummary(sessionId, 6, 6, "obs_5", [
+      summaryXml({ title: "first", decisions: ["first tail"] }),
+      "not xml",
+      summaryXml({ title: "second", decisions: ["second tail"] }),
+    ]);
+    const prior = await kv.get<object>("summaries", sessionId);
+    await kv.set("summaries", sessionId, { ...prior, coveredThrough: obsAt(3) });
+    provider.countTokens = async (text) => text.includes("prior decision") ? 10_000 : TOKENS_PER_OBS;
+    for (let i = 0; i < 3; i++) await kv.delete(`obs:${sessionId}`, `obs_${i}`);
+    await handler({ sessionId });
+    const last: any = await kv.get(`obs:${sessionId}`, "obs_5");
+    await kv.set(`obs:${sessionId}`, "obs_6", { ...last, id: "obs_6", timestamp: new Date().toISOString() });
+    provider.countTokens = async () => TOKENS_PER_OBS;
+
+    const result: any = await handler({ sessionId });
+    expect(result.summary.keyDecisions).toContain("prior decision");
+  });
+
   it("retries a fold whose first reply fails to parse as a whole-Session summary", async () => {
     const { handler, kv, provider } = await withPriorSummary("ses_retry", 8, 5, "obs_4", [
       "not xml",
@@ -1340,7 +1381,7 @@ describe("mem::summarize incremental fold", () => {
 
     expect(provider.calls).toHaveLength(2);
     const stored: any = await kv.get("summaries", "ses_folddrop");
-    expect(stored.keyDecisions).toEqual(["rule"]);
+    expect(stored.keyDecisions).toEqual(["prior decision", "rule"]);
   });
 
   it("keeps a decision-less fold of a prior summary that had none", async () => {

@@ -8,6 +8,7 @@ import type {
 } from "../types.js";
 import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
+import { withKeyedLock } from "../state/keyed-mutex.js";
 import {
   SUMMARY_SYSTEM,
   buildSummaryPrompt,
@@ -593,7 +594,6 @@ export function registerSummarizeFunction(
             (!!existing?.coveredThrough && !summaryCovers(existing, o.timestamp)),
         );
         const foldable = !data.force && existing !== null && uncovered.length > 0;
-        const priorInputMayBeMissing = foldable && priorLast + 1 < existing.observationCount;
         let foldPrompt: string | null = null;
         let planned: CompressedObservation[][] | null = null;
         const chunkCache: { partials?: ChunkPartials } = {};
@@ -699,7 +699,7 @@ export function registerSummarizeFunction(
           // chunk partials that had none, since the retry reuses them.
           const noDecisions = parsed.keyDecisions.length === 0;
           if (summary && noDecisions) break;
-          if (!fold && priorInputMayBeMissing) {
+          if (!fold && foldable) {
             parsed.keyDecisions = [...new Set([...existing.keyDecisions, ...parsed.keyDecisions])];
           }
           summary = parsed;
@@ -725,7 +725,7 @@ export function registerSummarizeFunction(
 
         const qualityScore = scoreSummary(summary);
 
-        await kv.set(KV.summaries, sessionId, summary);
+        await withKeyedLock(`summary:${sessionId}`, () => kv.set(KV.summaries, sessionId, summary));
         pendingOnly.delete(sessionId);
         if (pendingInput && pendingWasSoleBlocker) {
           if (pendingOnly.size >= MAX_PENDING_SUMMARY_REUSES) {
