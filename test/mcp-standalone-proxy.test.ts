@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
 import { handleToolCall, handleToolsList, handleResourcesList, handleResourcesRead, handlePromptsList, handlePromptsGet, hydrateMcpEnv } from "../src/mcp/standalone.js";
 import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
 import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
@@ -156,6 +157,53 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     } finally {
       delete process.env["OPENAI_TIMEOUT_MS"];
       spy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["fractional OpenAI override", "60000.01", undefined, undefined, 1_215_000],
+    ["opted-in SDK default", undefined, "true", undefined, 3_615_000],
+    ["opted-in SDK override", undefined, "true", "220000", 4_415_000],
+  ])("uses the Reflect budget for %s", async (_label, openai, allowSdk, sdk, expected) => {
+    vi.stubEnv("AGENTMEMORY_LLM_TIMEOUT_MS", undefined);
+    vi.stubEnv("OPENAI_TIMEOUT_MS", openai);
+    vi.stubEnv("AGENTMEMORY_ALLOW_AGENT_SDK", allowSdk);
+    vi.stubEnv("AGENTMEMORY_AGENT_SDK_TIMEOUT_MS", sdk);
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      installFetch(() => Response.json({ content: [] }));
+      await expect(handleToolCall("memory_reflect", {})).resolves.toEqual({ content: [] });
+      expect(timeout).toHaveBeenLastCalledWith(expected);
+    } finally {
+      timeout.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("uses a deadline-only dispatcher for Reflect and aborts a stalled response", async () => {
+    const server = createServer((req, res) => {
+      if (req.url === "/agentmemory/livez") res.end("ok");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No server address");
+    process.env["AGENTMEMORY_URL"] = `http://127.0.0.1:${address.port}`;
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+      realTimeout(ms > 60_000 ? 200 : ms),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      await expect(handleToolCall("memory_reflect", {})).rejects.toThrow(/timeout/i);
+      const [probe, reflect] = fetchSpy.mock.calls;
+      expect(probe?.[1]).not.toHaveProperty("dispatcher");
+      expect(reflect?.[1]).toHaveProperty("dispatcher");
+      expect(reflect?.[1]?.signal?.aborted).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      timeout.mockRestore();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 

@@ -1,3 +1,5 @@
+import { getDeadlineOnlyDispatcher } from "../providers/_fetch.js";
+
 const DEFAULT_URL = "http://localhost:3111";
 const DEFAULT_HEALTH_PROBE_TIMEOUT_MS = 2_000;
 const CALL_TIMEOUT_MS = 15_000;
@@ -26,7 +28,7 @@ function forceProxy(): boolean {
 export interface ProxyHandle {
   mode: "proxy";
   baseUrl: string;
-  call: (path: string, init?: RequestInit, timeoutMs?: number) => Promise<unknown>;
+  call: (path: string, init?: RequestInit, timeoutMs?: number, options?: { deadlineOnly: boolean }) => Promise<unknown>;
 }
 
 export interface LocalHandle {
@@ -160,8 +162,9 @@ export async function resolveHandle(): Promise<Handle> {
       const handle: ProxyHandle = {
         mode: "proxy",
         baseUrl: url,
-        call: async (path, init, timeoutMs = CALL_TIMEOUT_MS) => {
-          const res = await fetch(`${url}${path}`, {
+        call: async (path, init, timeoutMs = CALL_TIMEOUT_MS, options) => {
+          const dispatcher = options?.deadlineOnly ? getDeadlineOnlyDispatcher() : undefined;
+          const request = {
             ...init,
             headers: {
               "content-type": "application/json",
@@ -169,7 +172,9 @@ export async function resolveHandle(): Promise<Handle> {
               ...(init?.headers as Record<string, string> | undefined),
             },
             signal: AbortSignal.timeout(timeoutMs),
-          });
+            ...(dispatcher ? { dispatcher } : {}),
+          };
+          const res = await fetch(`${url}${path}`, request);
           if (!res.ok) {
             // Carry the status: the caller treats "the server answered 503"
             // differently from "the server could not be reached".

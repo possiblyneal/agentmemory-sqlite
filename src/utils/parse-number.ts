@@ -16,3 +16,10 @@ export function parseOptionalPositiveInt(value: unknown): number | undefined | n
   if (!Number.isInteger(parsed) || parsed < 1) return null;
   return parsed;
 }
+
+export function parsePositiveIntEnv(raw: string | undefined): number | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return undefined;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}

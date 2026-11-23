@@ -1,5 +1,6 @@
 import { compressMaxTokens, type CompressOptions, type MemoryProvider, type ProviderUsage } from "../types.js";
 import { getEnvVar } from "../config.js";
+import { parsePositiveIntEnv } from "../utils/parse-number.js";
 import { fetchWithTimeout, ProviderHttpError, ProviderTimeoutError } from "./_fetch.js";
 import { UsageTally, hostOf } from "./_usage.js";
 import {
@@ -319,15 +320,9 @@ async function readReply(
 //   2. AGENTMEMORY_LLM_TIMEOUT_MS — global LLM timeout (rohitg00/agentmemory#446)
 //   3. 60 000 ms default
 function resolveTimeout(): number {
-  const openaiRaw = getEnvVar("OPENAI_TIMEOUT_MS");
-  const openai = parsePositiveInt(openaiRaw);
-  if (openai !== undefined) return openai;
-
-  const globalRaw = getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS");
-  const globalMs = parsePositiveInt(globalRaw);
-  if (globalMs !== undefined) return globalMs;
-
-  return DEFAULT_TIMEOUT_MS;
+  return parsePositiveIntEnv(getEnvVar("OPENAI_TIMEOUT_MS")) ??
+    parsePositiveIntEnv(getEnvVar("AGENTMEMORY_LLM_TIMEOUT_MS")) ??
+    DEFAULT_TIMEOUT_MS;
 }
 
 function parseExtraBody(raw: string | undefined): Record<string, unknown> {
@@ -342,17 +337,5 @@ function parseExtraBody(raw: string | undefined): Record<string, unknown> {
     throw new Error("OPENAI_EXTRA_BODY must be a JSON object");
   }
   return parsed as Record<string, unknown>;
-}
-
-function parsePositiveInt(raw: string | null | undefined): number | undefined {
-  if (!raw) return undefined;
-  const trimmed = raw.trim();
-  // Reject malformed values like "30ms" or "1_000" — parseInt would
-  // silently return 30 / 1, swallowing user typos as valid timeouts.
-  // The regex enforces pure digits (no sign, no trailing units, no
-  // separators) before we hand off to Number.
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  const n = Number(trimmed);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 

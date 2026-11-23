@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { MemoryProvider } from '../types.js'
-import { getEnvVar } from '../config.js'
+import { getEnvVar, resolveAgentSdkTimeoutMs as sdkBudgetMs } from '../config.js'
+import { parsePositiveIntEnv } from '../utils/parse-number.js'
 import { logger } from '../logger.js'
 
 // #781: the recursion guard used to live on `process.env.AGENTMEMORY_SDK_CHILD`
@@ -58,30 +59,8 @@ const MAX_CONCURRENT_DEFAULT = 2
 // bounds children the daemon is still waiting on, and a host that wedges
 // repeatedly can hold more than the cap — the operator's `kill -KILL`
 // remains the recovery for those, as #27 says.
-const SDK_BUDGET_DEFAULT_MS = 180000
-
 let sdkInFlight = 0
 const sdkWaiters: Array<() => void> = []
-
-function positiveIntEnv(key: string, fallback: number): number {
-  const raw = getEnvVar(key)
-  if (!raw) return fallback
-  // Pure digits only, the way `parsePositiveInt` reads the same
-  // AGENTMEMORY_LLM_TIMEOUT_MS for the OpenAI path: parseInt would read
-  // "30s" as 30 ms here while that provider rejected it, so one variable
-  // would mean two different things.
-  const trimmed = raw.trim()
-  if (!/^\d+$/.test(trimmed)) return fallback
-  const n = Number(trimmed)
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
-function sdkBudgetMs(): number {
-  return positiveIntEnv(
-    'AGENTMEMORY_AGENT_SDK_TIMEOUT_MS',
-    positiveIntEnv('AGENTMEMORY_LLM_TIMEOUT_MS', SDK_BUDGET_DEFAULT_MS),
-  )
-}
 
 // Distinguishable from any string the drain can produce.
 const TIMED_OUT = Symbol('agent-sdk-timeout')
@@ -90,7 +69,8 @@ const TIMED_OUT = Symbol('agent-sdk-timeout')
 // waiter removes itself from the queue on expiry so a released slot is
 // never handed to a caller that has already given up.
 function acquireSlot(): Promise<boolean> {
-  if (sdkInFlight < positiveIntEnv('AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY', MAX_CONCURRENT_DEFAULT)) {
+  const maxConcurrent = parsePositiveIntEnv(getEnvVar('AGENTMEMORY_AGENT_SDK_MAX_CONCURRENCY')) ?? MAX_CONCURRENT_DEFAULT
+  if (sdkInFlight < maxConcurrent) {
     sdkInFlight++
     return Promise.resolve(true)
   }
