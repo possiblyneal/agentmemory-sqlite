@@ -417,8 +417,13 @@ describe("mem::summarize chunking", () => {
       provider,
     });
 
+    for (let i = 0; i < 250; i++) {
+      const observation: any = await kv.get("obs:ses_skip", `obs_${i}`);
+      observation.timestamp = new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString();
+    }
     const result: any = await handler({ sessionId: "ses_skip" });
 
+    expect(result.summary.coveredThrough).toBe("2020-01-01T00:01:40.000Z");
     expect(result.success).toBe(true);
     // 1 ok + (1 + 1 retry skip) + 1 ok + 1 reduce = 5 calls.
     expect(provider.calls).toHaveLength(5);
@@ -432,6 +437,55 @@ describe("mem::summarize chunking", () => {
     expect(reduceCall.user).toContain("obs 201-250");      // third surviving chunk (was idx 2, range 201-250)
     const stored: any = await kv.get("summaries", "ses_skip");
     expect(stored?.title).toBe("merged-with-skip");
+    const retry: any = await handler({ sessionId: "ses_skip" });
+    expect(retry.reused).not.toBe(true);
+    expect(provider.calls.slice(5).some((call) => call.user.includes("obs 100"))).toBe(true);
+    expect(retry.summary.coveredThrough > "2020-01-01T00:04:09.000Z").toBe(true);
+  });
+
+  it("retries a skipped final chunk on the same input and advances coverage after folding", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "first" }), summaryXml({ title: "second" }),
+      "<garbage/>", "<garbage/>", summaryXml({ title: "partial" }),
+      summaryXml({ title: "recovered" }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_final_gap", obsCount: 6, provider });
+    for (let i = 0; i < 6; i++) {
+      const observation: any = await kv.get("obs:ses_final_gap", `obs_${i}`);
+      observation.timestamp = new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString();
+    }
+    const partial: any = await handler({ sessionId: "ses_final_gap" });
+    expect(partial.summary.title).toBe("partial");
+    expect(partial.summary.coveredThrough).toBe("2020-01-01T00:00:04.000Z");
+    const recovered: any = await handler({ sessionId: "ses_final_gap" });
+    expect(recovered.reused).not.toBe(true);
+    expect(recovered.summary.title).toBe("recovered");
+    expect(provider.calls.at(-1)!.user).toContain("obs 4");
+    expect(recovered.summary.coveredThrough > "2020-01-01T00:00:05.000Z").toBe(true);
+    const current: any = await handler({ sessionId: "ses_final_gap" });
+    expect(current.reused).toBe(true);
+  });
+
+  it.each([1, 5])("uses the earlier of pending compression at %i and a failed chunk", async (pendingSecond) => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const provider = makeProvider([
+      summaryXml({ title: "first" }), "bad", "bad", summaryXml({ title: "last" }),
+      summaryXml({ title: "partial" }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId: "ses_gap_pending", obsCount: 6, provider });
+    for (let i = 0; i < 6; i++) {
+      const observation: any = await kv.get("obs:ses_gap_pending", `obs_${i}`);
+      observation.timestamp = new Date(Date.UTC(2020, 0, 1, 0, 0, i * 2)).toISOString();
+    }
+    const pendingAt = new Date(Date.UTC(2020, 0, 1, 0, 0, pendingSecond * 2 + 1)).toISOString();
+    await kv.set("obs:ses_gap_pending", "pending", { id: "pending", timestamp: pendingAt, awaitingCompression: true });
+    const result: any = await handler({ sessionId: "ses_gap_pending" });
+    expect(result.summary.coveredThrough).toBe(pendingSecond === 1 ? pendingAt : "2020-01-01T00:00:04.000Z");
+    expect(await handler({ sessionId: "ses_gap_pending" })).not.toHaveProperty("reused", true);
+    expect(provider.calls.at(-1)?.user).toContain("obs 2");
   });
 
   it("too many skipped chunks bails out with a clear error", async () => {
@@ -1035,6 +1089,30 @@ describe("mem::summarize Session Summary reuse", () => {
     expect(stored.lastObservationId).not.toBe("queued_0");
   });
 
+  it("reuses unchanged input blocked only by pending Compression, then folds once it completes", async () => {
+    const sessionId = "ses_pending_stop";
+    const scope = `obs:${sessionId}`;
+    const provider = makeProvider([summaryXml({ title: "first" }), summaryXml({ title: "folded" })]);
+    const { handler, kv } = await setupHandler({ sessionId, obsCount: 2, provider });
+    const pending = {
+      ...makeObs(2, sessionId),
+      timestamp: new Date(Date.now() - 60_000).toISOString(),
+      awaitingCompression: true,
+    };
+    await kv.set(scope, pending.id, pending);
+
+    expect(await handler({ sessionId })).toMatchObject({ summary: { coveredThrough: pending.timestamp } });
+    for (let i = 0; i < 2; i++) {
+      expect(await handler({ sessionId })).toMatchObject({ reused: true, summary: { coveredThrough: pending.timestamp } });
+    }
+    expect(provider.calls).toHaveLength(1);
+
+    await kv.set(scope, pending.id, { ...pending, awaitingCompression: false });
+    expect(await handler({ sessionId })).toMatchObject({ summary: { title: "folded" } });
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[1].user).toContain("obs 2");
+  });
+
   it("records coverage up to when it listed the Observations when none is pending", async () => {
     const { handler, kv } = await withStoredSummary("ses_done", 3, 0);
     const before = new Date().toISOString();
@@ -1203,6 +1281,25 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls.some((c) => c.user.includes("prior narrative text"))).toBe(false);
   });
 
+  it("retains decisions from an evicted prefix when an oversized fold falls back", async () => {
+    const sessionId = "ses_evicted_prefix";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(5);
+    const { handler, kv, provider } = await withPriorSummary(sessionId, 6, 6, "obs_5", [
+      summaryXml({ title: "fallback", decisions: ["new tail decision"] }),
+    ]);
+    const prior = await kv.get<object>("summaries", sessionId);
+    await kv.set("summaries", sessionId, { ...prior, coveredThrough: obsAt(3) });
+    provider.countTokens = async (text) => text.includes("prior decision") ? 10_000 : TOKENS_PER_OBS;
+    for (let i = 0; i < 3; i++) await kv.delete(`obs:${sessionId}`, `obs_${i}`);
+
+    expect(await handler({ sessionId })).toMatchObject({
+      summary: { title: "fallback", keyDecisions: ["prior decision", "new tail decision"] },
+    });
+    expect(provider.calls).toHaveLength(1);
+    expect(provider.calls[0].user).toContain("Session observations (3 total)");
+    expect(provider.calls[0].user).not.toContain("prior decision");
+  });
+
   it("retries a fold whose first reply fails to parse as a whole-Session summary", async () => {
     const { handler, kv, provider } = await withPriorSummary("ses_retry", 8, 5, "obs_4", [
       "not xml",
@@ -1218,6 +1315,19 @@ describe("mem::summarize incremental fold", () => {
     expect(provider.calls[1].user).not.toContain("prior narrative text");
     const stored: any = await kv.get("summaries", "ses_retry");
     expect(stored.observationCount).toBe(8);
+  });
+
+  it("caps a partial whole-session fallback after a failed fold", async () => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const { handler, provider } = await withPriorSummary("ses_fallback_gap", 6, 5, "obs_4", [
+      "not xml", summaryXml({ title: "first" }), "not xml", "not xml",
+      summaryXml({ title: "last" }), summaryXml({ title: "partial fallback" }),
+    ]);
+    const result: any = await handler({ sessionId: "ses_fallback_gap" });
+    expect(provider.calls[0].user).toContain("prior narrative text");
+    expect(result.summary.title).toBe("partial fallback");
+    expect(result.summary.coveredThrough).toBe(obsAt(2));
   });
 
   it("retries a fold that drops every decision the prior summary had", async () => {

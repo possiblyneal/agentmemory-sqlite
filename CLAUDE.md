@@ -260,8 +260,8 @@ still evicted only after rechecking their Observation bucket under capture's `ob
 lock, held through Session deletion; recovery and model work stay outside that lock. Existing
 orphaned buckets are not repaired. The same sweep still applies its
 Observation eviction rules after recovery. A dry run counts only stale Sessions whose
-Observation bucket was read successfully and found empty; it still projects Observation
-eviction separately.
+Observation bucket was read successfully and found empty. A failed stale-Session scan protects
+its Observations for that sweep; a dry run does not assume a recovery would cover them.
 
 ### Replace import
 `mem::import` validates section shapes, size limits and keyed fields used by import indexing
@@ -384,6 +384,16 @@ with the wrong tag. It drops the trailing mismatched close from that item and pr
 markup in correctly closed items. This applies to new replies; it does not rewrite stored records.
 
 ### Session Summaries in Injection
+A partially successful chunked Summary keeps its useful merged content but caps `coveredThrough`
+at the earliest failed chunk's earliest Observation, or the oldest Observation awaiting Compression
+if earlier. A failed chunk remains retryable on unchanged input. When pending Compression was
+verified to be the sole blocker, unchanged Stops reuse the stored Summary without moving the
+watermark; this reuse cache is process-local. If an incremental fold falls back and prior input
+may be missing, keep prior decisions and append exact-distinct decisions from retained input.
+Stale Session recovery uses the Summary written in the sweep for Eviction, retries uncovered
+rows on a later sweep, and keeps the recovered Session with its retained Observations. An
+explicit `coveredThrough` protects uncovered rows even past the stale-Session age cutoff.
+
 After the gate, `renderWithSessionDecisions` (`src/functions/prompt-context.ts`) gives an
 Observation hit that its Session Summary covers (`summaryCovers()`, the same `coveredThrough`
 test Eviction uses) as that Summary's first 10 decisions, once per Session and recorded as a

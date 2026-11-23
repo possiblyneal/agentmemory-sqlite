@@ -17,6 +17,7 @@ import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
+import { isAwaitingCompression } from "./compress-synthetic.js";
 import { summaryCovers } from "./summarize.js";
 import { logger } from "../logger.js";
 
@@ -125,7 +126,10 @@ async function recoverOrEvictStaleSession(
   sdk: ISdk,
   kv: StateKV,
   sessionId: string,
-): Promise<{ recovered: boolean; evicted: boolean }> {
+  prior: SessionSummary | undefined,
+  dryRun: boolean,
+  scannedSessions: Set<string>,
+): Promise<{ recovered: boolean; evicted: boolean; summary?: SessionSummary }> {
   const kept = { recovered: false, evicted: false };
   const observations = await kv
     .list<CompressedObservation | RawObservation>(KV.observations(sessionId))
@@ -137,11 +141,15 @@ async function recoverOrEvictStaleSession(
       return null;
     });
   if (!observations) return kept;
+  scannedSessions.add(sessionId);
+  if (prior && !observations.some((o) =>
+    !isCompressedObservation(o) || isAwaitingCompression(o) || !summaryCovers(prior, o.timestamp)
+  )) return kept;
+  if (dryRun) return { recovered: false, evicted: observations.length === 0 };
 
   // A raw row this old is a compression that never ran, so it is
   // compressed synthetically here; otherwise the Session could
   // never be summarized and would be retried on every run.
-  let recovered = false;
   if (observations.length > 0) {
     const raw = observations.filter(
       (o): o is RawObservation => !isCompressedObservation(o),
@@ -157,9 +165,14 @@ async function recoverOrEvictStaleSession(
       });
       return kept;
     }
-    recovered = await recoverStaleSession(sdk, sessionId);
-    if (!recovered) return kept;
-    return { recovered: true, evicted: false };
+    if (!(await recoverStaleSession(sdk, sessionId))) return kept;
+    const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null);
+    if (!summary) return kept;
+    return {
+      recovered: observations.every((o) => summaryCovers(summary, o.timestamp)),
+      evicted: false,
+      summary,
+    };
   }
 
   try {
@@ -176,14 +189,14 @@ async function recoverOrEvictStaleSession(
       id: sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { recovered, evicted: false };
+    return kept;
   }
   await recordAudit(kv, "delete", "mem::evict", [sessionId], {
     resource: "session",
     reason: "stale_session_without_summary",
     dryRun: false,
   });
-  return { recovered, evicted: true };
+  return { recovered: false, evicted: true };
 }
 
 export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
@@ -214,46 +227,24 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         .list<SessionSummary>(KV.summaries)
         .catch(() => []);
       const summaryBySession = new Map(summaries.map((s) => [s.sessionId, s]));
-      const summaryIds = new Set(summaryBySession.keys());
 
       const staleMs = cfg.staleSessionDays * MS_PER_DAY;
-      const staleSessions = sessions.filter(
-        (session) =>
-          session.startedAt &&
-          now - new Date(session.startedAt).getTime() > staleMs &&
-          !summaryIds.has(session.id),
-      );
-      const processedStaleSessionIds = new Set<string>();
-      if (dryRun) {
-        for (const session of staleSessions) {
-          const observations = await kv
-            .list<CompressedObservation | RawObservation>(KV.observations(session.id))
-            .catch(() => null);
-          if (!observations) continue;
-          processedStaleSessionIds.add(session.id);
-          if (observations.length === 0) stats.staleSessions++;
-        }
-      } else {
-        let recoveredStaleSessions = 0;
-        for (const session of staleSessions) {
-          const { recovered, evicted } = await recoverOrEvictStaleSession(
-            sdk,
-            kv,
-            session.id,
-          );
-          if (recovered) {
-            recoveredStaleSessions++;
-            processedStaleSessionIds.add(session.id);
-          }
-          if (evicted) {
-            stats.staleSessions++;
-            processedStaleSessionIds.add(session.id);
-          }
-        }
-        if (recoveredStaleSessions > 0) {
-          await runRecoveredSessionConsolidation(sdk);
-        }
+      const scannedSessions = new Set<string>();
+      const scannedStaleCandidates = new Set<string>();
+      let recoveredStaleSessions = 0;
+      for (const session of sessions) {
+        if (!(now - new Date(session.startedAt).getTime() > staleMs)) continue;
+        const prior = summaryBySession.get(session.id);
+        if (prior && !prior.coveredThrough) continue;
+        scannedStaleCandidates.add(session.id);
+        const { recovered, evicted, summary } = await recoverOrEvictStaleSession(
+          sdk, kv, session.id, prior, dryRun, scannedSessions,
+        );
+        if (summary) summaryBySession.set(session.id, summary);
+        if (recovered) recoveredStaleSessions++;
+        if (evicted) stats.staleSessions++;
       }
+      if (recoveredStaleSessions > 0) await runRecoveredSessionConsolidation(sdk);
 
       const evictedSourceIds: string[] = [];
       const removedBySession = new Map<string, number>();
@@ -273,9 +264,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           if (!o.timestamp) continue;
           const age = now - new Date(o.timestamp).getTime();
           if (
-            !processedStaleSessionIds.has(session.id) &&
-            age < staleMs &&
-            !isStopFinishedWith(o, session, summary)
+            (scannedStaleCandidates.has(session.id) && (!scannedSessions.has(session.id) || !summary)) ||
+            (summary?.coveredThrough && (isAwaitingCompression(o) || !summaryCovers(summary, o.timestamp))) ||
+            (age < staleMs && !isStopFinishedWith(o, session, summary))
           ) {
             awaitingStop.add(o.id);
             continue;

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ISdk } from "../engine/types.js";
 import type {
   CompressedObservation,
@@ -50,6 +51,7 @@ const COUNT_CONCURRENCY = 16;
 // Bail on the merged summary if more than this fraction of chunks fail
 // to parse — a half-blind narrative is worse than a clean error.
 const MAX_SKIP_RATIO = 0.5;
+const MAX_PENDING_SUMMARY_REUSES = 1_024;
 
 // A budget at or below the prompt overhead leaves no room for any
 // Observation, so it is floored to one payload token.
@@ -221,6 +223,7 @@ async function planChunks(
 interface ChunkPartials {
   reduceInput: ReducePartial[];
   skipped: number;
+  failedThrough?: string;
 }
 
 // Returns the final summary XML string. A single chunk is one LLM call.
@@ -316,7 +319,14 @@ async function summarizeChunks(
     const start = chunkStarts[originalIdx] ?? 0;
     return toReducePartial(p, start + 1, start + chunks[originalIdx]!.length);
   });
-  return { reduceInput, skipped };
+  const failedThrough = partialByIdx.reduce<string | undefined>((min, partial, i) => {
+    if (partial !== null) return min;
+    for (const observation of chunks[i]!) {
+      if (!min || observation.timestamp < min) min = observation.timestamp;
+    }
+    return min;
+  }, undefined);
+  return { reduceInput, skipped, failedThrough };
 }
 
 function toReducePartial(
@@ -475,7 +485,11 @@ export function registerSummarizeFunction(
   provider: MemoryProvider,
   metricsStore?: MetricsStore,
 ): void {
-  sdk.registerFunction("mem::summarize", 
+  const fingerprint = (value: SessionSummary | CompressedObservation[]) =>
+    createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  // A pending row's watermark can mask a later failed chunk.
+  const pendingOnly = new Map<string, { input: string; summary: string }>();
+  sdk.registerFunction("mem::summarize",
     // maxChunkConcurrency is for Eviction's recovery sweep, which must hold at
     // most one LLM slot so live Sessions keep the other.
     async (
@@ -513,17 +527,23 @@ export function registerSummarizeFunction(
         return { success: false, error: "no_observations" };
       }
 
-      // A stored summary is current when both the Observation count and the
-      // last Observation id still match: a delete followed by a new
-      // Observation keeps the count but moves the id.
+      // A delete followed by a new Observation can keep the count but move the
+      // last id; unchanged inputs can still have a gap in their coverage.
       const lastObservationId = compressed[compressed.length - 1]!.id;
       const lastObservationAt = compressed[compressed.length - 1]!.timestamp;
       const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
+      const pendingInput = coveredThrough < listedAt
+        ? fingerprint(observations)
+        : undefined;
+      const pendingReuse = pendingOnly.get(sessionId);
       if (!data.force) {
         if (
           existing &&
           existing.observationCount === compressed.length &&
-          existing.lastObservationId === lastObservationId
+          existing.lastObservationId === lastObservationId &&
+          ((pendingReuse && pendingReuse.input === pendingInput &&
+            pendingReuse.summary === fingerprint(existing)) ||
+            !compressed.some((o) => existing.coveredThrough && !summaryCovers(existing, o.timestamp)))
         ) {
           logger.info("Session Summary current, reused", {
             sessionId,
@@ -550,6 +570,7 @@ export function registerSummarizeFunction(
         // response used to discard the Session Summary, so it gets a second
         // attempt.
         let summary: SessionSummary | null = null;
+        let pendingWasSoleBlocker = false;
         let lastError: "empty_provider_response" | "parse_failed" | "validation_failed" =
           "empty_provider_response";
         let note = "";
@@ -562,7 +583,7 @@ export function registerSummarizeFunction(
         // cover. Neither is a count, since a Session at its cap evicts a
         // covered Observation for every new one, sometimes that last one. A
         // fold prompt (prior summary included) too big for one chunk, or a
-        // fold whose first attempt fails, falls back to the whole Session.
+        // fold whose first attempt fails, falls back to the retained Observations.
         const priorLast = existing
           ? compressed.findIndex((o) => o.id === existing.lastObservationId)
           : -1;
@@ -572,6 +593,7 @@ export function registerSummarizeFunction(
             (!!existing?.coveredThrough && !summaryCovers(existing, o.timestamp)),
         );
         const foldable = !data.force && existing !== null && uncovered.length > 0;
+        const priorInputMayBeMissing = foldable && priorLast + 1 < existing.observationCount;
         let foldPrompt: string | null = null;
         let planned: CompressedObservation[][] | null = null;
         const chunkCache: { partials?: ChunkPartials } = {};
@@ -666,7 +688,10 @@ export function registerSummarizeFunction(
           }
           parsed.lastObservationId = lastObservationId;
           parsed.lastObservationAt = lastObservationAt;
-          parsed.coveredThrough = coveredThrough;
+          const failedThrough = fold ? undefined : chunkCache.partials?.failedThrough;
+          parsed.coveredThrough = failedThrough && failedThrough < coveredThrough
+            ? failedThrough
+            : coveredThrough;
           // A Summary with no decisions gives Injection nothing to deliver, so
           // the first one is tried again and kept when the retry is no better.
           // A fold of a prior Summary that had none is kept as is: retrying it
@@ -674,7 +699,11 @@ export function registerSummarizeFunction(
           // chunk partials that had none, since the retry reuses them.
           const noDecisions = parsed.keyDecisions.length === 0;
           if (summary && noDecisions) break;
+          if (!fold && priorInputMayBeMissing) {
+            parsed.keyDecisions = [...new Set([...existing.keyDecisions, ...parsed.keyDecisions])];
+          }
           summary = parsed;
+          pendingWasSoleBlocker = !failedThrough;
           const inputHadNone = fold
             ? !existing?.keyDecisions?.length
             : (chunkCache.partials?.reduceInput.every((p) => p.keyDecisions.length === 0) ?? false);
@@ -697,6 +726,13 @@ export function registerSummarizeFunction(
         const qualityScore = scoreSummary(summary);
 
         await kv.set(KV.summaries, sessionId, summary);
+        pendingOnly.delete(sessionId);
+        if (pendingInput && pendingWasSoleBlocker) {
+          if (pendingOnly.size >= MAX_PENDING_SUMMARY_REUSES) {
+            pendingOnly.delete(pendingOnly.keys().next().value!);
+          }
+          pendingOnly.set(sessionId, { input: pendingInput, summary: fingerprint(summary) });
+        }
         await safeAudit(kv, "compress", "mem::summarize", [sessionId], {
           title: summary.title,
           observationCount: compressed.length,
