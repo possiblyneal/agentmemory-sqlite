@@ -510,6 +510,8 @@ export function registerSummarizeFunction(
         return { success: false, error: "session_not_found" };
       }
 
+      const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
+      const existingFingerprint = existing ? fingerprint(existing) : null;
       const listedAt = new Date().toISOString();
       const observations = await kv.list<CompressedObservation>(
         KV.observations(sessionId),
@@ -532,7 +534,6 @@ export function registerSummarizeFunction(
       // last id; unchanged inputs can still have a gap in their coverage.
       const lastObservationId = compressed[compressed.length - 1]!.id;
       const lastObservationAt = compressed[compressed.length - 1]!.timestamp;
-      const existing = await kv.get<SessionSummary>(KV.summaries, sessionId);
       const pendingInput = coveredThrough < listedAt
         ? fingerprint(observations)
         : undefined;
@@ -727,6 +728,9 @@ export function registerSummarizeFunction(
 
         const published = await withKeyedLock(`summary:${sessionId}`, async () => {
           const current = await kv.get<SessionSummary>(KV.summaries, sessionId);
+          if ((current ? fingerprint(current) : null) !== existingFingerprint) {
+            return "summary_changed_during_generation";
+          }
           if (current) {
             const newlyUncovered = observations.filter(
               (o) => summaryCovers(current, o.timestamp) && !summaryCovers(summary!, o.timestamp),
@@ -734,12 +738,12 @@ export function registerSummarizeFunction(
             const retained = await Promise.all(
               newlyUncovered.map((o) => kv.get(KV.observations(sessionId), o.id)),
             );
-            if (retained.some((o) => !o)) return false;
+            if (retained.some((o) => !o)) return "observations_evicted_during_summary";
           }
           await kv.set(KV.summaries, sessionId, summary);
-          return true;
+          return null;
         });
-        if (!published) return { success: false, error: "observations_evicted_during_summary" };
+        if (published) return { success: false, error: published };
         pendingOnly.delete(sessionId);
         if (pendingInput && pendingWasSoleBlocker) {
           if (pendingOnly.size >= MAX_PENDING_SUMMARY_REUSES) {

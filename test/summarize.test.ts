@@ -443,6 +443,40 @@ describe("mem::summarize chunking", () => {
     expect(retry.summary.coveredThrough > "2020-01-01T00:04:09.000Z").toBe(true);
   });
 
+  it.each([true, false])("rejects a concurrent Summary replacement with prior Summary: %s", async (hasPrior) => {
+    const sessionId = `ses_concurrent_${hasPrior}`;
+    const provider = makeProvider([
+      summaryXml({ title: "newer", decisions: ["new"] }),
+      summaryXml({ title: "older", decisions: ["old"] }),
+    ]);
+    let started!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { started = resolve; });
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const original = provider.summarize;
+    let first = true;
+    provider.summarize = async (system, prompt) => {
+      if (first) { first = false; started(); await blocked; }
+      return original(system, prompt);
+    };
+    const { handler, kv } = await setupHandler({ sessionId, obsCount: 1, provider });
+    if (hasPrior) await kv.set("summaries", sessionId, { sessionId, title: "prior", keyDecisions: [], observationCount: 0, createdAt: "2020-01-01T00:00:00.000Z" });
+    const older = handler({ sessionId, force: true });
+    await waiting;
+    const newObservation = makeObs(1, sessionId);
+    await kv.set(`obs:${sessionId}`, newObservation.id, newObservation);
+    const newer: any = await handler({ sessionId, force: true });
+    expect(newer.success).toBe(true);
+    expect(newer.summary.keyDecisions).toEqual(["new"]);
+    await kv.delete(`obs:${sessionId}`, newObservation.id);
+    release();
+    const result: any = await older;
+    expect(result).toMatchObject({ success: false, error: "summary_changed_during_generation" });
+    expect(await kv.get("summaries", sessionId)).toEqual(newer.summary);
+    const retry: any = await handler({ sessionId, force: true });
+    expect(retry.success).toBe(true);
+  });
+
   it.each([true, false])("handles newly uncovered input deleted during generation: %s", async (deleted) => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";

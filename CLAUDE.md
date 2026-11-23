@@ -393,8 +393,10 @@ its full-scan fallback puts decisions from retained input first and appends exac
 decisions, even if all input remains; a later successful fold can supersede them. Forced
 rebuilds do not retain them this way. Summary publication and each Observation eviction share a
 per-Session lock; eviction rechecks coverage inside it, while provider calls stay outside. Before
-publication, Summarize retains the current Summary and reports `observations_evicted_during_summary`
-if a newly uncovered Observation from its input has since been deleted. Retained Observations do not
+publication, Summarize rejects a result with `summary_changed_during_generation` if its predecessor
+changed after the initial read, and reports `observations_evicted_during_summary` if a newly uncovered
+Observation from its input has since been deleted. Either failure preserves the current Summary for a
+later attempt. Retained Observations do not
 block a partial Summary. Stale Session recovery uses the Summary written in the sweep for Eviction, retries uncovered rows on a
 later sweep, and keeps the recovered Session with its retained Observations. An
 explicit `coveredThrough` protects uncovered rows even past the stale-Session age cutoff.

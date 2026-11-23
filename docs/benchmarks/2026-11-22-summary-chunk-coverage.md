@@ -33,7 +33,9 @@ On the `e392b537` follow-up, deterministic tests cover both publication and Evic
 Eviction rechecks a lowered watermark before either deletion path, and a partial rebuild retains
 its prior Summary if an Observation it would newly uncover was deleted during generation. A
 barrier test also holds Eviction between its coverage reread and deletion: Summary publication
-waits, and removing only its publication lock makes the test fail.
+waits, and removing only its publication lock makes the test fail. A concurrent-writer fixture
+also verifies that a result generated against a replaced Summary is rejected, whether or not a
+prior Summary existed, and that a later attempt succeeds. Both cases failed before that guard.
 
 An oversized fallback fixture with ten prior decisions verifies that the fresh decision comes
 first, with the distinct prior decisions retained behind it. Fold-drift fixtures verify both the
