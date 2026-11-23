@@ -85,7 +85,7 @@ describe("measureFoldDrift", () => {
     expect(r.fallbacks).toBe(1);
     expect(r.droppedExact).toBe(0);
     expect(r.fallbackDroppedExact).toBe(0);
-    expect(r.steps[1]!.decisions).toEqual([ALL[0], ALL[1]]);
+    expect(r.steps[1]!.decisions).toEqual([ALL[1], ALL[0]]);
   });
 
   it("matches normalized text and counts a reworded decision as loosely matched", async () => {
@@ -193,7 +193,7 @@ describe("measureFoldDrift judged by the decision judge", () => {
     const r = await measureFoldDrift(provider, obs(6), opts, { judge: includesJudge(), key: keyed(ALL[0]!) });
     expect(r.steps.map((s) => s.kind)).toEqual(["first", "fallback"]);
     expect(r.labels).toEqual([{ decisionId: "d0", label: "kept", inOnePass: true }]);
-    expect(r.steps[1]!.decisions).toEqual([ALL[0], ALL[1]]);
+    expect(r.steps[1]!.decisions).toEqual([ALL[1], ALL[0]]);
   });
 
   it("ignores key decisions from other Sessions", async () => {

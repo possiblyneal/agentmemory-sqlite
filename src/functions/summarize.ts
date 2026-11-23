@@ -700,7 +700,7 @@ export function registerSummarizeFunction(
           const noDecisions = parsed.keyDecisions.length === 0;
           if (summary && noDecisions) break;
           if (!fold && foldable) {
-            parsed.keyDecisions = [...new Set([...existing.keyDecisions, ...parsed.keyDecisions])];
+            parsed.keyDecisions = [...new Set([...parsed.keyDecisions, ...existing.keyDecisions])];
           }
           summary = parsed;
           pendingWasSoleBlocker = !failedThrough;

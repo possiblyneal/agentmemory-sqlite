@@ -26,3 +26,16 @@ Paired synthetic regressions, with scripted provider responses and isolated test
 
 The chunk fixture also verifies that a pending watermark does not suppress a failed-chunk retry.
 These fixtures measure coverage, preservation, and call reuse; they do not measure live-provider Recall or latency.
+
+## Follow-up correctness fixtures
+
+On the `e392b537` follow-up, deterministic tests cover both publication and Eviction ordering:
+Eviction rechecks a lowered watermark before either deletion path, and a partial rebuild retains
+its prior Summary if an Observation it would newly uncover was deleted during generation. A
+barrier test also holds Eviction between its coverage reread and deletion: Summary publication
+waits, and removing only its publication lock makes the test fail.
+
+An oversized fallback fixture with ten prior decisions verifies that the fresh decision comes
+first, with the distinct prior decisions retained behind it. Fold-drift fixtures verify both the
+fallback count and that the retained decision is attributed as kept. These are scripted test
+results, not part of the earlier BM25 comparison or a live-provider measurement.

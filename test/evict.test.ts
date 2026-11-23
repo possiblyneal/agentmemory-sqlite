@@ -7,6 +7,7 @@ import type {
   SessionSummary,
 } from "../src/types.js";
 import { registerEvictFunction } from "../src/functions/evict.js";
+import { registerSummarizeFunction } from "../src/functions/summarize.js";
 import { KV } from "../src/state/schema.js";
 import { logger } from "../src/logger.js";
 
@@ -964,6 +965,55 @@ describe("mem::evict spares Observations their Session's stop has not finished w
     registerEvictFunction(sdk as never, kv as never);
     await sdk.trigger({ function_id: "mem::evict", payload: {} });
     expect(await kv.get(KV.observations(sessionId), observation.id)).not.toBeNull();
+  });
+
+  it("holds Summary publication until a covered Observation deletion completes", async () => {
+    const observation = obs("raced", daysAgo(5));
+    const store = storeForObservations(sessionId, [observation]);
+    store.get(KV.sessions)!.set(sessionId, { ...makeSession(sessionId), startedAt: daysAgo(1) });
+    store.get(KV.summaries)!.set(sessionId, { ...summaryFor(sessionId), coveredThrough: daysAgo(1) });
+    const kv = mockKV(store);
+    const get = kv.get;
+    let releaseDelete!: () => void;
+    let deletionReached!: () => void;
+    const deletionBarrier = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    const deletionStarted = new Promise<void>((resolve) => { deletionReached = resolve; });
+    kv.get = async <T>(scope: string, key: string): Promise<T | null> => {
+      if (scope === KV.observations(sessionId) && key === observation.id) {
+        deletionReached();
+        await deletionBarrier;
+      }
+      return get<T>(scope, key);
+    };
+    const { sdk } = mockSdk();
+    registerEvictFunction(sdk as never, kv as never);
+    let providerFinished!: () => void;
+    const providerDone = new Promise<void>((resolve) => { providerFinished = resolve; });
+    registerSummarizeFunction(sdk as never, kv as never, {
+      name: "test", countTokens: async () => 1,
+      summarize: async () => {
+        providerFinished();
+        return "<summary><title>New</title><narrative>A narrative long enough to validate.</narrative><decisions><decision>new</decision></decisions></summary>";
+      },
+    } as never);
+    const eviction = sdk.trigger({ function_id: "mem::evict", payload: {} });
+    await deletionStarted;
+    let published = false;
+    const set = kv.set;
+    kv.set = async <T>(scope: string, key: string, value: T): Promise<T> => {
+      if (scope === KV.summaries) published = true;
+      return set(scope, key, value);
+    };
+    const summarize = sdk.trigger({ function_id: "mem::summarize", payload: { sessionId, force: true } });
+    await providerDone;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    try {
+      expect(published).toBe(false);
+    } finally {
+      releaseDelete();
+    }
+    await Promise.all([eviction, summarize]);
+    expect(published).toBe(true);
   });
 
   it("keeps an old low-importance Observation whose Session has no Summary", async () => {

@@ -1327,11 +1327,27 @@ describe("mem::summarize incremental fold", () => {
     for (let i = 0; i < 3; i++) await kv.delete(`obs:${sessionId}`, `obs_${i}`);
 
     expect(await handler({ sessionId })).toMatchObject({
-      summary: { title: "fallback", keyDecisions: ["prior decision", "new tail decision"] },
+      summary: { title: "fallback", keyDecisions: ["new tail decision", "prior decision"] },
     });
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0].user).toContain("Session observations (3 total)");
     expect(provider.calls[0].user).not.toContain("prior decision");
+  });
+
+  it("places fresh fallback decisions inside the Injection window ahead of retained decisions", async () => {
+    const sessionId = "ses_fallback_fresh_first";
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(8);
+    const { handler, kv, provider } = await withPriorSummary(sessionId, 6, 5, "obs_4", [
+      summaryXml({ title: "fallback", decisions: ["new decision"] }),
+    ]);
+    const prior = await kv.get<object>("summaries", sessionId);
+    await kv.set("summaries", sessionId, {
+      ...prior, keyDecisions: Array.from({ length: 10 }, (_, i) => `old decision ${i}`),
+    });
+    provider.countTokens = async (text) => text.includes("old decision") ? 10_000 : TOKENS_PER_OBS;
+    const result: any = await handler({ sessionId });
+    expect(result.summary.keyDecisions[0]).toBe("new decision");
+    expect(result.summary.keyDecisions).toHaveLength(11);
   });
 
   it("retains evicted-prefix decisions across repeated oversized fallbacks", async () => {
@@ -1415,7 +1431,7 @@ describe("mem::summarize incremental fold", () => {
 
     expect(provider.calls).toHaveLength(2);
     const stored: any = await kv.get("summaries", "ses_folddrop");
-    expect(stored.keyDecisions).toEqual(["prior decision", "rule"]);
+    expect(stored.keyDecisions).toEqual(["rule", "prior decision"]);
   });
 
   it("keeps a decision-less fold of a prior summary that had none", async () => {
