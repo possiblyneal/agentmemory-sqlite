@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fsPromises from "node:fs/promises";
-import { syncBuiltinESMExports } from "node:module";
+import { open } from "node:fs/promises";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +11,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerApiTriggers } from "../src/triggers/api.js";
 import { registerObserveFunction } from "../src/functions/observe.js";
+import { observationLiterals } from "../src/functions/privacy.js";
 import { DedupMap } from "../src/functions/dedup.js";
 import {
   OBSERVE_RETRY_CAPACITY_BYTES,
@@ -48,11 +48,13 @@ describe("api::observe when a row write fails", () => {
   let sdk: ReturnType<typeof mockSdk>;
   let diskFull: boolean;
   let stored: number[];
+  let readLiterals: () => Promise<string[]>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     sdk = mockSdk({ looseTrigger: true });
-    registerApiTriggers(sdk as never, mockKV() as never);
+    readLiterals = observationLiterals;
+    registerApiTriggers(sdk as never, mockKV() as never, undefined, undefined, undefined, () => readLiterals());
     diskFull = true;
     stored = [];
     sdk.registerFunction("mem::observe", async (payload) => {
@@ -102,7 +104,6 @@ describe("api::observe when a row write fails", () => {
     const dir = mkdtempSync(join(process.cwd(), "tmp", "redaction-order-"));
     const path = join(dir, "rules.json");
     const previous = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;
-    const original = fsPromises.open;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let calls = 0;
@@ -110,26 +111,22 @@ describe("api::observe when a row write fails", () => {
     try {
       process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE = path;
       await observe(1);
-      fsPromises.open = (async (...args: Parameters<typeof original>) => {
+      const delayedOpen: typeof open = async (...args) => {
         if (++calls === 1) await gate;
-        return original(...args);
-      }) as typeof original;
-      syncBuiltinESMExports();
+        return open(...args);
+      };
+      readLiterals = () => observationLiterals(delayedOpen);
       const second = observe(2);
       const third = observe(3);
       await Promise.resolve();
       release();
       await Promise.all([second, third]);
       expect(calls).toBe(1);
-      fsPromises.open = original;
-      syncBuiltinESMExports();
       diskFull = false;
       await vi.advanceTimersByTimeAsync(OBSERVE_RETRY_INTERVAL_MS);
       expect(stored).toEqual([1, 2, 3]);
     } finally {
       release();
-      fsPromises.open = original;
-      syncBuiltinESMExports();
       if (previous === undefined) delete process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;
       else process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE = previous;
       rmSync(dir, { recursive: true, force: true });

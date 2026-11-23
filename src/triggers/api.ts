@@ -215,6 +215,7 @@ export function registerApiTriggers(
   secret?: string,
   metricsStore?: MetricsStore,
   provider?: ResilientProvider | { circuitState?: unknown; circuitStates?: unknown; usage?: () => unknown },
+  readObservationLiterals: () => Promise<string[]> = observationLiterals,
 ): void {
   const providerUsage = () => (provider && "usage" in provider ? provider.usage?.() ?? [] : []);
 
@@ -408,7 +409,7 @@ export function registerApiTriggers(
         };
       }
       try {
-        await observationLiterals();
+        await readObservationLiterals();
       } catch {
         return { status_code: 503, body: { error: OBSERVATION_RULES_ERROR } };
       }

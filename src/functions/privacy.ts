@@ -7,19 +7,19 @@ export const OBSERVATION_RULES_ERROR = "Observation redaction rules are invalid 
 
 const pendingRules = new Map<string, Promise<string[]>>();
 
-export function observationLiterals(): Promise<string[]> {
+export function observationLiterals(openRules: typeof open = open): Promise<string[]> {
   const path = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;
   if (path === undefined) return Promise.resolve([]);
   const pending = pendingRules.get(path);
   if (pending) return pending;
-  const load = loadObservationLiterals(path).finally(() => pendingRules.delete(path));
+  const load = loadObservationLiterals(path, openRules).finally(() => pendingRules.delete(path));
   pendingRules.set(path, load);
   return load;
 }
 
-async function loadObservationLiterals(path: string): Promise<string[]> {
+async function loadObservationLiterals(path: string, openRules: typeof open): Promise<string[]> {
   try {
-    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    const file = await openRules(path, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
       if (!(await file.stat()).isFile()) throw new Error();
       const buffer = Buffer.alloc(RULES_LIMIT + 1);
