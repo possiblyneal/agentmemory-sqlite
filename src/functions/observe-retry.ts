@@ -1,5 +1,6 @@
 import type { HookPayload } from "../types.js";
 import { logger } from "../logger.js";
+import { OBSERVATION_RULES_ERROR } from "./privacy.js";
 
 // Telemetry hooks fire and forget, so an Observation whose row write fails is
 // gone unless the daemon keeps it. The daemon keeps it when the failure clears on
@@ -36,6 +37,10 @@ export function isUnstored(err: unknown): boolean {
     err instanceof Error &&
     RETRYABLE_CAUSES.some((cause) => err.message.includes(UNSTORED_PREFIX + cause))
   );
+}
+
+export function isObservationRulesError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes(OBSERVATION_RULES_ERROR);
 }
 
 export class ObserveRetryQueue {
@@ -98,7 +103,7 @@ export class ObserveRetryQueue {
         try {
           await this.observe(this.pending[0].payload);
         } catch (err) {
-          if (isUnstored(err)) return;
+          if (isUnstored(err) || isObservationRulesError(err)) return;
           logger.error("Dropped queued Observation after an error that does not clear on its own", {
             sessionId: this.pending[0].payload.sessionId,
             error: err instanceof Error ? err.message : String(err),

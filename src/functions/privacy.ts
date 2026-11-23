@@ -1,4 +1,96 @@
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import type { ISdk } from "../engine/types.js";
+
+const RULES_LIMIT = 64 * 1024;
+export const OBSERVATION_RULES_ERROR = "Observation redaction rules are invalid or unreadable";
+
+const pendingRules = new Map<string, Promise<string[]>>();
+
+export function observationLiterals(): Promise<string[]> {
+  const path = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;
+  if (path === undefined) return Promise.resolve([]);
+  const pending = pendingRules.get(path);
+  if (pending) return pending;
+  const load = loadObservationLiterals(path).finally(() => pendingRules.delete(path));
+  pendingRules.set(path, load);
+  return load;
+}
+
+async function loadObservationLiterals(path: string): Promise<string[]> {
+  try {
+    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      if (!(await file.stat()).isFile()) throw new Error();
+      const buffer = Buffer.alloc(RULES_LIMIT + 1);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > RULES_LIMIT) throw new Error();
+      const rules: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, bytesRead)));
+      if (!Array.isArray(rules) || rules.length > 128 || rules.some((rule) => typeof rule !== "string" || rule.length === 0)) throw new Error();
+      return rules;
+    } finally {
+      await file.close();
+    }
+  } catch {
+    throw new Error(OBSERVATION_RULES_ERROR);
+  }
+}
+
+function isEncodedImage(value: string): boolean {
+  const comma = value.startsWith("data:image/") ? value.indexOf(",") : -1;
+  const encoded = comma === -1 ? value : value.slice(comma + 1);
+  if (!encoded) return false;
+  const bytes = Buffer.from(encoded, "base64");
+  return (bytes.length >= 20 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && bytes.subarray(-8, -4).toString() === "IEND") ||
+    (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9) ||
+    (bytes.length >= 14 && /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString()) && bytes.at(-1) === 0x3b) ||
+    (bytes.length >= 12 && bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP" && bytes.readUInt32LE(4) + 8 === bytes.length);
+}
+
+export function redactObservationLiterals(value: unknown, rules: string[]): unknown {
+  if (rules.length === 0) return value;
+  if (typeof value === "string") {
+    if ((value.startsWith("data:image/") || value.startsWith("iVBORw0KGgo") || value.startsWith("/9j/")) && isEncodedImage(value)) return value;
+    const masked = new Uint8Array(value.length);
+    for (const rule of rules) {
+      let index = value.indexOf(rule);
+      let coveredThrough = 0;
+      while (index !== -1) {
+        const end = index + rule.length;
+        masked.fill(1, Math.max(index, coveredThrough), end);
+        coveredThrough = end;
+        index = value.indexOf(rule, index + 1);
+      }
+    }
+    const replacement = rules.some((rule) => "[REDACTED]".includes(rule)) ? "" : "[REDACTED]";
+    let result = "";
+    let start = 0;
+    for (let i = 0; i < masked.length; i++) {
+      if (masked[i] && (i === 0 || !masked[i - 1])) {
+        result += value.slice(start, i) + replacement;
+      } else if (!masked[i] && i > 0 && masked[i - 1]) {
+        start = i;
+      }
+    }
+    return masked.at(-1) ? result : result + value.slice(start);
+  }
+  if (Array.isArray(value)) return value.map((item) => redactObservationLiterals(item, rules));
+  if (value !== null && typeof value === "object") {
+    const entries: Array<[string, unknown]> = [];
+    const used = new Set<string>();
+    let code = 0xe000;
+    while (rules.some((rule) => rule.includes(String.fromCharCode(code)))) code++;
+    const suffix = String.fromCharCode(code);
+    for (const [key, item] of Object.entries(value)) {
+      let redactedKey = redactObservationLiterals(key, rules) as string;
+      while (used.has(redactedKey)) redactedKey += suffix;
+      used.add(redactedKey);
+      entries.push([redactedKey, redactObservationLiterals(item, rules)]);
+    }
+    return Object.fromEntries(entries);
+  }
+  return value;
+}
 
 const PRIVATE_TAG_RE = /<private>[\s\S]*?(?:<\\*\/private>|$)/gi;
 

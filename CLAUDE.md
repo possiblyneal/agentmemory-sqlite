@@ -193,6 +193,18 @@ redacting strings under secret-named keys. `stripPrivateData()` also scrubs JSON
 assignments and an unclosed `<private>` block through the end of the text. This is defensive
 redaction, not a guarantee that every possible secret format is detected.
 
+`AGENTMEMORY_OBSERVATION_REDACTION_FILE` optionally names an Operator-controlled UTF-8 JSON
+array of up to 128 nonempty, case-sensitive literal strings, at most 64 KiB in total. Each
+new automatic Observation's `data` text and object keys are redacted before storage and
+Compression; encoded image strings with valid format signatures and endings are not altered.
+An unset variable leaves capture unchanged; an invalid or unreadable file rejects capture with a
+generic diagnostic, without blocking Recall. REST checks before queueing and the registrar checks
+again when processing, including retries. Concurrent reads of the same rules file share only the
+in-flight read, preserving queue admission order; later reads reload it so repairs take effect.
+An acknowledged queued Observation waits for valid rules instead of being dropped. The in-memory retry queue may hold unsanitized payloads. Rules do not rewrite stored data, redact image content, cover Observation
+metadata outside `data`, imports, or explicit Memory and Lesson saves; exact matching is not a
+general personal-data filter.
+
 ### Observations on a full disk or a locked database
 Telemetry hooks never retry, so the daemon keeps what it can. When an Observation's row write
 hits a full disk or `database is locked` (another connection holds the write lock; the store
