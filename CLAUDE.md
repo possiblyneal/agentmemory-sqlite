@@ -389,7 +389,8 @@ A partially successful chunked Summary keeps its useful merged content but caps 
 at the earliest failed chunk's earliest Observation, or the oldest Observation awaiting Compression
 if earlier. A failed chunk remains retryable on unchanged input. When pending Compression was
 verified to be the sole blocker, unchanged Stops reuse the stored Summary without moving the
-watermark; this reuse cache is process-local. When an incremental fold fails or is oversized,
+watermark; this reuse cache is process-local. Before reuse, Summarize re-reads the current Summary
+and checks that row against the listed input. When an incremental fold fails or is oversized,
 its full-scan fallback puts decisions from retained input first and appends exact-distinct prior
 decisions, even if all input remains; a later successful fold can supersede them. Forced
 rebuilds do not retain them this way. Summary publication and each Observation eviction share a

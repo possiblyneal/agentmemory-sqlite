@@ -539,19 +539,20 @@ export function registerSummarizeFunction(
         : undefined;
       const pendingReuse = pendingOnly.get(sessionId);
       if (!data.force) {
+        const current = await kv.get<SessionSummary>(KV.summaries, sessionId);
         if (
-          existing &&
-          existing.observationCount === compressed.length &&
-          existing.lastObservationId === lastObservationId &&
+          current &&
+          current.observationCount === compressed.length &&
+          current.lastObservationId === lastObservationId &&
           ((pendingReuse && pendingReuse.input === pendingInput &&
-            pendingReuse.summary === fingerprint(existing)) ||
-            !compressed.some((o) => existing.coveredThrough && !summaryCovers(existing, o.timestamp)))
+            pendingReuse.summary === fingerprint(current)) ||
+            !compressed.some((o) => current.coveredThrough && !summaryCovers(current, o.timestamp)))
         ) {
           logger.info("Session Summary current, reused", {
             sessionId,
             observationCount: compressed.length,
           });
-          return { success: true, summary: existing, reused: true };
+          return { success: true, summary: current, reused: true };
         }
       }
 

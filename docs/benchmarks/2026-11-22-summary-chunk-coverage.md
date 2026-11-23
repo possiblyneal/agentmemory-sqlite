@@ -38,7 +38,9 @@ also verifies that a result generated against a replaced Summary is rejected, wh
 prior Summary existed, and that a later attempt succeeds. Both cases failed before that guard.
 A graph-enabled stale-recovery fixture checks both low-importance and project-cap Eviction: the
 recovered graph watermark permits covered rows in the same sweep while uncovered rows remain.
-Both paths failed before refreshing the Session snapshot.
+Both paths failed before refreshing the Session snapshot. A forced rebuild during an unchanged-input
+listing also verifies that reuse returns the current Summary; it returned the superseded one before
+the reuse re-read.
 
 An oversized fallback fixture with ten prior decisions verifies that the fresh decision comes
 first, with the distinct prior decisions retained behind it. Fold-drift fixtures verify both the

@@ -443,6 +443,36 @@ describe("mem::summarize chunking", () => {
     expect(retry.summary.coveredThrough > "2020-01-01T00:04:09.000Z").toBe(true);
   });
 
+  it("reuses the current Summary if a forced rebuild publishes during listing", async () => {
+    const sessionId = "ses_reuse_race";
+    const provider = makeProvider([summaryXml({ title: "initial" }), summaryXml({ title: "replacement" })]);
+    const { handler, kv } = await setupHandler({ sessionId, obsCount: 1, provider });
+    const observation = { ...makeObs(0, sessionId), timestamp: "2020-01-01T00:00:00.000Z" };
+    await kv.set(`obs:${sessionId}`, observation.id, observation);
+    expect(await handler({ sessionId, force: true })).toMatchObject({ success: true });
+    const list = kv.list;
+    let start!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { start = resolve; });
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let first = true;
+    kv.list = async <T>(scope: string) => {
+      const rows = await list<T>(scope);
+      if (first && scope === `obs:${sessionId}`) {
+        first = false;
+        start();
+        await blocked;
+      }
+      return rows;
+    };
+    const reuse = handler({ sessionId });
+    await started;
+    const replacement = await handler({ sessionId, force: true });
+    release();
+    expect(replacement).toMatchObject({ success: true, summary: { title: "replacement" } });
+    expect(await reuse).toMatchObject({ success: true, reused: true, summary: { title: "replacement" } });
+  });
+
   it.each([true, false])("rejects a concurrent Summary replacement with prior Summary: %s", async (hasPrior) => {
     const sessionId = `ses_concurrent_${hasPrior}`;
     const provider = makeProvider([
