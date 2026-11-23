@@ -17,6 +17,7 @@ import { recordAudit } from "./audit.js";
 import { deleteIndexed } from "./search.js";
 import { evictGraphForSources } from "./graph-eviction.js";
 import { lowerObservationCounts, storeSyntheticCompression } from "./observe.js";
+import { isAwaitingCompression } from "./compress-synthetic.js";
 import { summaryCovers } from "./summarize.js";
 import { logger } from "../logger.js";
 
@@ -125,7 +126,10 @@ async function recoverOrEvictStaleSession(
   sdk: ISdk,
   kv: StateKV,
   sessionId: string,
-): Promise<{ recovered: boolean; evicted: boolean }> {
+  prior: SessionSummary | undefined,
+  dryRun: boolean,
+  scannedSessions: Set<string>,
+): Promise<{ recovered: boolean; evicted: boolean; summary?: SessionSummary }> {
   const kept = { recovered: false, evicted: false };
   const observations = await kv
     .list<CompressedObservation | RawObservation>(KV.observations(sessionId))
@@ -137,11 +141,15 @@ async function recoverOrEvictStaleSession(
       return null;
     });
   if (!observations) return kept;
+  scannedSessions.add(sessionId);
+  if (prior && !observations.some((o) =>
+    !isCompressedObservation(o) || isAwaitingCompression(o) || !summaryCovers(prior, o.timestamp)
+  )) return kept;
+  if (dryRun) return { recovered: false, evicted: observations.length === 0 };
 
   // A raw row this old is a compression that never ran, so it is
   // compressed synthetically here; otherwise the Session could
   // never be summarized and would be retried on every run.
-  let recovered = false;
   if (observations.length > 0) {
     const raw = observations.filter(
       (o): o is RawObservation => !isCompressedObservation(o),
@@ -157,9 +165,14 @@ async function recoverOrEvictStaleSession(
       });
       return kept;
     }
-    recovered = await recoverStaleSession(sdk, sessionId);
-    if (!recovered) return kept;
-    return { recovered: true, evicted: false };
+    if (!(await recoverStaleSession(sdk, sessionId))) return kept;
+    const summary = await kv.get<SessionSummary>(KV.summaries, sessionId).catch(() => null);
+    if (!summary) return kept;
+    return {
+      recovered: observations.every((o) => summaryCovers(summary, o.timestamp)),
+      evicted: false,
+      summary,
+    };
   }
 
   try {
@@ -176,14 +189,14 @@ async function recoverOrEvictStaleSession(
       id: sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { recovered, evicted: false };
+    return kept;
   }
   await recordAudit(kv, "delete", "mem::evict", [sessionId], {
     resource: "session",
     reason: "stale_session_without_summary",
     dryRun: false,
   });
-  return { recovered, evicted: true };
+  return { recovered: false, evicted: true };
 }
 
 export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
@@ -214,46 +227,29 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         .list<SessionSummary>(KV.summaries)
         .catch(() => []);
       const summaryBySession = new Map(summaries.map((s) => [s.sessionId, s]));
-      const summaryIds = new Set(summaryBySession.keys());
+      const sessionById = new Map(sessions.map((session) => [session.id, session]));
 
       const staleMs = cfg.staleSessionDays * MS_PER_DAY;
-      const staleSessions = sessions.filter(
-        (session) =>
-          session.startedAt &&
-          now - new Date(session.startedAt).getTime() > staleMs &&
-          !summaryIds.has(session.id),
-      );
-      const processedStaleSessionIds = new Set<string>();
-      if (dryRun) {
-        for (const session of staleSessions) {
-          const observations = await kv
-            .list<CompressedObservation | RawObservation>(KV.observations(session.id))
-            .catch(() => null);
-          if (!observations) continue;
-          processedStaleSessionIds.add(session.id);
-          if (observations.length === 0) stats.staleSessions++;
+      const scannedSessions = new Set<string>();
+      const scannedStaleCandidates = new Set<string>();
+      let recoveredStaleSessions = 0;
+      for (const session of sessions) {
+        if (!(now - new Date(session.startedAt).getTime() > staleMs)) continue;
+        const prior = summaryBySession.get(session.id);
+        if (prior && !prior.coveredThrough) continue;
+        scannedStaleCandidates.add(session.id);
+        const { recovered, evicted, summary } = await recoverOrEvictStaleSession(
+          sdk, kv, session.id, prior, dryRun, scannedSessions,
+        );
+        if (summary) {
+          summaryBySession.set(session.id, summary);
+          const currentSession = await kv.get<Session>(KV.sessions, session.id).catch(() => null);
+          if (currentSession) sessionById.set(session.id, currentSession);
         }
-      } else {
-        let recoveredStaleSessions = 0;
-        for (const session of staleSessions) {
-          const { recovered, evicted } = await recoverOrEvictStaleSession(
-            sdk,
-            kv,
-            session.id,
-          );
-          if (recovered) {
-            recoveredStaleSessions++;
-            processedStaleSessionIds.add(session.id);
-          }
-          if (evicted) {
-            stats.staleSessions++;
-            processedStaleSessionIds.add(session.id);
-          }
-        }
-        if (recoveredStaleSessions > 0) {
-          await runRecoveredSessionConsolidation(sdk);
-        }
+        if (recovered) recoveredStaleSessions++;
+        if (evicted) stats.staleSessions++;
       }
+      if (recoveredStaleSessions > 0) await runRecoveredSessionConsolidation(sdk);
 
       const evictedSourceIds: string[] = [];
       const removedBySession = new Map<string, number>();
@@ -261,7 +257,28 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
         removedBySession.set(sessionId, (removedBySession.get(sessionId) ?? 0) + 1);
       const projectObs = new Map<string, CompressedObservation[]>();
       const awaitingStop = new Set<string>();
-      for (const session of sessions) {
+      const deleteCoveredObservation = (o: CompressedObservation) =>
+        withKeyedLock(`summary:${o.sessionId}`, async () => {
+          const session = sessionById.get(o.sessionId)!;
+          const summary = await kv.get<SessionSummary>(KV.summaries, o.sessionId);
+          const age = now - new Date(o.timestamp).getTime();
+          if (
+            (scannedStaleCandidates.has(o.sessionId) && (!scannedSessions.has(o.sessionId) || !summary)) ||
+            (summary?.coveredThrough && (isAwaitingCompression(o) || !summaryCovers(summary, o.timestamp))) ||
+            (age < staleMs && !isStopFinishedWith(o, session, summary ?? undefined))
+          ) return false;
+          let deleted = false;
+          await deleteWithFacets(kv, async (removed) => {
+            const existed = await kv.get(KV.observations(o.sessionId), o.id);
+            if (!existed) return;
+            await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
+            removed.push(o.id);
+            deleted = true;
+          });
+          return deleted;
+        });
+      for (const originalSession of sessions) {
+        const session = sessionById.get(originalSession.id)!;
         const obs = await kv
           .list<CompressedObservation>(KV.observations(session.id))
           .catch(() => []);
@@ -273,9 +290,9 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           if (!o.timestamp) continue;
           const age = now - new Date(o.timestamp).getTime();
           if (
-            !processedStaleSessionIds.has(session.id) &&
-            age < staleMs &&
-            !isStopFinishedWith(o, session, summary)
+            (scannedStaleCandidates.has(session.id) && (!scannedSessions.has(session.id) || !summary)) ||
+            (summary?.coveredThrough && (isAwaitingCompression(o) || !summaryCovers(summary, o.timestamp))) ||
+            (age < staleMs && !isStopFinishedWith(o, session, summary))
           ) {
             awaitingStop.add(o.id);
             continue;
@@ -290,11 +307,10 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
               lowImportanceIds.add(o.id);
             } else {
               try {
-                await deleteWithFacets(kv, async (removed) => {
-                  const existed = await kv.get(KV.observations(session.id), o.id);
-                  await deleteIndexed(kv, KV.observations(session.id), o.id);
-                  if (existed) removed.push(o.id);
-                });
+                if (!await deleteCoveredObservation(o)) {
+                  awaitingStop.add(o.id);
+                  continue;
+                }
                 stats.lowImportanceObs++;
                 lowImportanceIds.add(o.id);
                 countRemoval(session.id);
@@ -340,11 +356,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           } else {
             for (const o of toEvict) {
               try {
-                await deleteWithFacets(kv, async (removed) => {
-                  const existed = await kv.get(KV.observations(o.sessionId), o.id);
-                  await deleteIndexed(kv, KV.observations(o.sessionId), o.id);
-                  if (existed) removed.push(o.id);
-                });
+                if (!await deleteCoveredObservation(o)) continue;
                 stats.capEvictions++;
                 countRemoval(o.sessionId);
                 evictedSourceIds.push(o.id);

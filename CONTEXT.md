@@ -63,15 +63,12 @@ The distilled account of one Session, produced each time the Session stops. Its 
 each rule, requirement or constraint the user stated as its own entry, with its exact values.
 It reads the tail of each Agent reply, so a recap the user accepts is kept verbatim and a short
 answer is read against the question it answers.
-A Session Summary is current until an Observation arrives after it was written, and a
-current one is reused rather than reproduced. A stale one is folded forward: only the
-Observations it has not seen (after its last Observation, or newer than what it covers) are
-sent, with the prior summary, so a Session at its cap still folds as Eviction removes covered
-Observations. The whole Session is re-read only on `force`, when neither its last Observation
-nor its coverage remains to place it, when the new Observations exceed one chunk, or when the
-fold fails twice.
-Folding forward or re-reading never loses a decision the prior summary held: each decision is
-dated when it was first made, and a later decision that restates an earlier one replaces it.
+A Session Summary is current when its input is unchanged and its watermark covers every
+compressed Observation, or pending Compression is known to be the sole blocker. A partial
+chunked Summary keeps its successful content but leaves the failed chunk and everything after
+its watermark eligible for retry. An incremental fold sends the prior Summary and only
+Observations after its last Observation or beyond its coverage. A fallback re-reads the
+retained Observations and carries prior decisions forward if prior input may be missing.
 _Avoid_: session digest, recap
 
 **Lesson**:
@@ -204,9 +201,10 @@ importance below 5 is evicted once it is a day old and a superseded Memory after
 `mem:config/eviction` record overrides both. Eviction never deletes an Observation its
 Session's stop has not finished with: the Session needs a Summary covering the Observation
 (written after it, and before the oldest Observation still awaiting compression) and, with
-graph extraction on and the graph leg not off, a graph extraction watermark at or past it. A
-Session the sweep has just recovered, and an Observation older than the stale-Session window
-(30 days), count as finished. Distinct from Reclaim.
+graph extraction on and the graph leg not off, a graph extraction watermark at or past it.
+The stale-Observation age exception does not override an explicit Summary coverage watermark.
+A partially recovered Session keeps its uncovered Observations for the next sweep. A recovered
+Session stays available with its retained Observations. Distinct from Reclaim.
 
 **Reclaim**:
 Deleting stored bytes that no longer back any live concept — data left behind by a removed

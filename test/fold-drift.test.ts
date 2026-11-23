@@ -74,7 +74,7 @@ describe("measureFoldDrift", () => {
     expect(r.fallbacks).toBe(1);
   });
 
-  it("counts what a fallback's re-summarize drops apart from fold drops", async () => {
+  it("counts no fallback drops when a failed fold retains prior decisions", async () => {
     const provider: MemoryProvider = {
       name: "fake",
       compress: async () => "",
@@ -84,7 +84,8 @@ describe("measureFoldDrift", () => {
     const r = await measureFoldDrift(provider, obs(6), opts);
     expect(r.fallbacks).toBe(1);
     expect(r.droppedExact).toBe(0);
-    expect(r.fallbackDroppedExact).toBe(1);
+    expect(r.fallbackDroppedExact).toBe(0);
+    expect(r.steps[1]!.decisions).toEqual([ALL[1], ALL[0]]);
   });
 
   it("matches normalized text and counts a reworded decision as loosely matched", async () => {
@@ -181,7 +182,7 @@ describe("measureFoldDrift judged by the decision judge", () => {
     expect(rescored.total.neverCaptured).toBe(1);
   });
 
-  it("labels a decision lost in a fallback re-summarize dropped-by-fallback", async () => {
+  it("labels a prior decision kept when a fallback reply omits it", async () => {
     let n = 0;
     const provider: MemoryProvider = {
       name: "fake",
@@ -191,7 +192,8 @@ describe("measureFoldDrift judged by the decision judge", () => {
     };
     const r = await measureFoldDrift(provider, obs(6), opts, { judge: includesJudge(), key: keyed(ALL[0]!) });
     expect(r.steps.map((s) => s.kind)).toEqual(["first", "fallback"]);
-    expect(r.labels).toEqual([{ decisionId: "d0", label: "dropped-by-fallback", inOnePass: true }]);
+    expect(r.labels).toEqual([{ decisionId: "d0", label: "kept", inOnePass: true }]);
+    expect(r.steps[1]!.decisions).toEqual([ALL[1], ALL[0]]);
   });
 
   it("ignores key decisions from other Sessions", async () => {
