@@ -124,6 +124,41 @@ describe("Semantic Fact keyed supersession", () => {
     expect(all.every((f) => f.isLatest !== false)).toBe(true);
   });
 
+  it("stores reworded unkeyed duplicates separately on the baseline", async () => {
+    await consolidate(`<facts><fact confidence="0.8">The service uses a stable timeout</fact></facts>`);
+    await consolidate(`<facts><fact confidence="0.8">The service uses the stable timeout</fact></facts>`);
+    const recalled = await recallSemanticFacts(kv as never, 10, { query: "service", project: "proj" });
+    expect(recalled.map((r) => r.fact.fact)).toEqual(expect.arrayContaining([
+      "The service uses a stable timeout", "The service uses the stable timeout",
+    ]));
+  });
+
+  it.each([
+    ["condition", "Deploy the service after tests pass", "Deploy the service before tests pass"],
+    ["value", "The service timeout is 30 seconds", "The service timeout is 60 seconds"],
+    ["negation", "The service does permit remote access", "The service does not permit remote access"],
+    ["time", "The service is available during weekdays", "The service is available during weekends"],
+  ])("preserves unkeyed claims that differ by %s", async (_kind, first, second) => {
+    await consolidate(`<facts><fact confidence="0.8">${first}</fact></facts>`);
+    await consolidate(`<facts><fact confidence="0.8">${second}</fact></facts>`);
+    const recalled = await recallSemanticFacts(kv as never, 10, { query: "service", project: "proj" });
+    expect(recalled.map((r) => r.fact.fact)).toEqual(expect.arrayContaining([first, second]));
+  });
+
+  it("keeps a similar unkeyed fact in another project separate", async () => {
+    await kv.set(KV.sessions, "other", { id: "other", project: "other" });
+    await kv.set(KV.semantic, "other-fact", {
+      id: "other-fact", fact: "The service uses a stable timeout", confidence: 0.8,
+      sourceSessionIds: ["other"], sourceMemoryIds: [], accessCount: 1,
+      lastAccessedAt: "", strength: 0.8, createdAt: "", updatedAt: "",
+    });
+    await consolidate(`<facts><fact confidence="0.8">The service uses the stable timeout</fact></facts>`);
+    const ours = await recallSemanticFacts(kv as never, 10, { query: "service", project: "proj" });
+    const theirs = await recallSemanticFacts(kv as never, 10, { query: "service", project: "other" });
+    expect(ours.map((r) => r.fact.fact)).toEqual(["The service uses the stable timeout"]);
+    expect(theirs.map((r) => r.fact.fact)).toEqual(["The service uses a stable timeout"]);
+  });
+
   it("leaves unkeyed facts alone", async () => {
     await consolidate(`<facts><fact confidence="0.8">The team indents with tabs</fact></facts>`);
     await consolidate(keyed(`subject="indentation" relation="style" object="spaces"`, "The team indents with spaces"));
