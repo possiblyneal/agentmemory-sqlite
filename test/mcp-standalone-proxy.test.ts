@@ -57,6 +57,24 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(calls.find((c) => c.url.includes("/sessions"))).toBeDefined();
   });
 
+  it.each(["bad", "2", null, true, {}, [], 1.5, NaN, Infinity])("rejects malformed smart-search limit %j", async (limit) => {
+    await expect(handleToolCall("memory_smart_search", { query: "auth", limit }, new InMemoryKV()))
+      .rejects.toThrow("limit must be an integer");
+  });
+
+  it.each([[undefined, 10], [-1, 1], [0, 1], [15, 15], [101, 100]])(
+    "forwards clamped smart-search limit %s", async (limit, expected) => {
+      let received: unknown;
+      installFetch((url, init) => {
+        if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+        received = JSON.parse(init?.body as string).limit;
+        return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      });
+      await handleToolCall("memory_smart_search", { query: "auth", limit });
+      expect(received).toBe(expected);
+    },
+  );
+
   it("proxies memory_smart_search to POST /agentmemory/smart-search", async () => {
     installFetch((url, init) => {
       if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
