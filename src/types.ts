@@ -58,7 +58,7 @@ export interface RawObservation {
   toolOutput?: unknown;
   userPrompt?: string;
   assistantResponse?: string;
-  syntheticDescription?: { title: string; narrative: string };
+  syntheticDescription?: { title: string; narrative: string } | null;
   raw: unknown;
   modality?: "text" | "image" | "mixed";
   imageData?: string;

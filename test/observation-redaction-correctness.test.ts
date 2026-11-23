@@ -22,6 +22,40 @@ describe("observation literal redaction correctness", () => {
     expect(Object.keys(output).every((key) => !/[01]/.test(key))).toBe(true);
   });
 
+  it("does not derive a hook description from a key created by redaction", async () => {
+    await mkdir("tmp", { recursive: true });
+    const home = await mkdtemp(resolve("tmp/redaction-absent-hook-"));
+    const file = join(home, "rules.json");
+    await writeFile(file, JSON.stringify(["E"]));
+    vi.stubEnv("AGENTMEMORY_OBSERVATION_REDACTION_FILE", file);
+    vi.stubEnv("AGENTMEMORY_AUTO_COMPRESS", "false");
+    try {
+      const kv = mockKV();
+      const set = kv.set;
+      let captured: import("../src/types.js").RawObservation | undefined;
+      kv.set = async (scope, key, value) => {
+        if (scope === KV.observations("absent-hook") && (value as { raw?: unknown }).raw) {
+          captured = JSON.parse(JSON.stringify(value));
+        }
+        return set(scope, key, value);
+      };
+      const sdk = mockSdk({ looseTrigger: true });
+      registerObserveFunction(sdk as never, kv as never);
+      await sdk.trigger("mem::observe", {
+        sessionId: "absent-hook", hookType: "stop", timestamp: "2026-11-22T10:00:00Z",
+        data: { last_Emessage: "fabricated reply" },
+      });
+      const [initial] = [...kv.store.get(KV.observations("absent-hook"))!.values()] as Array<{ title: string; narrative: string }>;
+      expect(initial).toMatchObject({ title: "stop", narrative: "" });
+      expect(captured?.syntheticDescription).toBeNull();
+      await storeDegradedCompression(kv as never, { sessionId: "absent-hook", observationId: captured!.id, raw: captured! }, "compression_failed");
+      expect(await kv.get(KV.observations("absent-hook"), captured!.id)).toMatchObject({ title: "stop", narrative: "" });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a nested image when a redacted image path cannot be saved", async () => {
     await mkdir("tmp", { recursive: true });
     const home = await mkdtemp(resolve("tmp/redaction-home-"));

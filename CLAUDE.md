@@ -206,7 +206,9 @@ skips unsaveable paths so they do not mask a valid encoded attachment.
 Canonical hook fields and synthetic descriptions read the original keys from the privacy-scrubbed
 payload, then literal-redact their values. `RawObservation.syntheticDescription` carries only the
 resulting `{ title, narrative }` through parked Compression jobs, including restart and degraded
-fallback; it is not sent to the LLM. Older jobs without it use the sanitized raw payload instead.
+fallback; it is not sent to the LLM. With rules active, `null` records that no description was
+found, preventing a redacted key from becoming a hook field. Older jobs without the field use the
+sanitized raw payload instead.
 Read-only tool classification uses the fields before
 literal redaction so matching a key or value does not change the classification. The tool error still supplies output when scrubbing
 leaves no tool output. Colliding redacted keys retain all values, and redaction never joins

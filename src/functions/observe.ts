@@ -447,7 +447,7 @@ export function registerObserveFunction(
         timestamp: payload.timestamp,
         hookType: payload.hookType,
         raw: sanitizedRaw,
-        ...(hook ? { syntheticDescription: hook } : {}),
+        ...(hook || rules.length ? { syntheticDescription: hook } : {}),
         origin: {
           channel: originChannel,
           capturedAt: payload.timestamp,
