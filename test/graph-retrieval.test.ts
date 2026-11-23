@@ -395,6 +395,31 @@ describe("GraphRetrieval — sessionId resolution (#656)", () => {
     return kv;
   }
 
+  it("stops resolving ranked candidates when the eligible page is full", async () => {
+    const node = {
+      ...makeNode("n1", "React", "library", ["outside", "inside", "stale"]),
+      sessionId: "hint",
+    };
+    const kv = await mockKVWithSessions([node], [], [{ id: "owner" }], {
+      owner: ["outside", "inside"],
+    });
+    const get = kv.get;
+    const reads: string[] = [];
+    kv.get = async <T>(scope: string, key: string): Promise<T | null> => {
+      if (scope.startsWith("mem:obs:")) reads.push(key);
+      return get<T>(scope, key);
+    };
+    const retrieval = new GraphRetrieval(kv as never);
+    const results = await retrieval.searchByEntities(
+      ["React"], 2, 1, async (id, sessionId) => id === "inside" && sessionId === "owner",
+    );
+    expect(results.map(({ obsId, sessionId }) => [obsId, sessionId])).toEqual([
+      ["inside", "owner"],
+    ]);
+    expect(reads).toEqual(["outside", "outside", "inside", "inside"]);
+    expect(kv.listCallCount("mem:sessions")).toBe(1);
+  });
+
   it("resolves a node's sessionId when the hint is verified in KV (start-node path)", async () => {
     const node: GraphNode = {
       ...makeNode("n1", "React", "library", ["obs_1"]),

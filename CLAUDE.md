@@ -525,10 +525,12 @@ BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
 Recall and Session listing accept `after` and `before` as explicit-offset ISO-8601 instants;
-`after` is inclusive and `before` exclusive. Invalid or reversed bounds are rejected. Recall
-uses the Observation timestamp or the record's creation time; Session listing uses `startedAt`.
-Eligibility precedes candidate truncation and Session paging. Omitted bounds preserve the
-unbounded paths; explicit `expandIds` retrieval is not date-filtered.
+`after` is inclusive and `before` exclusive, including fractional precision beyond milliseconds.
+Invalid or reversed bounds are rejected. Recall uses the Observation timestamp or the record's
+creation time; Session listing uses `startedAt`. Eligibility precedes candidate truncation and
+Session paging, and search rechecks loaded rows against the bounds. Graph retrieval resolves ranked
+candidates with one shared Session cache and stops when the eligible page is full. Omitted bounds
+preserve the unbounded paths; explicit `expandIds` retrieval is not date-filtered.
 
 `api::smart-search` and both MCP smart-search entry points reject a supplied `limit` that is not an integer; valid integers retain their existing clamping and omitted limits retain their defaults.
 

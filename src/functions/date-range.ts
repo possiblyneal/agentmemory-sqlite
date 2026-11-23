@@ -1,4 +1,8 @@
-export type DateRange = { after?: number; before?: number };
+export type DateRange = { after?: number; before?: number; afterFraction?: string; beforeFraction?: string };
+
+function fraction(value: string): string {
+  return /T\d{2}:\d{2}:\d{2}\.(\d+)/.exec(value)?.[1]?.slice(3).replace(/0+$/, "") ?? "";
+}
 
 function instant(value: unknown): number | undefined {
   if (value === undefined) return undefined;
@@ -18,15 +22,22 @@ function instant(value: unknown): number | undefined {
   return parsed;
 }
 
+function compare(a: number, af: string, b: number, bf: string): number {
+  return a === b ? (af < bf ? -1 : af > bf ? 1 : 0) : a < b ? -1 : 1;
+}
+
 export function parseDateRange(input: { after?: unknown; before?: unknown }): DateRange {
   const after = instant(input.after);
   const before = instant(input.before);
-  if (after !== undefined && before !== undefined && after > before) throw new Error("after must not be later than before");
-  return { after, before };
+  const afterFraction = typeof input.after === "string" ? fraction(input.after) : "";
+  const beforeFraction = typeof input.before === "string" ? fraction(input.before) : "";
+  if (after !== undefined && before !== undefined && compare(after, afterFraction, before, beforeFraction) > 0) throw new Error("after must not be later than before");
+  return { after, before, afterFraction, beforeFraction };
 }
 
 export function withinDateRange(timestamp: unknown, range: DateRange): boolean {
   if (range.after === undefined && range.before === undefined) return true;
   const time = typeof timestamp === "string" ? Date.parse(timestamp) : typeof timestamp === "number" ? timestamp : NaN;
-  return Number.isFinite(time) && (range.after === undefined || time >= range.after) && (range.before === undefined || time < range.before);
+  const remainder = typeof timestamp === "string" ? fraction(timestamp) : "";
+  return Number.isFinite(time) && (range.after === undefined || compare(time, remainder, range.after, range.afterFraction ?? "") >= 0) && (range.before === undefined || compare(time, remainder, range.before, range.beforeFraction ?? "") < 0);
 }

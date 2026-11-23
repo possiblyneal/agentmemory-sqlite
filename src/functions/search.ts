@@ -1,5 +1,5 @@
 import type { ISdk } from '../engine/types.js'
-import { parseDateRange } from './date-range.js'
+import { parseDateRange, withinDateRange } from './date-range.js'
 import type { CompactSearchResult, CompressedObservation, Memory, SearchResult, Session, SessionSummary } from '../types.js'
 import { KV } from '../state/schema.js'
 import { StateKV } from '../state/kv.js'
@@ -792,7 +792,7 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
       const enriched: SearchResult[] = []
       for (let i = 0; i < candidates.length; i++) {
         const obs = obsResults[i]
-        if (!obs) continue
+        if (!obs || !withinDateRange(obs.timestamp, range)) continue
         // #817: enforce agent-scope after the observation/memory is
         // loaded. The BM25 index doesn't carry agentId so the filter
         // happens post-lookup. Wildcard ("*") and no-isolation paths

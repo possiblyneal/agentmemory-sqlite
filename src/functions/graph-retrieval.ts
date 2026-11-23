@@ -75,10 +75,9 @@ export class GraphRetrieval {
    * sharing an obsId are cached, so repeats are free. Only genuine misses
    * pay the per-session scan.
    */
-  private async resolveSessionIds(
+  private async *resolveSessionIds(
     results: GraphRetrievalResult[],
-  ): Promise<void> {
-    if (results.length === 0) return;
+  ): AsyncGenerator<GraphRetrievalResult> {
 
     // obsId -> owning sessionId, or null when no known session holds it
     // (so an unresolved obsId is scanned at most once, not per result).
@@ -95,12 +94,14 @@ export class GraphRetrieval {
     for (const r of results) {
       if (resolved.has(r.obsId)) {
         r.sessionId = resolved.get(r.obsId) ?? "";
+        yield r;
         continue;
       }
 
       // 1) Trust-but-verify the node's hint first (cheapest path).
       if (r.sessionId && (await probe(r.sessionId, r.obsId))) {
         resolved.set(r.obsId, r.sessionId);
+        yield r;
         continue;
       }
 
@@ -129,6 +130,7 @@ export class GraphRetrieval {
       }
       resolved.set(r.obsId, found);
       r.sessionId = found ?? "";
+      yield r;
     }
   }
 
@@ -313,15 +315,10 @@ export class GraphRetrieval {
   ): Promise<GraphRetrievalResult[]> {
     const ranked = [...best.values()].sort((a, b) => b.score - a.score);
     if (limit <= 0) return [];
-    if (!eligible) {
-      const top = ranked.slice(0, limit);
-      await this.resolveSessionIds(top);
-      return top;
-    }
-    await this.resolveSessionIds(ranked);
+    const candidates = eligible ? ranked : ranked.slice(0, limit);
     const top: GraphRetrievalResult[] = [];
-    for (const result of ranked) {
-      if (await eligible(result.obsId, result.sessionId)) top.push(result);
+    for await (const result of this.resolveSessionIds(candidates)) {
+      if (!eligible || (await eligible(result.obsId, result.sessionId))) top.push(result);
       if (top.length >= limit) break;
     }
     return top;

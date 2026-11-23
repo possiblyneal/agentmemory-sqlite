@@ -284,8 +284,8 @@ export class HybridSearch {
     const eligible = range ? async (id: string, sessionId: string): Promise<boolean> => {
       const cached = dates.get(id);
       if (cached !== undefined) return cached;
-      const obs = await this.kv.get<CompressedObservation>(KV.observations(sessionId), id);
-      const memory = obs ? null : await this.kv.get<Memory>(KV.memories, id);
+      const obs = await this.kv.get<CompressedObservation>(KV.observations(sessionId), id).catch(() => null);
+      const memory = obs ? null : await this.kv.get<Memory>(KV.memories, id).catch(() => null);
       const matches = withinDateRange(obs?.timestamp ?? memory?.createdAt, range);
       dates.set(id, matches);
       return matches;
@@ -500,7 +500,7 @@ export class HybridSearch {
     );
     const enriched = await this.capNearTwins(
       this.applyRecency(
-        await this.enrichResults(diversified, retrievalDepth, filterNonLatest),
+        await this.enrichResults(diversified, retrievalDepth, filterNonLatest, range),
       ),
     );
 
@@ -621,6 +621,7 @@ export class HybridSearch {
     }>,
     limit: number,
     filterNonLatest = false,
+    range?: DateRange,
   ): Promise<HybridSearchResult[]> {
     const enriched: HybridSearchResult[] = [];
     let cursor = 0;
@@ -643,7 +644,7 @@ export class HybridSearch {
 
       for (let i = 0; i < batch.length; i++) {
         const obs = observations[i];
-        if (!obs) continue;
+        if (!obs || (range && !withinDateRange(obs.timestamp, range))) continue;
         enriched.push({
           observation: obs,
           bm25Score: batch[i].bm25Score,

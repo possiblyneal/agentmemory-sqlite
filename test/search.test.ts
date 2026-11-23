@@ -122,6 +122,15 @@ describe("mem::search", () => {
     expect(result.results.map((r) => r.observation.id)).toEqual(["obs_a"]);
   });
 
+  it("rechecks the loaded Observation against date bounds", async () => {
+    const obs = (await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a"))!;
+    await kv.set(KV.observations("ses_1"), obs.id, { ...obs, timestamp: "2026-02-01T00:00:00Z" });
+    const bounded = await sdk.trigger("mem::search", { query: "auth middleware", before: "2026-02-01T00:00:00Z" }) as { results: unknown[] };
+    expect(bounded.results).toEqual([]);
+    const unbounded = await sdk.trigger("mem::search", { query: "auth middleware" }) as { results: unknown[] };
+    expect(unbounded.results).toHaveLength(1);
+  });
+
   it("returns full format by default", async () => {
     const result = (await sdk.trigger("mem::search", {
       query: "auth middleware",

@@ -9,7 +9,7 @@ vi.mock("../src/state/keyed-mutex.js", () => ({
 }));
 
 import { registerApiTriggers } from "../src/triggers/api.js";
-import { parseDateRange } from "../src/functions/date-range.js";
+import { parseDateRange, withinDateRange } from "../src/functions/date-range.js";
 import { KV } from "../src/state/schema.js";
 import type { Session } from "../src/types.js";
 
@@ -91,6 +91,14 @@ beforeEach(() => {
 });
 
 describe("date bounds", () => {
+  it("compares sub-millisecond fractions exactly, including offsets and reversed bounds", () => {
+    const range = parseDateRange({ after: "2026-01-01T01:00:00.0000000000000002+01:00", before: "2026-01-01T00:00:00.0000000000000009Z" });
+    expect(withinDateRange("2026-01-01T00:00:00.000Z", range)).toBe(false);
+    expect(withinDateRange("2026-01-01T00:00:00.0000000000000002Z", range)).toBe(true);
+    expect(withinDateRange("2026-01-01T00:00:00.0000000000000009Z", range)).toBe(false);
+    expect(withinDateRange("2026-01-01T00:00:00.000Z", parseDateRange({ before: "2026-01-01T00:00:00.0001Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: "2026-01-01T00:00:00.0009Z", before: "2026-01-01T00:00:00.0001Z" })).toThrow();
+  });
   it("accepts leap days in years below 100 without applying the 1900 offset", () => {
     expect(parseDateRange({ after: "0000-02-29T00:00:00Z" }).after).toBe(Date.parse("0000-02-29T00:00:00Z"));
     expect(() => parseDateRange({ after: "0001-02-29T00:00:00Z" })).toThrow();

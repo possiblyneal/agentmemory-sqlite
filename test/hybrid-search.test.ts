@@ -107,6 +107,31 @@ describe("HybridSearch", () => {
     expect(results.map((r) => r.observation.id)).toEqual([obs.id]);
   });
 
+  it("keeps healthy bounded vector hits when another candidate cannot be read", async () => {
+    const obs = makeObs({ timestamp: "2026-01-15T00:00:00Z" });
+    await kv.set("mem:obs:ses_1", obs.id, obs);
+    const get = kv.get;
+    kv.get = async (scope, id) => {
+      if (id === "broken") throw new Error("bad row");
+      return get(scope, id);
+    };
+    const vector = new VectorIndex();
+    vector.add("broken", obs.sessionId, new Float32Array([1, 0]));
+    vector.add(obs.id, obs.sessionId, new Float32Array([1, 0]));
+    const provider: EmbeddingProvider = { name: "test", dimensions: 2, embed: async () => new Float32Array([1, 0]), embedBatch: async () => [] };
+    const hybrid = new HybridSearch(bm25, vector, provider, kv as never, 0.4, 0.6, 0, false);
+    expect((await hybrid.prepareSearch("auth", undefined, { after: Date.parse("2026-01-01T00:00:00Z") })(1)).map(r => r.observation.id)).toEqual([obs.id]);
+  });
+
+  it("rechecks the reloaded row after bounded candidate selection", async () => {
+    const obs = makeObs({ timestamp: "2026-01-15T00:00:00Z" });
+    bm25.add(obs);
+    await kv.set("mem:obs:ses_1", obs.id, { ...obs, timestamp: "2026-02-01T00:00:00Z" });
+    const hybrid = new HybridSearch(bm25, null, null, kv as never);
+    expect(await hybrid.prepareSearch("auth", undefined, { before: Date.parse("2026-02-01T00:00:00Z") })(1)).toEqual([]);
+    expect((await hybrid.prepareSearch("auth")(1)).map(r => r.observation.id)).toEqual([obs.id]);
+  });
+
   it("returns BM25-only results when no vector index is provided", async () => {
     const obs = makeObs({ id: "obs_1", sessionId: "ses_1" });
     bm25.add(obs);
