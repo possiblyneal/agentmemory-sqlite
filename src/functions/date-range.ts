@@ -1,9 +1,11 @@
 export type DateRange = { after?: number; before?: number; afterFraction?: string; beforeFraction?: string };
 
 const EXACT_TIMESTAMP = /^(\d{4}|[+-]\d{6})-(\d{2})-(\d{2})[Tt ](\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:?\d{2})(?![\s\S])/;
+const OFFSET_FREE_ISO = /^(?:\d{4}|[+-]\d{6})-\d{2}-\d{2}[Tt]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?![\s\S])/;
 
 function exactComponents(value: string): RegExpExecArray | null {
-  const match = EXACT_TIMESTAMP.exec(value);
+  const normalized = OFFSET_FREE_ISO.test(value) ? `${value}${/[Tt]\d{2}:\d{2}$/.test(value) ? ":00" : ""}Z` : value;
+  const match = EXACT_TIMESTAMP.exec(normalized);
   if (!match || match[1] === "-000000") return null;
   const [, year, month, day, hour, minute, second, , offset] = match;
   const calendar = new Date(0);
