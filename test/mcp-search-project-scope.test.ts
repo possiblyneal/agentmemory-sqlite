@@ -40,6 +40,24 @@ function surfaces() {
   return { callTool, payloads };
 }
 
+describe("MCP smart-search limit", () => {
+  it.each(["bad", "2", null, true, {}, [], 1.5, NaN, Infinity])("rejects malformed limit %j", async (limit) => {
+    const { callTool, payloads } = surfaces();
+    expect(await callTool("memory_smart_search", { query: "auth", limit })).toEqual({
+      status_code: 400, body: { error: "limit must be an integer" },
+    });
+    expect(payloads.has("mem::smart-search")).toBe(false);
+  });
+
+  it.each([[undefined, 10], [-1, 1], [0, 1], [15, 15], [101, 100]])(
+    "accepts and clamps limit %s", async (limit, expected) => {
+      const { callTool, payloads } = surfaces();
+      expect((await callTool("memory_smart_search", { query: "auth", limit })).status_code).toBe(200);
+      expect(payloads.get("mem::smart-search")?.limit).toBe(expected);
+    },
+  );
+});
+
 describe("MCP search tools forward project (#787)", () => {
   it("memory_recall passes project to mem::search", async () => {
     const { callTool, payloads } = surfaces();

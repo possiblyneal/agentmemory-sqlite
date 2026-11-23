@@ -9,7 +9,7 @@ import { getEnvVar } from "../config.js";
 // import: most importers never send one, and it is the costliest module to load.
 const undiciRequire = createRequire(import.meta.url);
 let deadlineOnlyDispatcher: Dispatcher | undefined;
-function getDeadlineOnlyDispatcher(): Dispatcher {
+export function getDeadlineOnlyDispatcher(): Dispatcher {
   if (!deadlineOnlyDispatcher) {
     const { Agent } = undiciRequire("undici") as typeof import("undici");
     deadlineOnlyDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });

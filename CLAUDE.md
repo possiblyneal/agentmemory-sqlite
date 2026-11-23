@@ -321,6 +321,14 @@ Measurements and rationale are in `docs/research/record-kind-counts.md`.
 reinforced only in its own scope. `mem::reflect` counts only attempted clusters in
 `clustersProcessed`, reports `clustersFailed`, and reports failure when all attempts fail.
 Scheduled consolidation retries a project on any cluster failure; unchanged clusters stay cached.
+For each of up to 20 clusters, the standalone MCP shim budgets the largest locally resolved
+provider deadline for the primary and each configured fallback. It adds 15 s for other work
+and caps the total at 2,147,483,647 ms. The budget considers the regular LLM deadline
+(default 60 s, minimum 15 s), including the shared setting's provider-specific parsing, a valid
+`OPENAI_TIMEOUT_MS`, and the enabled Agent SDK's deadline (default 180 s). Reflect uses the deadline-only dispatcher
+so Node's independent header timer cannot cut the request short. Streaming idle deadlines
+and a remote daemon's different configuration can still outlast this outer deadline. The
+health probe and `memory_consolidate` deadlines are unchanged.
 
 ### MCP Tool Handler
 ```typescript
@@ -418,6 +426,9 @@ closest one instead of writing a row, as an exact re-save does: it takes the new
 context and the union of tags, keeps its id, and is audited `lesson_strengthen` with
 `reason: "re-discovery"` and `match: "restated" | "exact"` (#378).
 
+### Recall audit excerpts
+`mem::lesson-recall` and `mem::insight-search` store only the first 200 characters of a query in new audit rows; both search the full query. Existing audit rows are unchanged.
+
 ### Lesson recall candidates
 `searchLessons` and `mem::lesson-recall` score against the full Lesson index, then rank only
 eligible hits within their candidate budgets; deleted, foreign-project and (for recall)
@@ -513,6 +524,8 @@ short forms count only beside an ordinal, a year, or after "on". The in-process 
 BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
+`api::smart-search` and both MCP smart-search entry points reject a supplied `limit` that is not an integer; valid integers retain their existing clamping and omitted limits retain their defaults.
+
 `mem::consolidate-pipeline` no longer extracts Procedural Memories; its `procedural` selector remains accepted and reports zero new procedures. Existing procedures remain available to skill extraction, reads, backups and mesh, and still undergo Decay and retention.
 
 `memoryToObservation()` carries the saved Memory type as optional `memoryType` on full, compact and narrative `mem::search` results and smart-search results; `memory_recall` rendering is unchanged. Graph retrieval keeps an Observation's best score among paths returned from different start nodes. `mem::consolidate` serializes its own runs, counts failed model calls toward its ten-call budget, writes a successor before demoting its predecessor, and updates the index before the predecessor audit. A failed demotion can leave two latest versions; the write lock does not make both writes transactional.

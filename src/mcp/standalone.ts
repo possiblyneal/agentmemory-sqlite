@@ -3,7 +3,9 @@
 import { InMemoryKV } from "./in-memory-kv.js";
 import { createStdioTransport } from "./transport.js";
 import { getAllTools, NOT_A_MEMORY_HINT } from "./tools-registry.js";
-import { getStandalonePersistPath } from "../config.js";
+import { getStandalonePersistPath, loadFallbackConfig, resolveAgentSdkTimeoutMs } from "../config.js";
+import { resolveLlmTimeoutMs } from "../providers/_fetch.js";
+import { parsePositiveIntEnv } from "../utils/parse-number.js";
 import { VERSION } from "../version.js";
 import { generateId } from "../state/schema.js";
 import { isSearchLayer, type SearchLayer } from "../state/search-index.js";
@@ -178,6 +180,9 @@ function validate(toolName: string, args: Record<string, unknown>): Validated {
         v.query = query.trim();
       } else if (!v.expandIds?.length) {
         throw new Error("query is required");
+      }
+      if (toolName === "memory_smart_search" && args["limit"] !== undefined && !Number.isInteger(args["limit"])) {
+        throw new Error("limit must be an integer");
       }
       v.limit = parseLimit(args["limit"]);
       const fmt = args["format"];
@@ -417,7 +422,20 @@ async function handleLocal(
   }
 }
 
-const LLM_BOUND_TOOLS = new Set(["memory_reflect", "memory_consolidate"]);
+const REFLECT_MAX_CLUSTERS = 20;
+const REFLECT_OVERHEAD_MS = 15_000;
+const MAX_TIMER_MS = 2_147_483_647;
+
+function reflectTimeoutMs(): number {
+  const sharedTimeout = parsePositiveIntEnv(process.env["AGENTMEMORY_LLM_TIMEOUT_MS"]) ?? 60_000;
+  const openaiTimeout = parsePositiveIntEnv(process.env["OPENAI_TIMEOUT_MS"]) ?? 0;
+  const sdkTimeout = process.env["AGENTMEMORY_ALLOW_AGENT_SDK"] === "true"
+    ? resolveAgentSdkTimeoutMs((key) => process.env[key])
+    : 0;
+  const perCall = Math.max(15_000, sharedTimeout, resolveLlmTimeoutMs(), openaiTimeout, sdkTimeout);
+  const providerAttempts = 1 + loadFallbackConfig().providers.length;
+  return Math.min(MAX_TIMER_MS, perCall * providerAttempts * REFLECT_MAX_CLUSTERS + REFLECT_OVERHEAD_MS);
+}
 
 async function handleProxyGeneric(
   toolName: string,
@@ -428,13 +446,15 @@ async function handleProxyGeneric(
   // reach every tool (lessons, slots, signals, graph, …)
   // instead of being capped at the 7 IMPLEMENTED_TOOLS set baked into
   // this shim. The server validates arguments per tool.
+  const isReflect = toolName === "memory_reflect";
   const result = (await handle.call(
     "/agentmemory/mcp/call",
     {
       method: "POST",
       body: JSON.stringify({ name: toolName, arguments: args }),
     },
-    LLM_BOUND_TOOLS.has(toolName) ? llmCallTimeoutMs() : undefined,
+    isReflect ? reflectTimeoutMs() : toolName === "memory_consolidate" ? llmCallTimeoutMs() : undefined,
+    isReflect ? { deadlineOnly: true } : undefined,
   )) as { content?: Array<{ type: string; text: string }> } | null;
   if (result && Array.isArray(result.content)) {
     return { content: result.content };

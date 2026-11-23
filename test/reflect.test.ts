@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import { handleToolCall } from "../src/mcp/standalone.js";
+import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
+import { FallbackChainProvider } from "../src/providers/fallback-chain.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -205,6 +209,72 @@ describe("Reflect", () => {
 
       expect(provider.summarize).not.toHaveBeenCalled();
       expect(result.clustersProcessed).toBe(0);
+    });
+
+    it.each([false, true])("completes sequential clusters through MCP (fallback chain: %s)", async (fallback) => {
+      for (const name of ["auth", "token", "session", "deploy", "docker", "helm"]) {
+        await seedNode(kv, makeConceptNode(name));
+      }
+      for (const [src, dst] of [["auth", "token"], ["auth", "session"], ["deploy", "docker"], ["deploy", "helm"]]) {
+        await seedEdge(kv, makeEdge(src!, dst!));
+      }
+      for (const name of ["auth", "deploy"]) {
+        for (let i = 0; i < 3; i++) {
+          await kv.set("mem:semantic", `${name}_${i}`, makeSemantic(`${name} fact ${i}`, `${name}_${i}`));
+        }
+      }
+      provider.summarize.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return XML_RESPONSE;
+      });
+      const primary = vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        throw new Error("primary provider failed");
+      });
+      if (fallback) {
+        registerReflectFunctions(sdk as never, kv as never, new FallbackChainProvider([
+          { ...provider, name: "primary", summarize: primary }, provider,
+        ]));
+      }
+      let run: Promise<unknown> | undefined;
+      const server = createServer((req, res) => {
+        if (req.url === "/agentmemory/livez") {
+          res.end("ok");
+          return;
+        }
+        run = sdk.trigger("mem::reflect", {});
+        void run.then((result) => {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(result) }] }));
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No server address");
+      vi.stubEnv("AGENTMEMORY_URL", `http://127.0.0.1:${address.port}`);
+      vi.stubEnv("AGENTMEMORY_LLM_TIMEOUT_MS", "60000");
+      vi.stubEnv("OPENAI_TIMEOUT_MS", "");
+      vi.stubEnv("AGENTMEMORY_ALLOW_AGENT_SDK", "false");
+      vi.stubEnv("FALLBACK_PROVIDERS", fallback ? "openrouter" : "");
+      resetHandleForTests();
+      const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeScale = fallback ? 5_000 : 500;
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+        realTimeout(ms >= 60_000 ? Math.ceil(ms / timeScale) : ms),
+      );
+      try {
+        const result = await handleToolCall("memory_reflect", {});
+        expect(JSON.parse(result.content[0].text).clustersProcessed).toBe(2);
+        expect(provider.summarize).toHaveBeenCalledTimes(2);
+        expect(primary).toHaveBeenCalledTimes(fallback ? 2 : 0);
+      } finally {
+        await run;
+        timeout.mockRestore();
+        resetHandleForTests();
+        vi.unstubAllEnvs();
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
 
     it("returns empty when no graph nodes or memories exist", async () => {
@@ -648,6 +718,16 @@ Layered protection for security means input validation, safe APIs and deny-lists
         tags: ["security"], createdAt: now, updatedAt: now, decayRate: 0.05,
       });
     });
+
+    it.each(["security layered protection", `${"unmatched ".repeat(30)}security`])(
+      "audits a bounded excerpt without losing matches for %s", async (query) => {
+        const result = await sdk.trigger("mem::insight-search", { query });
+        expect(result.insights.map((insight: Insight) => insight.title)).toContain("Defense in Depth");
+        const rows = await kv.list<{ operation: string; details: { query: string; resultCount: number } }>("mem:audit");
+        const audit = rows.find((row) => row.operation === "insight_search");
+        expect(audit?.details).toEqual({ query: query.slice(0, 200), resultCount: result.insights.length });
+      },
+    );
 
     it("finds insights matching query", async () => {
       const result = (await sdk.trigger("mem::insight-search", {

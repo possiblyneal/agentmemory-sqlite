@@ -274,7 +274,7 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
 
       try {
         await recordAudit(kv, "lesson_recall", "mem::lesson-recall", [], {
-          query: data.query,
+          query: data.query.slice(0, 200),
           resultCount: scored.length,
         });
       } catch {}
