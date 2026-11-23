@@ -59,7 +59,7 @@ async function ensureLessonIndex(kv: StateKV): Promise<SearchIndex> {
 export async function searchLessons(kv: StateKV, query: string, project: string | undefined, limit: number): Promise<Lesson[]> {
   const idx = await ensureLessonIndex(kv);
   const scored = idx
-    .search(query, Math.max(limit * 10, 100))
+    .search(query, idx.size)
     .map((h) => ({ lesson: lessonRecords.get(h.obsId), score: h.score }))
     .filter((s): s is { lesson: Lesson; score: number } => !!s.lesson && !s.lesson.deleted && (!project || !s.lesson.project || s.lesson.project === project))
     .slice(0, limit);
@@ -242,14 +242,15 @@ export function registerLessonsFunctions(sdk: ISdk, kv: StateKV): void {
       const fetchLimit = filtering
         ? Math.max(limit * 10, 100)
         : Math.max(limit * 5, 50);
-      const hits = idx.search(data.query, fetchLimit);
+      const hits = idx.search(data.query, idx.size);
       const maxHit = hits.length > 0 ? hits[0].score : 0;
 
       const scored: Array<{ lesson: Lesson; score: number }> = [];
       for (let i = 0; i < hits.length; i++) {
         const l = lessonRecords.get(hits[i].obsId);
-        if (!l || l.confidence < minConfidence) continue;
+        if (!l || l.deleted || l.confidence < minConfidence) continue;
         if (data.project && l.project && l.project !== data.project) continue;
+        if (scored.length >= fetchLimit) break;
 
         const relevance = maxHit > 0 ? hits[i].score / maxHit : 0;
         const daysSinceReinforced = l.lastReinforcedAt

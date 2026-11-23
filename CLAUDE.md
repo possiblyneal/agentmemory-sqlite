@@ -418,6 +418,12 @@ closest one instead of writing a row, as an exact re-save does: it takes the new
 context and the union of tags, keeps its id, and is audited `lesson_strengthen` with
 `reason: "re-discovery"` and `match: "restated" | "exact"` (#378).
 
+### Lesson recall candidates
+`searchLessons` and `mem::lesson-recall` search the full Lesson index before excluding deleted,
+foreign-project and (for recall) below-confidence records; excluded hits cannot consume the
+candidate budget. Recall retains its existing BM25 candidate budget and confidence/recency
+reranking after filtering. `searchLessons` still caps near-twins within its requested limit.
+
 ### Lesson retention
 `mem::lesson-decay-sweep` lowers a Lesson's confidence by its `decayRate` per active week of
 Project Time down to a floor of 0.05, reinforced or not, and never deletes a live Lesson for
