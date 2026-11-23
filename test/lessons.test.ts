@@ -7,6 +7,8 @@ vi.mock("../src/logger.js", () => ({
 import { registerFacetsFunction } from "../src/functions/facets.js";
 import { registerLessonsFunctions, resetLessonIndex, searchLessons } from "../src/functions/lessons.js";
 import { recordProjectActivity } from "../src/state/project-time.js";
+import { SearchIndex } from "../src/state/search-index.js";
+import { lessonToObservation } from "../src/state/memory-utils.js";
 import type { Lesson } from "../src/types.js";
 
 function mockKV() {
@@ -96,7 +98,7 @@ describe("Lessons", () => {
     }
   });
 
-  it("finds a project Lesson behind 200 higher-scoring foreign Lessons on both recall paths", async () => {
+  it.each(["candidate", "recall"])("finds a project Lesson behind 200 higher-scoring foreign Lessons on the %s path", async (path) => {
     const now = new Date().toISOString();
     const lesson: Lesson = {
       id: "target", content: "quartz deployment with additional details for our project", context: "",
@@ -107,12 +109,30 @@ describe("Lessons", () => {
     for (let i = 0; i < 200; i++) {
       await kv.set("mem:lessons", `foreign-${i}`, { ...lesson, id: `foreign-${i}`, project: "/other", content: "quartz deployment" });
     }
-    const results = await Promise.all([
-      searchLessons(kv as never, "quartz deployment", "/app", 1),
-      sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app", limit: 1 }),
-    ]);
-    expect(results[0].map((l: Lesson) => l.id)).toEqual(["target"]);
-    expect(results[1].lessons.map((l: Lesson) => l.id)).toEqual(["target"]);
+    const results = path === "candidate"
+      ? await searchLessons(kv as never, "quartz deployment", "/app", 1)
+      : (await sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app", limit: 1 })).lessons;
+    expect(results.map((l: Lesson) => l.id)).toEqual(["target"]);
+  });
+
+  it("normalizes recall against the strongest hit even when it belongs to another project", async () => {
+    const now = new Date().toISOString();
+    const target: Lesson = {
+      id: "target", content: "quartz deployment with additional details for our project", context: "",
+      confidence: 0.9, reinforcements: 0, source: "manual", sourceIds: [], project: "/app",
+      tags: [], createdAt: now, updatedAt: now, decayRate: 0.01,
+    };
+    const foreign = { ...target, id: "foreign", project: "/other", content: "quartz deployment" };
+    await kv.set("mem:lessons", target.id, target);
+    await kv.set("mem:lessons", foreign.id, foreign);
+    const index = new SearchIndex();
+    index.add(lessonToObservation(target));
+    index.add(lessonToObservation(foreign));
+    const hits = index.search("quartz deployment", 2);
+    expect(hits[0].obsId).toBe("foreign");
+    const result = await sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app", limit: 1 });
+    expect(result.lessons[0].id).toBe("target");
+    expect(result.lessons[0].score).toBe(Math.round(0.9 * hits[1].score / hits[0].score * 1000) / 1000);
   });
 
   it.each(["deleted", "confidence"])("does not let %s Lessons exhaust recall candidates", async (excluded) => {
@@ -135,6 +155,33 @@ describe("Lessons", () => {
     expect(result.lessons.map((l: Lesson) => l.id)).toEqual(["target"]);
     if (excluded === "deleted") {
       expect((await searchLessons(kv as never, "quartz deployment", "/app", 1)).map((l) => l.id)).toEqual(["target"]);
+    }
+  });
+
+  it.each(["candidate", "recall"])("bounds ranking work on the %s Lesson search path", async (path) => {
+    const now = new Date().toISOString();
+    for (let i = 0; i < 500; i++) {
+      const id = `rank-${i}`;
+      await kv.set("mem:lessons", id, {
+        id, content: i < 250 ? "quartz deployment with extra filler words" : "quartz deployment",
+        context: "", confidence: 0.9, reinforcements: 0, source: "manual", sourceIds: [],
+        project: "/app", tags: [], createdAt: now, updatedAt: now, decayRate: 0.01,
+      });
+    }
+    const splice = Array.prototype.splice;
+    let shifts = 0;
+    const spy = vi.spyOn(Array.prototype, "splice").mockImplementation(function (this: unknown[], ...args: Parameters<typeof splice>) {
+      if ((args[2] as { obsId?: string } | undefined)?.obsId?.startsWith("rank-")) shifts += this.length - args[0];
+      return splice.apply(this, args);
+    });
+    try {
+      const found = path === "candidate"
+        ? await searchLessons(kv as never, "quartz deployment", "/app", 1)
+        : (await sdk.trigger("mem::lesson-recall", { query: "quartz deployment", project: "/app", limit: 1 })).lessons;
+      expect(found).toHaveLength(1);
+      expect(shifts).toBeLessThan(30000);
+    } finally {
+      spy.mockRestore();
     }
   });
 

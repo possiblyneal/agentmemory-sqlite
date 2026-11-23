@@ -135,11 +135,11 @@ export class SearchIndex {
     this.entries.delete(id);
   }
 
-  search(query: string, limit = 20, layer?: IndexLayer): SearchHit[] {
+  search(query: string, limit = 20, layer?: IndexLayer, eligible?: (id: string) => boolean): SearchHit[] {
     const steps = this.scoreTerms(query);
     let step = steps.next();
     while (!step.done) step = steps.next();
-    return this.ranked(step.value, limit, layer);
+    return this.ranked(step.value, limit, layer, eligible);
   }
 
   // Ranks as search() does, but hands the event loop back between query terms
@@ -168,10 +168,10 @@ export class SearchIndex {
   // the head is kept: sorting every scored document held the event loop for
   // up to 200 ms on a 99k-document index, to throw all but `limit` away. Ties
   // rank in scoring order, as a stable sort of the full list would.
-  private ranked(scores: Map<string, number>, limit: number, layer?: IndexLayer): SearchHit[] {
+  private ranked(scores: Map<string, number>, limit: number, layer?: IndexLayer, eligible?: (id: string) => boolean): SearchHit[] {
     const head: SearchHit[] = [];
     for (const [obsId, score] of scores) {
-      if (limit <= 0 || (head.length === limit && !(score > head[limit - 1].score))) continue;
+      if (limit <= 0 || (eligible && !eligible(obsId)) || (head.length === limit && !(score > head[limit - 1].score))) continue;
       const entry = this.entries.get(obsId);
       if (!entry || (layer && (entry.layer ?? "observation") !== layer)) continue;
       let at = head.length;

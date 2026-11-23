@@ -186,6 +186,10 @@ npm run build && npm run eval:supersession -- --instance N
 
 It runs BM25-only by default (`--embeddings local` adds vectors), is not part of `eval:suite`, and takes `--split dev` unless the holdout is named through `AGENTMEMORY_EVAL_HOLDOUT`, like every runner. `--instance` defaults to 5; give each concurrent run its own.
 
+### Lesson crowding
+
+`npx tsx eval/lesson-crowding.ts <source-root>` runs both Lesson search paths against a synthetic corpus: the relevant `target` Lesson is in `/app`, and 200 higher-scoring Lessons belong to `/other`. It prints the expected and returned IDs and a hit indicator for each path. The optional source root defaults to the current checkout; for a baseline, extract that revision's `src/` into a directory under `tmp/` and pass that directory. Run from a checkout with dependencies installed. This tests a specific starvation case, not general Recall quality; it uses no live data or daemon.
+
 ### Session burst (#400)
 
 ```sh
