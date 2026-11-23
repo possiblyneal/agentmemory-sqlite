@@ -725,7 +725,21 @@ export function registerSummarizeFunction(
 
         const qualityScore = scoreSummary(summary);
 
-        await withKeyedLock(`summary:${sessionId}`, () => kv.set(KV.summaries, sessionId, summary));
+        const published = await withKeyedLock(`summary:${sessionId}`, async () => {
+          const current = await kv.get<SessionSummary>(KV.summaries, sessionId);
+          if (current) {
+            const newlyUncovered = observations.filter(
+              (o) => summaryCovers(current, o.timestamp) && !summaryCovers(summary!, o.timestamp),
+            );
+            const retained = await Promise.all(
+              newlyUncovered.map((o) => kv.get(KV.observations(sessionId), o.id)),
+            );
+            if (retained.some((o) => !o)) return false;
+          }
+          await kv.set(KV.summaries, sessionId, summary);
+          return true;
+        });
+        if (!published) return { success: false, error: "observations_evicted_during_summary" };
         pendingOnly.delete(sessionId);
         if (pendingInput && pendingWasSoleBlocker) {
           if (pendingOnly.size >= MAX_PENDING_SUMMARY_REUSES) {

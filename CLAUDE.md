@@ -392,8 +392,10 @@ watermark; this reuse cache is process-local. When an incremental fold fails or 
 its full-scan fallback keeps prior decisions and appends exact-distinct decisions from retained
 input, even if all input remains; a later successful fold can supersede those decisions. Forced
 rebuilds do not retain them this way. Summary publication and each Observation eviction share a
-per-Session lock; eviction rechecks coverage inside it, while provider calls stay outside. Stale
-Session recovery uses the Summary written in the sweep for Eviction, retries uncovered rows on a
+per-Session lock; eviction rechecks coverage inside it, while provider calls stay outside. Before
+publication, Summarize retains the current Summary and reports `observations_evicted_during_summary`
+if a newly uncovered Observation from its input has since been deleted. Retained Observations do not
+block a partial Summary. Stale Session recovery uses the Summary written in the sweep for Eviction, retries uncovered rows on a
 later sweep, and keeps the recovered Session with its retained Observations. An
 explicit `coveredThrough` protects uncovered rows even past the stale-Session age cutoff.
 

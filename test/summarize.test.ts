@@ -443,6 +443,40 @@ describe("mem::summarize chunking", () => {
     expect(retry.summary.coveredThrough > "2020-01-01T00:04:09.000Z").toBe(true);
   });
 
+  it.each([true, false])("handles newly uncovered input deleted during generation: %s", async (deleted) => {
+    process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
+    process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
+    const sessionId = "ses_eviction_during_rebuild";
+    const provider = makeProvider([
+      summaryXml({ title: "first" }), summaryXml({ title: "second" }),
+      "<garbage/>", "<garbage/>", summaryXml({ title: "partial" }),
+    ]);
+    const { handler, kv } = await setupHandler({ sessionId, obsCount: 6, provider });
+    for (let i = 0; i < 6; i++) {
+      const observation: any = await kv.get(`obs:${sessionId}`, `obs_${i}`);
+      observation.timestamp = new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString();
+    }
+    const prior = { sessionId, project: "test-project", title: "prior", narrative: VALID_NARRATIVE,
+      keyDecisions: ["old decision"], filesModified: [], concepts: [], observationCount: 6,
+      createdAt: "2020-01-01T00:01:00.000Z", coveredThrough: "2020-01-01T00:01:00.000Z" };
+    await kv.set("summaries", sessionId, prior);
+    const summarize = provider.summarize;
+    provider.summarize = async (system, prompt) => {
+      if (deleted) await kv.delete(`obs:${sessionId}`, "obs_4");
+      return summarize(system, prompt);
+    };
+
+    const result: any = await handler({ sessionId, force: true });
+    expect(result.success).toBe(!deleted);
+    if (deleted) {
+      expect(result.error).toBe("observations_evicted_during_summary");
+      expect(await kv.get("summaries", sessionId)).toEqual(prior);
+    } else {
+      expect(result.summary.title).toBe("partial");
+      expect(result.summary.coveredThrough).toBe("2020-01-01T00:00:04.000Z");
+    }
+  });
+
   it("retries a skipped final chunk on the same input and advances coverage after folding", async () => {
     process.env.SUMMARIZE_CHUNK_TOKENS = budgetFor(2);
     process.env.SUMMARIZE_CHUNK_CONCURRENCY = "1";
