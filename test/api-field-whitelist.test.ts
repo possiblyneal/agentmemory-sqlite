@@ -62,6 +62,30 @@ const ROUTES: Array<[string, string, string[]]> = [
   ["api::lesson-search", "mem::lesson-recall", ["query", "project", "minConfidence", "limit"]],
 ];
 
+describe("smart-search limit", () => {
+  it.each([[undefined], [-1], [0], [10], [101]])("forwards integer limit %s unchanged", async (limit) => {
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+    let received: unknown;
+    sdk._fns.set("mem::smart-search", (data: { limit?: number }) => { received = data.limit; });
+    const result = await sdk._fns.get("api::smart-search")!({
+      headers: { authorization: `Bearer ${SECRET}` }, body: { query: "auth", limit },
+    });
+    expect(result.status_code).toBe(200);
+    expect(received).toBe(limit);
+  });
+
+  it.each(["bad", "2", null, true, {}, [], 1.5])("rejects malformed limit %j", async (limit) => {
+    const sdk = mockSdk();
+    registerApiTriggers(sdk as never, mockKV() as never, SECRET);
+    const result = await sdk._fns.get("api::smart-search")!({
+      headers: { authorization: `Bearer ${SECRET}` },
+      body: { query: "auth", limit },
+    });
+    expect(result).toEqual({ status_code: 400, body: { error: "limit must be an integer" } });
+  });
+});
+
 describe.each(ROUTES)("%s field whitelist", (route, fn, fields) => {
   let sdk: ReturnType<typeof mockSdk>;
   let received: unknown;

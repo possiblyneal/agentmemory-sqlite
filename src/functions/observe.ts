@@ -350,6 +350,10 @@ function reportsError(output: unknown): boolean {
   return (typeof o["stderr"] === "string" && o["stderr"].trim() !== "") || o["interrupted"] === true || o["is_error"] === true;
 }
 
+function validExecutionField(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= 256 ? value : undefined;
+}
+
 export function isReadOnlyObservation(raw: RawObservation): boolean {
   if (raw.hookType !== "post_tool_use" || !raw.toolName) return false;
   if (reportsError(raw.toolOutput)) return false;
@@ -421,7 +425,7 @@ export function registerObserveFunction(
           payload.sessionId,
           payload.hookType,
           toolName,
-          dedupInput,
+          [dedupInput, validExecutionField(d["agent_id"]), validExecutionField(d["agent_type"])],
           d["tool_output"] ?? d["tool_response"] ?? d["error"],
         );
         if (dedupMap.isDuplicate(dedupHash)) {
@@ -448,7 +452,7 @@ export function registerObserveFunction(
       };
 
       const validateImages = process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE !== undefined;
-      const extractedImage = extractImageWithValidation(privateRaw, validateImages);
+      let extractedImage: string | undefined;
 
       if (typeof privateRaw === "object" && privateRaw !== null) {
         const d = privateRaw as Record<string, unknown>;
@@ -456,6 +460,11 @@ export function registerObserveFunction(
           payload.hookType === "post_tool_use" ||
           payload.hookType === "post_tool_failure"
         ) {
+          const original = payload.data as Record<string, unknown>;
+          const agentId = validExecutionField(original["agent_id"]);
+          const agentType = validExecutionField(original["agent_type"]);
+          if (agentId && agentId === d["agent_id"] && !rules.some((rule) => agentId.includes(rule))) raw.executionAgentId = agentId;
+          if (agentType && agentType === d["agent_type"] && !rules.some((rule) => agentType.includes(rule))) raw.executionAgentType = agentType;
           raw.toolName = redactObservationLiterals(d["tool_name"], rules) as string | undefined;
           raw.toolInput = redactObservationLiterals(d["tool_input"], rules);
           raw.toolOutput = redactObservationLiterals(d["tool_output"], rules) || redactObservationLiterals(d["error"], rules);
@@ -468,10 +477,18 @@ export function registerObserveFunction(
           raw.assistantResponse = redactObservationLiterals(d["last_message"], rules) as string;
         }
 
+        const { agent_id: _agentId, agent_type: _agentType, ...imagePayload } = d;
+        extractedImage = extractImageWithValidation(
+          payload.hookType === "post_tool_use" || payload.hookType === "post_tool_failure"
+            ? imagePayload
+            : d,
+          validateImages,
+        );
         if (extractedImage) {
           raw.modality = (raw.toolInput || raw.toolOutput || raw.userPrompt) ? "mixed" : "image";
         }
-      } else if (typeof sanitizedRaw === "string") {
+      } else if (typeof privateRaw === "string") {
+        extractedImage = extractImageWithValidation(privateRaw, validateImages);
         if (extractedImage) {
           raw.modality = "image";
         }

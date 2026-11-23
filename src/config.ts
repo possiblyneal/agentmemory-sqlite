@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { logger, refreshBootVerbose } from "./logger.js";
-import { parseOptionalPositiveInt } from "./utils/parse-number.js";
+import { parseOptionalPositiveInt, parsePositiveIntEnv } from "./utils/parse-number.js";
 import { hydrateEnvFromFile, loadEnvFile } from "./hooks/_env.js";
 import pc from "picocolors";
 import { isPlaceholderKey } from "./utils/placeholder-key.js";
@@ -221,6 +221,12 @@ function getMergedEnv(
 
 export function getEnvVar(key: string): string | undefined {
   return getMergedEnv()[key];
+}
+
+export function resolveAgentSdkTimeoutMs(readEnv = getEnvVar): number {
+  return parsePositiveIntEnv(readEnv("AGENTMEMORY_AGENT_SDK_TIMEOUT_MS")) ??
+    parsePositiveIntEnv(readEnv("AGENTMEMORY_LLM_TIMEOUT_MS")) ??
+    180_000;
 }
 
 // Claude Code reads only its own process environment, never ~/.agentmemory/.env.

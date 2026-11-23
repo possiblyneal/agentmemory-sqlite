@@ -118,6 +118,14 @@ describe("observation literal redaction correctness", () => {
       expect(imageRows[1].imageData).toBeUndefined();
       expect(imageRows[1].modality).not.toBe("image");
       expect(JSON.stringify(imageRows[1])).not.toContain("SYNTHETIC-LABEL");
+      await sdk.trigger("mem::observe", {
+        ...payload, hookType: "post_tool_use",
+        data: { tool_name: "Read", agent_id: "SYNTHETIC-LABEL-id", agent_type: "reader" },
+      });
+      const attributedRows = [...kv.store.get(KV.observations("redaction"))!.values()] as Array<Record<string, unknown>>;
+      expect(attributedRows[2].executionAgentId).toBeUndefined();
+      expect(attributedRows[2].executionAgentType).toBe("reader");
+      expect(JSON.stringify(attributedRows[2])).not.toContain("SYNTHETIC-LABEL");
     } finally {
       if (previous === undefined) delete process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE;
       else process.env.AGENTMEMORY_OBSERVATION_REDACTION_FILE = previous;

@@ -206,6 +206,8 @@ async function main() {
 			cwd,
 			timestamp: (/* @__PURE__ */ new Date()).toISOString(),
 			data: {
+				...typeof data.agent_id === "string" && data.agent_id.length <= 256 ? { agent_id: data.agent_id } : {},
+				...typeof data.agent_type === "string" && data.agent_type.length <= 256 ? { agent_type: data.agent_type } : {},
 				tool_name: toolName,
 				tool_input: toolInput,
 				tool_output: truncate(cleanOutput, 8e3),

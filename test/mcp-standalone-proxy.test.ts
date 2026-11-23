@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
 import { handleToolCall, handleToolsList, handleResourcesList, handleResourcesRead, handlePromptsList, handlePromptsGet, hydrateMcpEnv } from "../src/mcp/standalone.js";
 import { resetHandleForTests } from "../src/mcp/rest-proxy.js";
 import { InMemoryKV } from "../src/mcp/in-memory-kv.js";
@@ -26,12 +27,14 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     resetHandleForTests();
     delete process.env["AGENTMEMORY_URL"];
     delete process.env["AGENTMEMORY_SECRET"];
+    vi.stubEnv("FALLBACK_PROVIDERS", "");
   });
 
   afterEach(() => {
     resetHandleForTests();
     globalThis.fetch = originalFetch;
     delete process.env["AGENTMEMORY_URL"];
+    vi.unstubAllEnvs();
   });
 
   it("proxies memory_sessions to GET /agentmemory/sessions when server is up", async () => {
@@ -56,6 +59,24 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
     expect(body.sessions[0].id).toBe("sess-1");
     expect(calls.find((c) => c.url.includes("/sessions"))).toBeDefined();
   });
+
+  it.each(["bad", "2", null, true, {}, [], 1.5, NaN, Infinity])("rejects malformed smart-search limit %j", async (limit) => {
+    await expect(handleToolCall("memory_smart_search", { query: "auth", limit }, new InMemoryKV()))
+      .rejects.toThrow("limit must be an integer");
+  });
+
+  it.each([[undefined, 10], [-1, 10], [0, 10], [15, 15], [101, 100]])(
+    "forwards normalized smart-search limit %s", async (limit, expected) => {
+      let received: unknown;
+      installFetch((url, init) => {
+        if (url.endsWith("/agentmemory/livez")) return new Response("ok", { status: 200 });
+        received = JSON.parse(init?.body as string).limit;
+        return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      });
+      await handleToolCall("memory_smart_search", { query: "auth", limit });
+      expect(received).toBe(expected);
+    },
+  );
 
   it("proxies memory_smart_search to POST /agentmemory/smart-search", async () => {
     installFetch((url, init) => {
@@ -115,11 +136,78 @@ describe("@agentmemory/mcp standalone — server proxy (issue #159)", () => {
       const consolidate = timeouts.at(-1)!;
       await handleToolCall("memory_sessions", {});
       const sessions = timeouts.at(-1)!;
-      expect(reflect).toBeGreaterThan(15_000);
-      expect(consolidate).toBeGreaterThan(15_000);
+      expect(reflect).toBe(1_215_000);
+      expect(consolidate).toBe(60_000);
       expect(sessions).toBe(15_000);
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it("allows for an OpenAI provider timeout longer than the shared timeout", async () => {
+    const timeouts: number[] = [];
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return realTimeout(ms);
+    });
+    process.env["OPENAI_TIMEOUT_MS"] = "120000";
+    try {
+      installFetch(() => new Response(JSON.stringify({ content: [] }), { status: 200 }));
+      await handleToolCall("memory_reflect", {});
+      expect(timeouts.at(-1)).toBe(2_415_000);
+    } finally {
+      delete process.env["OPENAI_TIMEOUT_MS"];
+      spy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["fractional shared timeout below one", "0.5", undefined, undefined, undefined, 1_215_000],
+    ["fractional shared timeout accepted by Anthropic", "120000.5", undefined, undefined, undefined, 2_415_000],
+    ["shared timeout integer", "20000", undefined, undefined, undefined, 415_000],
+    ["fractional OpenAI override", undefined, "60000.01", undefined, undefined, 1_215_000],
+    ["opted-in SDK default", undefined, undefined, "true", undefined, 3_615_000],
+    ["opted-in SDK override", undefined, undefined, "true", "220000", 4_415_000],
+  ])("uses the Reflect budget for %s", async (_label, shared, openai, allowSdk, sdk, expected) => {
+    vi.stubEnv("AGENTMEMORY_LLM_TIMEOUT_MS", shared);
+    vi.stubEnv("OPENAI_TIMEOUT_MS", openai);
+    vi.stubEnv("AGENTMEMORY_ALLOW_AGENT_SDK", allowSdk);
+    vi.stubEnv("AGENTMEMORY_AGENT_SDK_TIMEOUT_MS", sdk);
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      installFetch(() => Response.json({ content: [] }));
+      await expect(handleToolCall("memory_reflect", {})).resolves.toEqual({ content: [] });
+      expect(timeout).toHaveBeenLastCalledWith(expected);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("uses a deadline-only dispatcher for Reflect and aborts a stalled response", async () => {
+    const server = createServer((req, res) => {
+      if (req.url === "/agentmemory/livez") res.end("ok");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No server address");
+    process.env["AGENTMEMORY_URL"] = `http://127.0.0.1:${address.port}`;
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+      realTimeout(ms > 60_000 ? 200 : ms),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      await expect(handleToolCall("memory_reflect", {})).rejects.toThrow(/timeout/i);
+      const [probe, reflect] = fetchSpy.mock.calls;
+      expect(probe?.[1]).not.toHaveProperty("dispatcher");
+      expect(reflect?.[1]).toHaveProperty("dispatcher");
+      expect(reflect?.[1]?.signal?.aborted).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      timeout.mockRestore();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
@@ -654,6 +742,23 @@ describe("@agentmemory/mcp standalone — explicit daemon must not fall back (ro
       handleToolCall("memory_save", { content: "keep me" }, kv),
     ).rejects.toThrow("agentmemory daemon unreachable at http://daemon.invalid:3111");
     expect((await kv.list("mem:memories")).length).toBe(0);
+  });
+
+  it("fails Reflect promptly when the daemon does not answer its health probe", async () => {
+    resetHandleForTests();
+    process.env["AGENTMEMORY_URL"] = "http://127.0.0.1:3111";
+    process.env["AGENTMEMORY_PROBE_TIMEOUT_MS"] = "50";
+    const started = Date.now();
+    (globalThis as { fetch: typeof fetch }).fetch = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      })) as typeof fetch;
+    try {
+      await expect(handleToolCall("memory_reflect", {})).rejects.toThrow(/daemon unreachable/);
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      delete process.env["AGENTMEMORY_PROBE_TIMEOUT_MS"];
+    }
   });
 
   it("errors under AGENTMEMORY_FORCE_PROXY when the call cannot reach the daemon", async () => {

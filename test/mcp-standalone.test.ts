@@ -377,21 +377,19 @@ describe("handleToolCall", () => {
     expect(parsed.sessions).toHaveLength(2);
   });
 
-  it("parseLimit clamps bad/malicious limit values to a safe range", async () => {
+  it("smart-search rejects malformed limits and clamps integer limits", async () => {
     const kv = new InMemoryKV();
     for (let i = 0; i < 150; i++) {
       await handleToolCall("memory_save", { content: `mem ${i}` }, kv);
     }
 
-    // Negative / NaN / Infinity / string / object — all should fall back
-    // to the default (10) for memory_smart_search.
-    for (const bogus of [-1, NaN, Infinity, "abc", {}, true]) {
-      const r = await handleToolCall(
-        "memory_smart_search",
-        { query: "mem", limit: bogus },
-        kv,
-      );
-      expect(JSON.parse(r.content[0].text).results).toHaveLength(10);
+    for (const bogus of [NaN, Infinity, "abc", {}, true]) {
+      await expect(handleToolCall("memory_smart_search", { query: "mem", limit: bogus }, kv))
+        .rejects.toThrow("limit must be an integer");
+    }
+    for (const limit of [-1, 0]) {
+      const low = await handleToolCall("memory_smart_search", { query: "mem", limit }, kv);
+      expect(JSON.parse(low.content[0].text).results).toHaveLength(10);
     }
 
     // An absurdly large limit gets clamped to MAX_LIMIT (100).

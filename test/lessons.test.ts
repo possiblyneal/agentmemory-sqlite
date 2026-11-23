@@ -480,6 +480,16 @@ describe("Lessons", () => {
       });
     });
 
+    it.each(["database performance", `${"unmatched ".repeat(30)}database`])(
+      "audits a bounded excerpt without losing matches for %s", async (query) => {
+        const result = await sdk.trigger("mem::lesson-recall", { query });
+        expect(result.lessons.map((lesson: Lesson) => lesson.content)).toContain("Database indexing improves query performance");
+        const rows = await kv.list<{ operation: string; details: { query: string; resultCount: number } }>("mem:audit");
+        const audit = rows.find((row) => row.operation === "lesson_recall");
+        expect(audit?.details).toEqual({ query: query.slice(0, 200), resultCount: result.lessons.length });
+      },
+    );
+
     it("finds lessons matching query", async () => {
       const result = (await sdk.trigger("mem::lesson-recall", {
         query: "database performance",
