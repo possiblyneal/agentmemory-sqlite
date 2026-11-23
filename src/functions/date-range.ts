@@ -7,11 +7,11 @@ function exactComponents(value: string): RegExpExecArray | null {
   const normalized = OFFSET_FREE_ISO.test(value) ? `${value}${/[Tt]\d{2}:\d{2}$/.test(value) ? ":00" : ""}Z` : value;
   const match = EXACT_TIMESTAMP.exec(normalized);
   if (!match || match[1] === "-000000") return null;
-  const [, year, month, day, hour, minute, second, , offset] = match;
+  const [, year, month, day, hour, minute, second, digits = "", offset] = match;
   const calendar = new Date(0);
   calendar.setUTCFullYear(Number(year), Number(month), 0);
   const zone = offset!.toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, "$1:$2");
-  if (Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > calendar.getUTCDate() || Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59 || (zone !== "Z" && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4)) > 59))) return null;
+  if (Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > calendar.getUTCDate() || Number(hour) > 24 || (Number(hour) === 24 && (Number(minute) !== 0 || Number(second) !== 0 || /[1-9]/.test(digits))) || Number(minute) > 59 || Number(second) > 59 || (zone !== "Z" && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4)) > 59))) return null;
   return match;
 }
 
@@ -22,7 +22,7 @@ function fraction(value: string): string {
   return digits.slice(3, end);
 }
 
-function parseTimestamp(value: string): number {
+export function parseTimestamp(value: string): number {
   const match = exactComponents(value);
   if (!match) return Date.parse(value);
   const [, year, month, day, hour, minute, second, digits = "", offset] = match;

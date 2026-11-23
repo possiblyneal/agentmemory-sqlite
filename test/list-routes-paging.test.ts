@@ -99,6 +99,11 @@ describe("date bounds", () => {
     expect(withinDateRange(stored, parseDateRange({ before: instant }))).toBe(false);
     expect(() => parseDateRange({ after: stored })).toThrow();
   });
+  it.each(["2026-01-01T24:00", "2026-01-01T24:00:00", "2026-01-01T24:00:00.0000"])("interprets stored end of day as UTC: %s", (stored) => {
+    expect(compareTimestamps(stored, "2026-01-02T00:00:00Z")).toBe(0);
+    expect(withinDateRange(stored, parseDateRange({ after: "2026-01-02T00:00:00Z" }))).toBe(true);
+    expect(() => parseDateRange({ after: `${stored}Z` })).toThrow();
+  });
   it("interprets an offset-free ISO date-time with minute precision as UTC", () => {
     expect(compareTimestamps("2026-01-01T00:30", "2026-01-01T00:30:00Z")).toBe(0);
     expect(() => parseDateRange({ after: "2026-01-01T00:30" })).toThrow();

@@ -6,6 +6,7 @@ vi.mock("../src/logger.js", () => ({
 
 import { registerSearchFunction, getSearchIndex, rebuildIndex, setVectorIndex, setEmbeddingProvider, getVectorIndex } from "../src/functions/search.js";
 import { VectorIndex } from "../src/state/vector-index.js";
+import { recencyFactor } from "../src/state/hybrid-search.js";
 import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, Memory, Session } from "../src/types.js";
 
@@ -120,6 +121,23 @@ describe("mem::search", () => {
       after: "2025-12-31T19:00:00-05:00", before: "2026-01-02T00:00:00Z",
     }) as { results: Array<{ observation: CompressedObservation }> };
     expect(result.results.map((r) => r.observation.id)).toEqual(["obs_a"]);
+  });
+
+  it("uses UTC for bounded Observation recency", () => {
+    const now = Date.parse("2026-01-02T02:00:00Z");
+    expect(recencyFactor("2026-01-01T01:00:00", now, true)).toBe(recencyFactor("2026-01-01T01:00:00Z", now, true));
+  });
+
+  it("ranks bounded offset-free Observations by UTC near-twin time", async () => {
+    const original = (await kv.get<CompressedObservation>(KV.observations("ses_1"), "obs_a"))!;
+    const older = { ...original, id: "older", timestamp: "2026-01-01T01:00:00", title: "auth middleware decision", narrative: "auth middleware decision" };
+    const newer = { ...older, id: "newer", timestamp: "2026-01-01T04:00:00Z" };
+    await kv.set(KV.observations("ses_1"), older.id, older);
+    await kv.set(KV.observations("ses_1"), newer.id, newer);
+    getSearchIndex().clear();
+    await rebuildIndex(kv as never);
+    const result = await sdk.trigger("mem::search", { query: "auth middleware decision", after: "2026-01-01T00:00:00Z", before: "2026-01-02T00:00:00Z" }) as { results: Array<{ observation: CompressedObservation }> };
+    expect(result.results.map((r) => r.observation.id).indexOf("newer")).toBeLessThan(result.results.map((r) => r.observation.id).indexOf("older"));
   });
 
   it("rechecks the loaded Observation against date bounds", async () => {

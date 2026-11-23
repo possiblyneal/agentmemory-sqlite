@@ -588,8 +588,9 @@ BM25 from content at boot, so there is no migration.
 Recall and Session listing accept `after` and `before` as explicit-offset ISO-8601 instants;
 `after` is inclusive and `before` exclusive. Valid stored ISO date-times with a `T` or `t` separator
 and no offset are interpreted as UTC for bounded Recall and Session ordering, retaining exact fractional
-precision like explicit-offset ISO timestamps. Other Node-parseable legacy timestamps use Node's
-millisecond result; stored records are not rewritten.
+precision like explicit-offset ISO timestamps, including valid `24:00` end of day. Bounded Observation
+recency and near-twin ranking use that same interpretation at millisecond precision; unbounded ranking
+is unchanged. Other Node-parseable legacy timestamps use Node's millisecond result; stored records are not rewritten.
 Invalid or reversed bounds are rejected. Recall uses the Observation timestamp or the record's
 creation time; Session listing uses `startedAt`. Eligibility precedes candidate truncation and
 Session paging, bounded Session pages sort by exact instant, and search rechecks loaded rows against
