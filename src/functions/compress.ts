@@ -182,6 +182,8 @@ export async function commitCompression(
     ...(imageDescription ? { imageDescription } : {}),
     ...(job.raw.imageData ? { imageRef: job.raw.imageData } : {}),
     ...(job.raw.agentId ? { agentId: job.raw.agentId } : {}),
+    ...(job.raw.executionAgentId ? { executionAgentId: job.raw.executionAgentId } : {}),
+    ...(job.raw.executionAgentType ? { executionAgentType: job.raw.executionAgentType } : {}),
     ...(job.raw.origin ? { origin: job.raw.origin } : {}),
     // Persisted so the index-write sites can recognise the
     // daemon's own retrieval calls. Compression overwrites the raw

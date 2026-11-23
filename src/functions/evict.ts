@@ -159,10 +159,17 @@ async function recoverOrEvictStaleSession(
     }
     recovered = await recoverStaleSession(sdk, sessionId);
     if (!recovered) return kept;
+    return { recovered: true, evicted: false };
   }
 
   try {
-    await kv.delete(KV.sessions, sessionId);
+    const deleted = await withKeyedLock(`obs:${sessionId}`, async () => {
+      const current = await kv.listPage(KV.observations(sessionId), undefined, 1);
+      if (current.length > 0) return false;
+      await kv.delete(KV.sessions, sessionId);
+      return true;
+    });
+    if (!deleted) return kept;
   } catch (err) {
     logger.warn("Eviction delete failed", {
       resource: "session",
@@ -173,9 +180,7 @@ async function recoverOrEvictStaleSession(
   }
   await recordAudit(kv, "delete", "mem::evict", [sessionId], {
     resource: "session",
-    reason: recovered
-      ? "stale_session_recovered_then_evicted"
-      : "stale_session_without_summary",
+    reason: "stale_session_without_summary",
     dryRun: false,
   });
   return { recovered, evicted: true };
@@ -218,10 +223,16 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           now - new Date(session.startedAt).getTime() > staleMs &&
           !summaryIds.has(session.id),
       );
-      const evictedStaleSessionIds = new Set<string>();
+      const processedStaleSessionIds = new Set<string>();
       if (dryRun) {
-        stats.staleSessions = staleSessions.length;
-        for (const session of staleSessions) evictedStaleSessionIds.add(session.id);
+        for (const session of staleSessions) {
+          const observations = await kv
+            .list<CompressedObservation | RawObservation>(KV.observations(session.id))
+            .catch(() => null);
+          if (!observations) continue;
+          processedStaleSessionIds.add(session.id);
+          if (observations.length === 0) stats.staleSessions++;
+        }
       } else {
         let recoveredStaleSessions = 0;
         for (const session of staleSessions) {
@@ -230,10 +241,13 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
             kv,
             session.id,
           );
-          if (recovered) recoveredStaleSessions++;
+          if (recovered) {
+            recoveredStaleSessions++;
+            processedStaleSessionIds.add(session.id);
+          }
           if (evicted) {
             stats.staleSessions++;
-            evictedStaleSessionIds.add(session.id);
+            processedStaleSessionIds.add(session.id);
           }
         }
         if (recoveredStaleSessions > 0) {
@@ -259,7 +273,7 @@ export function registerEvictFunction(sdk: ISdk, kv: StateKV): void {
           if (!o.timestamp) continue;
           const age = now - new Date(o.timestamp).getTime();
           if (
-            !evictedStaleSessionIds.has(session.id) &&
+            !processedStaleSessionIds.has(session.id) &&
             age < staleMs &&
             !isStopFinishedWith(o, session, summary)
           ) {

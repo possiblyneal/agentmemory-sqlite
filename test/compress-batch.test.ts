@@ -125,13 +125,20 @@ describe("getXmlElementsById", () => {
 });
 
 describe("mem::compress-enqueue batching", () => {
+  it("preserves execution attribution through LLM compression", async () => {
+    const t = setup(async () => fields("Edited"));
+    const input = { ...raw(1), executionAgentId: "worker-1", executionAgentType: "Explore" };
+    const result = await t.sdk.trigger({ function_id: "mem::compress", payload: { observationId: input.id, sessionId: input.sessionId, raw: input } }) as { compressed: unknown };
+    expect(result.compressed).toMatchObject({ executionAgentId: "worker-1", executionAgentType: "Explore" });
+  });
+
   it("compresses a full batch in one call and upgrades every synthetic record", async () => {
     const t = setup(async (system, prompt) => {
       expect(system).toBe(COMPRESSION_BATCH_SYSTEM);
       const ids = [...prompt.matchAll(/=== Observation (\S+) ===/g)].map((m) => m[1]);
       return ids.map((id) => block(id, `Edited ${id}`)).join("\n");
     });
-    const raws = Array.from({ length: BATCH_MAX_ITEMS }, (_, i) => raw(i));
+    const raws = Array.from({ length: BATCH_MAX_ITEMS }, (_, i) => ({ ...raw(i), executionAgentId: `worker-${i}`, executionAgentType: "Explore" }));
     for (const r of raws) await observe(t.kv, r);
 
     for (const r of raws) await t.enqueue(r);
@@ -140,6 +147,7 @@ describe("mem::compress-enqueue batching", () => {
     for (const r of raws) {
       const obs = await t.stored(r.id);
       expect(obs?.title).toBe(`Edited ${r.id}`);
+      expect(obs).toMatchObject({ executionAgentId: r.executionAgentId, executionAgentType: "Explore" });
       expect(obs?.confidence).not.toBe(0.3);
       expect(obs?.awaitingCompression).toBeUndefined();
       expect(await t.pending(r.id)).toBeNull();
