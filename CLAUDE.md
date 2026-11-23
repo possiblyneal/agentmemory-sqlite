@@ -199,8 +199,9 @@ new automatic Observation's `data` text and object keys are redacted before stor
 Compression; encoded image strings with valid format signatures and endings are not altered only
 when the whole string has valid Base64 syntax and, for a data URI, an image MIME and Base64 header
 without extra metadata. Other image-like strings are treated as text.
-An unset variable leaves capture unchanged; an invalid or unreadable file rejects capture with a
-generic diagnostic, without blocking Recall. REST checks before queueing and the registrar checks
+An unset variable leaves capture unchanged; an invalid or unreadable file rejects capture without
+blocking Recall. REST returns a generic 503 diagnostic; a validated request records its arrival
+before this check and settles on rejection. REST checks before queueing and the registrar checks
 again when processing, including retries. Concurrent reads of the same rules file share only the
 in-flight read, preserving queue admission order; later reads reload it so repairs take effect.
 An acknowledged queued Observation waits for valid rules instead of being dropped. The in-memory retry queue may hold unsanitized payloads. Rules do not rewrite stored data, redact image content, cover Observation

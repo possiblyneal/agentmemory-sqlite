@@ -408,11 +408,6 @@ export function registerApiTriggers(
           },
         };
       }
-      try {
-        await readObservationLiterals();
-      } catch {
-        return { status_code: 503, body: { error: OBSERVATION_RULES_ERROR } };
-      }
       const payload: HookPayload = {
         hookType: hookType as HookPayload["hookType"],
         sessionId,
@@ -422,13 +417,24 @@ export function registerApiTriggers(
         data: body.data,
       };
       markCaptureArrival(payload);
-      const outcome = await observeRetry.submit(payload).catch((err: unknown) => {
+      try {
+        await readObservationLiterals();
+      } catch {
         markCaptureSettled(payload);
+        return { status_code: 503, body: { error: OBSERVATION_RULES_ERROR } };
+      }
+      try {
+        const outcome = await observeRetry.submit(payload);
+        return outcome.queued
+          ? { status_code: 202, body: { queued: true } }
+          : { status_code: 201, body: outcome.result };
+      } catch (err) {
+        markCaptureSettled(payload);
+        if (isObservationRulesError(err)) {
+          return { status_code: 503, body: { error: OBSERVATION_RULES_ERROR } };
+        }
         throw err;
-      });
-      return outcome.queued
-        ? { status_code: 202, body: { queued: true } }
-        : { status_code: 201, body: outcome.result };
+      }
     },
   );
   sdk.registerTrigger({
