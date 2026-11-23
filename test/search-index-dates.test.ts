@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { parseDateRange } from "../src/functions/date-range.js";
 import { SearchIndex } from "../src/state/search-index.js";
 import { dateTermsForQuery } from "../src/state/date-terms.js";
@@ -115,15 +115,63 @@ describe("SearchIndex record dates", () => {
     }
   });
 
-  it("survives removal at a yield inside the bounded date postings", async () => {
+  const explicit = "2026-01-01T00:30:00Z";
+  const addedOnly = "2026-01-01t0:30:00Z";
+  const dateQuery = dateTermsForQuery(explicit)[0].slice("@date:".length);
+  const bounds = parseDateRange({ after: "2026-01-01T00:00:00Z" });
+
+  it.each(["2026-01-01T00:30:00", addedOnly])("keeps the first tied date hit at limit 1 for %s", async (spelling) => {
     const index = new SearchIndex();
-    const [day] = dateTermsForQuery("2026-01-01T00:30:00Z");
-    const range = parseDateRange({ after: "2026-01-01T00:00:00Z" });
-    for (let i = 0; i < 2048; i++) index.add(shipped(`obs_${i}`, "2026-01-01t0:30:00Z"));
-    const pending = index.searchCooperatively(day.slice("@date:".length), 2048, undefined, 0, range);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    index.remove("obs_2047");
-    const hits = await pending;
+    index.add(shipped("first", spelling));
+    index.add(shipped("second", explicit));
+    const control = new SearchIndex();
+    control.add(shipped("first", explicit));
+    control.add(shipped("second", explicit));
+    const expected = control.search(dateQuery, 1);
+    expect(expected.map(({ obsId }) => obsId)).toEqual(["first"]);
+    const copy = new SearchIndex();
+    copy.restoreFrom(index);
+    for (const candidate of [index, copy, SearchIndex.deserialize(index.serialize())]) {
+      expect(await candidate.searchCooperatively(dateQuery, 1, undefined, 0, bounds)).toEqual(expected);
+    }
+  });
+
+  async function mutateInsideDatePostings(index: SearchIndex, mutate: () => void) {
+    vi.useFakeTimers({ toFake: ["setImmediate"] });
+    try {
+      const pending = index.searchCooperatively(dateQuery, 2049, undefined, 0, bounds);
+      // Advance through the distinct unmatched numeric terms before the date term.
+      for (const _ of new Set(dateQuery.split("-"))) {
+        expect(vi.getTimerCount()).toBe(1);
+        vi.advanceTimersToNextTimer();
+        await Promise.resolve();
+      }
+      expect(vi.getTimerCount()).toBe(1);
+      mutate();
+      const [hits] = await Promise.all([pending, vi.runAllTimersAsync()]);
+      return hits;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("scores an already visited date hit once when replacement moves it to added postings", async () => {
+    const index = new SearchIndex();
+    for (let i = 0; i < 2048; i++) index.add(shipped(`obs_${i}`, explicit));
+    index.add(shipped("added", addedOnly));
+    const hits = await mutateInsideDatePostings(index, () => index.add(shipped("obs_0", addedOnly)));
+    const expected = await index.searchCooperatively(dateQuery, 2049, undefined, 0, bounds);
+    expect(hits).toHaveLength(2049);
+    expect(hits.find(({ obsId }) => obsId === "obs_0")).toEqual(expected.find(({ obsId }) => obsId === "obs_0"));
+  });
+
+  it.each(["remove", "replace"])("skips the suspended date posting on %s", async (action) => {
+    const index = new SearchIndex();
+    for (let i = 0; i < 2048; i++) index.add(shipped(`obs_${i}`, addedOnly));
+    const hits = await mutateInsideDatePostings(index, () => {
+      if (action === "remove") index.remove("obs_2047");
+      else index.add(shipped("obs_2047", explicit));
+    });
     expect(hits).toHaveLength(2047);
     expect(hits.some(({ obsId }) => obsId === "obs_2047")).toBe(false);
   });

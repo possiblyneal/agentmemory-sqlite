@@ -14,6 +14,7 @@ interface IndexEntry {
   timestamp: string;
   files: string[];
   layer?: IndexLayer;
+  postingOrder: number;
 }
 
 export type IndexLayer = "memory" | "observation";
@@ -49,6 +50,7 @@ export class SearchIndex {
   // Most date postings agree with the bounded parser; keep only the differences
   // so unbounded queries retain their original postings and scoring order.
   private boundedDateDeltas = new Map<string, { added: Set<string>; omitted: Set<string> }>();
+  private nextPostingOrder = 0;
   private totalDocLength = 0;
   private termsByLead: Map<string, Set<string>> = new Map();
 
@@ -84,6 +86,7 @@ export class SearchIndex {
       timestamp: obs.timestamp,
       files: obs.files ?? [],
       layer,
+      postingOrder: this.nextPostingOrder++,
     });
     this.docTermCounts.set(obs.id, termFreq);
     this.totalDocLength += termCount;
@@ -228,6 +231,28 @@ export class SearchIndex {
     return head;
   }
 
+  private *mergeDatePostings(base: Set<string>, added: Set<string>): Generator<string> {
+    const baseIds = base.values();
+    const addedIds = added.values();
+    const order = (posting: ReturnType<typeof baseIds.next>) =>
+      posting.done ? Infinity : (this.entries.get(posting.value)?.postingOrder ?? -1);
+    let left = baseIds.next();
+    let right = addedIds.next();
+    let leftOrder = order(left);
+    let rightOrder = order(right);
+    while (!left.done || !right.done) {
+      if (!left.done && leftOrder <= rightOrder) {
+        yield left.value;
+        left = baseIds.next();
+        leftOrder = order(left);
+      } else if (!right.done) {
+        yield right.value;
+        right = addedIds.next();
+        rightOrder = order(right);
+      }
+    }
+  }
+
   // Yields every POSTINGS_PER_STEP documents scored and after each query term.
   private *scoreTerms(query: string, bounded = false): Generator<void, Map<string, number>> {
     const scores = new Map<string, number>();
@@ -263,16 +288,16 @@ export class SearchIndex {
       const df = (matchingDocs?.size ?? 0) + (delta?.added.size ?? 0) - (delta?.omitted.size ?? 0);
       if (df > 0) {
         const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
-        function* postings() {
-          if (matchingDocs) yield* matchingDocs;
-          if (delta) yield* delta.added;
-        }
-
+        const postings = matchingDocs && delta?.added.size
+          ? this.mergeDatePostings(matchingDocs, delta.added)
+          : (matchingDocs ?? delta!.added);
+        // A replacement can reappear at the tail of either live iterator after a yield.
+        const postingEnd = this.nextPostingOrder;
         let scored = 0;
-        for (const obsId of delta ? postings() : matchingDocs!) {
+        for (const obsId of postings) {
           if (++scored % POSTINGS_PER_STEP === 0) yield;
           const entry = this.entries.get(obsId);
-          if (!entry) continue;
+          if (!entry || (boundedDate && entry.postingOrder >= postingEnd)) continue;
           const docTerms = this.docTermCounts.get(obsId);
           const liveDelta = boundedDate ? this.boundedDateDeltas.get(term) : undefined;
           if (liveDelta?.omitted.has(obsId)) continue;
@@ -354,7 +379,7 @@ export class SearchIndex {
 
   restoreFrom(other: SearchIndex): void {
     this.entries = new Map(
-      Array.from(other.entries.entries()).map(([k, v]) => [k, { ...v }]),
+      Array.from(other.entries, ([id, entry]) => [id, { ...entry, postingOrder: this.nextPostingOrder++ }]),
     );
     this.invertedIndex = new Map(
       Array.from(other.invertedIndex.entries()).map(([k, v]) => [
@@ -380,7 +405,7 @@ export class SearchIndex {
   }
 
   serialize(): string {
-    const entries = Array.from(this.entries.entries());
+    const entries = Array.from(this.entries, ([id, { postingOrder: _postingOrder, ...entry }]) => [id, entry]);
     const inverted = Array.from(this.invertedIndex.entries()).map(
       ([term, ids]) => [term, Array.from(ids)] as [string, string[]],
     );
@@ -403,7 +428,7 @@ export class SearchIndex {
       const data = JSON.parse(json);
       if (!data?.entries || !data?.inverted || !data?.docTerms) return idx;
       for (const [key, val] of data.entries) {
-        idx.entries.set(key, val);
+        idx.entries.set(key, { ...val, postingOrder: idx.nextPostingOrder++ });
       }
       for (const [term, ids] of data.inverted) {
         idx.invertedIndex.set(term, new Set(ids));

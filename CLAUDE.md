@@ -583,8 +583,10 @@ query's dates at weight 1.0: ISO dates (not inside a path or dated filename), mo
 day-month with an optional year, and month-year. A bare month is not matched; `may` and the
 short forms count only beside an ordinal, a year, or after "on". Bounded BM25 resolves the
 stored instant with the date-range parser before taking its local calendar day; the index stores
-only the date postings that differ from unbounded search. The in-process Engine rebuilds BM25
-from content at boot, so there is no migration.
+only the date postings that differ from unbounded search. It merges base and added postings in
+insertion order for ties. Each bounded date term skips postings removed or published after that
+term started; previously scored contributions are not recomputed. The in-process Engine rebuilds
+BM25 from content at boot, so there is no migration.
 
 ### Search and consolidation
 Recall and Session listing accept `after` and `before` as explicit-offset ISO-8601 instants;
