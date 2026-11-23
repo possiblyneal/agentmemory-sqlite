@@ -12,7 +12,7 @@ agentmemory exposes 43 MCP tools. 8 are in the lean core set (`--tools core` or 
 | `memory_commit_lookup` |  | `sha`*: string | Look up the agent session(s) that produced a specific git commit, given its SHA. Returns the commit metadata and linked sessions. |
 | `memory_commits` |  | `branch`: string, `repo`: string, `limit`: number | List recent commits linked to agent sessions, optionally filtered by branch or repo. |
 | `memory_compress_file` |  | `filePath`*: string | Compress a markdown file to reduce token usage while preserving headings, URLs, and code blocks. Creates a .original.md backup before writing. |
-| `memory_consolidate` | yes | `tier`: string | Run the 4-tier memory consolidation pipeline (working -> episodic -> semantic -> procedural). |
+| `memory_consolidate` | yes | `tier`: string | Run memory consolidation, reflection, and decay. |
 | `memory_diagnose` | yes | `categories`: string | Run health checks across all subsystems (signals, sessions, observations, memories, lessons, summaries, semantic, procedural, insights, mesh, injections, injection-use, recall-coverage). Identifies stuck, orphaned, and inconsistent state, Missed Injections, injected items the Session never used, and Unrecalled Memories. |
 | `memory_export` |  | none | Export all memory data as JSON. |
 | `memory_facet_query` |  | `matchAll`: string, `matchAny`: string, `targetType`: string | Query targets by facet tags with AND/OR logic. Find all memories tagged priority:urgent AND team:backend. |

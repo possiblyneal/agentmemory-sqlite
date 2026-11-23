@@ -364,7 +364,7 @@ export const V040_TOOLS: McpToolDef[] = [
   {
     name: "memory_consolidate",
     description:
-      "Run the 4-tier memory consolidation pipeline (working -> episodic -> semantic -> procedural).",
+      "Run memory consolidation, reflection, and decay.",
     inputSchema: {
       type: "object",
       properties: {
