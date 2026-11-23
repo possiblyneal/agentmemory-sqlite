@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { ISdk } from "../engine/types.js";
 import type {
   SemanticMemory,
@@ -220,19 +221,29 @@ export function registerConsolidationPipelineFunction(
         let textMatch = live.find(row =>
           (row.project === undefined || row.project === project) &&
           (sameKey.length === 0 || (sameKey.includes(row) && sameValue(row))) &&
-          (!key || !row.subject || sameValue(row) || (!verifyFact && !(row.aliases?.length))) &&
+          (!key || !row.subject || sameValue(row)) &&
           members(row).some(member => member.fact.toLowerCase() === lowerFact),
         );
         if (textMatch && key && !textMatch.subject && !(await citesOnlyProject(textMatch, project))) {
           textMatch = undefined;
         }
-        let existing = textMatch ?? sameKey.find(sameValue);
+        const reinforce = (row: SemanticMemory): SemanticMemory => ({
+          ...row,
+          accessCount: row.accessCount + 1,
+          lastAccessedAt: now,
+          updatedAt: now,
+          confidence: Math.max(row.confidence, confidence),
+          sourceSessionIds: capSourceIds([...row.sourceSessionIds, ...sessionIds], MAX_SOURCE_LIST_IDS),
+          ...(key && !row.subject ? { project, ...key } : {}),
+        });
+        const existing = textMatch ?? sameKey.find(sameValue);
+        let target: SemanticMemory | undefined;
         if (!existing && key && sameKey.length === 0 && verifyFact && verificationCalls < MAX_FACT_VERIFICATIONS) {
           const object = key.object.normalize("NFC").trim();
           let candidate: SemanticMemory | undefined;
           for (const row of live) {
             if (row.project !== project || !row.subject || !row.relation ||
-                row.object?.normalize("NFC").trim() !== object ||
+                typeof row.object !== "string" || row.object.normalize("NFC").trim() !== object ||
                 jaccardSimilarity(row.fact, fact) < RESTATEMENT_OVERLAP) continue;
             if (candidate) {
               candidate = undefined;
@@ -243,25 +254,25 @@ export function registerConsolidationPipelineFunction(
           if (candidate) {
             verificationCalls++;
             if (await verifyFact(candidate.fact, fact).catch(() => false) === true) {
-              existing = candidate;
-              existing.aliases = [...factAliases(existing.aliases), { ...key, fact }];
+              const at = existingSemantic.indexOf(candidate);
+              const current = await kv.get<SemanticMemory>(KV.semantic, candidate.id);
+              if (current && isDeepStrictEqual(current, candidate)) {
+                const value = { ...reinforce(current), aliases: [...factAliases(current.aliases), { ...key, fact }] };
+                const written = await kv.setManyIfUnchanged(KV.semantic, [{ key: current.id, value, updatedAt: current.updatedAt }]);
+                if (written.length) target = value;
+              }
+              const latest = target ?? await kv.get<SemanticMemory>(KV.semantic, candidate.id);
+              if (latest) existingSemantic[at] = latest;
+              else existingSemantic.splice(at, 1);
             }
           }
         }
-        let target: SemanticMemory;
         if (existing) {
-          existing.accessCount++;
-          existing.lastAccessedAt = now;
-          existing.updatedAt = now;
-          existing.confidence = Math.max(existing.confidence, confidence);
-          existing.sourceSessionIds = capSourceIds(
-            [...existing.sourceSessionIds, ...sessionIds],
-            MAX_SOURCE_LIST_IDS,
-          );
-          if (key && !existing.subject) Object.assign(existing, { project, ...key });
-          await kv.set(KV.semantic, existing.id, existing);
+          const value = reinforce(existing);
+          await kv.set(KV.semantic, value.id, value);
+          Object.assign(existing, value);
           target = existing;
-        } else {
+        } else if (!target) {
           target = {
             id: generateId("sem"),
             fact,
@@ -287,8 +298,8 @@ export function registerConsolidationPipelineFunction(
           const primaryMatches = old.subject === key!.subject && old.relation === key!.relation;
           const aliases = factAliases(old.aliases).filter((member) => member.subject !== key!.subject || member.relation !== key!.relation);
           if (primaryMatches && aliases.length > 0) {
-            const [primary, ...remaining] = aliases;
-            Object.assign(old, primary, { aliases: remaining });
+            const [{ subject, relation, object, fact }, ...remaining] = aliases;
+            Object.assign(old, { subject, relation, object, fact, aliases: remaining });
           } else if (!primaryMatches) {
             old.aliases = aliases;
           } else {

@@ -4,6 +4,7 @@ import { KV } from "../state/schema.js";
 import type { StateKV } from "../state/kv.js";
 import { STOP_WORDS } from "../state/stopwords.js";
 import { capBehindNewer } from "./recency-cap.js";
+import { factAliases } from "./semantic-fact-aliases.js";
 import { createSessionLoader } from "./search.js";
 import { semanticFactIndex, startsAWord, type IndexedFact } from "./semantic-fact-index.js";
 
@@ -21,7 +22,7 @@ const CAP_POOL = 50;
 interface Scored {
   fact: IndexedFact;
   score: number;
-  matchedText?: string;
+  matchedTexts?: string[];
 }
 
 const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
@@ -61,16 +62,17 @@ export async function recallSemanticFacts(
         continue;
       }
       let bestCount = 0;
-      let matchedText = fact.text;
+      let matchedTexts: string[] = [];
       for (const text of [fact.text, ...fact.aliasTexts]) {
         const lower = text.toLowerCase();
         const matches = terms.filter(term => startsAWord(lower, term)).length;
         if (matches > bestCount) {
           bestCount = matches;
-          matchedText = text;
+          matchedTexts = [];
         }
+        if (matches === bestCount) matchedTexts.push(text);
       }
-      scored.push({ fact, score: (fact.confidence * bestCount) / terms.length, matchedText });
+      scored.push({ fact, score: (fact.confidence * bestCount) / terms.length, matchedTexts });
     }
   } else {
     const now = Date.now();
@@ -87,15 +89,21 @@ export async function recallSemanticFacts(
 
   const poolSize = Math.max(limit, CAP_POOL);
   const pool = options.project ? await inProject(kv, scored, options.project, poolSize) : scored.slice(0, poolSize);
-  capBehindNewer(pool, (s) => s.matchedText ?? s.fact.text, (s) => s.fact.createdAt);
+  capBehindNewer(pool, (s) => s.matchedTexts ?? s.fact.text, (s) => s.fact.createdAt);
   pool.sort((a, b) => b.score - a.score);
   const rows = await Promise.all(
-    pool.slice(0, limit).map(async ({ fact, score }) => ({
-      fact: await kv.get<SemanticMemory>(KV.semantic, fact.id),
-      score,
-    })),
+    pool.slice(0, limit).map(async ({ fact, score, matchedTexts }): Promise<RecalledFact | null> => {
+      const current = await kv.get<SemanticMemory>(KV.semantic, fact.id);
+      if (!current || current.isLatest === false || (options.range && !withinDateRange(current.createdAt, options.range))) return null;
+      if (terms.length > 0) {
+        const winningTexts = matchedTexts ?? [fact.text];
+        if (!winningTexts.includes(current.fact) &&
+            !factAliases(current.aliases).some(alias => winningTexts.includes(alias.fact))) return null;
+      }
+      return { fact: current, score };
+    }),
   );
-  return rows.filter((r): r is RecalledFact => r.fact !== null && r.fact.isLatest !== false && (!options.range || withinDateRange(r.fact.createdAt, options.range)));
+  return rows.filter((row): row is RecalledFact => row !== null);
 }
 
 async function inProject(

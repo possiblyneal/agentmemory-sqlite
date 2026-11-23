@@ -4,7 +4,10 @@ import { logger } from "../logger.js";
 
 const TIMEOUT_MS = 10_000;
 
-export function createFactEntailmentVerifier(directory: string | undefined) {
+export function createFactEntailmentVerifier(
+  directory: string | undefined,
+  startWorker = (entry: URL, modelDirectory: string) => new Worker(entry, { workerData: modelDirectory }),
+) {
   if (!directory) return undefined;
   if (!isAbsolute(directory)) {
     logger.warn("Fact entailment model directory must be absolute; cross-key merging disabled");
@@ -27,7 +30,7 @@ export function createFactEntailmentVerifier(directory: string | undefined) {
     try {
       if (!worker) {
         const ext = import.meta.url.endsWith(".ts") ? "ts" : "mjs";
-        worker = new Worker(new URL(`./fact-entailment-worker.${ext}`, import.meta.url), { workerData: directory });
+        worker = startWorker(new URL(`./fact-entailment-worker.${ext}`, import.meta.url), directory);
         worker.on("error", disable);
         worker.on("exit", disable);
         worker.on("message", (result: unknown) => pending?.(result === true));

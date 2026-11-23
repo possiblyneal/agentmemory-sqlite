@@ -31,12 +31,16 @@ function prefixOf(tokens: Set<string>, rank: Map<string, number>): string[] {
 // just behind the newer so reinforcement cannot outvote a correction.
 export function capBehindNewer<T extends { score: number }>(
   scored: T[],
-  textOf: (item: T) => string,
+  textOf: (item: T) => string | string[],
   activeAt: (item: T) => number,
 ): void {
   const byRecency: Entry<T>[] = [...scored]
     .sort((a, b) => activeAt(b) - activeAt(a))
-    .map((item) => ({ item, at: activeAt(item), text: jaccardText(textOf(item)) }));
+    .flatMap((item) => {
+      const texts = textOf(item);
+      const at = activeAt(item);
+      return (typeof texts === "string" ? [texts] : texts).map(text => ({ item, at, text: jaccardText(text) }));
+    });
   const frequency = new Map<string, number>();
   for (const { text } of byRecency) for (const token of text.tokens) frequency.set(token, (frequency.get(token) ?? 0) + 1);
   const rank = new Map(
