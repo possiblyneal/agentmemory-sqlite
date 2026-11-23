@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { SqliteState, stateFunctions } from "../src/engine/inproc/state.js";
+import { StateKV } from "../src/state/kv.js";
 
 vi.mock("../src/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -80,6 +84,120 @@ describe("Semantic Fact keyed supersession", () => {
       await kv.set(KV.summaries, `ses_${i}`, summary(i));
       await kv.set(KV.sessions, `ses_${i}`, { id: `ses_${i}`, project: "proj", startedAt: summary(i).createdAt, status: "completed", observationCount: 3 });
     }
+  });
+
+  it("merges verified cross-key restatements and recalls alias wording", async () => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, async () => true);
+    await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+    expect(await facts()).toHaveLength(1);
+    expect((await recallSemanticFacts(kv as never, 10, { query: "deadline", project: "proj" })).map(r => r.fact.fact))
+      .toEqual(["The service timeout is 30 seconds"]);
+    await consolidate(`<facts><fact confidence="0.8">The service deadline timeout is 30 seconds</fact></facts>`);
+    expect(await facts()).toHaveLength(1);
+  });
+
+  it.each(["timeout", "deadline"])("detaches an updated %s key without closing the other key", async (changed) => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, async () => true);
+    await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="${changed}" object="60 seconds"`, `The service ${changed} is 60 seconds`));
+    const live = (await facts()).filter(f => f.isLatest !== false);
+    expect(live).toHaveLength(2);
+    expect(live.find(f => f.object === "30 seconds")?.relation).toBe(changed === "timeout" ? "deadline" : "timeout");
+    expect(live.find(f => f.object === "60 seconds")?.relation).toBe(changed);
+  });
+
+  it.each(["timeout", "deadline"])("retains both keys after reopening SQLite, then updates %s", async (changed) => {
+    mkdirSync("tmp", { recursive: true });
+    const dir = mkdtempSync(join("tmp", "semantic-keys-"));
+    const path = join(dir, "state.sqlite");
+    let store: SqliteState | undefined;
+    function open(verify?: () => Promise<boolean>) {
+      store = new SqliteState(path);
+      const handlers = stateFunctions(store);
+      const db = new StateKV({ trigger: async (req: { function_id: string; payload: unknown }) =>
+        handlers[req.function_id](req.payload) } as never);
+      sdk = mockSdk();
+      registerConsolidationPipelineFunction(sdk as never, db, {
+        name: "t", compress: vi.fn(), summarize: async () => reply,
+      }, verify);
+      return db;
+    }
+    try {
+      const db = open(async () => true);
+      for (let i = 0; i < 5; i++) {
+        const session = summary(i);
+        await db.set(KV.summaries, session.sessionId, session);
+        await db.set(KV.sessions, session.sessionId, { project: session.project });
+      }
+      await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+      await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+      const [merged] = await db.list<SemanticMemory>(KV.semantic);
+      expect(await db.list(KV.semantic)).toHaveLength(1);
+      store!.close();
+      store = undefined;
+      const reopened = open();
+      await consolidate(keyed(`subject="service" relation="${changed}" object="60 seconds"`, `The service ${changed} is 60 seconds`));
+      const live = (await recallSemanticFacts(reopened, 10, { project: "proj" })).map(hit => hit.fact);
+      const retained = changed === "timeout" ? "deadline" : "timeout";
+      expect(live).toHaveLength(2);
+      expect(live.find(fact => fact.id === merged.id)).toMatchObject({
+        relation: retained, object: "30 seconds",
+        fact: retained === "deadline" ? "The service deadline timeout is 30 seconds" : "The service timeout is 30 seconds",
+      });
+      expect(live.find(fact => fact.id !== merged.id)).toMatchObject({ relation: changed, object: "60 seconds" });
+    } finally {
+      store?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["declines", "throws", "unavailable"])("keeps candidates separate when verification %s", async (mode) => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    const verifier = mode === "unavailable" ? undefined : async () => { if (mode === "throws") throw new Error("offline"); return false; };
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, verifier);
+    await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+    expect(await facts()).toHaveLength(2);
+  });
+
+  it("does not verify cross-key candidates from another project", async () => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    const verify = vi.fn(async () => true);
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, verify);
+    await kv.set(KV.semantic, "other", {
+      id: "other", fact: "The service timeout is 30 seconds", project: "other",
+      subject: "service", relation: "timeout", object: "30 seconds", confidence: 0.8,
+      sourceSessionIds: [], sourceMemoryIds: [], accessCount: 1, lastAccessedAt: "",
+      strength: 0.8, createdAt: "", updatedAt: "",
+    });
+    await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+    expect(await facts()).toHaveLength(2);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("declines ambiguous cross-key candidates", async () => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    const verify = vi.fn(async () => true);
+    await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="deadline" object="30 seconds"`, "The service deadline timeout is 30 seconds"));
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, verify);
+    await consolidate(keyed(`subject="service" relation="limit" object="30 seconds"`, "The service timeout limit is 30 seconds"));
+    expect(await facts()).toHaveLength(3);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("does not collapse a changed key into a different existing claim", async () => {
+    const provider = { name: "t", compress: vi.fn(), summarize: vi.fn(async () => reply) };
+    registerConsolidationPipelineFunction(sdk as never, kv as never, provider as never, async () => true);
+    await consolidate(keyed(`subject="service" relation="timeout" object="30 seconds"`, "The service timeout is 30 seconds"));
+    await consolidate(keyed(`subject="service" relation="deadline" object="60 seconds"`, "The service deadline is 60 seconds"));
+    await consolidate(keyed(`subject="service" relation="timeout" object="60 seconds"`, "The service deadline is 60 seconds"));
+    const live = (await facts()).filter(f => f.isLatest !== false);
+    expect(live).toHaveLength(2);
   });
 
   it("closes a live fact when the same subject and relation arrive with a different object", async () => {

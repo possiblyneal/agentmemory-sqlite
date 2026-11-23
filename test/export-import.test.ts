@@ -440,6 +440,34 @@ describe("Export/Import Functions", () => {
     expect(await kv.get("mem:relations", "rel_old")).toEqual(relation);
   });
 
+  it("preserves alternate Semantic Fact keys in full export and snapshots", async () => {
+    const fact = {
+      id: "sem_backups", fact: "Backups run nightly", project: "proj", subject: "backups",
+      relation: "schedule", object: "nightly", confidence: 0.8, strength: 0.8, accessCount: 1,
+      sourceSessionIds: [], sourceMemoryIds: [], createdAt: "2026-01-01", updatedAt: "2026-01-01",
+      lastAccessedAt: "2026-01-01",
+      aliases: [{ subject: "backups", relation: "frequency", object: "nightly", fact: "The backups run nightly" }],
+    };
+    await kv.set("mem:semantic", fact.id, fact);
+    const exportData = JSON.parse(JSON.stringify(await sdk.trigger("mem::export", {})));
+    await kv.delete("mem:semantic", fact.id);
+    expect(await sdk.trigger("mem::import", { exportData, strategy: "replace" })).toMatchObject({ success: true });
+    expect(await kv.get("mem:semantic", fact.id)).toEqual(fact);
+
+    mkdirSync("tmp", { recursive: true });
+    const dir = mkdtempSync(join(process.cwd(), "tmp", "snapshot-semantic-aliases-"));
+    try {
+      registerSnapshotFunction(sdk as never, kv as never, dir);
+      const created = await sdk.trigger("mem::snapshot-create", {});
+      expect(created.success).toBe(true);
+      await kv.delete("mem:semantic", fact.id);
+      expect(await sdk.trigger("mem::snapshot-restore", { commitHash: created.snapshot.commitHash })).toMatchObject({ success: true });
+      expect(await kv.get("mem:semantic", fact.id)).toEqual(fact);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("restores captured legacy-keyed relations and removes later relations", async () => {
     mkdirSync("tmp", { recursive: true });
     const dir = mkdtempSync(join(process.cwd(), "tmp", "snapshot-relations-"));

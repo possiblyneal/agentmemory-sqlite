@@ -103,9 +103,10 @@ BM25 from content and skips non-latest Memories. `mem::evict` deletes a non-late
 **Semantic Facts.** Consolidation's one LLM call per project returns each fact with an optional
 key: `subject`, `relation`, `object`. All three present, stored lowercased and trimmed with the
 project, make a keyed fact. A new keyed fact whose (subject, relation) matches a live keyed fact
-of the same project but whose object differs closes that fact (`isLatest: false`, `supersededBy`)
-and audits it (`evolve`, `semantic.supersede`); the same key and object reinforces, as exact text
-does. A keyed fact whose text matches a live unkeyed fact whose cited Sessions are all this project's
+of the same project but whose object differs replaces that key and audits it (`evolve`,
+`semantic.supersede`). If the row has another key, that key and its wording survive under the
+same row ID; otherwise the old row closes (`isLatest: false`, `supersededBy`). The same key and
+object reinforces, as does exact text when it does not conflict with an existing key. A keyed fact whose text matches a live unkeyed fact whose cited Sessions are all this project's
 reinforces it and gives it the key (otherwise a new keyed fact is written), so a fact written before keys existed can be closed later. Facts are not in BM25 or the vector index, so closing one has nothing to de-index; the
 filter is on the read side: `recallSemanticFacts` (smart-search, session start) and the facts
 Reflect reads skip `isLatest === false`. An unkeyed fact (old rows, or the LLM omitted the key)

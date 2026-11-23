@@ -41,3 +41,35 @@ Quantized `Xenova/nli-deberta-v3-small` (revision `6bc2a55c7c0f7e2bc68de60bb248e
 The quantized `Xenova/nli-deberta-v3-base` (revision `80a99030ce45a69a39ea2a6f50756d03859ff521`) used the same local CPU setup, decision rule, and 24 pairs. It caught two of the three restatements but preserved only 15 of the 21 distinct pairs. Requiring both models to agree caught two restatements and still would merge two distinct pairs. This reuses the original screen; it is not an independent validation set.
 
 Reject both models and their agreement rule for automatic merging. Before retrying, require a distinct candidate to preserve the known counterexamples and test it on fresh labeled pairs before running Consolidation and Recall. No production logic changed.
+
+## Fact object guard
+
+A read-only live scan matched all 24 labeled pairs back to unique same-project, live, cross-key Fact pairs by their exact text. Requiring equal objects after NFC normalization and trimming, in addition to Jaccard ≥ 0.5, caught two of the three restatements and still would merge two of the 21 distinct pairs. Reject the object-and-overlap rule on its own.
+
+Adding bidirectional entailment from the small checkpoint caught one of the three restatements and preserved all 21 distinct pairs. Adding the base checkpoint instead, or requiring both, gave the same counts. This combination was selected after seeing the original labels.
+
+### Fresh blind screen
+
+The small-model combination generated a fresh sample of 12 disjoint, same-project cross-key pairs, excluding all texts from the first screen. The sampler drew eight predicted merges and four abstentions from pairs with equal normalized objects and Jaccard ≥ 0.5. The Operator saw only the two texts, in mixed order. All eight predicted merges were labeled restatements and all four abstentions were labeled distinct. This selected sample tests for failures inside the guard's candidate set, not overall coverage or a production false-merge rate.
+
+### Keyed update replay
+
+A synthetic replay used real Consolidation and Semantic Fact Recall with a stubbed equivalence verdict for one restatement. Both arms then received a changed object, once under each of the two keys in separate runs. Direct reinforcement avoided writing the restatement but retained only the original key. An update under the incoming key left the old claim visible in both arms; the baseline closed the incoming-key row, while the candidate had no such row to close. An update under the original key left the other wording visible on the baseline but only the new claim visible on the candidate. Direct reinforcement makes later behavior depend on which key happened to be stored first. Reject dropping the alternate key. A future candidate must preserve keyed updates or group results without dropping either key.
+
+### Preserve both keys
+
+A scratch-only variant kept the alternate key and its wording in the same Fact row. After a JSON storage round trip and Consolidation handler reinitialization, the replay updated both keys in both orders. The variant initially stored one row instead of the baseline's two. After each first update it recalled the same Fact texts as the baseline, including the untouched key's original wording; after each second update both arms recalled only the two replacement texts. Direct reinforcement without the alternate key lost the untouched wording when the primary key was updated first.
+
+That scratch fixture used a stubbed verdict and an in-memory store. The implementation's separate regression opens a file-backed SQLite store, merges with a stubbed verdict, closes the store, and reopens it with no verifier. Updating either key leaves two live rows and retains the untouched key's wording and original row ID. Export/replace import and snapshot/restore round-trip the alias; the mesh fixture checks inbound receipt only.
+
+### Coding-life regression check
+
+The default dev split on sandbox instance 37 compared base `c212777e` with the candidate. After restoring the existing embedding worker's expected bundle path, both arms produced the same Recall, precision and no-answer-clean scores:
+
+| Surface | Queries per adapter | Hybrid | BM25 |
+|---|---:|---|---|
+| Search | 12 | 1.000 / 0.708 / 0.000 | 0.950 / 0.694 / 0.000 |
+| Session start | 2 | 0.625 / 1.000 / 1.000 | 0.625 / 1.000 / 1.000 |
+| Prompt submit | 9 | 0.861 / 1.000 / 1.000 | 0.861 / 1.000 / 1.000 |
+
+This run checks general Recall, not the classifier or Consolidation; the SQLite fixture and labeled screens cover those separately.

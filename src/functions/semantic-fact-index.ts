@@ -64,7 +64,7 @@ async function readIndex(kv: StateKV): Promise<SemanticFactIndex> {
     const page = await kv.listPage<SemanticMemory>(KV.semantic, after, PAGE);
     for (const { value: fact } of page) {
       if (fact.isLatest === false) continue;
-      const lowerText = fact.fact.toLowerCase();
+      const lowerText = [fact.fact, ...(fact.aliases ?? []).map((alias) => alias.fact)].join(" ").toLowerCase();
       for (const word of new Set(lowerText.match(WORD))) {
         const list = postings.get(word);
         if (list) list.push(facts.length);

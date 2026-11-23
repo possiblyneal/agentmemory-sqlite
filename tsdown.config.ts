@@ -65,10 +65,12 @@ export default defineConfig([
     clean: false,
     sourcemap: false,
   },
-  // The local embedder's worker thread (ADR 0002). The provider resolves it
-  // next to whichever dist bundle it was inlined into.
+  // Local inference workers live beside the dist bundles that start them (ADR 0002).
   {
-    entry: ["src/providers/embedding/local-worker.ts"],
+    entry: {
+      "local-worker": "src/providers/embedding/local-worker.ts",
+      "fact-entailment-worker": "src/providers/fact-entailment-worker.ts",
+    },
     outDir: "dist",
     ...shared,
     clean: false,
