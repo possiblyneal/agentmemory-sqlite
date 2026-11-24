@@ -52,9 +52,10 @@ export async function runExperiment() {
 
   async function render(prompt: string, reply: string) {
     const sdk = mockSdk();
-    sdk.registerFunction("mem::search", async ({ query }: { query: string }) => ({
-      results: index.search(query).map(({ obsId, sessionId, score }) => ({ sessionId, score, observation: observations.get(obsId) })),
-    }));
+    sdk.registerFunction("mem::search", async (data) => {
+      const { query } = data as { query: string };
+      return { results: index.search(query).map(({ obsId, sessionId, score }) => ({ sessionId, score, observation: observations.get(obsId) })) };
+    });
     registerPromptContextFunction(sdk as never, mockKV() as never);
     return (await sdk.trigger("mem::prompt-context", { sessionId: "next", project: "synthetic", prompt, reply }) as PromptContextResult).context;
   }

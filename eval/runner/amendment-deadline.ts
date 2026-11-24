@@ -28,7 +28,8 @@ async function pair(item: typeof cases[number], treatment: boolean) {
   }
   let elapsed = 0;
   let skipped = false;
-  sdk.registerFunction("mem::search", async ({ query }: { query: string }) => {
+  sdk.registerFunction("mem::search", async (data) => {
+    const { query } = data as { query: string };
     if (query === primaryQuery) {
       elapsed += item.primaryMs;
       return { results: [first] };
