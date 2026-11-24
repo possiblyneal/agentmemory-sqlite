@@ -26,4 +26,8 @@ One real coding checkpoint from the [capture pilot](./2026-11-24-precompact-loca
 
 Both selected verifying the existing edits without changing the index. The Summary already mentioned staging and committing. The paired outcome was a tie; the total token and timing differences are single-run observations, not a demonstrated saving.
 
-**Verdict: delivery verified; usefulness inconclusive.** Do not ship or discard #543 based on one tie. Retry when there are independent, restorable dev compactions with representative nonempty Recall, including routine compactions and cases whose Summary omits a still-live constraint. Measure paired discordance on dev before freezing the sample size and opening holdout under the [approved threshold](./2026-11-24-precompact-real-preflight.md). No holdout or production changes; raw Session data and per-arm receipts stayed local.
+## Disposition
+
+**Do not adopt #543 on the current evidence.** The synthetic screen improved action selection; the only restored real-task diagnostic tied, and the archive audit found no matched cohort. The proposal did not demonstrate the required gain or clear the regression guardrails. That is a no-merge decision, not evidence that the underlying hypothesis is false. No holdout or production changes; raw Session data and per-arm receipts stayed local.
+
+Retry in #578 only with independent, restorable dev compactions and representative nonempty Recall, including routine compactions and cases whose Summary omits a still-live constraint. The delivery trace shows that the hook can influence the compaction request itself. A frozen-Summary test can isolate continuation behavior, but an end-to-end test must start both arms before compaction and let each produce its own Summary. Measure dev paired discordance before sizing and opening holdout under the [approved threshold](./2026-11-24-precompact-real-preflight.md).
