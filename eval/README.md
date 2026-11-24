@@ -303,7 +303,7 @@ Derived from Session k's transcript against earlier Sessions of the same project
 
 | Rule | Key item | Delivered when |
 |---|---|---|
-| Files needed | a file Session k read or edited (project-relative path) that an earlier Session also read or edited, at its first turn of use; never `CLAUDE.md`, `AGENTS.md`, `CONTEXT.md`, `GLOSSARY.md` or `LESSONS.md`, which the Agent reads by convention | a probe at turn <= that turn returned an item whose files list names it |
+| Files needed | a file Session k read or edited (project-relative path) that an earlier Session also read or edited, at its first turn of use; never `CLAUDE.md`, `AGENTS.md`, `GLOSSARY.md` or `LESSONS.md`, which the Agent reads by convention; older transcripts also exclude `CONTEXT.md` (the former glossary name) | a probe at turn <= that turn returned an item whose files list names it |
 | Repeated correction | a human turn of k that looks like a correction (`no`, `don't`, `I told you`, `stop doing`, ...; at most 500 chars) and shares >= 3 content words and at least half the shorter side with an earlier correction | an Injection at turn < k's turn returned an item holding >= 60% of the earlier correction's content words |
 | Decision revisited | a non-correction turn of k that shares the same overlap with an earlier turn phrased as a decision (`decided`, `go with`, `from now on`, `we'll use`, ...) | an Injection at turn <= k's turn returned an item holding >= 60% of that earlier turn's words |
 
