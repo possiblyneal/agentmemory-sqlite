@@ -24,6 +24,10 @@
 
 The first pass omitted the instruction to leave captions unchanged for now; the second read returned an empty list even though it had that statement. Every eligible reply was an empty list, so there were no unsupported additions, quote rejections, or parse errors. No decision was lost. This does not test whether quote validation can reject a plausible but unsupported claim. The first passes took 34,111 ms in aggregate, including the Summarize handler. The three added calls took 2,223 ms of elapsed call time; cost per extra delivered decision is undefined because none were delivered.
 
-## Reproduction limits
+**Memory preflight:** `ai.lan` reported 82 GiB available before loading the profile, 54 GiB after a successful generation probe, and 55 GiB after the eval. The sampled memory pressure averages were zero after the probe and after the run. These are snapshots, not peak-memory measurements.
 
-This scorecard reports the original research run, including its input checks, model responses, and timings. The baseline is an off-branch research commit. The original runner is not included, and these results were not independently verified for this publication. The real-Session follow-up is #573.
+## Reproduction
+
+Run `npx tsx eval/runner/decision-second-read.ts` from the repository root with the `general-eval-b` broker endpoint available. The runner saves each completed pair under `tmp/decision-second-read/`; use `--resume` to skip completed pairs with the same revision and runner. Judge the visible `baseline` and `treatment` strings against each pair's frozen `key`. No production code or defaults changed.
+
+The real-Session follow-up is #573.
