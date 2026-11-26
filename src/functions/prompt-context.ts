@@ -42,6 +42,10 @@ interface SearchHit {
   observation: { id: string; timestamp?: string; title?: string; narrative?: string; files?: string[] };
 }
 
+function renderedNarrative(o: { title?: string; narrative: string }): string {
+  return o.narrative.startsWith("{") && o.title ? o.title : o.narrative;
+}
+
 type NarratedHit = SearchHit & { observation: { narrative: string } };
 
 export interface PromptContextResult {
@@ -233,7 +237,7 @@ function renderWithSessionDecisions(chosen: Resolved[]) {
   const timeline: Entry[] = [...sessions];
   for (const { hit, ref, summary, memoryAt, lesson } of chosen) {
     if (summary) continue;
-    const text = lesson ? lessonText(lesson) : escapeXml(hit.observation.narrative.slice(0, MAX_NARRATIVE_CHARS));
+    const text = lesson ? lessonText(lesson) : escapeXml(renderedNarrative(hit.observation).slice(0, MAX_NARRATIVE_CHARS));
     if (memoryAt && memoryAt > oldestAt) {
       timeline.push({ at: memoryAt, memory: { text, ref } });
     } else {
