@@ -72,7 +72,7 @@ interface Counters {
   // (nonlatestLeaked), never both.
   nonlatestLeaked: Counter;
   // Injection: a context-injecting hook endpoint answered. emptyInjections
-  // is the subset that returned no context (CONTEXT.md, Empty Injection).
+  // is the subset that returned no context (GLOSSARY.md, Empty Injection).
   injections: Counter;
   emptyInjections: Counter;
   // The subset of emptyInjections where the Injection Gate judged every

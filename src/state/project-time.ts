@@ -3,7 +3,7 @@ import { KV } from "./schema.js";
 import { withKeyedLock } from "./keyed-mutex.js";
 import type { ProjectActivity, Session, SessionSummary, StateScope } from "../types.js";
 
-// Project Time (CONTEXT.md): a week counts only when the project had a
+// Project Time (GLOSSARY.md): a week counts only when the project had a
 // Session in it. Weeks are UTC calendar weeks named by their Monday, and the
 // record lives in its own scope so Eviction of Sessions cannot erase it.
 

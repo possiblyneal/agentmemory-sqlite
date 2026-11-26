@@ -38,7 +38,7 @@ skipped on rebuild.
 **Why `fingerprintId()` did not collapse them.** `mem::remember` never uses it. It builds
 the id with `generateId("mem")` (random) and de-duplicates by similarity-supersession
 instead. Lessons (`lsn`) and Insights (`ins`) are the kinds that fingerprint their content.
-`CONTEXT.md` says Memories "are content-addressed, so the same content captured twice is
+The glossary at the time (`CONTEXT.md`) said Memories "are content-addressed, so the same content captured twice is
 one Memory"; the code does not do that. An exact restatement produces a new version row and
 retires the old one, so Recall sees one, but the store keeps both rows.
 
@@ -103,7 +103,7 @@ concept nodes (or falls back to Jaccard clusters), then gives the LLM the Semant
 Lessons and Crystals that match each cluster's concepts. Of the 12,628 Insights, all 12,628
 list Semantic Fact ids in `sourceMemoryIds`, 0 list Lessons, 0 list Crystals, and none
 resolve to a Memory. So Insights here are summaries of Semantic Facts (30,270 rows,
-themselves distilled from Session Summaries). `CONTEXT.md` defines an Insight as built from
+themselves distilled from Session Summaries). The glossary at the time (`CONTEXT.md`) defined an Insight as built from
 "Memories, Lessons and Crystals"; the code reads Semantic Facts as the main input, and the
 `sourceMemoryIds` field name is a misnomer for fact ids.
 
@@ -202,5 +202,5 @@ which is what Recall can return.
 3. `mem::consolidate` (Observation to Memory promotion): unscheduled; keep, schedule, or
    remove.
 4. Insights: choice of retention strategy (#271).
-   Glossary drift on Memory and Insight (#272): reword `CONTEXT.md` or change the code.
+   Glossary drift on Memory and Insight (#272): reword `GLOSSARY.md` or change the code.
 5. Session start carries no Memory block; whether Global Memories should be added.

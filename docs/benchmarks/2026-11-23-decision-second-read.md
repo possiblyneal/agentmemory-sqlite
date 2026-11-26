@@ -29,3 +29,5 @@ The first pass omitted the instruction to leave captions unchanged for now; the 
 ## Reproduction
 
 Run `npx tsx eval/runner/decision-second-read.ts` from the repository root with the `general-eval-b` broker endpoint available. The runner saves each completed pair under `tmp/decision-second-read/`; use `--resume` to skip completed pairs with the same revision and runner. Judge the visible `baseline` and `treatment` strings against each pair's frozen `key`. No production code or defaults changed.
+
+The real-Session follow-up is #573.
