@@ -26,4 +26,4 @@ The first pass omitted the instruction to leave captions unchanged for now; the 
 
 ## Reproduction limits
 
-This scorecard preserves the aggregate result. The original runner is not included and the experiment was not rerun for this publication.
+This scorecard reports the original research run, including its input checks, model responses, and timings. The baseline is an off-branch research commit. The original runner is not included, and these results were not independently verified for this publication. The real-Session follow-up is #573.
